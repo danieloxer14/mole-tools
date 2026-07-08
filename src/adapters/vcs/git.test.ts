@@ -161,7 +161,7 @@ describe("GitAdapter", () => {
 		].join("\x1f");
 		const git = new GitAdapter(
 			scriptedExec(
-				{ [`log main..HEAD --pretty=format:%H\x1f%s\x1f%an\x1f%aI`]: ok(line) },
+				{ "log main..HEAD --pretty=format:%H\x1f%s\x1f%an\x1f%aI": ok(line) },
 				[],
 			),
 		);
@@ -203,7 +203,7 @@ describe("GitAdapter", () => {
 		const git = new GitAdapter(
 			scriptedExec(
 				{
-					[`log --pretty=format:%H\x1f%s\x1f%an\x1f%aI -n5 main..HEAD`]: ok(""),
+					"log --pretty=format:%H\x1f%s\x1f%an\x1f%aI -n5 main..HEAD": ok(""),
 				},
 				calls,
 			),
