@@ -1,0 +1,5 @@
+[test]
+coverage = true
+coverageThreshold = { line = 0.9, function = 0.9 }
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["src/index.tsx", "src/adapters/ui/UiHost.tsx"]
