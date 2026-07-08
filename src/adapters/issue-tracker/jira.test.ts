@@ -1,0 +1,102 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { PortError } from "../../core/errors";
+import { JiraAdapter } from "./jira";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+	globalThis.fetch = originalFetch;
+});
+
+describe("JiraAdapter", () => {
+	test("fetches issue summary and description with bearer auth", async () => {
+		let capturedUrl = "";
+		let capturedAuth = "";
+		globalThis.fetch = (async (url: string, init?: RequestInit) => {
+			capturedUrl = String(url);
+			capturedAuth = String(
+				(init?.headers as Record<string, string>)?.Authorization,
+			);
+			return new Response(
+				JSON.stringify({
+					key: "AST-1",
+					fields: { summary: "Add feature", description: "Details" },
+				}),
+				{ status: 200 },
+			);
+		}) as unknown as typeof fetch;
+
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "secret",
+		});
+		const issue = await adapter.fetchIssue("AST-1");
+
+		expect(issue).toEqual({
+			key: "AST-1",
+			summary: "Add feature",
+			description: "Details",
+		});
+		expect(capturedUrl).toBe("https://jira.example.com/rest/api/2/issue/AST-1");
+		expect(capturedAuth).toBe("Bearer secret");
+	});
+
+	test("defaults description to an empty string when absent", async () => {
+		globalThis.fetch = (async () =>
+			new Response(
+				JSON.stringify({ key: "AST-2", fields: { summary: "No description" } }),
+				{
+					status: 200,
+				},
+			)) as unknown as typeof fetch;
+
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "secret",
+		});
+		const issue = await adapter.fetchIssue("AST-2");
+		expect(issue.description).toBe("");
+	});
+
+	test("throws PortError on network failure", async () => {
+		globalThis.fetch = (async () => {
+			throw new Error("network down");
+		}) as unknown as typeof fetch;
+
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "secret",
+		});
+		await expect(adapter.fetchIssue("AST-1")).rejects.toThrow(PortError);
+	});
+
+	test("throws PortError on 404", async () => {
+		globalThis.fetch = (async () =>
+			new Response("not found", { status: 404 })) as unknown as typeof fetch;
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "secret",
+		});
+		await expect(adapter.fetchIssue("AST-404")).rejects.toThrow(PortError);
+	});
+
+	test("throws PortError on auth failure", async () => {
+		globalThis.fetch = (async () =>
+			new Response("forbidden", { status: 403 })) as unknown as typeof fetch;
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "bad",
+		});
+		await expect(adapter.fetchIssue("AST-1")).rejects.toThrow(PortError);
+	});
+
+	test("throws PortError on other non-ok statuses", async () => {
+		globalThis.fetch = (async () =>
+			new Response("boom", { status: 500 })) as unknown as typeof fetch;
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "secret",
+		});
+		await expect(adapter.fetchIssue("AST-1")).rejects.toThrow(PortError);
+	});
+});
