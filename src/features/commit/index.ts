@@ -81,11 +81,13 @@ export const commit: Feature<typeof args, CommitResult> = {
 			final = message;
 		}
 
+		await ctx.ui.info("Creating commit...");
 		const { sha } = await ctx.vcs.commit(final);
 		await ctx.ui.info(`Committed ${sha.slice(0, 7)}: ${final}`);
 
 		if (await ctx.ui.confirm("Push?")) {
 			const branch = await ctx.vcs.currentBranch();
+			await ctx.ui.info("Pushing...");
 			await ctx.vcs.push({ setUpstream: false, branch });
 		}
 
