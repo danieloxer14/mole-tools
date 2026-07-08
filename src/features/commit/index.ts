@@ -69,6 +69,7 @@ export const commit: Feature<typeof args, CommitResult> = {
 			diff,
 		);
 		const message = await generateValid(ctx, prompt);
+		await ctx.ui.info(message);
 
 		const choice = await ctx.ui.select("Commit message", ACCEPT_EDIT_REJECT);
 		let final: string;
