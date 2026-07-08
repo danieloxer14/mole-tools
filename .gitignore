@@ -3,6 +3,7 @@ node_modules
 
 # build artifact
 mole-tools
+*.bun-build
 
 # output
 out

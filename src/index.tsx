@@ -1,5 +1,6 @@
 import cac, { type Command } from "cac";
 import { z } from "zod";
+import packageJson from "../package.json";
 import { loadConfig } from "./adapters/config/loader";
 import { runInInk } from "./app";
 import { buildContext } from "./core/context";
@@ -15,6 +16,7 @@ function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
 }
 
 const cli = cac("mole-tools");
+cli.version(packageJson.version);
 
 for (const feature of features as Feature[]) {
 	const cmd = cli.command(feature.name, feature.description);
