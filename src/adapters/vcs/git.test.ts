@@ -132,6 +132,23 @@ describe("GitAdapter", () => {
 		expect(calls[0]).toEqual(["push"]);
 	});
 
+	test("push without upstream auto-retries with -u origin when git reports no upstream branch", async () => {
+		const calls: string[][] = [];
+		const git = new GitAdapter(
+			scriptedExec(
+				{
+					push: fail(
+						"fatal: The current branch feature/x has no upstream branch.",
+					),
+					"push -u origin feature/x": ok(""),
+				},
+				calls,
+			),
+		);
+		await git.push({ setUpstream: false, branch: "feature/x" });
+		expect(calls).toEqual([["push"], ["push", "-u", "origin", "feature/x"]]);
+	});
+
 	test("push surfaces git stderr verbatim via PortError on rejection", async () => {
 		const git = new GitAdapter(
 			scriptedExec(

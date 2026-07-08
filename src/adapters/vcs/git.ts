@@ -129,9 +129,15 @@ export class GitAdapter implements Vcs {
 	async push(opts: { setUpstream: boolean; branch: string }): Promise<void> {
 		if (opts.setUpstream) {
 			await this.run(["push", "-u", "origin", opts.branch]);
-		} else {
-			await this.run(["push"]);
+			return;
 		}
+		const result = await this.exec(["push"]);
+		if (result.exitCode === 0) return;
+		if (/has no upstream branch/i.test(result.stderr)) {
+			await this.run(["push", "-u", "origin", opts.branch]);
+			return;
+		}
+		throw new PortError("git push failed", result.stderr, result.exitCode);
 	}
 
 	async commitsAhead(base: string): Promise<CommitMeta[]> {
