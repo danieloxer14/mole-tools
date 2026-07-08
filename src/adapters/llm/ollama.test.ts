@@ -53,6 +53,7 @@ describe("OllamaAdapter", () => {
 			system: "sys",
 			prompt: "diff",
 			stream: true,
+			think: false,
 		});
 	});
 

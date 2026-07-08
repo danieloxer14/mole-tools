@@ -24,6 +24,7 @@ export class OllamaAdapter implements Llm {
 					system: req.system,
 					prompt: req.prompt,
 					stream: true,
+					think: false,
 				}),
 			});
 		} catch (e) {
