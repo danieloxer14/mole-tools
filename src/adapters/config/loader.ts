@@ -1,30 +1,41 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PortError } from "../../core/errors";
+import { stripJsonComments } from "../../shared/jsonc";
 import { type Config, ConfigSchema } from "./schema";
 
 export function defaultConfigPath(): string {
 	return join(homedir(), ".config", "mole-tools", "config.json");
 }
 
-export const CONFIG_TEMPLATE: Config = {
-	ollama: {
-		commitModel: "llama3.1",
-		baseUrl: "http://localhost:11434",
-	},
-	commitSystemPrompt:
-		"Write a concise Conventional Commits message for the following staged diff. Reply with only the message.",
-	jira: {
-		enabled: false,
-		branchPattern: "[A-Z]+-[0-9]+",
-	},
-	diff: {
-		ignore: ["*.lock", "bun.lockb", "package-lock.json", "*.snap"],
-	},
-};
+export const CONFIG_TEMPLATE_TEXT = `{
+  "ollama": {
+    "commitModel": "llama3.1",
+    "baseUrl": "http://localhost:11434"
+    // "mrModel": "llama3.1"          // model for merge-request descriptions (reserved for the merge-request tool)
+  },
+  "commitSystemPrompt": "Write a concise Conventional Commits message for the following staged diff. Reply with only the message.",
+  // "mrSystemPrompt": "..."          // system prompt for merge-request descriptions (reserved for the merge-request tool)
+  "jira": {
+    "enabled": false,
+    "branchPattern": "[A-Z]+-[0-9]+"
+    // "url": "https://your-domain.atlassian.net"   // Jira base URL, required when jira.enabled is true
+    // "apiKey": "your-api-token"                    // Jira API token, stored in plaintext
+  },
+  "diff": {
+    "ignore": ["*.lock", "bun.lockb", "package-lock.json", "*.snap"]
+  }
+  // "dynamicEnvRepos": ["org/repo"]                  // repos offered the "create dynamic env" option (reserved for the merge-request tool)
+  // "autoReviewer": { "username": "your-handle" }    // presence enables the "add auto-reviewer?" question (reserved for the merge-request tool)
+}
+`;
+
+export const CONFIG_TEMPLATE: Config = ConfigSchema.parse(
+	JSON.parse(stripJsonComments(CONFIG_TEMPLATE_TEXT)),
+);
 
 export async function writeTemplate(path: string): Promise<void> {
-	await Bun.write(path, `${JSON.stringify(CONFIG_TEMPLATE, null, 2)}\n`);
+	await Bun.write(path, CONFIG_TEMPLATE_TEXT);
 }
 
 function formatZodIssues(
@@ -45,7 +56,7 @@ export async function loadConfig(
 		return CONFIG_TEMPLATE;
 	}
 
-	const raw: unknown = await file.json();
+	const raw: unknown = JSON.parse(stripJsonComments(await file.text()));
 	const result = ConfigSchema.safeParse(raw);
 	if (!result.success) {
 		throw new PortError(
