@@ -82,6 +82,7 @@ export const commit: Feature<typeof args, CommitResult> = {
 		}
 
 		const { sha } = await ctx.vcs.commit(final);
+		await ctx.ui.info(`Committed ${sha.slice(0, 7)}: ${final}`);
 
 		if (await ctx.ui.confirm("Push?")) {
 			const branch = await ctx.vcs.currentBranch();
