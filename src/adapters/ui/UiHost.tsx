@@ -107,12 +107,16 @@ function StreamView({ req }: { req: Extract<Request, { kind: "stream" }> }) {
 		let acc = "";
 		let cancelled = false;
 		(async () => {
-			for await (const chunk of req.source) {
-				if (cancelled) return;
-				acc += chunk;
-				setText(acc);
+			try {
+				for await (const chunk of req.source) {
+					if (cancelled) return;
+					acc += chunk;
+					setText(acc);
+				}
+				if (!cancelled) req.resolve(acc);
+			} catch (e) {
+				if (!cancelled) req.reject(e);
 			}
-			if (!cancelled) req.resolve(acc);
 		})();
 		return () => {
 			cancelled = true;

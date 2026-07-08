@@ -70,7 +70,7 @@ export class GitAdapter implements Vcs {
 		const result = await this.exec(args, input);
 		if (result.exitCode !== 0) {
 			throw new PortError(
-				`git ${args.join(" ")} failed`,
+				result.stderr.trim() || `git ${args.join(" ")} failed`,
 				result.stderr,
 				result.exitCode,
 			);
@@ -137,7 +137,11 @@ export class GitAdapter implements Vcs {
 			await this.run(["push", "-u", "origin", opts.branch]);
 			return;
 		}
-		throw new PortError("git push failed", result.stderr, result.exitCode);
+		throw new PortError(
+			result.stderr.trim() || "git push failed",
+			result.stderr,
+			result.exitCode,
+		);
 	}
 
 	async commitsAhead(base: string): Promise<CommitMeta[]> {

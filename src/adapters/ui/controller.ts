@@ -25,6 +25,7 @@ export type Request =
 			source: AsyncIterable<string>;
 			label?: string;
 			resolve: Resolve;
+			reject: (e: unknown) => void;
 	  };
 
 export class UiController {
@@ -41,9 +42,11 @@ export class UiController {
 	getSnapshot = (): Request | null => this.current;
 	getLogSnapshot = (): LogEntry[] => this.log;
 
-	request<T>(make: (resolve: (v: T) => void) => Request): Promise<T> {
-		return new Promise((resolve) => {
-			this.current = make(resolve);
+	request<T>(
+		make: (resolve: (v: T) => void, reject: (e: unknown) => void) => Request,
+	): Promise<T> {
+		return new Promise((resolve, reject) => {
+			this.current = make(resolve, reject);
 			this.emit();
 		});
 	}

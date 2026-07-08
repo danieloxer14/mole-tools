@@ -61,11 +61,12 @@ export class InkUiPort implements UiPort {
 	}
 
 	stream(source: AsyncIterable<string>, label?: string): Promise<string> {
-		return this.controller.request<string>((resolve) => ({
+		return this.controller.request<string>((resolve, reject) => ({
 			kind: "stream",
 			source,
 			label,
 			resolve,
+			reject,
 		}));
 	}
 }

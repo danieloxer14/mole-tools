@@ -22,7 +22,7 @@ export async function handleError(e: unknown, ui: UiPort): Promise<number> {
 		return 1;
 	}
 	if (e instanceof PortError) {
-		await ui.error(e.stderr ?? e.message);
+		await ui.error(e.message);
 		return e.code;
 	}
 	await ui.error(String(e));

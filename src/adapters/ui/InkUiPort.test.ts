@@ -82,4 +82,13 @@ describe("InkUiPort", () => {
 		controller.resolveCurrent("ab");
 		expect(await promise).toBe("ab");
 	});
+
+	test("stream request exposes a reject callback so a failed generation propagates", async () => {
+		const controller = new UiController();
+		const ui = new InkUiPort(controller);
+		const promise = ui.stream(chunks(["a"]), "generating");
+		const req = controller.getSnapshot();
+		if (req?.kind === "stream") req.reject(new Error("daemon unreachable"));
+		await expect(promise).rejects.toThrow("daemon unreachable");
+	});
 });

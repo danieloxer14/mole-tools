@@ -37,6 +37,21 @@ describe("UiController", () => {
 		expect(() => controller.resolveCurrent("x")).not.toThrow();
 	});
 
+	test("request exposes a reject callback that rejects the pending promise", async () => {
+		const controller = new UiController();
+		const promise = controller.request<string>((resolve, reject) => ({
+			kind: "stream",
+			source: (async function* () {})(),
+			resolve,
+			reject,
+		}));
+		const boom = new Error("boom");
+		const req = controller.getSnapshot();
+		expect(req?.kind).toBe("stream");
+		if (req?.kind === "stream") req.reject(boom);
+		await expect(promise).rejects.toThrow("boom");
+	});
+
 	test("pushLog appends entries and notifies subscribers", () => {
 		const controller = new UiController();
 		let calls = 0;
