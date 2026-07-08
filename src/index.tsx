@@ -1,7 +1,7 @@
 import cac, { type Command } from "cac";
 import { z } from "zod";
 import packageJson from "../package.json";
-import { loadConfig } from "./adapters/config/loader";
+import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
 import { runInInk } from "./app";
 import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
@@ -31,7 +31,11 @@ for (const feature of features as Feature[]) {
 			return;
 		}
 
-		const config = await loadConfig();
+		// init writes/overwrites the config template itself (with its own
+		// existence check + overwrite confirmation) — loading it here first
+		// would race with that and always report "config already exists".
+		const config =
+			feature.name === "init" ? CONFIG_TEMPLATE : await loadConfig();
 		process.exitCode = await runInInk(async (ui) => {
 			try {
 				const ctx = buildContext({ config, ui });
