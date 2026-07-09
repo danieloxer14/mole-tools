@@ -19,9 +19,9 @@ export function buildCommitPrompt(
 	const sections = [system];
 	if (issue) {
 		sections.push(
-			`Ticket ${issue.key}: ${issue.summary}\n${issue.description}`,
+			`Here is the work item details:\nTicket ${issue.key}: ${issue.summary}\n${issue.description}`,
 		);
 	}
-	sections.push(`Diff:\n${renderDiff(diff)}`);
+	sections.push(`Here is the changelog:\n${renderDiff(diff)}`);
 	return sections.join("\n\n");
 }

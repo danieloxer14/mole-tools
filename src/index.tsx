@@ -2,11 +2,13 @@ import cac, { type Command } from "cac";
 import { z } from "zod";
 import packageJson from "../package.json";
 import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
+import { appendCostSession } from "./adapters/cost-history/file";
 import { runInInk } from "./app";
 import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
 import type { Feature } from "./core/feature";
 import { features } from "./core/registry";
+import { formatCostSavingsTable } from "./shared/cost-estimate";
 
 function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
 	if (!(schema instanceof z.ZodObject)) return;
@@ -36,10 +38,21 @@ for (const feature of features as Feature[]) {
 		// would race with that and always report "config already exists".
 		const config =
 			feature.name === "init" ? CONFIG_TEMPLATE : await loadConfig();
+		const startedAt = new Date().toISOString();
 		process.exitCode = await runInInk(async (ui) => {
 			try {
 				const ctx = buildContext({ config, ui });
 				await feature.run(ctx, args);
+				const entries = ctx.costTracker.getEntries();
+				if (entries.length > 0) {
+					await appendCostSession({
+						id: crypto.randomUUID(),
+						feature: feature.name,
+						startedAt,
+						entries: [...entries],
+					});
+					await ui.info(formatCostSavingsTable(entries));
+				}
 				return 0;
 			} catch (e) {
 				return handleError(e, ui);

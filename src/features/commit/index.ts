@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { loadPrompt } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { AbortError, UserRejectedError } from "../../core/errors";
 import type { Feature } from "../../core/feature";
@@ -28,9 +29,16 @@ const MAX_GENERATE_ATTEMPTS = 3;
 async function maybeFetchIssue(ctx: Context): Promise<Issue | null> {
 	if (!ctx.issues) return null;
 	const branch = await ctx.vcs.currentBranch();
-	const match = branch.match(new RegExp(ctx.config.jira.branchPattern));
-	if (!match) return null;
-	return ctx.issues.fetchIssue(match[0]);
+	const match = branch.match(new RegExp(ctx.config.jira.branchPattern, "i"));
+	if (!match) {
+		await ctx.ui.info(`No Jira ticket found in branch "${branch}"`);
+		return null;
+	}
+	const key = match[0].toUpperCase();
+	await ctx.ui.info(`Fetching Jira issue ${key}...`, { spinner: true });
+	const issue = await ctx.issues.fetchIssue(key);
+	await ctx.ui.info(`Fetched ${issue.key}: ${issue.summary}`);
+	return issue;
 }
 
 async function generateValid(ctx: Context, prompt: string): Promise<string> {
@@ -41,6 +49,7 @@ async function generateValid(ctx: Context, prompt: string): Promise<string> {
 				model: ctx.config.ollama.commitModel,
 				system: "",
 				prompt,
+				task: "commit-message",
 			}),
 			"Generating commit message",
 		);
@@ -62,12 +71,13 @@ export const commit: Feature<typeof args, CommitResult> = {
 			throw new AbortError("No staged changes");
 
 		const issue = await maybeFetchIssue(ctx);
+		await ctx.ui.info("Fetching staged diff...", { spinner: true });
 		const diff = filterDiff(await ctx.vcs.stagedDiff(), ctx.config.diff.ignore);
-		const prompt = buildCommitPrompt(
-			ctx.config.commitSystemPrompt,
-			issue,
-			diff,
+		await ctx.ui.info(
+			`Fetched diff (${diff.length} file${diff.length === 1 ? "" : "s"})`,
 		);
+		const systemPrompt = await loadPrompt("commit-system");
+		const prompt = buildCommitPrompt(systemPrompt, issue, diff);
 		const message = await generateValid(ctx, prompt);
 		await ctx.ui.info(message);
 
@@ -81,13 +91,13 @@ export const commit: Feature<typeof args, CommitResult> = {
 			final = message;
 		}
 
-		await ctx.ui.info("Creating commit...");
+		await ctx.ui.info("Creating commit...", { spinner: true });
 		const { sha } = await ctx.vcs.commit(final);
 		await ctx.ui.info(`Committed ${sha.slice(0, 7)}: ${final}`);
 
 		if (await ctx.ui.confirm("Push?")) {
 			const branch = await ctx.vcs.currentBranch();
-			await ctx.ui.info("Pushing...");
+			await ctx.ui.info("Pushing...", { spinner: true });
 			await ctx.vcs.push({ setUpstream: false, branch });
 		}
 

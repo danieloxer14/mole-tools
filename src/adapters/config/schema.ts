@@ -6,11 +6,10 @@ export const ConfigSchema = z.object({
 		mrModel: z.string().optional(),
 		baseUrl: z.string(),
 	}),
-	commitSystemPrompt: z.string(),
-	mrSystemPrompt: z.string().optional(),
 	jira: z.object({
 		enabled: z.boolean(),
 		url: z.string().optional(),
+		email: z.string().optional(),
 		apiKey: z.string().optional(),
 		branchPattern: z.string(),
 	}),

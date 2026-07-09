@@ -23,6 +23,7 @@ function stubUi(confirmResult = true): UiPort {
 		editText: notImplemented,
 		editMultiline: notImplemented,
 		stream: notImplemented,
+		pause: notImplemented,
 	};
 }
 

@@ -1,6 +1,7 @@
 import { CONFIG_TEMPLATE } from "../../src/adapters/config/loader";
 import type { Config } from "../../src/adapters/config/schema";
 import type { Context, Logger } from "../../src/core/context";
+import { CostTracker } from "../../src/core/cost-tracker";
 import type { GitHost } from "../../src/ports/git-host";
 import type { IssueTracker } from "../../src/ports/issue-tracker";
 import type { Llm } from "../../src/ports/llm";
@@ -26,6 +27,7 @@ export function fakeContext(
 		issues?: IssueTracker | null;
 		gitHost?: GitHost | null;
 		log?: Logger;
+		costTracker?: CostTracker;
 	} = {},
 ): Context {
 	return {
@@ -37,5 +39,6 @@ export function fakeContext(
 		gitHost:
 			overrides.gitHost !== undefined ? overrides.gitHost : new FakeGitHost(),
 		log: overrides.log ?? noopLogger,
+		costTracker: overrides.costTracker ?? new CostTracker(),
 	};
 }

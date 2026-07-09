@@ -1,9 +1,14 @@
+import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import type { Issue, IssueTracker } from "../../ports/issue-tracker";
+import { estimateTokens, truncateWords } from "../../shared/text";
+
+const MAX_DESCRIPTION_WORDS = 500;
 
 export interface JiraConfig {
 	url: string;
 	apiKey: string;
+	email?: string;
 }
 
 interface JiraIssueResponse {
@@ -15,14 +20,25 @@ interface JiraIssueResponse {
 }
 
 export class JiraAdapter implements IssueTracker {
-	constructor(private readonly cfg: JiraConfig) {}
+	constructor(
+		private readonly cfg: JiraConfig,
+		private readonly costTracker: CostTracker = new CostTracker(),
+	) {}
+
+	private authHeader(): string {
+		// Jira Cloud API tokens require Basic auth with the account email;
+		// Bearer is only valid for Server/Data Center personal access tokens.
+		return this.cfg.email
+			? `Basic ${btoa(`${this.cfg.email}:${this.cfg.apiKey}`)}`
+			: `Bearer ${this.cfg.apiKey}`;
+	}
 
 	async fetchIssue(key: string): Promise<Issue> {
 		let res: Response;
 		try {
 			res = await fetch(`${this.cfg.url}/rest/api/2/issue/${key}`, {
 				headers: {
-					Authorization: `Bearer ${this.cfg.apiKey}`,
+					Authorization: this.authHeader(),
 					Accept: "application/json",
 				},
 			});
@@ -53,10 +69,19 @@ export class JiraAdapter implements IssueTracker {
 		}
 
 		const data = (await res.json()) as JiraIssueResponse;
+		this.costTracker.record({
+			type: "jira",
+			task: "fetchIssue",
+			inputTokens: 0,
+			outputTokens: estimateTokens(JSON.stringify(data)),
+		});
 		return {
 			key: data.key,
 			summary: data.fields.summary,
-			description: data.fields.description ?? "",
+			description: truncateWords(
+				data.fields.description ?? "",
+				MAX_DESCRIPTION_WORDS,
+			),
 		};
 	}
 }

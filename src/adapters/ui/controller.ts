@@ -4,6 +4,7 @@ export interface LogEntry {
 	id: number;
 	level: "info" | "warn" | "error";
 	text: string;
+	spinner?: boolean;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: resolve is invoked with the value the request kind expects; call sites (InkUiPort) keep that contract.
@@ -26,7 +27,8 @@ export type Request =
 			label?: string;
 			resolve: Resolve;
 			reject: (e: unknown) => void;
-	  };
+	  }
+	| { kind: "pause"; message: string; resolve: Resolve };
 
 export class UiController {
 	current: Request | null = null;
@@ -46,7 +48,17 @@ export class UiController {
 		make: (resolve: (v: T) => void, reject: (e: unknown) => void) => Request,
 	): Promise<T> {
 		return new Promise((resolve, reject) => {
-			this.current = make(resolve, reject);
+			const wrappedResolve = (v: T) => {
+				this.current = null;
+				resolve(v);
+				this.emit();
+			};
+			const wrappedReject = (e: unknown) => {
+				this.current = null;
+				reject(e);
+				this.emit();
+			};
+			this.current = make(wrappedResolve, wrappedReject);
 			this.emit();
 		});
 	}
@@ -61,8 +73,11 @@ export class UiController {
 
 	private nextLogId = 0;
 
-	pushLog(level: LogEntry["level"], text: string): void {
-		this.log = [...this.log, { id: this.nextLogId++, level, text }];
+	pushLog(level: LogEntry["level"], text: string, spinner?: boolean): void {
+		this.log = [
+			...this.log,
+			{ id: this.nextLogId++, level, text, ...(spinner ? { spinner } : {}) },
+		];
 		this.emit();
 	}
 

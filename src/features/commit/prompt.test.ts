@@ -17,8 +17,10 @@ describe("buildCommitPrompt", () => {
 	test("includes system prompt and diff without an issue", () => {
 		const prompt = buildCommitPrompt("Write a commit message.", null, diff);
 		expect(prompt).toContain("Write a commit message.");
+		expect(prompt).toContain("Here is the changelog:");
 		expect(prompt).toContain("src/a.ts");
 		expect(prompt).toContain("@@ -1 +1 @@");
+		expect(prompt).not.toContain("Here is the work item details:");
 	});
 
 	test("includes issue summary and description when present", () => {
@@ -28,6 +30,7 @@ describe("buildCommitPrompt", () => {
 			description: "Detailed description",
 		};
 		const prompt = buildCommitPrompt("system", issue, diff);
+		expect(prompt).toContain("Here is the work item details:");
 		expect(prompt).toContain("AST-1");
 		expect(prompt).toContain("Add feature");
 		expect(prompt).toContain("Detailed description");

@@ -7,6 +7,7 @@ import type { IssueTracker } from "../ports/issue-tracker";
 import type { Llm } from "../ports/llm";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
+import { CostTracker } from "./cost-tracker";
 
 export interface Logger {
 	info(msg: string): void;
@@ -22,6 +23,7 @@ export interface Context {
 	issues: IssueTracker | null;
 	gitHost: GitHost | null;
 	log: Logger;
+	costTracker: CostTracker;
 }
 
 function makeLogger(): Logger {
@@ -34,16 +36,25 @@ function makeLogger(): Logger {
 
 export function buildContext(input: { config: Config; ui: UiPort }): Context {
 	const { config, ui } = input;
+	const costTracker = new CostTracker();
 	return {
 		config,
 		ui,
-		vcs: new GitAdapter(),
-		llm: new OllamaAdapter(config.ollama),
+		vcs: new GitAdapter(undefined, costTracker),
+		llm: new OllamaAdapter(config.ollama, costTracker),
 		issues:
 			config.jira.enabled && config.jira.url && config.jira.apiKey
-				? new JiraAdapter({ url: config.jira.url, apiKey: config.jira.apiKey })
+				? new JiraAdapter(
+						{
+							url: config.jira.url,
+							apiKey: config.jira.apiKey,
+							email: config.jira.email,
+						},
+						costTracker,
+					)
 				: null,
 		gitHost: null,
 		log: makeLogger(),
+		costTracker,
 	};
 }

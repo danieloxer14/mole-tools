@@ -31,7 +31,6 @@ describe("loadConfig", () => {
 				commitModel: "custom-model",
 				baseUrl: "http://localhost:11434",
 			},
-			commitSystemPrompt: "custom prompt",
 			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
 			diff: { ignore: [] },
 		};

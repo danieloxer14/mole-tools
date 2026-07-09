@@ -37,8 +37,8 @@ export class FakeUiPort implements UiPort {
 		return (entry as Record<ScriptKey, unknown>)[methodName] as T;
 	}
 
-	async info(text: string): Promise<void> {
-		this.transcript.push({ kind: "info", text });
+	async info(text: string, opts?: { spinner?: boolean }): Promise<void> {
+		this.transcript.push({ kind: "info", text, spinner: opts?.spinner });
 	}
 
 	async warn(text: string): Promise<void> {
@@ -79,5 +79,9 @@ export class FakeUiPort implements UiPort {
 		for await (const chunk of source) acc += chunk;
 		this.transcript.push({ kind: "stream", label, text: acc });
 		return acc;
+	}
+
+	async pause(message: string): Promise<void> {
+		this.transcript.push({ kind: "pause", message });
 	}
 }

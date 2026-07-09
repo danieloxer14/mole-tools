@@ -4,8 +4,8 @@ import type { UiController } from "./controller";
 export class InkUiPort implements UiPort {
 	constructor(private readonly controller: UiController) {}
 
-	async info(text: string): Promise<void> {
-		this.controller.pushLog("info", text);
+	async info(text: string, opts?: { spinner?: boolean }): Promise<void> {
+		this.controller.pushLog("info", text, opts?.spinner);
 	}
 
 	async warn(text: string): Promise<void> {
@@ -67,6 +67,14 @@ export class InkUiPort implements UiPort {
 			label,
 			resolve,
 			reject,
+		}));
+	}
+
+	pause(message: string): Promise<void> {
+		return this.controller.request<void>((resolve) => ({
+			kind: "pause",
+			message,
+			resolve,
 		}));
 	}
 }

@@ -20,6 +20,17 @@ describe("InkUiPort", () => {
 		]);
 	});
 
+	test("info with spinner:true marks the log entry as spinning", async () => {
+		const controller = new UiController();
+		const ui = new InkUiPort(controller);
+		await ui.info("Creating commit...", { spinner: true });
+		await ui.info("Committed abc123");
+		expect(controller.getLogSnapshot()).toEqual([
+			{ id: 0, level: "info", text: "Creating commit...", spinner: true },
+			{ id: 1, level: "info", text: "Committed abc123" },
+		]);
+	});
+
 	test("confirm resolves through the controller's current request", async () => {
 		const controller = new UiController();
 		const ui = new InkUiPort(controller);
@@ -90,5 +101,17 @@ describe("InkUiPort", () => {
 		const req = controller.getSnapshot();
 		if (req?.kind === "stream") req.reject(new Error("daemon unreachable"));
 		await expect(promise).rejects.toThrow("daemon unreachable");
+	});
+
+	test("pause resolves through the controller's current request", async () => {
+		const controller = new UiController();
+		const ui = new InkUiPort(controller);
+		const promise = ui.pause("Press Enter to continue...");
+		expect(controller.getSnapshot()).toMatchObject({
+			kind: "pause",
+			message: "Press Enter to continue...",
+		});
+		controller.resolveCurrent(undefined);
+		await expect(promise).resolves.toBeUndefined();
 	});
 });

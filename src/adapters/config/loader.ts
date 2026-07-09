@@ -14,12 +14,11 @@ export const CONFIG_TEMPLATE_TEXT = `{
     "baseUrl": "http://localhost:11434"
     // "mrModel": "llama3.1"          // model for merge-request descriptions (reserved for the merge-request tool)
   },
-  "commitSystemPrompt": "Write a concise Conventional Commits message for the following staged diff. Reply with only the message.",
-  // "mrSystemPrompt": "..."          // system prompt for merge-request descriptions (reserved for the merge-request tool)
   "jira": {
     "enabled": false,
     "branchPattern": "[A-Z]+-[0-9]+"
     // "url": "https://your-domain.atlassian.net"   // Jira base URL, required when jira.enabled is true
+    // "email": "you@example.com"                    // account email; set this for Jira Cloud (Basic auth) - omit for Server/Data Center PATs (Bearer auth)
     // "apiKey": "your-api-token"                    // Jira API token, stored in plaintext
   },
   "diff": {

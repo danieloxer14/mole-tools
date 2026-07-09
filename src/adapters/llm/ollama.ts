@@ -1,5 +1,7 @@
+import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import type { Llm, LlmRequest } from "../../ports/llm";
+import { estimateTokens } from "../../shared/text";
 
 export interface OllamaConfig {
 	baseUrl: string;
@@ -8,10 +10,15 @@ export interface OllamaConfig {
 interface OllamaChunk {
 	response?: string;
 	done?: boolean;
+	prompt_eval_count?: number;
+	eval_count?: number;
 }
 
 export class OllamaAdapter implements Llm {
-	constructor(private readonly cfg: OllamaConfig) {}
+	constructor(
+		private readonly cfg: OllamaConfig,
+		private readonly costTracker: CostTracker = new CostTracker(),
+	) {}
 
 	async *generate(req: LlmRequest): AsyncIterable<string> {
 		let res: Response;
@@ -54,6 +61,9 @@ export class OllamaAdapter implements Llm {
 		const reader = res.body.getReader();
 		const decoder = new TextDecoder();
 		let buffer = "";
+		let responseText = "";
+		let promptEvalCount: number | undefined;
+		let evalCount: number | undefined;
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
@@ -64,10 +74,23 @@ export class OllamaAdapter implements Llm {
 				buffer = buffer.slice(newlineIndex + 1);
 				if (line) {
 					const chunk = JSON.parse(line) as OllamaChunk;
-					if (chunk.response) yield chunk.response;
+					if (chunk.response) {
+						responseText += chunk.response;
+						yield chunk.response;
+					}
+					if (chunk.prompt_eval_count !== undefined)
+						promptEvalCount = chunk.prompt_eval_count;
+					if (chunk.eval_count !== undefined) evalCount = chunk.eval_count;
 				}
 				newlineIndex = buffer.indexOf("\n");
 			}
 		}
+
+		this.costTracker.record({
+			type: "llm",
+			task: req.task,
+			inputTokens: promptEvalCount ?? estimateTokens(req.system + req.prompt),
+			outputTokens: evalCount ?? estimateTokens(responseText),
+		});
 	}
 }

@@ -1,5 +1,7 @@
+import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import type { CommitMeta, FileDiff, LogQuery, Vcs } from "../../ports/vcs";
+import { estimateTokens } from "../../shared/text";
 
 export interface GitExecResult {
 	stdout: string;
@@ -64,7 +66,21 @@ function parseUnifiedDiff(text: string): Map<string, string> {
 }
 
 export class GitAdapter implements Vcs {
-	constructor(private readonly exec: GitExec = defaultExec) {}
+	constructor(
+		private readonly execFn: GitExec = defaultExec,
+		private readonly costTracker: CostTracker = new CostTracker(),
+	) {}
+
+	private async exec(args: string[], input?: string): Promise<GitExecResult> {
+		const result = await this.execFn(args, input);
+		this.costTracker.record({
+			type: "git",
+			task: args[0] ?? "git",
+			inputTokens: 0,
+			outputTokens: estimateTokens(result.stdout),
+		});
+		return result;
+	}
 
 	private async run(args: string[], input?: string): Promise<string> {
 		const result = await this.exec(args, input);
