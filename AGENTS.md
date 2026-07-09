@@ -120,10 +120,9 @@ Required discovery before execution:
 subagent({ action: "list" })
 ```
 
-Common launch shapes:
+For context scouts, disable acceptance and wait for completion:
 
 ```ts
-// Single async scout. Disable acceptance for read-only context gathering.
 const run = subagent({
   agent: "quick-context-scout",
   task: "Gather real repo context for: <task>. Cite actual files/functions. Do not edit files. Do not ask the parent to inspect files or write artifacts.",
@@ -132,25 +131,9 @@ const run = subagent({
   acceptance: false
 })
 
-// Check result/status
-subagent({ action: "status", id: "<run-id>" })
-
-// Block until an async scout completes when no independent work remains.
-// If wait returns needs_attention, inspect/reply to the child, then wait again.
 wait({ id: "<run-id>" })
-
-// Fresh parallel read-only review
-subagent({
-  tasks: [
-    { agent: "reviewer", task: "Review <scope> for correctness. Do not modify files." },
-    { agent: "reviewer", task: "Review <scope> for tests/validation gaps. Do not modify files." }
-  ],
-  context: "fresh",
-  async: true,
-  concurrency: 2
-})
 ```
 
-For context scouts, require concrete evidence: real file paths, function names, current behavior, likely change points, tests, risks, and explicit unknowns. Treat generic answers or invented paths as failed scouting.
+If `wait` returns `needs_attention`, inspect/reply to the child, then call `wait({ id })` again until the scout is complete. When the user explicitly asks to gather context with a scout before planning/grilling/implementing, do not duplicate the scout's repository search in the main agent unless the scout fails or returns insufficient evidence. If the child asks the parent to read files, run commands, or write artifacts, reply that this is the child's responsibility; only do the work in the parent after marking the scout run failed/insufficient.
 
-When the user explicitly asks to gather context with a scout before planning/grilling/implementing, do not duplicate the scout's repository search in the main agent unless the scout fails or returns insufficient evidence. Launch the scout, supervise only real blockers, and keep calling `wait({ id })` until the run is complete. If the child asks the parent to read files, run commands, or write artifacts, reply that this is the child's responsibility; only do the work in the parent after marking the scout run failed/insufficient.
+For context scouts, require concrete evidence: real file paths, function names, current behavior, likely change points, tests, risks, and explicit unknowns. Treat generic answers or invented paths as failed scouting.
