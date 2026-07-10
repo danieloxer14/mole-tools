@@ -36,6 +36,15 @@ export const costBreakdown: Feature<typeof args, CostBreakdownResult> = {
 	name: "cost-breakdown",
 	description: "Show a paginated cost breakdown per past session",
 	args,
+	help: {
+		usage: "mole-tools cost-breakdown",
+		examples: [""],
+		notes: [
+			"Runs through each recorded session newest-first.",
+			"Press Enter to advance between sessions.",
+			"Cost history is stored automatically after each feature run — nothing to configure.",
+		],
+	},
 	run(ctx, _args) {
 		return runCostBreakdown(ctx);
 	},

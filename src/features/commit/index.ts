@@ -66,6 +66,15 @@ export const commit: Feature<typeof args, CommitResult> = {
 	name: "commit",
 	description: "Generate a commit message for staged changes",
 	args,
+	help: {
+		usage: "mole-tools commit",
+		examples: [""],
+		notes: [
+			"Works on currently staged git changes only.",
+			"If your branch name contains a Jira ticket key (e.g. PROJ-123), it will fetch issue details and include them in the generation prompt.",
+			"You can accept, edit, or reject the generated message. After accepting you are asked whether to push.",
+		],
+	},
 	async run(ctx, _args) {
 		if (!(await ctx.vcs.hasStagedChanges()))
 			throw new AbortError("No staged changes");

@@ -8,6 +8,11 @@ import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
 import type { Feature } from "./core/feature";
 import { features } from "./core/registry";
+import {
+	formatCommandHelp,
+	formatGeneralHelp,
+	formatUnknownCommand,
+} from "./features/help/format";
 import { formatCostSavingsTable } from "./shared/cost-estimate";
 
 function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
@@ -19,6 +24,29 @@ function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
 
 const cli = cac("mole-tools");
 cli.version(packageJson.version);
+
+// Help command — registered before features so it takes priority.
+// This path intentionally bypasses loadConfig, buildContext, and runInInk.
+cli
+	.command("help [command]", "Show help for available tools", {
+		ignoreImplicitRegistration: false,
+	})
+	.action((command?: string) => {
+		if (!command) {
+			console.log(formatGeneralHelp(features));
+			process.exitCode = 0;
+			return;
+		}
+
+		const result = formatCommandHelp(features, command);
+		if (result.ok) {
+			console.log(result.text);
+			process.exitCode = 0;
+		} else {
+			process.stdout.write(formatUnknownCommand(result.command, result.known));
+			process.exitCode = 1;
+		}
+	});
 
 for (const feature of features as Feature[]) {
 	const cmd = cli.command(feature.name, feature.description);

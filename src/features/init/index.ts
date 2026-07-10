@@ -28,6 +28,15 @@ export const init: Feature<typeof args, InitResult> = {
 	name: "init",
 	description: "Write a default config.json template",
 	args,
+	help: {
+		usage: "mole-tools init",
+		examples: [""],
+		notes: [
+			"Writes to ~/.config/mole-tools/config.json by default.",
+			"If a config already exists you are prompted before overwriting.",
+			"Does not require any prior configuration — this is how you bootstrap the tool.",
+		],
+	},
 	run(ctx, _args) {
 		return runInit(ctx, defaultConfigPath());
 	},
