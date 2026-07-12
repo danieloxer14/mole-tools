@@ -248,7 +248,7 @@ describe("GitAdapter", () => {
 				{
 			type: "git",
 			task: "rev-parse",
-			inputTokens: 0,
+			inputTokens: 7,
 			outputTokens: 2,
 					},
 				]);

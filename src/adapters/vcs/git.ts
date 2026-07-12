@@ -115,7 +115,7 @@ export class GitAdapter implements Vcs {
 		this.costTracker.record({
 			type: "git",
 			task: args[0] ?? "git",
-			inputTokens: 0,
+			inputTokens: estimateTokens(args.join(" ")),
 			outputTokens: estimateTokens(result.stdout),
 				});
 		return result;
@@ -130,7 +130,7 @@ export class GitAdapter implements Vcs {
 		this.costTracker.record({
 			type: "git",
 			task: args[0] ?? "git",
-			inputTokens: 0,
+			inputTokens: estimateTokens(args.join(" ")),
 			outputTokens: estimateTokens(result.stdout),
 				});
 		return result;
