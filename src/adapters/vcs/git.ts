@@ -1,6 +1,13 @@
 import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
-import type { CommitMeta, FileDiff, LogQuery, Vcs, WorktreeInfo } from "../../ports/vcs";
+import type {
+	CommitMeta,
+	FileDiff,
+	LogQuery,
+	TouchAuthor,
+	Vcs,
+	WorktreeInfo,
+} from "../../ports/vcs";
 import { estimateTokens } from "../../shared/text";
 
 export interface GitExecResult {
@@ -279,6 +286,111 @@ export class GitAdapter implements Vcs {
 				}
 
 		return output;
+	}
+
+	async mergeBaseDiff(base: string): Promise<FileDiff[]> {
+		return this.diffBetween([`origin/${base}...HEAD`]);
+	}
+
+	async hasUnstagedChanges(): Promise<boolean> {
+		const result = await this.exec(["diff", "--quiet"]);
+		return result.exitCode === 1;
+	}
+
+	async hasUpstream(branch: string): Promise<boolean> {
+		const result = await this.exec([
+			"rev-parse",
+			"--abbrev-ref",
+			`${branch}@{upstream}`,
+		]);
+		return result.exitCode === 0;
+	}
+
+	async isAheadOfUpstream(branch: string): Promise<boolean> {
+		if (!(await this.hasUpstream(branch))) return false;
+		const count = (await this.run(["rev-list", "--count", "@{upstream}..HEAD"])).trim();
+		return parseInt(count, 10) > 0;
+	}
+
+	async changedFiles(base: string): Promise<string[]> {
+		const result = await this.exec([
+			"diff",
+			`origin/${base}...HEAD`,
+			"--diff-filter=M",
+			"--name-only",
+		]);
+		if (result.exitCode !== 0) return [];
+		return result.stdout
+			.split("\n")
+			.map((f) => f.trim())
+			.filter((f) => f.length > 0);
+	}
+
+	async touchAuthorsForFiles(
+		files: string[],
+		maxCount = 200,
+	): Promise<TouchAuthor[]> {
+		if (files.length === 0) return [];
+		const result = await this.exec([
+			"log",
+			`-n${maxCount}`,
+			"--name-only",
+			`--pretty=format:%an${SEP}%H`,
+			"--",
+			...files,
+		]);
+		const fileSet = new Set(files);
+		const authorCounts = new Map<string, number>();
+
+		if (result.exitCode !== 0) return [];
+
+		const blocks = result.stdout.split(/\n\n+/).filter(Boolean);
+		for (const block of blocks) {
+			const lines = block.split("\n");
+			if (lines.length < 1) continue;
+			const headerLine = lines[0];
+			const parts = headerLine.split(SEP);
+			if (parts.length < 2 && !fileSet.has(headerLine)) {
+				continue;
+			}
+			// If no SEP, the whole line is a file name — not a commit header
+			const [author] = parts;
+			if (parts.length < 2 || !author) continue; // pure file line, skip
+			const commitFiles = new Set(
+				lines.slice(1).map((f) => f.trim()).filter((f) => fileSet.has(f)),
+			);
+			if (commitFiles.size > 0) {
+				const existing = authorCounts.get(author) || 0;
+				authorCounts.set(author, existing + commitFiles.size);
+			}
+		}
+
+		return [...authorCounts.entries()]
+			.map(([author, count]) => ({ author, count }))
+			.sort((a, b) => b.count - a.count);
+	}
+
+	async recentAuthors(maxCount = 100): Promise<string[]> {
+		const out = await this.run([
+			"log",
+			`-n${maxCount}`,
+			"--format=%an",
+		]);
+		const seen = new Set<string>();
+		const result: string[] = [];
+		for (const line of out.split("\n")) {
+			const author = line.trim();
+			if (!author) continue;
+			if (!seen.has(author)) {
+				seen.add(author);
+				result.push(author);
+			}
+		}
+		return result;
+	}
+
+	async repoRoot(): Promise<string> {
+		return (await this.run(["rev-parse", "--show-toplevel"])).trim();
 	}
 }
 

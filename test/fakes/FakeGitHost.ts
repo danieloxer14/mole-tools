@@ -6,6 +6,8 @@ import type {
 } from "../../src/ports/git-host";
 
 export class FakeGitHost implements GitHost {
+	async preflight(): Promise<void> {}
+
 	async currentUser(): Promise<HostUser | null> {
 		return null;
 	}

@@ -10,6 +10,9 @@ export interface FakeVcsOptions {
 	commitsAhead?: CommitMeta[];
 	rangeDiff?: FileDiff[];
 	log?: CommitMeta[];
+	upstream?: boolean;
+	ahead?: boolean;
+	mergeBaseDiff?: FileDiff[];
 }
 
 export class FakeVcs implements Vcs {
@@ -47,6 +50,38 @@ export class FakeVcs implements Vcs {
 
 	async commitsAhead(_base: string): Promise<CommitMeta[]> {
 		return this.opts.commitsAhead ?? [];
+	}
+
+	async hasUnstagedChanges(): Promise<boolean> {
+		return false;
+	}
+
+	async hasUpstream(_branch: string): Promise<boolean> {
+		return this.opts.upstream ?? true;
+	}
+
+	async isAheadOfUpstream(_branch: string): Promise<boolean> {
+		return this.opts.ahead ?? false;
+	}
+
+	async mergeBaseDiff(_base: string): Promise<FileDiff[]> {
+		return this.opts.mergeBaseDiff ?? this.opts.rangeDiff ?? [];
+	}
+
+	async changedFiles(_base: string): Promise<string[]> {
+		return [];
+	}
+
+	async touchAuthorsForFiles(_files: string[]): Promise<never[]> {
+		return [];
+	}
+
+	async recentAuthors(_maxCount?: number): Promise<string[]> {
+		return [];
+	}
+
+	async repoRoot(): Promise<string> {
+		return "/tmp/fake-repo";
 	}
 
 	async rangeDiff(_base: string): Promise<FileDiff[]> {

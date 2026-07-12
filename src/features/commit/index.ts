@@ -62,6 +62,52 @@ async function generateValid(ctx: Context, prompt: string): Promise<string> {
 	);
 }
 
+export interface CommitFlowOptions {
+	/** When false, commit locally without offering the standalone push prompt. */
+	askToPush?: boolean;
+}
+
+export async function runCommitFlow(
+	ctx: Context,
+	options: CommitFlowOptions = {},
+): Promise<CommitResult> {
+	if (!(await ctx.vcs.hasStagedChanges()))
+		throw new AbortError("No staged changes");
+
+	const issue = await maybeFetchIssue(ctx);
+	await ctx.ui.info("Fetching staged diff...", { spinner: true });
+	const diff = filterDiff(await ctx.vcs.stagedDiff(), ctx.config.diff.ignore);
+	await ctx.ui.info(
+		`Fetched diff (${diff.length} file${diff.length === 1 ? "" : "s"})`,
+	);
+	const systemPrompt = await loadPrompt("commit-system");
+	const prompt = buildCommitPrompt(systemPrompt, issue, diff);
+	const message = await generateValid(ctx, prompt);
+	await ctx.ui.info(message);
+
+	const choice = await ctx.ui.select("Commit message", ACCEPT_EDIT_REJECT);
+	let final: string;
+	if (choice === "edit") {
+		final = await ctx.ui.editText("Edit commit message", message);
+	} else if (choice === "reject") {
+		throw new UserRejectedError();
+	} else {
+		final = message;
+	}
+
+	await ctx.ui.info("Creating commit...", { spinner: true });
+	const { sha } = await ctx.vcs.commit(final);
+	await ctx.ui.info(`Committed ${sha.slice(0, 7)}: ${final}`);
+
+	if (options.askToPush !== false && (await ctx.ui.confirm("Push?"))) {
+		const branch = await ctx.vcs.currentBranch();
+		await ctx.ui.info("Pushing...", { spinner: true });
+		await ctx.vcs.push({ setUpstream: false, branch });
+	}
+
+	return { committed: true, sha };
+}
+
 export const commit: Feature<typeof args, CommitResult> = {
 	name: "commit",
 	description: "Generate a commit message for staged changes",
@@ -76,40 +122,6 @@ export const commit: Feature<typeof args, CommitResult> = {
 		],
 	},
 	async run(ctx, _args) {
-		if (!(await ctx.vcs.hasStagedChanges()))
-			throw new AbortError("No staged changes");
-
-		const issue = await maybeFetchIssue(ctx);
-		await ctx.ui.info("Fetching staged diff...", { spinner: true });
-		const diff = filterDiff(await ctx.vcs.stagedDiff(), ctx.config.diff.ignore);
-		await ctx.ui.info(
-			`Fetched diff (${diff.length} file${diff.length === 1 ? "" : "s"})`,
-		);
-		const systemPrompt = await loadPrompt("commit-system");
-		const prompt = buildCommitPrompt(systemPrompt, issue, diff);
-		const message = await generateValid(ctx, prompt);
-		await ctx.ui.info(message);
-
-		const choice = await ctx.ui.select("Commit message", ACCEPT_EDIT_REJECT);
-		let final: string;
-		if (choice === "edit") {
-			final = await ctx.ui.editText("Edit commit message", message);
-		} else if (choice === "reject") {
-			throw new UserRejectedError();
-		} else {
-			final = message;
-		}
-
-		await ctx.ui.info("Creating commit...", { spinner: true });
-		const { sha } = await ctx.vcs.commit(final);
-		await ctx.ui.info(`Committed ${sha.slice(0, 7)}: ${final}`);
-
-		if (await ctx.ui.confirm("Push?")) {
-			const branch = await ctx.vcs.currentBranch();
-			await ctx.ui.info("Pushing...", { spinner: true });
-			await ctx.vcs.push({ setUpstream: false, branch });
-		}
-
-		return { committed: true, sha };
+		return runCommitFlow(ctx, { askToPush: true });
 	},
 };

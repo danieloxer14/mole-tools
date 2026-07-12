@@ -25,6 +25,7 @@ export const CONFIG_TEMPLATE_TEXT = `{
     "ignore": ["*.lock", "bun.lockb", "package-lock.json", "*.snap"]
   }
   // "dynamicEnvRepos": ["org/repo"]                  // repos offered the "create dynamic env" option (reserved for the merge-request tool)
+  // "dynamicEnvScript": "hack/local/dynamic-env.sh"  // handoff script for configured repositories
   // "autoReviewer": { "username": "your-handle" }    // presence enables the "add auto-reviewer?" question (reserved for the merge-request tool)
 }
 `;

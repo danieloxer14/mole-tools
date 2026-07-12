@@ -1,4 +1,5 @@
 import type { Config } from "../adapters/config/schema";
+import { GlabAdapter } from "../adapters/git-host/glab";
 import { JiraAdapter } from "../adapters/issue-tracker/jira";
 import { OllamaAdapter } from "../adapters/llm/ollama";
 import { GitAdapter } from "../adapters/vcs/git";
@@ -53,7 +54,7 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
 						costTracker,
 					)
 				: null,
-		gitHost: null,
+		gitHost: new GlabAdapter(costTracker),
 		log: makeLogger(),
 		costTracker,
 	};

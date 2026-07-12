@@ -17,6 +17,7 @@ export const ConfigSchema = z.object({
 		ignore: z.array(z.string()),
 	}),
 	dynamicEnvRepos: z.array(z.string()).optional(),
+	dynamicEnvScript: z.string().optional(),
 	autoReviewer: z
 		.object({
 			username: z.string(),

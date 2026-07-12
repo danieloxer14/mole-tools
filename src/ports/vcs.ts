@@ -18,6 +18,11 @@ export interface LogQuery {
 	maxCount?: number;
 }
 
+export interface TouchAuthor {
+	author: string;
+	count: number;
+}
+
 export interface Vcs {
 	currentBranch(): Promise<string>;
 	defaultBranch(): Promise<string>;
@@ -27,5 +32,13 @@ export interface Vcs {
 	push(opts: { setUpstream: boolean; branch: string }): Promise<void>;
 	commitsAhead(base: string): Promise<CommitMeta[]>;
 	rangeDiff(base: string): Promise<FileDiff[]>;
+	mergeBaseDiff(base: string): Promise<FileDiff[]>;
+	hasUnstagedChanges(): Promise<boolean>;
+	hasUpstream(branch: string): Promise<boolean>;
+	isAheadOfUpstream(branch: string): Promise<boolean>;
+	changedFiles(base: string): Promise<string[]>;
+	touchAuthorsForFiles(files: string[], maxCount?: number): Promise<TouchAuthor[]>;
+	recentAuthors(maxCount?: number): Promise<string[]>;
+	repoRoot(): Promise<string>;
 	log(opts: LogQuery): Promise<CommitMeta[]>;
 }

@@ -384,6 +384,23 @@ describe("GitAdapter", () => {
 				).rejects.toThrow(PortError);
 	});
 
+	test("touchAuthorsForFiles counts touched files by author", async () => {
+		const git = new GitAdapter(
+			scriptedExec(
+				{
+					"log -n200 --name-only --pretty=format:%an\x1f%H -- src/a.ts src/b.ts": ok(
+						"Alice Smith\x1fabc123\nsrc/a.ts\nsrc/b.ts\n\nBob Jones\x1fdef456\nsrc/a.ts\n",
+					),
+				},
+				[],
+			),
+		);
+		expect(await git.touchAuthorsForFiles(["src/a.ts", "src/b.ts"])).toEqual([
+			{ author: "Alice Smith", count: 2 },
+			{ author: "Bob Jones", count: 1 },
+		]);
+	});
+
 	test("showWorktreeStatus returns combined status + diff stat output", async () => {
 		const exec: GitExec = async (args) => {
 			if (args[0] === "status") return ok(" M src/changed.ts\n");
