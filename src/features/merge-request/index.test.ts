@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { AbortError } from "../../core/errors";
 import { fakeContext } from "../../../test/fakes/fakeContext";
 import { FakeGitHost } from "../../../test/fakes/FakeGitHost";
 import { FakeLlm } from "../../../test/fakes/FakeLlm";
@@ -40,12 +39,34 @@ describe("merge-request flow", () => {
 		expect(llm.requests[0]?.prompt).toContain("feat: add feature");
 	});
 
-	test("rejects unstaged-only changes without staging", async () => {
-		const vcs = new FakeVcs({ staged: false });
+	test("allows unstaged changes but only sends the merge-base diff", async () => {
+		const llm = new FakeLlm([["Title: feat: add feature\n\nDescription"]]);
+		const vcs = new FakeVcs({
+			staged: false,
+			commitsAhead: [commit],
+			mergeBaseDiff: [{
+				path: "committed.ts",
+				statOnly: false,
+				patch: "+committed change",
+				insertions: 1,
+				deletions: 0,
+			}],
+		});
 		vcs.hasUnstagedChanges = async () => true;
-		const ctx = fakeContext({ vcs });
-		await expect(runMergeRequestFlow(ctx)).rejects.toEqual(
-			new AbortError("Unstaged changes — stage them first"),
-		);
+		const ctx = fakeContext({
+			vcs,
+			llm,
+			ui: new FakeUiPort([
+				{ select: "accept" },
+				{ confirm: false }, // draft
+				{ confirm: true }, // create
+			]),
+		});
+
+		await expect(runMergeRequestFlow(ctx)).resolves.toMatchObject({
+			title: "feat: add feature",
+		});
+		expect(llm.requests[0]?.prompt).toContain("committed.ts");
+		expect(llm.requests[0]?.prompt).not.toContain("unstaged");
 	});
 });

@@ -61,7 +61,7 @@ The implemented feature should follow the product spec order:
 4. If an open MR already exists for the branch, print URL and exit successfully.
 5. Handle pending changes:
    - staged changes: run the commit flow as a sub-step, then resume;
-   - dirty unstaged-only tree: abort with `Unstaged changes — stage them first`;
+   - unstaged changes do not block the flow and are excluded from the MR diff;
    - clean tree: continue.
 6. Push branch:
    - no upstream: `git push -u origin <branch>`;
@@ -337,7 +337,8 @@ Implementation details:
 - Preflight before git/LLM work.
 - Existing MR guard must happen before generation.
 - If `ctx.vcs.hasStagedChanges()`, invoke `runCommitFlow(ctx, { askToPush: false })`.
-- If no staged changes but unstaged changes exist, abort.
+- Unstaged changes do not block the flow; `mergeBaseDiff` uses the committed
+  `origin/<base>...HEAD` range, so working-tree changes are excluded.
 - Push before generation.
 - Use `ctx.vcs.defaultBranch()` for base.
 - Use `ctx.vcs.commitsAhead(base)` for nothing-to-merge guard.
@@ -457,7 +458,7 @@ Cover:
 - current branch equals default branch → abort message.
 - existing open MR → URL printed, no generation.
 - staged changes → commit helper called, then MR flow resumes.
-- unstaged-only dirty tree → abort, no `git add`.
+- unstaged changes → continue, no `git add`, and exclude them from the MR diff.
 - no upstream → push with `setUpstream: true`.
 - ahead of upstream → push.
 - push failure propagates stderr.

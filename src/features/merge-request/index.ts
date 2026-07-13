@@ -67,9 +67,6 @@ export async function runMergeRequestFlow(ctx: Context): Promise<MergeRequestRes
 	if (await ctx.vcs.hasStagedChanges()) {
 		await runCommitFlow(ctx, { askToPush: false });
 	}
-	if (await ctx.vcs.hasUnstagedChanges())
-		throw new AbortError("Unstaged changes — stage them first");
-
 	const upstream = await ctx.vcs.hasUpstream(branch);
 	if (!upstream || (await ctx.vcs.isAheadOfUpstream(branch))) {
 		await ctx.ui.info("Pushing branch...", { spinner: true });

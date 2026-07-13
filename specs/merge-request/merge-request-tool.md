@@ -71,8 +71,9 @@ reads:
 3. **Existing-MR guard.** `glab mr list --source-branch <branch>` — if an open
    MR exists, print its URL and exit 0 (don't burn Ollama tokens or re-create).
 4. **Pending changes.** If the working tree has **staged** changes → run the
-   `--commit` flow, then return here. If the tree is dirty but **nothing is
-   staged** → `Unstaged changes — stage them first`, abort (no auto `git add`).
+   `--commit` flow, then return here. Unstaged changes do not block the flow;
+   the merge-request diff is collected from committed changes only (no auto
+   `git add`).
 5. **Push.** If the branch has no upstream → `git push -u origin <branch>`. If
    it has an upstream but local is ahead → `git push`. Push errors printed
    verbatim, exit non-zero (no auto-pull). Clean + up-to-date → skip.
@@ -118,7 +119,8 @@ reads:
 ### 5.3 Pending changes → commit detour
 - Staged changes present → invoke the `--commit` flow (staged-only, per commit
   spec), return on completion, continue the MR flow.
-- Dirty but nothing staged → warn + abort. No `git add -A`.
+- Unstaged changes do not block the flow and are never included in the MR diff.
+  No `git add -A`.
 - Clean tree → skip straight to push check.
 
 ### 5.4 Push
@@ -232,7 +234,7 @@ Ported from the `create-merge-request` skill's `suggest_reviewers.py`:
 | 2 | Run while on the default branch | `Cannot open MR from <default>`, exit non-zero |
 | 3 | An open MR already exists for the branch | Its URL printed, exit 0, no generation |
 | 4 | Working tree has staged changes | `--commit` flow runs, then MR flow resumes |
-| 5 | Tree dirty but nothing staged | `Unstaged changes — stage them first`, abort, no `git add` |
+| 5 | Tree has unstaged changes | MR flow proceeds; unstaged changes are excluded from the diff, no `git add` |
 | 6 | Branch has no upstream | `git push -u origin <branch>` sets upstream before creating |
 | 7 | Local ahead of remote | `git push` before creating |
 | 8 | Push rejected by remote | git error verbatim, exit non-zero, no auto-pull |
