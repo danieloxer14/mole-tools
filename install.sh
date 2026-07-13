@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="danieloxer/mole-tools"
+REPO="danieloxer14/mole-tools"
 INSTALL_DIR="/usr/local/bin"
 BIN_NAME="mole-tools"
 ASSET_NAME="mole-tools-darwin-arm64"
@@ -11,21 +11,16 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
 	exit 1
 fi
 
-echo "Resolving latest release..."
-DOWNLOAD_URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-	| grep "\"browser_download_url\".*${ASSET_NAME}" \
-	| sed -E 's/.*"browser_download_url": "([^"]+)".*/\1/')
-
-if [[ -z "${DOWNLOAD_URL}" ]]; then
-	echo "error: could not find a ${ASSET_NAME} asset on the latest release." >&2
-	exit 1
-fi
-
+DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${ASSET_NAME}"
 TMP_FILE=$(mktemp)
 trap 'rm -f "${TMP_FILE}"' EXIT
 
-echo "Downloading ${DOWNLOAD_URL}..."
-curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_FILE}"
+echo "Downloading the latest ${ASSET_NAME} release..."
+if ! curl --fail --location --silent --show-error --retry 3 "${DOWNLOAD_URL}" -o "${TMP_FILE}"; then
+	echo "error: could not download ${ASSET_NAME} from the latest GitHub release." >&2
+	echo "       Publish a release containing an asset named ${ASSET_NAME}." >&2
+	exit 1
+fi
 chmod +x "${TMP_FILE}"
 
 TARGET="${INSTALL_DIR}/${BIN_NAME}"

@@ -7,7 +7,7 @@ Claude round-trip. See [specs/commit-tool.md](specs/commit-tool.md) and
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/danieloxer/mole-tools/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/danieloxer14/mole-tools/main/install.sh | bash
 ```
 
 Installs the `mole-tools` binary to `/usr/local/bin` (macOS arm64 only).
