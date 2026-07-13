@@ -1,69 +1,35 @@
 import { z } from "zod";
 
-// ─── Provider schemas (discriminated union) ────────────────────────────────
-
-const OllamaProviderSchema = z.object({
-	provider: z.literal("ollama"),
-	baseUrl: z.string(),
-});
-
-const PiProviderSchema = z.object({
-	provider: z.literal("pi"),
-	binary: z.string().default("pi"),
+/** Connection details for a named provider. The map key is the provider identity. */
+export const OllamaProviderSchema = z.object({
+	baseUrl: z.string().min(1),
+}).strict();
+export const PiProviderSchema = z.object({
+	binary: z.string().min(1),
 	projectRoot: z.string().optional(),
-});
-
+}).strict();
 export const ProviderProfileSchema = z.union([OllamaProviderSchema, PiProviderSchema]);
 export type ProviderProfile = z.infer<typeof ProviderProfileSchema>;
 
-// Per-feature routing: each feature selects its provider profile key
-export const LlmRoutingSchema = z.object({
-	commit: z.string().default("ollama"),
-	mergeRequest: z.string().default("ollama"),
-	ralph: z.string().default("pi"),
-});
+export const ModelRouteSchema = z.object({
+	provider: z.string().min(1),
+	name: z.string().min(1),
+}).strict();
+export type ModelRoute = z.infer<typeof ModelRouteSchema>;
 
-export type LlmRouting = z.infer<typeof LlmRoutingSchema>;
-
-// ─── Legacy config (backward compat shim) ──────────────────────────────────
-
-const LegacyOllamaSchema = z.object({
-	commitModel: z.string(),
-	mrModel: z.string().optional(),
-	baseUrl: z.string(),
-});
-
-const LegacyConfigSchema = z.object({
-	ollama: LegacyOllamaSchema,
-	jira: z.object({
-		enabled: z.boolean(),
-		url: z.string().optional(),
-		email: z.string().optional(),
-		apiKey: z.string().optional(),
-		branchPattern: z.string(),
+export const ModelsConfigSchema = z.object({
+	commit: ModelRouteSchema,
+	mergeRequest: ModelRouteSchema,
+	ralph: z.object({
+		init: ModelRouteSchema,
+		implement: ModelRouteSchema,
+		reflect: ModelRouteSchema,
 	}),
-	diff: z.object({
-		ignore: z.array(z.string()),
-	}),
-	dynamicEnvRepos: z.array(z.string()).optional(),
-	dynamicEnvScript: z.string().optional(),
-	autoReviewer: z
-		.object({
-			username: z.string(),
-		})
-		.optional(),
-});
-
-// ─── New config ────────────────────────────────────────────────────────────
+}).strict();
 
 export const ConfigSchema = z.object({
-	providers: z.record(z.string(), ProviderProfileSchema).default({}),
-	models: z
-		.object({
-			default: z.string().optional(),
-		})
-		.optional(),
-	llm: LlmRoutingSchema,
+	providers: z.record(z.string().min(1), ProviderProfileSchema),
+	models: ModelsConfigSchema,
 	jira: z.object({
 		enabled: z.boolean().default(false),
 		url: z.string().optional(),
@@ -71,76 +37,39 @@ export const ConfigSchema = z.object({
 		apiKey: z.string().optional(),
 		branchPattern: z.string().default("[A-Z]+-[0-9]+"),
 	}),
-	diff: z.object({
-		ignore: z.array(z.string()).default([]),
-	}),
+	diff: z.object({ ignore: z.array(z.string()).default([]) }),
 	dynamicEnvRepos: z.array(z.string()).optional(),
 	dynamicEnvScript: z.string().optional(),
-	autoReviewer: z
-		.object({
-			username: z.string(),
-		})
-		.optional(),
-
-	// ─ legacy fields preserved for migration compat ─
-	ollama: LegacyOllamaSchema.optional(),
-});
-
+	autoReviewer: z.object({ username: z.string() }).optional(),
+}).strict();
 export type Config = z.infer<typeof ConfigSchema>;
 
-/** Resolve the provider profile + model for a given feature purpose */
+export type RoutingPurpose = "commit" | "mergeRequest" | "ralph";
+
 export function resolveLlmProvider(
 	config: Config,
-	purpose: "commit" | "mergeRequest" | "ralph",
-): { providerKey: string; providerProfile: ProviderProfile; model?: string } {
-	const routing = config.llm?.[purpose] ?? (purpose === "ralph" ? "pi" : "ollama");
+	purpose: RoutingPurpose,
+): { providerKey: string; providerProfile: ProviderProfile; model: string } {
+	const route = purpose === "ralph" ? config.models.ralph.init : config.models[purpose];
+	const providerProfile = config.providers[route.provider];
+	if (!providerProfile) {
+		throw new Error(`provider '${route.provider}' referenced in models.${purpose} but not defined in providers`);
+	}
+	return { providerKey: route.provider, providerProfile, model: route.name };
+}
 
-	// Check if routing string starts with a model override prefix "@model:"
-	let modelOverride: string | undefined;
-	let providerKey = routing;
-	if (typeof routing === "string") {
-		const match = routing.match(/^@([^:]+):(.+)$/);
-		if (match) {
-			modelOverride = match[1];
-			providerKey = match[2] || "ollama";
+/** Validate every route, including Ralph's phase routes, with a useful path. */
+export function validateModelProviders(config: Config): void {
+	const routes: Array<[string, ModelRoute]> = [
+		["models.commit", config.models.commit],
+		["models.mergeRequest", config.models.mergeRequest],
+		["models.ralph.init", config.models.ralph.init],
+		["models.ralph.implement", config.models.ralph.implement],
+		["models.ralph.reflect", config.models.ralph.reflect],
+	];
+	for (const [path, route] of routes) {
+		if (!config.providers[route.provider]) {
+			throw new Error(`provider '${route.provider}' referenced in ${path} but not defined in providers`);
 		}
 	}
-
-	const profiles = config.providers ?? {};
-	let profile = profiles[providerKey];
-
-	// Fall back to legacy ollama section if no new providers defined
-	if (!profile && config.ollama) {
-		profile = {
-			provider: "ollama" as const,
-			baseUrl: config.ollama.baseUrl,
-		};
-	}
-
-	if (!profile) {
-		throw new Error(
-			`No provider profile found for key "${providerKey}" (feature "${purpose}").`,
-		);
-	}
-
-	// Model resolution: explicit override > legacy field > default
-	let resolvedModel = modelOverride;
-	if (!resolvedModel) {
-		switch (purpose) {
-			case "commit":
-				resolvedModel = config.ollama?.commitModel ?? config.models?.default;
-				break;
-			case "mergeRequest":
-				resolvedModel =
-					config.ollama?.mrModel ??
-					config.ollama?.commitModel ??
-					config.models?.default;
-				break;
-			case "ralph":
-				// Ralph model comes from CLI --model, resolved at call site
-				break;
-		}
-	}
-
-	return { providerKey, providerProfile: profile, model: resolvedModel };
 }

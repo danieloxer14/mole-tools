@@ -1,7 +1,11 @@
 # ADR 0003: Capability-aware LLM provider routing
 
-- **Status:** Accepted
+- **Status:** Accepted (configuration decision superseded by ADR 0004)
 - **Date:** 2026-07-13
+
+## Supersession note
+
+ADR 0004 supersedes this ADR's configuration and model-routing shape with explicit `{ provider, name }` routes under `models`, including persisted Ralph phase routes. The capability-aware `Llm` port and adapter boundary remain valid.
 
 ## Context
 
@@ -37,8 +41,12 @@ Configuration is feature-owned, for example:
 }
 ```
 
-Ralph retains its required CLI `--model`; it overrides/supplies the model for
-its `ralph` profile and persists both provider and model in loop state.
+Ralph phase model names are selected during init and persisted per phase; the
+capability-aware port remains responsible for executing those selections.
+
+> **Superseded (config format only):** [ADR 0004](./0004-explicit-per-phase-model-routing.md) replaces the string-key routing schema shown below (`"commit": "ollama"` with `@model:` overrides) with explicit `{ provider, name }` objects keyed by feature. The capability-aware port and adapter contract described in this ADR remain valid.
+
+## Adapter contract (unchanged)
 
 Requests at the port boundary are semantic. Pi-specific flags, including
 `--approve`, exist only in `PiAdapter`. An adapter lacking a requested
