@@ -102,7 +102,11 @@ describe("GlabAdapter", () => {
 			const glab = makeGlab({
 				"api /user": ok(JSON.stringify({ id: 1, name: "bob" })),
 			});
-			expect(await glab.currentUser()).toEqual({ id: "1", handle: "bob", displayName: "bob" });
+			expect(await glab.currentUser()).toEqual({
+				id: "1",
+				handle: "bob",
+				displayName: "bob",
+			});
 		});
 	});
 
@@ -141,7 +145,7 @@ describe("GlabAdapter", () => {
 	describe("resolveHandle", () => {
 		test("routes to resolveUser for non-slash handles", async () => {
 			const glab = makeGlab({
-				"api /users ?username=alice": ok(
+				"api /users?username=alice": ok(
 					JSON.stringify([{ id: 5, username: "alice" }]),
 				),
 			});
@@ -171,12 +175,12 @@ describe("GlabAdapter", () => {
 		});
 
 		test("returns null for user not found", async () => {
-			const glab = makeGlab({ "api /users ?username=nobody": fail("", 404) });
+			const glab = makeGlab({ "api /users?username=nobody": fail("", 404) });
 			expect(await glab.resolveHandle("nobody")).toBeNull();
 		});
 
 		test("returns null for user with empty response body", async () => {
-			const glab = makeGlab({ "api /users ?username=ghost": ok("[]") });
+			const glab = makeGlab({ "api /users?username=ghost": ok("[]") });
 			expect(await glab.resolveHandle("ghost")).toBeNull();
 		});
 
@@ -235,7 +239,7 @@ describe("GlabAdapter", () => {
 
 		test("handles user handle with special chars", async () => {
 			const glab = makeGlab({
-				"api /users ?username=j.doe": ok(
+				"api /users?username=j.doe": ok(
 					JSON.stringify([{ id: 9, username: "j.doe" }]),
 				),
 			});

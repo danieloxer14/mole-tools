@@ -1,5 +1,6 @@
 import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
+import { logger } from "../../core/logger";
 import type {
 	CreateMrInput,
 	GitHost,
@@ -107,10 +108,14 @@ export class GlabAdapter implements GitHost {
 	}
 
 	async resolveHandle(handle: string): Promise<HostMember | null> {
-		if (handle.includes("/")) {
-			return this.resolveGroup(handle);
-		}
-		return this.resolveUser(handle);
+		const kind = handle.includes("/") ? "group" : "user";
+
+		const member =
+			kind === "group"
+				? await this.resolveGroup(handle)
+				: await this.resolveUser(handle);
+
+		return member;
 	}
 
 	createMr(input: CreateMrInput): Promise<{ url: string }> {
@@ -160,6 +165,7 @@ export class GlabAdapter implements GitHost {
 	async resolveGroup(handle: string): Promise<HostMember | null> {
 		const encoded = encodeURIComponent(handle);
 		let page = 1;
+
 		const members: HostMember[] = [];
 		const MAX_PAGES = 5;
 
@@ -172,22 +178,30 @@ export class GlabAdapter implements GitHost {
 				"--page",
 				String(page),
 			]);
-
 			if (result.exitCode !== 0) {
+				logger.warn("glab.resolve-group.failed", {
+					handle,
+					page,
+					exitCode: result.exitCode,
+				});
 				return members.length > 0 ? members[0] : null;
 			}
 
 			let body: unknown;
 			try {
 				body = JSON.parse(result.stdout);
-			} catch {
+			} catch (error) {
+				logger.warn("glab.resolve-group.invalid-json", { handle, page, error });
 				return members.length > 0 ? members[0] : null;
 			}
 			if (!Array.isArray(body)) {
+				logger.warn("glab.resolve-group.unexpected-response", {
+					handle,
+					page,
+					responseType: typeof body,
+				});
 				return members.length > 0 ? members[0] : null;
-			}
-
-			for (const member of body) {
+			}			for (const member of body) {
 				members.push({
 					id: String(member.id ?? ""),
 					handle: String(member.username ?? member.name ?? ""),
@@ -202,7 +216,10 @@ export class GlabAdapter implements GitHost {
 			page++;
 		}
 
-		if (members.length === 0) return null;
+		if (members.length === 0) {
+
+			return null;
+		}
 
 		return {
 			id: members[0].id,
@@ -212,26 +229,38 @@ export class GlabAdapter implements GitHost {
 	}
 
 	async resolveUser(handle: string): Promise<HostMember | null> {
-		const result = await this._exec([
-			"api",
-			"/users",
-			`?username=${encodeURIComponent(handle)}`,
-		]);
+		const encoded = encodeURIComponent(handle);
+
+		// glab api accepts a single endpoint argument; keep the query string on it.
+		const result = await this._exec(["api", `/users?username=${encoded}`]);
+
 		if (result.exitCode !== 0 || !result.stdout.trim()) {
+			logger.warn("glab.resolve-user.failed", {
+				handle,
+				exitCode: result.exitCode,
+				reason: result.exitCode !== 0 ? "non-zero-exit" : "empty-stdout",
+			});
 			return null;
 		}
 
 		let body: unknown;
 		try {
 			body = JSON.parse(result.stdout);
-		} catch {
+		} catch (error) {
+			logger.warn("glab.resolve-user.invalid-json", { handle, error });
 			return null;
 		}
 		if (!Array.isArray(body) || body.length === 0) {
+			logger.warn("glab.resolve-user.no-match", {
+				handle,
+				responseType: Array.isArray(body) ? "array" : typeof body,
+				resultCount: Array.isArray(body) ? body.length : null,
+			});
 			return null;
 		}
 
 		const user = body[0] as Record<string, unknown>;
+
 		return {
 			id: String(user.id ?? ""),
 			handle: String(user.username ?? handle),

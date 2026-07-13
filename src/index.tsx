@@ -7,6 +7,7 @@ import { runInInk } from "./app";
 import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
 import type { Feature } from "./core/feature";
+import { closeLogger, initializeLogger } from "./core/logger";
 import { features } from "./core/registry";
 import {
 	formatCommandHelp,
@@ -52,40 +53,46 @@ for (const feature of features as Feature[]) {
 	const cmd = cli.command(feature.name, feature.description);
 	applyZodOptions(cmd, feature.args);
 	cmd.action(async (options: Record<string, unknown>) => {
-		let args: unknown;
+		// Help is handled above and intentionally never enters this lifecycle.
+		await initializeLogger();
 		try {
-			args = feature.args.parse(options);
-		} catch (e) {
-			console.error(e instanceof Error ? e.message : String(e));
-			process.exitCode = 1;
-			return;
-		}
-
-		// init writes/overwrites the config template itself (with its own
-		// existence check + overwrite confirmation) — loading it here first
-		// would race with that and always report "config already exists".
-		const config =
-			feature.name === "init" ? CONFIG_TEMPLATE : await loadConfig();
-		const startedAt = new Date().toISOString();
-		process.exitCode = await runInInk(async (ui) => {
+			let args: unknown;
 			try {
-				const ctx = buildContext({ config, ui });
-				await feature.run(ctx, args);
-				const entries = ctx.costTracker.getEntries();
-				if (entries.length > 0) {
-					await appendCostSession({
-						id: crypto.randomUUID(),
-						feature: feature.name,
-						startedAt,
-						entries: [...entries],
-					});
-					await ui.info(formatCostSavingsTable(entries));
-				}
-				return 0;
+				args = feature.args.parse(options);
 			} catch (e) {
-				return handleError(e, ui);
+				console.error(e instanceof Error ? e.message : String(e));
+				process.exitCode = 1;
+				return;
 			}
-		});
+
+			// init writes/overwrites the config template itself (with its own
+			// existence check + overwrite confirmation) — loading it here first
+			// would race with that and always report "config already exists".
+			const config =
+				feature.name === "init" ? CONFIG_TEMPLATE : await loadConfig();
+			const startedAt = new Date().toISOString();
+			process.exitCode = await runInInk(async (ui) => {
+				try {
+					const ctx = buildContext({ config, ui });
+					await feature.run(ctx, args);
+					const entries = ctx.costTracker.getEntries();
+					if (entries.length > 0) {
+						await appendCostSession({
+							id: crypto.randomUUID(),
+							feature: feature.name,
+							startedAt,
+							entries: [...entries],
+						});
+						await ui.info(formatCostSavingsTable(entries));
+					}
+					return 0;
+				} catch (e) {
+					return handleError(e, ui);
+				}
+			});
+		} finally {
+			await closeLogger();
+		}
 	});
 }
 
