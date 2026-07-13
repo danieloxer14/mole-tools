@@ -17,6 +17,8 @@ export class UnsupportedCapabilityError extends Error {
 // ─── Generation request (text-only) ─────────────────────────────────────
 
 export interface GenerateRequest {
+	/** Selected provider route, supplied by the composition/router. */
+	providerKey?: string;
 	model: string;
 	system: string;
 	prompt: string;
@@ -50,6 +52,8 @@ export interface AgentRequest {
 	/** How to treat the provided prompt against the adapter's default system prompt */
 	systemPromptMode: SystemPromptMode;
 	prompt: string;
+	/** Optional provider status updates for a caller-owned progress UI. */
+	onProgress?: (message: string) => void;
 	signal?: AbortSignal;
 }
 

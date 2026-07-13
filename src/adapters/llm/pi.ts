@@ -77,11 +77,11 @@ export class PiAdapter implements Llm {
 	runAgent(req: AgentRequest): Promise<AgentResult> {
 		return new Promise((resolve, reject) => {
 			const args = [
-				"-p", // non-interactive/print mode
+				"-p", // non-interactive prompt mode
+				"--mode",
+				"json", // exposes tool and lifecycle events while retaining machine-readable output
 				"--model",
 				req.model,
-				"--dir",
-				req.workspace,
 			];
 
 			if (req.permissionPolicy === "auto-approve") {
@@ -100,9 +100,38 @@ export class PiAdapter implements Llm {
 
 			let output = "";
 			let stderr = "";
+			let pendingStdout = "";
+
+			const handleEvent = (line: string) => {
+				try {
+					const event = JSON.parse(line) as Record<string, unknown>;
+					if (event.type === "tool_execution_start") {
+						req.onProgress?.(`Pi: running ${String(event.toolName)}…`);
+					}
+					if (event.type === "tool_execution_end") {
+						req.onProgress?.(`Pi: ${String(event.toolName)} ${event.isError ? "failed" : "completed"}.`);
+					}
+					if (event.type === "message_end") {
+						const message = event.message as { role?: unknown; content?: unknown } | undefined;
+						if (message?.role === "assistant" && Array.isArray(message.content)) {
+							const text = message.content
+								.filter((part): part is { type: "text"; text: string } => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")
+								.map((part) => part.text)
+								.join("");
+							if (text) output = text;
+						}
+					}
+				} catch {
+					// Preserve unexpected output for diagnostics rather than failing the agent run.
+					stderr += `${line}\n`;
+				}
+			};
 
 			child.stdout?.on("data", (chunk: Buffer) => {
-				output += chunk.toString();
+				pendingStdout += chunk.toString();
+				const lines = pendingStdout.split("\n");
+				pendingStdout = lines.pop() ?? "";
+				for (const line of lines) if (line.trim()) handleEvent(line);
 			});
 
 			child.stderr?.on("data", (chunk: Buffer) => {
@@ -117,6 +146,7 @@ export class PiAdapter implements Llm {
 			if (req.signal) req.signal.addEventListener("abort", abort, { once: true });
 
 			child.on("close", (code) => {
+				if (pendingStdout.trim()) handleEvent(pendingStdout);
 				if (req.signal) req.signal.removeEventListener("abort", abort);
 				const ok = code === 0 && !req.signal?.aborted;
 				resolve({ output, stderr: req.signal?.aborted ? "aborted" : stderr, ok });

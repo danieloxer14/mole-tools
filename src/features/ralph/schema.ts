@@ -73,8 +73,11 @@ export const RalphStateFileSchema = z.object({
 	name: LoopNameSchema,
 	source: z.string().min(1, "Source must not be empty"),
 	taskFile: z.string().min(1, "Task file path must not be empty"),
-	provider: z.string().min(1, "Provider identifier must not be empty"),
-	model: z.string().min(1, "Model identifier must not be empty"),
+	models: z.object({
+		init: z.object({ provider: z.string().min(1), name: z.string().min(1) }),
+		implement: z.object({ provider: z.string().min(1), name: z.string().min(1) }),
+		reflect: z.object({ provider: z.string().min(1), name: z.string().min(1) }),
+	}),
 	iteration: z.number().int().nonnegative(),
 	maxIterations: z.number().int().positive(),
 	reflectEvery: z.number().int().nonnegative(),

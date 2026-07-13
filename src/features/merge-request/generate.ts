@@ -23,14 +23,15 @@ export async function generateMergeRequest(
 	const system = await loadPrompt("mr-system");
 	const prompt = buildMergeRequestPrompt({ ...input, system });
 	const llm = ctx.getLlmFor("mergeRequest");
-	const { model } = resolveLlmProvider(ctx.config, "mergeRequest");
+	const { providerKey, model } = resolveLlmProvider(ctx.config, "mergeRequest");
 
 	let violations: string[] = [];
 
 	for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
 		const raw = await ctx.ui.stream(
 			llm.generate({
-				model: model ?? "llama3.1",
+				providerKey,
+				model,
 				system,
 				prompt,
 				task: "merge-request",

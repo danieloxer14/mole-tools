@@ -43,8 +43,9 @@ export async function runRalphRun(ctx: Context, input: RalphRunArgs): Promise<Ra
 		await ctx.ui.info(`Ralph loop "${args.name}" is already completed.`);
 		return { name: args.name, status: "completed", iteration: state.iteration };
 	}
-	const llm = ctx.getLlmFor("ralph");
-	if (!llm.capabilities().includes("agentic-workspace")) throw new UnsupportedCapabilityError("agentic-workspace", state.provider);
+	const llm = ctx.getLlmFor("ralph", state.models.implement.provider);
+	if (!llm.capabilities().includes("agentic-workspace")) throw new UnsupportedCapabilityError("agentic-workspace", state.models.implement.provider);
+	if (!ctx.getLlmFor("ralph", state.models.reflect.provider).capabilities().includes("agentic-workspace")) throw new UnsupportedCapabilityError("agentic-workspace", state.models.reflect.provider);
 	const runId = crypto.randomUUID();
 	let lock: LockHandle = createLock(args.name, runId);
 	let activeAbort: AbortController | null = null;
@@ -66,7 +67,7 @@ export async function runRalphRun(ctx: Context, input: RalphRunArgs): Promise<Ra
 		activeAbort = new AbortController();
 		let result: { ok: boolean; output: string; stderr?: string };
 		try {
-			result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.provider, model: state.model, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${prompt}\n\n${reflectionRequest(before)}`, signal: activeAbort.signal });
+			result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.models.reflect.provider, model: state.models.reflect.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${prompt}\n\n${reflectionRequest(before)}`, signal: activeAbort.signal });
 		} catch (error) {
 			result = { ok: false, output: "", stderr: error instanceof Error ? error.message : String(error) };
 		} finally { activeAbort = null; }
@@ -117,7 +118,7 @@ export async function runRalphRun(ctx: Context, input: RalphRunArgs): Promise<Ra
 			await ctx.ui.info(`Iteration ${state.iteration + 1}/${state.maxIterations} — ${selected.text}`, { spinner: true });
 			activeAbort = new AbortController();
 			let result: { ok: boolean; output: string; stderr?: string };
-			try { result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.provider, model: state.model, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${systemPrompt}\n\n${taskRequest(before, selected.text)}`, signal: activeAbort.signal }); }
+			try { result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.models.implement.provider, model: state.models.implement.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${systemPrompt}\n\n${taskRequest(before, selected.text)}`, signal: activeAbort.signal }); }
 			catch (error) { result = { ok: false, output: "", stderr: error instanceof Error ? error.message : String(error) }; }
 			activeAbort = null;
 			if (interrupted) { await pause("interrupted"); throw new RalphRunError("Ralph run interrupted", { name: args.name, status: "paused", iteration: state.iteration }); }

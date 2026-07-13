@@ -45,12 +45,13 @@ async function maybeFetchIssue(ctx: Context): Promise<Issue | null> {
 async function generateValid(ctx: Context, prompt: string): Promise<string> {
 	let violations: string[] = [];
 	const llm = ctx.getLlmFor("commit");
-	const { model } = resolveLlmProvider(ctx.config, "commit");
+	const { providerKey, model } = resolveLlmProvider(ctx.config, "commit");
 
 	for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
 		const message = await ctx.ui.stream(
 			llm.generate({
-				model: model ?? "llama3.1",
+				providerKey,
+				model,
 				system: "",
 				prompt,
 				task: "commit-message",
