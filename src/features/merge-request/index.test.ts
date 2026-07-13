@@ -24,12 +24,12 @@ describe("merge-request flow", () => {
 
 	test("collects filtered diff and returns accepted candidate", async () => {
 		const llm = new FakeLlm([["Title: feat: add feature\n\nDescription"]]);
+		// staged=false → no commit flow runs, so first UI interaction is the draft confirm, not a select
 		const ctx = fakeContext({
 			ui: new FakeUiPort([
-			{ select: "accept" },
-			{ confirm: false }, // draft
-			{ confirm: true }, // create
-		]),
+				{ confirm: false }, // draft
+				{ confirm: true }, // create
+			]),
 			llm,
 			vcs: new FakeVcs({ staged: false, commitsAhead: [commit], mergeBaseDiff: [] }),
 		});
@@ -57,7 +57,6 @@ describe("merge-request flow", () => {
 			vcs,
 			llm,
 			ui: new FakeUiPort([
-				{ select: "accept" },
 				{ confirm: false }, // draft
 				{ confirm: true }, // create
 			]),

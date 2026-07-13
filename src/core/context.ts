@@ -1,11 +1,12 @@
-import type { Config } from "../adapters/config/schema";
+import type { Config, ProviderProfile } from "../adapters/config/schema";
 import { GlabAdapter } from "../adapters/git-host/glab";
 import { JiraAdapter } from "../adapters/issue-tracker/jira";
 import { OllamaAdapter } from "../adapters/llm/ollama";
+import { PiAdapter } from "../adapters/llm/pi";
 import { GitAdapter } from "../adapters/vcs/git";
 import type { GitHost } from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
-import type { Llm } from "../ports/llm";
+import type { AgentRequest, AgentResult, GenerateRequest, Llm } from "../ports/llm";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
 import { CostTracker } from "./cost-tracker";
@@ -20,11 +21,113 @@ export interface Context {
 	config: Config;
 	ui: UiPort;
 	vcs: Vcs;
-	llm: Llm;
+	llm: Llm; // convenience proxy — routes to the commit provider by default
+	getLlmFor(purpose: "commit" | "mergeRequest" | "ralph"): ProviderLlmProxy;
 	issues: IssueTracker | null;
 	gitHost: GitHost | null;
 	log: Logger;
 	costTracker: CostTracker;
+}
+
+/**
+ * Thin proxy that always resolves to a specific provider profile.
+ * A single Llm adapter per profile is cached so repeated lookups are cheap.
+ */
+export class ProviderLlmProxy implements Llm {
+	constructor(
+		private readonly adapters: Map<string, Llm>,
+		private readonly profileKey: string,
+	) {}
+
+	capabilities() {
+		return this.adapter.capabilities();
+	}
+
+	generate(req: GenerateRequest) {
+		return this.adapter.generate(req);
+	}
+
+	runAgent(req: AgentRequest): Promise<AgentResult> {
+		return this.adapter.runAgent(req);
+	}
+
+	private get adapter(): Llm {
+		const a = this.adapters.get(this.profileKey);
+		if (!a) throw new Error(`No adapter wired for provider "${this.profileKey}"`);
+		return a;
+	}
+}
+
+/**
+ * Proxy that routes to whatever the current feature's configured provider is.
+ * The purpose is inferred from context (passed at construction).
+ */
+export class RoutingLlmProxy implements Llm {
+	private commitProxy: ProviderLlmProxy;
+	private mrProxy: ProviderLlmProxy;
+
+	constructor(
+		private readonly adapters: Map<string, Llm>,
+		private readonly config: Config,
+	) {
+		const commitKey = this.resolveProfileKey("commit");
+		this.commitProxy = new ProviderLlmProxy(adapters, commitKey);
+	}
+
+	capabilities() {
+		return this.defaultAdapter.capabilities();
+	}
+
+	generate(req: GenerateRequest) {
+		return this.defaultAdapter.generate(req);
+	}
+
+	runAgent(req: AgentRequest): Promise<AgentResult> {
+		const key = req.providerKey ?? this.resolveProfileKey("ralph");
+		return this.forProvider(key).runAgent({ ...req, providerKey: undefined });
+	}
+
+	getLlmFor(purpose: "commit" | "mergeRequest" | "ralph"): ProviderLlmProxy {
+		switch (purpose) {
+			case "commit":
+				return this.commitProxy;
+			case "mergeRequest":
+				if (!this.mrProxy) {
+					this.mrProxy = new ProviderLlmProxy(
+						this.adapters,
+						this.resolveProfileKey("mergeRequest"),
+					);
+				}
+				return this.mrProxy;
+			case "ralph":
+				return new ProviderLlmProxy(
+					this.adapters,
+					this.resolveProfileKey("ralph"),
+				);
+		}
+	}
+
+	private resolveProfileKey(
+		purpose: "commit" | "mergeRequest" | "ralph",
+	): string {
+		const routing = this.config.llm?.[purpose];
+		if (typeof routing === "string") {
+			// Strip any "@model:" prefix if present
+			const match = routing.match(/^@[^:]+:(.+)$/);
+			return match ? match[1] : routing;
+		}
+		return purpose === "ralph" ? "pi" : "ollama";
+	}
+
+	private get defaultAdapter(): Llm {
+		return this.commitProxy.adapter;
+	}
+
+	private forProvider(key: string): Llm {
+		const a = this.adapters.get(key);
+		if (!a) throw new Error(`No adapter wired for provider "${key}"`);
+		return a;
+	}
 }
 
 function makeLogger(): Logger {
@@ -35,14 +138,54 @@ function makeLogger(): Logger {
 	};
 }
 
+/** Build the per-provider Llm adapter map from config */
+function buildAdapterMap(config: Config, costTracker: CostTracker): Map<string, Llm> {
+	const adapters = new Map<string, Llm>();
+
+	for (const [key, profile] of Object.entries(config.providers)) {
+		switch (profile.provider) {
+			case "ollama": {
+				adapters.set(key, new OllamaAdapter({ baseUrl: profile.baseUrl }, costTracker));
+				break;
+			}
+			case "pi": {
+				adapters.set(
+					key,
+					new PiAdapter(
+						{ binary: profile.binary ?? "pi", projectRoot: profile.projectRoot },
+						costTracker,
+					),
+				);
+				break;
+			}
+		}
+	}
+
+	// Legacy fallback: if no providers defined but ollama config exists, wire it as "ollama"
+	if (adapters.size === 0 && config.ollama) {
+		adapters.set(
+			"ollama",
+			new OllamaAdapter({ baseUrl: config.ollama.baseUrl }, costTracker),
+		);
+	}
+
+	return adapters;
+}
+
 export function buildContext(input: { config: Config; ui: UiPort }): Context {
 	const { config, ui } = input;
 	const costTracker = new CostTracker();
+	const adapterMap = buildAdapterMap(config, costTracker);
+
+	const llmProxy = new RoutingLlmProxy(adapterMap, config);
+
 	return {
 		config,
 		ui,
 		vcs: new GitAdapter(),
-		llm: new OllamaAdapter(config.ollama, costTracker),
+		llm: llmProxy, // default routes to commit provider
+		getLlmFor: (purpose: "commit" | "mergeRequest" | "ralph") =>
+			llmProxy.getLlmFor(purpose),
 		issues:
 			config.jira.enabled && config.jira.url && config.jira.apiKey
 				? new JiraAdapter(

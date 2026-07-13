@@ -51,8 +51,8 @@ reads:
 
 | Key | Purpose |
 |-----|---------|
-| `ollama.mrModel` | Model for MR title + description |
-| `ollama.baseUrl` | Ollama endpoint (shared) |
+| `mergeRequest.provider`, `mergeRequest.model` | Provider and model for MR title + description |
+| `providers.*` | Selected-provider connection settings (shared) |
 | `mrSystemPrompt` | System prompt owning MR message content/structure |
 | `jira.*` | Optional ticket context (shared, branch-pattern gated) |
 | `diff.ignore` | Noise globs excluded from the diff body (shared with commit) |
@@ -69,7 +69,7 @@ reads:
 2. **On-default-branch guard.** If current branch is the resolved default
    branch → `Cannot open MR from <default>`, exit non-zero.
 3. **Existing-MR guard.** `glab mr list --source-branch <branch>` — if an open
-   MR exists, print its URL and exit 0 (don't burn Ollama tokens or re-create).
+   MR exists, print its URL and exit 0 (don't invoke the LLM or re-create).
 4. **Pending changes.** If the working tree has **staged** changes → run the
    `--commit` flow, then return here. Unstaged changes do not block the flow;
    the merge-request diff is collected from committed changes only (no auto
@@ -86,7 +86,7 @@ reads:
    `origin/<base>...HEAD` with `diff.ignore` noise filtering (stat/filename only
    for excluded files — same rule as commit §5.2).
 9. **Generate.** Send `mrSystemPrompt` + Jira info (if any) + commit messages +
-   diff → `ollama.mrModel`, streamed live.
+   diff → the configured merge-request LLM provider/model, streamed live.
 10. **Title format check.** Enforce `type(scope)?: description` + subject ≤72
     (same rules as commit §5.5). Auto-regenerate up to ~3, then abort + print
     violations. **Body is free-form** — no format check.

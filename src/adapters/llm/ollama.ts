@@ -1,6 +1,13 @@
 import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
-import type { Llm, LlmRequest } from "../../ports/llm";
+import type {
+	AgentRequest,
+	AgentResult,
+	GenerateRequest,
+	LlmCapability,
+	Llm,
+} from "../../ports/llm";
+import { UnsupportedCapabilityError } from "../../ports/llm";
 import { estimateTokens } from "../../shared/text";
 
 export interface OllamaConfig {
@@ -14,13 +21,19 @@ interface OllamaChunk {
 	eval_count?: number;
 }
 
+const SUPPORTED_CAPABILITIES: LlmCapability[] = ["text-generation"];
+
 export class OllamaAdapter implements Llm {
 	constructor(
 		private readonly cfg: OllamaConfig,
 		private readonly costTracker: CostTracker = new CostTracker(),
 	) {}
 
-	async *generate(req: LlmRequest): AsyncIterable<string> {
+	capabilities(): LlmCapability[] {
+		return SUPPORTED_CAPABILITIES;
+	}
+
+	async *generate(req: GenerateRequest): AsyncIterable<string> {
 		let res: Response;
 		try {
 			res = await fetch(`${this.cfg.baseUrl}/api/generate`, {
@@ -92,5 +105,9 @@ export class OllamaAdapter implements Llm {
 			inputTokens: promptEvalCount ?? estimateTokens(req.system + req.prompt),
 			outputTokens: evalCount ?? estimateTokens(responseText),
 		});
+	}
+
+	runAgent(_req: AgentRequest): Promise<AgentResult> {
+		throw new UnsupportedCapabilityError("agentic-workspace", "ollama");
 	}
 }

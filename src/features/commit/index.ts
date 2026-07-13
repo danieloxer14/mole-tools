@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveLlmProvider } from "../../adapters/config/schema";
 import { loadPrompt } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { AbortError, UserRejectedError } from "../../core/errors";
@@ -43,10 +44,13 @@ async function maybeFetchIssue(ctx: Context): Promise<Issue | null> {
 
 async function generateValid(ctx: Context, prompt: string): Promise<string> {
 	let violations: string[] = [];
+	const llm = ctx.getLlmFor("commit");
+	const { model } = resolveLlmProvider(ctx.config, "commit");
+
 	for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
 		const message = await ctx.ui.stream(
-			ctx.llm.generate({
-				model: ctx.config.ollama.commitModel,
+			llm.generate({
+				model: model ?? "llama3.1",
 				system: "",
 				prompt,
 				task: "commit-message",

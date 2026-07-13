@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
+import { UnsupportedCapabilityError } from "../../ports/llm";
 import { OllamaAdapter } from "./ollama";
 
 const originalFetch = globalThis.fetch;
@@ -21,6 +22,11 @@ function ndjsonStream(chunks: object[]): ReadableStream<Uint8Array> {
 }
 
 describe("OllamaAdapter", () => {
+	test("reports text-generation capability", () => {
+		const adapter = new OllamaAdapter({ baseUrl: "http://localhost:11434" });
+		expect(adapter.capabilities()).toEqual(["text-generation"]);
+	});
+
 	test("posts model/system/prompt to /api/generate and yields streamed tokens", async () => {
 		let capturedUrl = "";
 		let capturedBody = "";
@@ -211,5 +217,26 @@ describe("OllamaAdapter", () => {
 			}
 			};
 		await expect(iterate()).rejects.toThrow(/ollama pull ghost/);
+	});
+
+	test("throws UnsupportedCapabilityError for agentic-workspace", async () => {
+		const adapter = new OllamaAdapter({ baseUrl: "http://localhost:11434" });
+		const agentReq = {
+			purpose: "ralph",
+			model: "claude-sonnet",
+			workspace: ".",
+			permissionPolicy: "auto-approve" as const,
+			systemPromptMode: "replace" as const,
+			prompt: "do something",
+		};
+
+		try {
+			await adapter.runAgent(agentReq);
+			expect.fail("Should have thrown");
+		} catch (e) {
+			expect(e).toBeInstanceOf(UnsupportedCapabilityError);
+			expect((e as Error).message).toContain("agentic-workspace");
+			expect((e as any).capability).toBe("agentic-workspace");
+		}
 	});
 });

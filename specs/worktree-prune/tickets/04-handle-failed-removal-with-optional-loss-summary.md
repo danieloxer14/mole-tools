@@ -29,7 +29,7 @@ ready-for-agent
 ### Red-Green strategy
 
 1. **Red**: Write tests for summary shown, LLM/snapshot failure bypass, force acceptance, force decline, force-removal failure, and multiple independent fallback decisions.
-2. **Green**: Add a small summary helper using `Context.llm` and the configured Ollama model, wrapping all nonessential summary work in best-effort error handling; then connect it to ticket 03's recorded failures.
+2. **Green**: Add a small summary helper using `Context.llm` and its configured text-generation provider/model, wrapping all nonessential summary work in best-effort error handling; then connect it to ticket 03's recorded failures.
 3. **Refactor**: Isolate the summary helper from destructive control flow so deletion safety is governed only by the explicit per-worktree confirmation.
 
 ## Implementation notes

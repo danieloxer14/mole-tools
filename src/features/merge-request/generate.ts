@@ -1,3 +1,4 @@
+import { resolveLlmProvider } from "../../adapters/config/schema";
 import { loadPrompt } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { AbortError } from "../../core/errors";
@@ -21,12 +22,15 @@ export async function generateMergeRequest(
 ): Promise<ParsedMergeRequest> {
 	const system = await loadPrompt("mr-system");
 	const prompt = buildMergeRequestPrompt({ ...input, system });
+	const llm = ctx.getLlmFor("mergeRequest");
+	const { model } = resolveLlmProvider(ctx.config, "mergeRequest");
+
 	let violations: string[] = [];
 
 	for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
 		const raw = await ctx.ui.stream(
-			ctx.llm.generate({
-				model: ctx.config.ollama.mrModel ?? ctx.config.ollama.commitModel,
+			llm.generate({
+				model: model ?? "llama3.1",
 				system,
 				prompt,
 				task: "merge-request",

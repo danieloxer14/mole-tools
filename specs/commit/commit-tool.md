@@ -50,8 +50,8 @@ Consequence: accept lower output quality for everyday commits. Stay lean. Do
 **Location:** `~/.config/mole-tools/config.json`
 
 **Bootstrap:** On first run with no config file, the tool **auto-creates a
-template** (default Ollama model, Jira disabled), tells the user where it is,
-then proceeds if possible.
+template** (Ollama selected for commit and merge-request by default, Pi selected
+for Ralph, Jira disabled), tells the user where it is, then proceeds if possible.
 
 **Secrets:** Stored **plaintext** in `config.json`. Keep the file out of any
 synced/committed repo (it lives in `~/.config`, not a project dir).
@@ -60,9 +60,11 @@ synced/committed repo (it lives in `~/.config`, not a project dir).
 
 | Key | Purpose | Tool |
 |-----|---------|------|
-| `ollama.commitModel` | Model for commit messages | commit |
-| `ollama.mrModel` | Model for MR descriptions | MR |
-| `ollama.baseUrl` | Ollama endpoint (default `http://localhost:11434`) | shared |
+| `commit.provider`, `commit.model` | Provider and model for commit messages | commit |
+| `mergeRequest.provider`, `mergeRequest.model` | Provider and model for MR descriptions | MR |
+| `ralph.provider` | Workspace-agent provider; model is required by Ralph CLI | Ralph |
+| `providers.ollama.baseUrl` | Ollama endpoint (default `http://localhost:11434`) | provider config |
+| `providers.pi.command` | Pi executable (default `pi`) | provider config |
 | `commitSystemPrompt` | System prompt for commit generation | commit |
 | `mrSystemPrompt` | System prompt for MR generation | MR |
 | `jira.enabled` | Toggle Jira integration | shared |
@@ -84,8 +86,8 @@ synced/committed repo (it lives in `~/.config`, not a project dir).
 2. If Jira configured **and** branch matches the ticket pattern → fetch the
    Jira ticket summary + description.
 3. Grab the diff of **staged** changes (with noise filtering, §5.2).
-4. Send `commitSystemPrompt` + Jira info (if any) + diff → configured Ollama
-   model.
+4. Send `commitSystemPrompt` + Jira info (if any) + diff → the configured
+   commit LLM provider/model.
 5. Model produces a candidate commit message.
 6. Run the format check (§5.5). On failure, auto-regenerate up to N times, then
    abort.
@@ -118,11 +120,13 @@ synced/committed repo (it lives in `~/.config`, not a project dir).
 - Ticket key placement in the message: **trust the prompt** — no deterministic
   injection by the tool.
 
-### 5.4 Ollama
-- Endpoint from `ollama.baseUrl`, model from `ollama.commitModel`.
-- Daemon unreachable → error with the URL, exit non-zero.
-- Model not pulled → error with `ollama pull <model>` hint, exit non-zero.
-- No auto-pull, no manual-editor fallback on Ollama failure.
+### 5.4 LLM provider
+- Commit resolves its configured `commit.provider` and `commit.model` through
+  the capability-aware LLM port. The flow does not branch on provider.
+- The selected provider must support `text-generation`; unsupported capability
+  fails before external work.
+- Ollama-specific errors retain the daemon URL and `ollama pull <model>` hint.
+- No provider auto-install/pull or manual-editor fallback on generation failure.
 
 ### 5.5 Format check (fixed rules, not configurable)
 Applied to model output:
@@ -202,5 +206,5 @@ print the violations.
   touch-score logic to reuse vs. skip for lean/fast.
 - `dynamicEnvRepos` — the "create dynamic env" option per-repo.
 - `autoReviewer.username` — presence enables the "add auto-reviewer?" prompt.
-- `mrSystemPrompt` + `ollama.mrModel` wiring.
+- `mrSystemPrompt` + `mergeRequest.provider`/`mergeRequest.model` wiring.
 - MR title/body template and Jira linkage.

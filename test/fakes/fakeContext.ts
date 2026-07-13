@@ -1,5 +1,5 @@
 import { CONFIG_TEMPLATE } from "../../src/adapters/config/loader";
-import type { Config } from "../../src/adapters/config/schema";
+import type { Config, ProviderProfile } from "../../src/adapters/config/schema";
 import type { Context, Logger } from "../../src/core/context";
 import { CostTracker } from "../../src/core/cost-tracker";
 import type { GitHost } from "../../src/ports/git-host";
@@ -30,11 +30,14 @@ export function fakeContext(
 		costTracker?: CostTracker;
 	} = {},
 ): Context {
+	const llm = overrides.llm ?? new FakeLlm();
+
 	return {
 		config: overrides.config ?? CONFIG_TEMPLATE,
 		ui: overrides.ui ?? new FakeUiPort(),
 		vcs: overrides.vcs ?? new FakeVcs(),
-		llm: overrides.llm ?? new FakeLlm(),
+		llm,
+		getLlmFor: (_purpose: "commit" | "mergeRequest" | "ralph"): Llm => llm,
 		issues: overrides.issues !== undefined ? overrides.issues : null,
 		gitHost:
 			overrides.gitHost !== undefined ? overrides.gitHost : new FakeGitHost(),

@@ -14,7 +14,7 @@ decoupled, and how it is all tested. Every new tool follows this.
 ## 1. Guiding principles (from the grill)
 
 1. **Abstract every third party behind a port.** Features depend on interfaces
-   (`IssueTracker`, `GitHost`, `Vcs`, `Llm`), never on Jira/glab/git/Ollama
+   (`IssueTracker`, `GitHost`, `Vcs`, `Llm`), never on Jira/glab/git/Ollama/Pi
    directly. Concrete adapters are swappable without touching a feature.
 2. **One entry point, self-registering features.** A registry of `Feature`
    objects drives the CLI. Adding a tool = adding one entry.
@@ -73,7 +73,7 @@ src/
   ports/                    # INTERFACES ONLY — no implementation
     ui.ts                   # UiPort
     vcs.ts                  # Vcs (git)
-    llm.ts                  # Llm (Ollama-shaped, but abstract)
+    llm.ts                  # Llm (provider-neutral, capability-aware)
     issue-tracker.ts        # IssueTracker (Jira today)
     git-host.ts             # GitHost (GitLab today, GitHub later)
 
@@ -83,7 +83,8 @@ src/
       controller.ts         # current-request store (useSyncExternalStore source)
       InkUiPort.ts          # UiPort impl writing to the controller
     vcs/git.ts              # shell-out via Bun $
-    llm/ollama.ts           # raw fetch → /api/generate, stream:true
+    llm/ollama.ts           # raw fetch → /api/generate, text-generation
+    llm/pi.ts               # Pi subprocess, text/agent capabilities
     issue-tracker/jira.ts
     git-host/gitlab.ts
     config/
@@ -199,7 +200,7 @@ export interface Context {
   config: Config;              // plain, zod-validated value (NOT a port)
   ui: UiPort;                  // always present
   vcs: Vcs;                    // git, always present
-  llm: Llm;                    // Ollama, always present
+  llm: Llm;                    // capability-aware, purpose-routed provider
   issues: IssueTracker | null; // null when jira.enabled === false
   gitHost: GitHost | null;     // null until a feature needs it / provider unset
   log: Logger;
@@ -211,7 +212,7 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
     config,
     ui,
     vcs: new GitAdapter(),
-    llm: new OllamaAdapter(config.ollama),
+    llm: makeLlmRouter(config), // routes feature purpose to configured adapter
     issues: config.jira.enabled ? new JiraAdapter(config.jira) : null,
     gitHost: makeGitHost(config),   // provider switch: "gitlab" → GitLabAdapter
     log: makeLogger(),
@@ -226,6 +227,13 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
   null check is where "no ticket context, proceed" lives.
 - **Provider selection** (`GitLab` now, `GitHub` later) is a switch inside
   `makeGitHost(config)` — the only place that knows the concrete host.
+- **LLM selection is feature-owned:** configuration uses profiles such as
+  `commit: { provider, model }`, `mergeRequest: { provider, model }`, and
+  `ralph: { provider }`, with connection details under `providers`. The
+  Context-level LLM router resolves a request purpose to its adapter; provider
+  names and provider-specific configuration never enter a feature flow. Ralph
+  supplies its required CLI model and persists that model plus the resolved
+  provider selection; the router resolves that persisted selection on resume.
 
 ---
 
@@ -247,10 +255,13 @@ export interface Vcs {
   log(opts: LogQuery): Promise<CommitMeta[]>;
 }
 
-// ports/llm.ts  — streaming IS the interface
+// ports/llm.ts — provider-neutral capabilities
 export interface Llm {
+  capabilities: ReadonlySet<LlmCapability>;
   /** Yields token chunks. Non-streaming callers just collect them. */
-  generate(req: LlmRequest): AsyncIterable<string>;
+  generate(req: GenerateRequest): AsyncIterable<string>;
+  /** Runs a workspace-capable agent and returns output/diagnostics. */
+  runAgent(req: AgentRequest): Promise<AgentResult>;
 }
 
 // ports/issue-tracker.ts
@@ -267,8 +278,11 @@ export interface GitHost {
 }
 ```
 
-- **Ollama shapes the `Llm` port but does not leak into it** — no `baseUrl`,
-  no `/api/generate` in the interface. That detail lives in `OllamaAdapter`.
+- **Providers do not leak into the `Llm` port** — no `baseUrl`, `/api/generate`,
+  Pi flags, or subprocess handles appear in the interface. Adapters expose
+  explicit `text-generation` and `agentic-workspace` capabilities; unsupported
+  operations fail before external work. A Context-level router selects the
+  provider/model from feature-owned configuration.
 - The `Vcs` port returns **structured** data (`FileDiff[]`, `CommitMeta[]`); the
   adapter parses git's stdout, so features never touch raw text.
 
@@ -419,16 +433,16 @@ Three tiers, each with a clean seam:
 | Tier | What | How |
 |------|------|-----|
 | **Feature e2e** | Whole `run()` flow | Build `Context` from **fake ports** + a **scripted, recording `FakeUiPort`**; call `run()`; assert on the returned `Result`, the recorded port calls, and the UI transcript. |
-| **Adapter unit** | Each adapter's request-building + response-parsing | Instantiate the real adapter but **mock its transport** (mock `fetch` for Ollama, mock the Bun `$`/subprocess for git & glab). Assert the outbound request/command is correct and the mocked response parses to the right structured value. No live network. |
+| **Adapter unit** | Each adapter's request-building + response-parsing | Instantiate the real adapter but **mock its transport** (mock `fetch` for Ollama, mock the Bun subprocess for Pi/git/glab). Assert the outbound request/command is correct and the mocked response parses to the right structured value. No live network. |
 | **Pure unit** | `shared/` + feature pure fns | Plain input→output assertions, no mocks. |
 
 - `FakeUiPort` both **scripts** responses (a queued answer per interaction) and
   **records** a transcript so tests assert *what the user was shown*.
-- `FakeLlm.generate()` yields scripted chunks — exercises the streaming path
-  deterministically.
-- Fakes throw the same `PortError`/`AbortError` types on demand, so failure-path
-  acceptance criteria (Ollama down, push rejected, Jira fetch fails) are e2e-testable
-  without real infra.
+- `FakeLlm` scripts text and agent operations, exercising streaming and
+  workspace-agent paths deterministically.
+- Fakes throw the same `PortError`/`AbortError`/unsupported-capability types on
+  demand, so failure paths (Ollama down, Pi failure, push rejected, Jira fetch
+  fails) are e2e-testable without real infrastructure.
 
 Example e2e seam:
 
@@ -445,7 +459,7 @@ expect(ctx.vcs.commit).toHaveBeenCalledWith("feat: x");
 
 ## 11. How to add a new tool (the whole checklist)
 
-1. Add any new external boundary as a **port** in `ports/` (interface only).
+1. Add any new external boundary or provider capability as a **port** contract in `ports/` (interface only).
 2. Implement its **adapter** in `adapters/`; wire it into `buildContext`.
 3. Create `features/<name>/index.ts` exporting a `Feature` (`name`,
    `description`, `args` zod schema, `run`). Keep `run()` linear — push logic
