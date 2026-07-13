@@ -53,3 +53,23 @@ bun run build           # bun build --compile --target=bun-darwin-arm64
 
 Produces a standalone `mole-tools` binary (no `node_modules` needed at
 runtime).
+
+## Release
+
+Install and authenticate the GitHub CLI once:
+
+```bash
+brew install gh
+gh auth login
+```
+
+From a clean working tree, publish the next GitHub release and its installable
+macOS-arm64 binary:
+
+```bash
+bun run release patch # or: minor, major
+```
+
+The command bumps `package.json`, builds the binary, commits and tags
+`v<version>`, pushes the commit and tag, then creates a GitHub release with a
+`mole-tools-darwin-arm64` asset.

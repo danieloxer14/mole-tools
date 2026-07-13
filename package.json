@@ -9,7 +9,8 @@
 		"build": "bun build src/index.tsx --compile --target=bun-darwin-arm64 --outfile mole-tools",
 		"test": "bun test",
 		"test:cov": "bun test --coverage",
-		"lint": "biome check"
+		"lint": "biome check",
+		"release": "bun run scripts/release.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.3",
