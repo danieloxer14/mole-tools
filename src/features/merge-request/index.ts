@@ -83,6 +83,7 @@ export async function runMergeRequestFlow(ctx: Context): Promise<MergeRequestRes
 		await ctx.vcs.mergeBaseDiff(defaultBranch),
 		ctx.config.diff.ignore,
 	);
+	await ctx.ui.info(`Diff collected (${diff.length} file${diff.length === 1 ? "" : "s"} changed).`);
 	const candidate = await generateMergeRequest(ctx, {
 		issue,
 		commits: commits.map((commit) => commit.subject),

@@ -38,6 +38,8 @@ function formatEntriesTable(
     .map((entry, i) => {
       const d = derived[i];
       if (!d) return null;
+      // Skip entries with no token usage (non-LLM operations like git-host)
+      if (entry.inputTokens === 0 && entry.outputTokens === 0) return null;
       const entryUsage = {
         inputTokens: entry.inputTokens,
         // Git outputs are not charged here; they only count toward cost if
@@ -51,9 +53,9 @@ function formatEntriesTable(
         // Left-aligned columns
         entry.type.toUpperCase(),
         entry.task,
-        // Right-aligned numeric / currency columns
+        // Right-aligned numeric / currency columns — display the cost-adjusted token counts
         String(entry.inputTokens),
-        String(entry.outputTokens),
+        String(entryUsage.outputTokens),
         fmt(d.cacheReadTokens),
         fmt(d.cacheWriteTokens),
         costs[0]?.cost !== undefined ? formatUsd(costs[0]!.cost) : "", // Haiku 4.5

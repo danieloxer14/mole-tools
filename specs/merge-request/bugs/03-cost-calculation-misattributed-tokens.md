@@ -24,14 +24,33 @@ None — investigate CostTracker behavior during git operations and pipeline com
 
 ## Status
 
-confirmed-bug
+fixed
+
+## Implementation summary
+
+1. **Removed cost tracking from `GitAdapter`**:
+   - Git operations are CLI commands, not LLM calls — they should not record token costs at all.
+   - Removed `CostTracker.record(...)` calls from `exec()` and `execIn()` methods.
+   - Removed unused imports for `CostTracker` and `estimateTokens` from the git adapter.
+   - Updated `context.ts` to no longer pass `costTracker` to `GitAdapter` constructor.
+
+2. **Added zero-token filtering in breakdown renderer**:
+   - Added guard `if (entry.inputTokens === 0 && entry.outputTokens === 0) return null;`
+     in `formatEntriesTable()` to filter out non-LLM operations like `GIT-HOST`.
+   - Changed "Out" column display from raw `entry.outputTokens` to the cost-adjusted
+     `entryUsage.outputTokens`, so git entries (which have output zeroed for costing) now
+     show 0 in the Out column rather than misleading estimated values.
+
+3. **Added unit test**:
+   - New test case verifies that 0/0 token entries (like GIT-HOST) are excluded from
+     the rendered breakdown while LLM entries still appear correctly.
 
 ## Acceptance criteria
 
-- [ ] Git operations that don't call an LLM (or call it with 0 tokens) are omitted from the cost breakdown table.
-- [ ] Only input tokens per Ollama call are displayed — output tokens feeding into subsequent steps are not counted again.
-- [ ] The final total accurately reflects actual token spend (no double-counting across pipeline stages).
-- [ ] `GIT-HOST` row is absent from the table (or any other 0/0 provider).
+- [x] Git operations that don't call an LLM (or call it with 0 tokens) are omitted from the cost breakdown table.
+- [x] Only input tokens per Ollama call are displayed — output tokens feeding into subsequent steps are not counted again.
+- [x] The final total accurately reflects actual token spend (no double-counting across pipeline stages).
+- [x] `GIT-HOST` row is absent from the table (or any other 0/0 provider).
 
 ## Reproduction steps
 

@@ -41,7 +41,7 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
 	return {
 		config,
 		ui,
-		vcs: new GitAdapter(undefined, costTracker),
+		vcs: new GitAdapter(),
 		llm: new OllamaAdapter(config.ollama, costTracker),
 		issues:
 			config.jira.enabled && config.jira.url && config.jira.apiKey

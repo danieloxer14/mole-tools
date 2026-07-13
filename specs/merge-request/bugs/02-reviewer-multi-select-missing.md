@@ -24,7 +24,22 @@ None — investigate why the reviewer step is not triggering.
 
 ## Status
 
-confirmed-bug
+fixed
+
+### Root cause
+
+`selectReviewers()` returned early with an empty array when:
+1. CODEOWNERS file was not found (`if (!path) return []`)
+2. CODEOWNERS handles resolved to no members (`if (members.length === 0) return []`)
+
+This prevented the reviewer selection UI from appearing at all, even though `rankReviewerSuggestions` already supports fallback using touch/recent authors.
+
+### Fix applied
+
+- Removed hard early-returns when CODEOWNERS is missing or resolves to empty members
+- Added `buildFallbackReviewerSuggestions()` function that constructs reviewer candidates directly from git history (touch authors + recent authors) when no CODEOWNERS member pool exists
+- Updated `selectReviewers()` to fall back to git history suggestions when the CODEOWNERS-based ranking produces no candidates
+- Added tests for the new fallback function
 
 ## Acceptance criteria
 

@@ -1,4 +1,3 @@
-import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import type {
 	CommitMeta,
@@ -8,7 +7,6 @@ import type {
 	Vcs,
 	WorktreeInfo,
 } from "../../ports/vcs";
-import { estimateTokens } from "../../shared/text";
 
 export interface GitExecResult {
 	stdout: string;
@@ -114,17 +112,10 @@ export class GitAdapter implements Vcs {
 	private readonly _gitExec = this.execFn;
 	constructor(
 		private readonly execFn: GitExec = defaultExec,
-		private readonly costTracker: CostTracker = new CostTracker(),
 	) {}
 
 	private async exec(args: string[], input?: string): Promise<GitExecResult> {
 		const result = await this.execFn(args, input);
-		this.costTracker.record({
-			type: "git",
-			task: args[0] ?? "git",
-			inputTokens: estimateTokens(args.join(" ")),
-			outputTokens: estimateTokens(result.stdout),
-				});
 		return result;
 	}
 
@@ -134,12 +125,6 @@ export class GitAdapter implements Vcs {
 		input?: string,
 	): Promise<GitExecResult> {
 		const result = await this.execFn(args, input, cwd);
-		this.costTracker.record({
-			type: "git",
-			task: args[0] ?? "git",
-			inputTokens: estimateTokens(args.join(" ")),
-			outputTokens: estimateTokens(result.stdout),
-				});
 		return result;
 	}
 

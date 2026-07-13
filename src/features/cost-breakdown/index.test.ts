@@ -36,43 +36,79 @@ describe("runCostBreakdown", () => {
 
 		expect(result).toEqual({ sessionCount: 0 });
 		expect(ui.transcript).toEqual([
-					{
-					kind: "info",
-						text: "No cost history yet — run a feature first.",
-					spinner: undefined,
-					},
-				]);
+			{
+				kind: "info",
+				text: "No cost history yet — run a feature first.",
+				spinner: undefined,
+			},
+		]);
 	});
 
 	test("shows sessions newest-first, pausing between each but not after the last", async () => {
 		const path = await historyPath();
-			await appendCostSession(
+		await appendCostSession(
+			{
+				id: "1",
+				feature: "commit",
+				startedAt: "2026-07-08T00:00:00.000Z",
+				entries: [entry],
+			},
+			path,
+		);
+		await appendCostSession(
+			{
+				id: "2",
+				feature: "commit",
+				startedAt: "2026-07-09T00:00:00.000Z",
+				entries: [entry],
+			},
+			path,
+		);
+		const ui = new FakeUiPort();
+		const ctx = fakeContext({ ui });
+
+		const result = await runCostBreakdown(ctx, path);
+
+		expect(result).toEqual({ sessionCount: 2 });
+		const kinds = ui.transcript.map((t) => t.kind);
+		expect(kinds).toEqual(["info", "pause", "info"]);
+		expect(ui.transcript[0]?.text).toContain("2026-07-09T00:00:00.000Z");
+		expect(ui.transcript[2]?.text).toContain("2026-07-08T00:00:00.000Z");
+	});
+
+	test("omits zero-token entries from the breakdown table", async () => {
+		const path = await historyPath();
+		await appendCostSession(
+			{
+				id: "1",
+				feature: "merge-request",
+				startedAt: "2026-07-10T00:00:00.000Z",
+				entries: [
 					{
-					id: "1",
-						feature: "commit",
-					startedAt: "2026-07-08T00:00:00.000Z",
-						entries: [entry],
+						type: "llm",
+						task: "mr-description",
+						inputTokens: 120,
+						outputTokens: 45,
 					},
-					path,
-							);
-			await appendCostSession(
 					{
-					id: "2",
-						feature: "commit",
-					startedAt: "2026-07-09T00:00:00.000Z",
-						entries: [entry],
-						  },
-						path,
-					  );
-			const ui = new FakeUiPort();
-			const ctx = fakeContext({ ui });
+						type: "git-host",
+						task: "mr",
+						inputTokens: 0,
+						outputTokens: 0,
+					},
+				],
+			},
+			path,
+		);
+		const ui = new FakeUiPort();
+		const ctx = fakeContext({ ui });
 
-			const result = await runCostBreakdown(ctx, path);
+		await runCostBreakdown(ctx, path);
 
-				expect(result).toEqual({ sessionCount: 2 });
-			const kinds = ui.transcript.map((t) => t.kind);
-			expect(kinds).toEqual(["info", "pause", "info"]);
-			expect(ui.transcript[0]?.text).toContain("2026-07-09T00:00:00.000Z");
-			expect(ui.transcript[2]?.text).toContain("2026-07-08T00:00:00.000Z");
+		// GIT-HOST row should not appear
+		expect(ui.transcript[0]?.text).not.toContain("GIT-HOST");
+		// LLM row should appear
+		expect(ui.transcript[0]?.text).toContain("LLM");
+		expect(ui.transcript[0]?.text).toContain("mr-description");
 	});
 });

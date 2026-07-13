@@ -100,6 +100,37 @@ describe("GitAdapter", () => {
 		expect(diffs[0]?.patch).toContain("+new");
 	});
 
+	test("mergeBaseDiff reads only committed changes between origin and HEAD", async () => {
+		const patch = [
+				"diff --git a/src/a.ts b/src/a.ts",
+				"index 111..222 100644",
+				"--- a/src/a.ts",
+				"+++ b/src/a.ts",
+				"@@ -1 +1 @@",
+				"-old",
+				"+new",
+				"",
+			].join("\n");
+		const calls: string[][] = [];
+		const git = new GitAdapter(
+			scriptedExec(
+				{
+					"diff origin/main...HEAD --numstat": ok("1\t1\tsrc/a.ts\n"),
+					"diff origin/main...HEAD": ok(patch),
+				},
+				calls,
+			),
+		);
+
+		const diffs = await git.mergeBaseDiff("main");
+
+		expect(diffs[0]?.path).toBe("src/a.ts");
+		expect(calls).toEqual([
+			["diff", "origin/main...HEAD", "--numstat"],
+			["diff", "origin/main...HEAD"],
+		]);
+	});
+
 	test("commit pipes the message via stdin and returns the new sha", async () => {
 		const calls: string[][] = [];
 		const inputs: (string | undefined)[] = [];
@@ -234,25 +265,8 @@ describe("GitAdapter", () => {
 				"-n5",
 				"main..HEAD",
 					]);
-	});
+		});
 
-	test("records a git cost entry per command, sized by stdout length", async () => {
-		const costTracker = new CostTracker();
-		const git = new GitAdapter(
-			scriptedExec({ "rev-parse --abbrev-ref HEAD": ok("main\n") }, []),
-			costTracker,
-				);
-		await git.currentBranch();
-
-		expect(costTracker.getEntries()).toEqual([
-				{
-			type: "git",
-			task: "rev-parse",
-			inputTokens: 7,
-			outputTokens: 2,
-					},
-				]);
-	});
 	test("worktrees parses --porcelain output and filters out the main worktree", async () => {
 		// Real git output: uppercase HEAD, "branch refs/heads/name" not "symbolic"
 		const porcelain = [
