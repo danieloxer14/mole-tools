@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="danieloxer14/mole-tools"
 INSTALL_DIR="/usr/local/bin"
 BIN_NAME="mole-tools"
-ASSET_NAME="mole-tools-darwin-arm64"
+ASSET_NAME="mole-tools"
 
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
 	echo "error: mole-tools only ships a macOS arm64 binary." >&2
