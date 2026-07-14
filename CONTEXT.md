@@ -43,6 +43,9 @@ The machine-readable state at `.ralph/<name>.state.json` that persists a Ralph l
 ### Ralph run lock
 The exclusive `.ralph/<name>.lock` file held while a continuous Ralph run owns a loop. It records the owning process so a later command can reject a live concurrent run or reclaim a stale lock after checking its PID. On Ctrl+C, Ralph cancels its active agent operation through the LLM port, waits for it to settle, preserves task changes already written, sets state to `paused` with reason `interrupted`, clears `active`, and removes the lock.
 
+### Commit auto mode
+A strictly non-interactive commit invocation enabled by `mole-tools commit --auto`. It accepts the generated, format-valid message and creates the local commit without showing the message selection. It deliberately never pushes; staged-change validation, Jira lookup, diff collection, generation, and failure handling remain unchanged. A future commit-flow decision that cannot be safely automated fails rather than prompting or silently choosing a default.
+
 ### LLM provider profile
 A feature-owned provider/model selection in global configuration, for example `commit: { provider: "ollama", model: "qwen3" }` or `ralph: { provider: "pi" }`. Provider connection details are stored separately under `providers`. Changing a profile changes no feature flow.
 

@@ -334,12 +334,11 @@ export async function runRalphRun(
 				after === null
 					? new RalphParseError("Task file disappeared")
 					: parseTaskFile(after, { allowCompleted: true });
-			const changedCorrectly =
-				result.ok &&
-				after !== null &&
-				!(afterParsed instanceof RalphParseError) &&
-				validateCheckboxChange(before, after, selected.text).success &&
-				afterParsed.checklist[selected.index]?.done === true;
+			const checkboxChange =
+				result.ok && after !== null && !(afterParsed instanceof RalphParseError)
+					? validateCheckboxChange(before, after)
+					: null;
+			const changedCorrectly = checkboxChange?.success === true;
 			state = {
 				...state,
 				iteration: state.iteration + 1,
@@ -349,7 +348,8 @@ export async function runRalphRun(
 						? diagnostic(result, "Agent failed")
 						: afterParsed instanceof RalphParseError
 							? afterParsed.message
-							: "Worker changed the wrong checklist item or made no change",
+							: (checkboxChange?.reason ??
+								"Worker changed the wrong checklist item or made no change"),
 			};
 			if (!changedCorrectly) {
 				restoreSnapshot(args.name);

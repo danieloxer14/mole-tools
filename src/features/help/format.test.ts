@@ -138,6 +138,24 @@ describe("formatCommandHelp", () => {
 		}
 	});
 
+	test("renders boolean options as bare flags in usage and options", () => {
+		const feature = makeFeature({
+			name: "commit",
+			args: z.object({
+				auto: z.boolean().describe("Skip prompts and do not push"),
+			}),
+		});
+
+		const result = formatCommandHelp([feature], "commit");
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.text).toContain("mole-tools commit [--auto]");
+			expect(result.text).toContain("  --auto\n");
+			expect(result.text).not.toContain("--auto <auto>");
+		}
+	});
+
 	test("renders help with zod meta examples", () => {
 		const schema = z.object({
 			baseDir: z

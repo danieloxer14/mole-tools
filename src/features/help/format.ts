@@ -1,12 +1,19 @@
 import type { z } from "zod";
-import { ZodObject } from "zod";
+import { ZodBoolean, ZodDefault, ZodObject } from "zod";
 import type { Feature } from "../../core/feature";
 
 interface OptionInfo {
 	flag: string;
-	valuePlaceholder: string;
+	valuePlaceholder?: string;
 	description?: string;
 	examples?: string[];
+}
+
+function isBooleanField(schema: z.ZodTypeAny): boolean {
+	if (schema instanceof ZodBoolean) return true;
+	if (schema instanceof ZodDefault)
+		return isBooleanField(schema.unwrap() as z.ZodTypeAny);
+	return false;
 }
 
 function extractOptions(schema: z.ZodTypeAny): OptionInfo[] {
@@ -23,7 +30,7 @@ function extractOptions(schema: z.ZodTypeAny): OptionInfo[] {
 		const meta = typedField.meta?.();
 		options.push({
 			flag: `--${key}`,
-			valuePlaceholder: `<${key}>`,
+			valuePlaceholder: isBooleanField(fieldSchema) ? undefined : `<${key}>`,
 			description: typedField.description ?? undefined,
 			examples: Array.isArray(meta?.examples) ? meta.examples : undefined,
 		});
@@ -41,7 +48,9 @@ function buildUsageLine(
 	if (options.length === 0) return ``;
 
 	const flags = options
-		.map((o) => `[${o.flag} ${o.valuePlaceholder}]`)
+		.map(
+			(o) => `[${o.flag}${o.valuePlaceholder ? ` ${o.valuePlaceholder}` : ""}]`,
+		)
 		.join(" ");
 	return `mole-tools ${commandName} ${flags}`;
 }
@@ -96,7 +105,9 @@ export function formatCommandHelp(
 		lines.push("");
 		lines.push("Options:");
 		for (const opt of options) {
-			lines.push(`  ${opt.flag} ${opt.valuePlaceholder}`);
+			lines.push(
+				`  ${opt.flag}${opt.valuePlaceholder ? ` ${opt.valuePlaceholder}` : ""}`,
+			);
 			if (opt.description) {
 				lines.push(`     ${opt.description}`);
 			}

@@ -330,22 +330,7 @@ describe("nextUncheckedTask", () => {
 // ─── validateCheckboxChange tests ──────────────────────────────────
 
 describe("validateCheckboxChange", () => {
-	test("accepts when exactly the selected checkbox was checked", () => {
-		const before = `## Task checklist
-- [ ] Write tests
-- [ ] Implement feature
-- [ ] Add docs
-`;
-		const after = `## Task checklist
-- [x] Write tests
-- [ ] Implement feature
-- [ ] Add docs
-`;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(true);
-	});
-
-	test("rejects when wrong checkbox was checked", () => {
+	test("accepts a checked task anywhere in the checklist", () => {
 		const before = `## Task checklist
 - [ ] Write tests
 - [ ] Implement feature
@@ -356,26 +341,10 @@ describe("validateCheckboxChange", () => {
 - [x] Implement feature
 - [ ] Add docs
 `;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(false);
+		expect(validateCheckboxChange(before, after).success).toBe(true);
 	});
 
-	test("accepts consecutive tasks completed from the selected task", () => {
-		const before = `## Task checklist
-- [ ] Write tests
-- [ ] Implement feature
-- [ ] Add docs
-`;
-		const after = `## Task checklist
-- [x] Write tests
-- [x] Implement feature
-- [ ] Add docs
-`;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(true);
-	});
-
-	test("rejects progress that skips a task", () => {
+	test("accepts non-contiguous tasks checked after a review reopened work", () => {
 		const before = `## Task checklist
 - [ ] Write tests
 - [ ] Implement feature
@@ -386,18 +355,15 @@ describe("validateCheckboxChange", () => {
 - [ ] Implement feature
 - [x] Add docs
 `;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(false);
+		expect(validateCheckboxChange(before, after).success).toBe(true);
 	});
 
-	test("rejects an unchanged selected item", () => {
+	test("rejects when no checklist task was checked", () => {
 		const before = `## Task checklist
 - [ ] Write tests
 - [ ] Implement feature
 `;
-		const after = before;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(false);
+		expect(validateCheckboxChange(before, before).success).toBe(false);
 	});
 
 	test("rejects when a previously checked box was unchecked", () => {
@@ -407,10 +373,9 @@ describe("validateCheckboxChange", () => {
 `;
 		const after = `## Task checklist
 - [ ] Write tests
-- [ ] Implement feature
+- [x] Implement feature
 `;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(false);
+		expect(validateCheckboxChange(before, after).success).toBe(false);
 	});
 
 	test("ignores non-checklist content changes", () => {
@@ -426,11 +391,26 @@ describe("validateCheckboxChange", () => {
 - [x] Write tests
 - [ ] Implement feature
 `;
-		const result = validateCheckboxChange(before, after, "Implement feature");
-		expect(result.success).toBe(false);
+		expect(validateCheckboxChange(before, after).success).toBe(false);
 	});
 
-	test("rejects adding a new checkbox item that wasn't in the original", () => {
+	test("ignores checkboxes outside the task checklist", () => {
+		const before = `## Task checklist
+- [ ] Write tests
+
+## Completion gate
+- [ ] Run full suite
+`;
+		const after = `## Task checklist
+- [x] Write tests
+
+## Completion gate
+- [x] Run full suite
+`;
+		expect(validateCheckboxChange(before, after).success).toBe(true);
+	});
+
+	test("rejects adding or removing a checklist item", () => {
 		const before = `## Task checklist
 - [ ] Write tests
 `;
@@ -438,20 +418,7 @@ describe("validateCheckboxChange", () => {
 - [x] Write tests
 - [ ] Extra task
 `;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(false);
-	});
-
-	test("rejects removing a checkbox item", () => {
-		const before = `## Task checklist
-- [ ] Write tests
-- [ ] Implement feature
-`;
-		const after = `## Task checklist
-- [x] Write tests
-`;
-		const result = validateCheckboxChange(before, after, "Write tests");
-		expect(result.success).toBe(false);
+		expect(validateCheckboxChange(before, after).success).toBe(false);
 	});
 });
 

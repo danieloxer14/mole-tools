@@ -4,13 +4,27 @@ import {
 	PortError,
 	UserRejectedError,
 } from "../../src/core/errors";
-import { commit } from "../../src/features/commit";
+import { commit, runCommitFlow } from "../../src/features/commit";
 import type { FileDiff } from "../../src/ports/vcs";
 import { FakeIssueTracker } from "../fakes/FakeIssueTracker";
 import { FakeLlm } from "../fakes/FakeLlm";
 import { FakeUiPort } from "../fakes/FakeUiPort";
 import { FakeVcs } from "../fakes/FakeVcs";
 import { fakeContext } from "../fakes/fakeContext";
+
+class NoInputUiPort extends FakeUiPort {
+	override async select<T>(): Promise<T> {
+		throw new Error("select must not be called in auto mode");
+	}
+
+	override async editText(): Promise<string> {
+		throw new Error("editText must not be called in auto mode");
+	}
+
+	override async confirm(): Promise<boolean> {
+		throw new Error("confirm must not be called in auto mode");
+	}
+}
 
 describe("commit args schema", () => {
 	test("rejects whitespace-only context with Zod error", () => {
@@ -26,11 +40,49 @@ describe("commit args schema", () => {
 
 	test("accepts empty object (no context)", () => {
 		const result = commit.args.parse({});
-		expect(result).toEqual({});
+		expect(result).toEqual({ auto: false });
+	});
+
+	test("parses the bare auto flag as true", () => {
+		expect(commit.args.parse({ auto: true }).auto).toBe(true);
 	});
 });
 
 describe("commit feature", () => {
+	test("auto mode commits once without UI input or pushing", async () => {
+		const vcs = new FakeVcs();
+		const ui = new NoInputUiPort();
+		const ctx = fakeContext({
+			vcs,
+			ui,
+			llm: new FakeLlm([["feat: add x"]]),
+			issues: null,
+		});
+
+		const result = await runCommitFlow(ctx, { auto: true });
+
+		expect(result).toEqual({ committed: true, sha: "fakesha" });
+		expect(vcs.committedMessages).toEqual(["feat: add x"]);
+		expect(vcs.pushCalls).toEqual([]);
+		expect(
+			ui.transcript.filter((entry) =>
+				["select", "editText", "confirm"].includes(entry.kind),
+			),
+		).toEqual([]);
+		expect(
+			ui.transcript.some(
+				(entry) => entry.kind === "info" && entry.text === "feat: add x",
+			),
+		).toBe(true);
+		expect(
+			ui.transcript.some(
+				(entry) =>
+					entry.kind === "info" &&
+					entry.text === "Committed fakesha: feat: add x",
+			),
+		).toBe(true);
+	});
+
 	// #2 — nothing staged
 	test("aborts with 'No staged changes' when nothing is staged", async () => {
 		const vcs = new FakeVcs({ staged: false });
@@ -254,6 +306,25 @@ describe("commit feature", () => {
 		});
 		await commit.run(ctx, {});
 		expect(vcs.pushCalls).toEqual([]);
+	});
+
+	test("merge-request flow stays interactive without its push prompt", async () => {
+		const vcs = new FakeVcs();
+		const ui = new FakeUiPort([{ select: "accept" }]);
+		const ctx = fakeContext({
+			vcs,
+			llm: new FakeLlm([["feat: add x"]]),
+			ui,
+		});
+
+		await runCommitFlow(ctx, { askToPush: false });
+
+		expect(ui.transcript.find((entry) => entry.kind === "select")).toBeDefined();
+		expect(
+			ui.transcript.some((entry) => entry.kind === "confirm"),
+		).toBe(false);
+		expect(vcs.pushCalls).toEqual([]);
+		expect(vcs.committedMessages).toEqual(["feat: add x"]);
 	});
 
 	// #15 — push rejected by remote surfaces the error verbatim

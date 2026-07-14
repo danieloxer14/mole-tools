@@ -18,6 +18,12 @@ const args = z.object({
 		.optional()
 		.describe("Extra guidance for the generated commit message")
 		.meta({ examples: ["Emphasize the migration risk and rollout plan."] }),
+	auto: z
+		.boolean()
+		.default(false)
+		.describe(
+			"Non-interactive local commit — skips all prompts, does not push",
+		),
 });
 
 export interface CommitResult {
@@ -80,6 +86,8 @@ export interface CommitFlowOptions {
 	askToPush?: boolean;
 	/** Optional user-supplied guidance for the generated commit message. */
 	context?: string;
+	/** Skip all input prompts and never push. */
+	auto?: boolean;
 }
 
 export async function runCommitFlow(
@@ -100,21 +108,29 @@ export async function runCommitFlow(
 	const message = await generateValid(ctx, prompt);
 	await ctx.ui.info(message);
 
-	const choice = await ctx.ui.select("Commit message", ACCEPT_EDIT_REJECT);
 	let final: string;
-	if (choice === "edit") {
-		final = await ctx.ui.editText("Edit commit message", message);
-	} else if (choice === "reject") {
-		throw new UserRejectedError();
-	} else {
+	if (options.auto === true) {
 		final = message;
+	} else {
+		const choice = await ctx.ui.select("Commit message", ACCEPT_EDIT_REJECT);
+		if (choice === "edit") {
+			final = await ctx.ui.editText("Edit commit message", message);
+		} else if (choice === "reject") {
+			throw new UserRejectedError();
+		} else {
+			final = message;
+		}
 	}
 
 	await ctx.ui.info("Creating commit...", { spinner: true });
 	const { sha } = await ctx.vcs.commit(final);
 	await ctx.ui.info(`Committed ${sha.slice(0, 7)}: ${final}`);
 
-	if (options.askToPush !== false && (await ctx.ui.confirm("Push?"))) {
+	if (
+		options.auto !== true &&
+		options.askToPush !== false &&
+		(await ctx.ui.confirm("Push?"))
+	) {
 		const branch = await ctx.vcs.currentBranch();
 		await ctx.ui.info("Pushing...", { spinner: true });
 		await ctx.vcs.push({ setUpstream: false, branch });
@@ -128,7 +144,7 @@ export const commit: Feature<typeof args, CommitResult> = {
 	description: "Generate a commit message for staged changes",
 	args,
 	help: {
-		usage: "mole-tools commit [--context <text>]",
+		usage: "mole-tools commit [--context <text>] [--auto]",
 		examples: [
 			'mole-tools commit --context "Emphasize the migration risk and rollout plan."',
 		],
@@ -137,9 +153,14 @@ export const commit: Feature<typeof args, CommitResult> = {
 			"If your branch name contains a Jira ticket key (e.g. PROJ-123), it will fetch issue details and include them in the generation prompt.",
 			"You can accept, edit, or reject the generated message. After accepting you are asked whether to push.",
 			"Use --context to supply invocation-scoped guidance for the LLM without changing configured prompts.",
+			"Use --auto to commit the generated message locally without prompts or pushing.",
 		],
 	},
 	async run(ctx, args) {
-		return runCommitFlow(ctx, { askToPush: true, context: args.context });
+		return runCommitFlow(ctx, {
+			askToPush: true,
+			context: args.context,
+			auto: args.auto,
+		});
 	},
 };

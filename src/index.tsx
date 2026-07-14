@@ -1,5 +1,4 @@
-import cac, { type Command } from "cac";
-import { z } from "zod";
+import cac from "cac";
 import packageJson from "../package.json";
 import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
 import { appendCostSession } from "./adapters/cost-history/file";
@@ -15,13 +14,9 @@ import {
 	formatUnknownCommand,
 } from "./features/help/format";
 import { formatCostSavingsTable } from "./shared/cost-estimate";
+import { applyZodOptions } from "./cli/options";
 
-function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
-	if (!(schema instanceof z.ZodObject)) return;
-	for (const key of Object.keys(schema.shape)) {
-		cmd.option(`--${key} <value>`, `Set ${key}`);
-	}
-}
+export { applyZodOptions } from "./cli/options";
 
 const cli = cac("mole-tools");
 cli.version(packageJson.version);

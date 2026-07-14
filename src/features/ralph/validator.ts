@@ -44,6 +44,7 @@ export type ParseResult = RalphTaskFile | RalphParseError;
 
 export interface CheckboxChangeResult {
 	success: boolean;
+	reason?: string;
 }
 
 // ─── REGEX HELPERS ──────────────────────────────────────────────────────
@@ -229,50 +230,47 @@ export function nextUncheckedTask(
 }
 
 /**
- * Validate a worker's progress from the selected first unchecked task.
+ * Validate that a worker recorded some forward checklist progress.
  *
- * A worker may complete one ticket's consecutive tasks in one iteration, so it
- * may check a contiguous run beginning at the selected task. It may not skip a
- * task, rewrite the checklist, or uncheck prior progress.
+ * A worker may check any incomplete tasks. This intentionally does not require
+ * contiguous progress from the task selected at iteration start: a review may
+ * have reopened earlier work between iterations. It may not rewrite, add/remove,
+ * or uncheck checklist tasks.
  */
 export function validateCheckboxChange(
 	before: string,
 	after: string,
-	selectedItem: string,
 ): CheckboxChangeResult {
-	const beforeItems = extractChecklistItems(before);
-	const afterItems = extractChecklistItems(after);
-
-	// Item count must stay the same (no additions or removals)
-	if (beforeItems.length !== afterItems.length) {
-		return { success: false };
-	}
-
-	const selectedLower = selectedItem.trim().toLowerCase();
-	const selectedIndex = beforeItems.findIndex(
-		(item) => !item.done && item.text.trim().toLowerCase() === selectedLower,
+	// Only the Task checklist is worker progress. Other sections may contain
+	// verification checkboxes and must not make this comparison fail.
+	const beforeItems = extractChecklistItems(
+		extractSection(before.split("\n"), "## Task checklist"),
 	);
-	if (selectedIndex === -1) return { success: false };
+	const afterItems = extractChecklistItems(
+		extractSection(after.split("\n"), "## Task checklist"),
+	);
+
+	if (beforeItems.length !== afterItems.length)
+		return { success: false, reason: "checklist items were added or removed" };
 
 	const changedIndexes: number[] = [];
 	for (let i = 0; i < beforeItems.length; i++) {
 		const beforeItem = beforeItems[i];
 		const afterItem = afterItems[i];
-		if (!beforeItem || !afterItem) return { success: false };
+		if (!beforeItem || !afterItem)
+			return { success: false, reason: "checklist could not be compared" };
 		if (
 			beforeItem.text.trim().toLowerCase() !==
 			afterItem.text.trim().toLowerCase()
 		)
-			return { success: false };
+			return { success: false, reason: "checklist task text was changed" };
 		if (beforeItem.done === afterItem.done) continue;
-		if (!afterItem.done) return { success: false };
+		if (!afterItem.done)
+			return { success: false, reason: "a completed task was unchecked" };
 		changedIndexes.push(i);
 	}
 
-	// Progress must start at the selected task and contain no skipped tasks.
-	return {
-		success:
-			changedIndexes.length > 0 &&
-			changedIndexes.every((index, offset) => index === selectedIndex + offset),
-	};
+	if (changedIndexes.length === 0)
+		return { success: false, reason: "no checklist task was checked" };
+	return { success: true };
 }
