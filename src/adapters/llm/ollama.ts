@@ -4,8 +4,8 @@ import type {
 	AgentRequest,
 	AgentResult,
 	GenerateRequest,
-	LlmCapability,
 	Llm,
+	LlmCapability,
 } from "../../ports/llm";
 import { UnsupportedCapabilityError } from "../../ports/llm";
 import { estimateTokens } from "../../shared/text";

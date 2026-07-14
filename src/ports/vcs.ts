@@ -42,7 +42,10 @@ export interface Vcs {
 	hasUpstream(branch: string): Promise<boolean>;
 	isAheadOfUpstream(branch: string): Promise<boolean>;
 	changedFiles(base: string): Promise<string[]>;
-	touchAuthorsForFiles(files: string[], maxCount?: number): Promise<TouchAuthor[]>;
+	touchAuthorsForFiles(
+		files: string[],
+		maxCount?: number,
+	): Promise<TouchAuthor[]>;
 	recentAuthors(maxCount?: number): Promise<string[]>;
 	repoRoot(): Promise<string>;
 	log(opts: LogQuery): Promise<CommitMeta[]>;

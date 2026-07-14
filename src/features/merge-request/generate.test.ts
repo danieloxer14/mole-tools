@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { AbortError } from "../../core/errors";
-import { fakeContext } from "../../../test/fakes/fakeContext";
 import { FakeLlm } from "../../../test/fakes/FakeLlm";
+import { fakeContext } from "../../../test/fakes/fakeContext";
+import { AbortError } from "../../core/errors";
 import { generateMergeRequest } from "./generate";
 
 describe("generateMergeRequest", () => {
@@ -9,7 +9,10 @@ describe("generateMergeRequest", () => {
 		const llm = new FakeLlm([["Title: feat: valid\n\nnot conventional: body"]]);
 		const ctx = fakeContext({ llm });
 		const result = await generateMergeRequest(ctx, { commits: [], diff: [] });
-		expect(result).toEqual({ title: "feat: valid", body: "not conventional: body" });
+		expect(result).toEqual({
+			title: "feat: valid",
+			body: "not conventional: body",
+		});
 		// Model comes from resolveLlmProvider — with the legacy fallback it picks up the default
 		expect(llm.requests[0]?.model).toBeDefined();
 	});

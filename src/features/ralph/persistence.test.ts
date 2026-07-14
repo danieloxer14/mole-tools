@@ -1,23 +1,34 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile, access, constants } from "node:fs/promises";
+import crypto from "node:crypto";
+import {
+	access,
+	constants,
+	mkdtemp,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import crypto from "node:crypto";
-
-import { StatusEnum, PhaseEnum, type RalphStateFile, RalphError } from "./schema";
 import {
-	ensureRalphDir,
-	writeState,
-	readState,
-	writeTaskFile,
-	readTaskFile,
-	snapshotTaskFile,
-	restoreSnapshot,
-	createLock,
 	checkCollision,
-	setRalphDirForTesting,
+	createLock,
+	ensureRalphDir,
+	readState,
+	readTaskFile,
 	resetRalphDirForTesting,
+	restoreSnapshot,
+	setRalphDirForTesting,
+	snapshotTaskFile,
+	writeState,
+	writeTaskFile,
 } from "./persistence";
+import {
+	PhaseEnum,
+	RalphError,
+	type RalphStateFile,
+	StatusEnum,
+} from "./schema";
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -188,7 +199,9 @@ describe("snapshotTaskFile / restoreSnapshot", () => {
 		expect(restored).toBe(original);
 
 		// Snapshot should be gone
-		const snapContent = await readTaskFile("test-loop.snap.md".replace(".snap.md", ""));
+		const _snapContent = await readTaskFile(
+			"test-loop.snap.md".replace(".snap.md", ""),
+		);
 	});
 
 	test("throws when restoring without a snapshot", async () => {
@@ -365,7 +378,11 @@ describe("full lifecycle integration", () => {
 		expect(() => checkCollision(name)).toThrow(RalphError);
 
 		// 6. Update state during work
-		const updated = makeState({ name, iteration: 1, status: StatusEnum.in_progress });
+		const updated = makeState({
+			name,
+			iteration: 1,
+			status: StatusEnum.in_progress,
+		});
 		await writeState(name, updated);
 		expect((await readState(name)).iteration).toBe(1);
 

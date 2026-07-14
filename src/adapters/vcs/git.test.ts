@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
-import { GitAdapter, type GitExec, type GitExecResult } from "./git";
+import {
+	GitAdapter,
+	type GitExec,
+	type GitExecResult,
+	parseWorktreePorcelain,
+} from "./git";
 
 function ok(stdout: string): GitExecResult {
 	return { stdout, stderr: "", exitCode: 0 };
@@ -10,6 +14,28 @@ function ok(stdout: string): GitExecResult {
 function fail(stderr: string, exitCode = 1): GitExecResult {
 	return { stdout: "", stderr, exitCode };
 }
+
+describe("parseWorktreePorcelain", () => {
+	test("labels detached worktrees without undefined values", () => {
+		const worktrees = parseWorktreePorcelain(
+			"worktree /repo\nHEAD abc\n\nworktree /repo/detached\nHEAD def\n\n",
+			"/repo",
+		);
+
+		expect(worktrees).toEqual([{ path: "/repo/detached", ref: "detached" }]);
+		expect(JSON.stringify(worktrees)).not.toContain("undefined");
+	});
+
+	test("falls back to the worktree line when git omits its path", () => {
+		const worktrees = parseWorktreePorcelain(
+			"worktree /repo\nHEAD abc\n\nworktree \nHEAD def\n\n",
+			"/repo",
+		);
+
+		expect(worktrees).toEqual([{ path: "worktree ", ref: "detached" }]);
+		expect(JSON.stringify(worktrees)).not.toContain("undefined");
+	});
+});
 
 function scriptedExec(
 	script: Record<string, GitExecResult>,
@@ -29,7 +55,7 @@ describe("GitAdapter", () => {
 		const calls: string[][] = [];
 		const git = new GitAdapter(
 			scriptedExec({ "rev-parse --abbrev-ref HEAD": ok("main\n") }, calls),
-				);
+		);
 		expect(await git.currentBranch()).toBe("main");
 		expect(calls[0]).toEqual(["rev-parse", "--abbrev-ref", "HEAD"]);
 	});
@@ -37,61 +63,61 @@ describe("GitAdapter", () => {
 	test("defaultBranch falls back to main when no remote HEAD is set", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{ "symbolic-ref refs/remotes/origin/HEAD": fail("not a symbolic ref") },
+				{ "symbolic-ref refs/remotes/origin/HEAD": fail("not a symbolic ref") },
 				[],
-					),
-				);
+			),
+		);
 		expect(await git.defaultBranch()).toBe("main");
 	});
 
 	test("defaultBranch strips the origin prefix", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-						"symbolic-ref refs/remotes/origin/HEAD": ok(
-								"refs/remotes/origin/develop\n",
-							),
-					},
-				[],
+				{
+					"symbolic-ref refs/remotes/origin/HEAD": ok(
+						"refs/remotes/origin/develop\n",
 					),
-				);
+				},
+				[],
+			),
+		);
 		expect(await git.defaultBranch()).toBe("develop");
 	});
 
 	test("hasStagedChanges is true when git diff --quiet exits 1", async () => {
 		const git = new GitAdapter(
 			scriptedExec({ "diff --staged --quiet": fail("", 1) }, []),
-				);
+		);
 		expect(await git.hasStagedChanges()).toBe(true);
 	});
 
 	test("hasStagedChanges is false when git diff --quiet exits 0", async () => {
 		const git = new GitAdapter(
 			scriptedExec({ "diff --staged --quiet": ok("") }, []),
-				);
+		);
 		expect(await git.hasStagedChanges()).toBe(false);
 	});
 
 	test("stagedDiff combines numstat and patch text per file", async () => {
 		const patch = [
-					"diff --git a/src/a.ts b/src/a.ts",
-					"index 111..222 100644",
-					"--- a/src/a.ts",
-					"+++ b/src/a.ts",
-					"@@ -1 +1 @@",
-					"-old",
-					"+new",
-					"",
-				].join("\n");
+			"diff --git a/src/a.ts b/src/a.ts",
+			"index 111..222 100644",
+			"--- a/src/a.ts",
+			"+++ b/src/a.ts",
+			"@@ -1 +1 @@",
+			"-old",
+			"+new",
+			"",
+		].join("\n");
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-						"diff --staged --numstat": ok("1\t1\tsrc/a.ts\n"),
-						"diff --staged": ok(patch),
-					},
+				{
+					"diff --staged --numstat": ok("1\t1\tsrc/a.ts\n"),
+					"diff --staged": ok(patch),
+				},
 				[],
-					),
-				);
+			),
+		);
 		const diffs = await git.stagedDiff();
 		expect(diffs).toHaveLength(1);
 		expect(diffs[0]?.path).toBe("src/a.ts");
@@ -102,15 +128,15 @@ describe("GitAdapter", () => {
 
 	test("mergeBaseDiff reads only committed changes between origin and HEAD", async () => {
 		const patch = [
-				"diff --git a/src/a.ts b/src/a.ts",
-				"index 111..222 100644",
-				"--- a/src/a.ts",
-				"+++ b/src/a.ts",
-				"@@ -1 +1 @@",
-				"-old",
-				"+new",
-				"",
-			].join("\n");
+			"diff --git a/src/a.ts b/src/a.ts",
+			"index 111..222 100644",
+			"--- a/src/a.ts",
+			"+++ b/src/a.ts",
+			"@@ -1 +1 @@",
+			"-old",
+			"+new",
+			"",
+		].join("\n");
 		const calls: string[][] = [];
 		const git = new GitAdapter(
 			scriptedExec(
@@ -140,7 +166,7 @@ describe("GitAdapter", () => {
 			if (args[0] === "commit") return ok("");
 			if (args.join(" ") === "rev-parse HEAD") return ok("abc123\n");
 			throw new Error(`unscripted: ${args.join(" ")}`);
-			};
+		};
 		const git = new GitAdapter(exec);
 		const result = await git.commit("feat: add thing");
 		expect(result).toEqual({ sha: "abc123" });
@@ -152,7 +178,7 @@ describe("GitAdapter", () => {
 		const calls: string[][] = [];
 		const git = new GitAdapter(
 			scriptedExec({ "push -u origin feature/x": ok("") }, calls),
-				);
+		);
 		await git.push({ setUpstream: true, branch: "feature/x" });
 		expect(calls[0]).toEqual(["push", "-u", "origin", "feature/x"]);
 	});
@@ -168,15 +194,15 @@ describe("GitAdapter", () => {
 		const calls: string[][] = [];
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-				push: fail(
+				{
+					push: fail(
 						"fatal: The current branch feature/x has no upstream branch.",
-							),
-						"push -u origin feature/x": ok(""),
-					},
-			calls,
 					),
-				);
+					"push -u origin feature/x": ok(""),
+				},
+				calls,
+			),
+		);
 		await git.push({ setUpstream: false, branch: "feature/x" });
 		expect(calls).toEqual([["push"], ["push", "-u", "origin", "feature/x"]]);
 	});
@@ -184,107 +210,107 @@ describe("GitAdapter", () => {
 	test("push surfaces git stderr verbatim via PortError on rejection", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{ push: fail("! [rejected] main -> main (fetch first)") },
+				{ push: fail("! [rejected] main -> main (fetch first)") },
 				[],
-					),
-				);
+			),
+		);
 		await expect(
 			git.push({ setUpstream: false, branch: "main" }),
-				).rejects.toThrow(PortError);
+		).rejects.toThrow(PortError);
 		try {
 			await git.push({ setUpstream: false, branch: "main" });
-			} catch (e) {
+		} catch (e) {
 			expect(e).toBeInstanceOf(PortError);
 			expect((e as PortError).stderr).toBe(
-					"! [rejected] main -> main (fetch first)",
-						);
-				}
+				"! [rejected] main -> main (fetch first)",
+			);
+		}
 	});
 
 	test("commitsAhead parses structured commit metadata", async () => {
 		const line = [
-					"abc123",
-					"feat: x",
-					"Daniel Oxer",
-					"2026-07-08T00:00:00Z",
-				].join("\x1f");
+			"abc123",
+			"feat: x",
+			"Daniel Oxer",
+			"2026-07-08T00:00:00Z",
+		].join("\x1f");
 		const git = new GitAdapter(
 			scriptedExec(
-					{ "log main..HEAD --pretty=format:%H\x1f%s\x1f%an\x1f%aI": ok(line) },
+				{ "log main..HEAD --pretty=format:%H\x1f%s\x1f%an\x1f%aI": ok(line) },
 				[],
-					),
-				);
+			),
+		);
 		const commits = await git.commitsAhead("main");
 		expect(commits).toEqual([
-					{
+			{
 				sha: "abc123",
-					subject: "feat: x",
+				subject: "feat: x",
 				author: "Daniel Oxer",
-					date: "2026-07-08T00:00:00Z",
-					},
-				]);
+				date: "2026-07-08T00:00:00Z",
+			},
+		]);
 	});
 
 	test("rangeDiff diffs against a base ref", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-						"diff main..HEAD --numstat": ok("2\t0\tsrc/b.ts\n"),
-						"diff main..HEAD": ok(""),
-					},
+				{
+					"diff main..HEAD --numstat": ok("2\t0\tsrc/b.ts\n"),
+					"diff main..HEAD": ok(""),
+				},
 				[],
-					),
-				);
+			),
+		);
 		const diffs = await git.rangeDiff("main");
 		expect(diffs).toEqual([
-				{
-			path: "src/b.ts",
-			statOnly: false,
-			patch: null,
-			insertions: 2,
-			deletions: 0,
-					},
-				]);
+			{
+				path: "src/b.ts",
+				statOnly: false,
+				patch: null,
+				insertions: 2,
+				deletions: 0,
+			},
+		]);
 	});
 
 	test("log respects maxCount and base options", async () => {
 		const calls: string[][] = [];
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-						"log --pretty=format:%H\x1f%s\x1f%an\x1f%aI -n5 main..HEAD": ok(""),
-					},
-			calls,
-					),
-				);
+				{
+					"log --pretty=format:%H\x1f%s\x1f%an\x1f%aI -n5 main..HEAD": ok(""),
+				},
+				calls,
+			),
+		);
 		const commits = await git.log({ base: "main", maxCount: 5 });
 		expect(commits).toEqual([]);
 		expect(calls[0]).toEqual([
-				"log",
-				"--pretty=format:%H\x1f%s\x1f%an\x1f%aI",
-				"-n5",
-				"main..HEAD",
-					]);
-		});
+			"log",
+			"--pretty=format:%H\x1f%s\x1f%an\x1f%aI",
+			"-n5",
+			"main..HEAD",
+		]);
+	});
 
 	test("worktrees parses --porcelain output and filters out the main worktree", async () => {
 		// Real git output: uppercase HEAD, "branch refs/heads/name" not "symbolic"
 		const porcelain = [
-				"worktree /path/to/repo",
-				"HEAD abc123",
-				"branch refs/heads/main",
-				"",
-				"worktree /path/to/features/dev-wt",
-				"HEAD def456",
-				"branch refs/heads/feature/x",
-				"",
-			].join("\n");
+			"worktree /path/to/repo",
+			"HEAD abc123",
+			"branch refs/heads/main",
+			"",
+			"worktree /path/to/features/dev-wt",
+			"HEAD def456",
+			"branch refs/heads/feature/x",
+			"",
+		].join("\n");
 		const calls: string[][] = [];
-		const exec: GitExec = async (args, _input, cwd) => {
+		const exec: GitExec = async (args, _input, _cwd) => {
 			calls.push(args);
 			if (args[0] === "worktree") return ok(porcelain);
 			throw new Error(`unscripted: ${args.join(" ")}`);
-			};
+		};
 		const git = new GitAdapter(exec);
 		const worktrees = await git.worktrees("/path/to/repo");
 
@@ -297,15 +323,15 @@ describe("GitAdapter", () => {
 	test("worktrees filters main tree by path even without joint marker", async () => {
 		// When trees don't share a commit, git omits 'joint' entirely
 		const porcelain = [
-				"worktree /Users/dev/my-repo",
-				"HEAD abc123",
-				"detached",
-				"",
-			].join("\n");
+			"worktree /Users/dev/my-repo",
+			"HEAD abc123",
+			"detached",
+			"",
+		].join("\n");
 		const exec: GitExec = async (args, _input) => {
 			if (args[0] === "worktree") return ok(porcelain);
 			throw new Error("unscripted");
-			};
+		};
 		const git = new GitAdapter(exec);
 		const worktrees = await git.worktrees("/Users/dev/my-repo");
 
@@ -314,19 +340,19 @@ describe("GitAdapter", () => {
 
 	test("worktrees handles older git format with lowercase head and symbolic", async () => {
 		const porcelain = [
-				"worktree /path/to/repo",
-				"head abc123",
-				"symbolic refs/heads/main",
-				"",
-				"worktree /path/to/features/dev-wt",
-				"head def456",
-				"symbolic refs/heads/feature/x",
-				"",
-			].join("\n");
+			"worktree /path/to/repo",
+			"head abc123",
+			"symbolic refs/heads/main",
+			"",
+			"worktree /path/to/features/dev-wt",
+			"head def456",
+			"symbolic refs/heads/feature/x",
+			"",
+		].join("\n");
 		const exec: GitExec = async (args, _input) => {
 			if (args[0] === "worktree") return ok(porcelain);
 			throw new Error("unscripted");
-			};
+		};
 		const git = new GitAdapter(exec);
 		const worktrees = await git.worktrees("/path/to/repo");
 
@@ -338,10 +364,10 @@ describe("GitAdapter", () => {
 	test("worktrees returns empty array when git command fails", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{ "worktree list --porcelain": fail("not a git repo", 128) },
+				{ "worktree list --porcelain": fail("not a git repo", 128) },
 				[],
-					),
-				);
+			),
+		);
 		const worktrees = await git.worktrees("/nonexistent");
 		expect(worktrees).toEqual([]);
 	});
@@ -352,7 +378,7 @@ describe("GitAdapter", () => {
 			calls.push(args);
 			if (args[0] === "worktree") return ok("");
 			throw new Error(`unscripted: ${args.join(" ")}`);
-			};
+		};
 		const git = new GitAdapter(exec);
 		await git.removeWorktree("/path/to/wt", "/path/to/repo");
 
@@ -362,13 +388,18 @@ describe("GitAdapter", () => {
 	test("removeWorktree throws PortError when removal fails", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-						"worktree remove /path/to/wt": fail("fatal: worktree has staged changes", 1),
-					},
-				[],
+				{
+					"worktree remove /path/to/wt": fail(
+						"fatal: worktree has staged changes",
+						1,
 					),
-				);
-		await expect(git.removeWorktree("/path/to/wt", "/path/to/repo")).rejects.toThrow(PortError);
+				},
+				[],
+			),
+		);
+		await expect(
+			git.removeWorktree("/path/to/wt", "/path/to/repo"),
+		).rejects.toThrow(PortError);
 	});
 
 	test("forceRemoveWorktree runs worktree remove --force", async () => {
@@ -377,7 +408,7 @@ describe("GitAdapter", () => {
 			calls.push(args);
 			if (args[0] === "worktree") return ok("");
 			throw new Error(`unscripted: ${args.join(" ")}`);
-			};
+		};
 		const git = new GitAdapter(exec);
 		await git.forceRemoveWorktree("/path/to/wt", "/path/to/repo");
 
@@ -387,24 +418,25 @@ describe("GitAdapter", () => {
 	test("forceRemoveWorktree throws PortError on failure", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
-					{
-						"worktree remove --force /path/to/wt": fail("permission denied", 1),
-					},
+				{
+					"worktree remove --force /path/to/wt": fail("permission denied", 1),
+				},
 				[],
-					),
-				);
+			),
+		);
 		await expect(
 			git.forceRemoveWorktree("/path/to/wt", "/path/to/repo"),
-				).rejects.toThrow(PortError);
+		).rejects.toThrow(PortError);
 	});
 
 	test("touchAuthorsForFiles counts touched files by author", async () => {
 		const git = new GitAdapter(
 			scriptedExec(
 				{
-					"log -n200 --name-only --pretty=format:%an\x1f%H -- src/a.ts src/b.ts": ok(
-						"Alice Smith\x1fabc123\nsrc/a.ts\nsrc/b.ts\n\nBob Jones\x1fdef456\nsrc/a.ts\n",
-					),
+					"log -n200 --name-only --pretty=format:%an\x1f%H -- src/a.ts src/b.ts":
+						ok(
+							"Alice Smith\x1fabc123\nsrc/a.ts\nsrc/b.ts\n\nBob Jones\x1fdef456\nsrc/a.ts\n",
+						),
 				},
 				[],
 			),
@@ -418,9 +450,10 @@ describe("GitAdapter", () => {
 	test("showWorktreeStatus returns combined status + diff stat output", async () => {
 		const exec: GitExec = async (args) => {
 			if (args[0] === "status") return ok(" M src/changed.ts\n");
-			if (args[0] === "diff") return ok(" src/changed.ts | 5 +++\n 1 file changed, 5 insertions(+)");
+			if (args[0] === "diff")
+				return ok(" src/changed.ts | 5 +++\n 1 file changed, 5 insertions(+)");
 			throw new Error(`unscripted: ${args.join(" ")}`);
-			};
+		};
 		const git = new GitAdapter(exec);
 		const output = await git.showWorktreeStatus("/repo", "/worktree/path");
 

@@ -4,7 +4,10 @@ export interface Choice<T> {
 }
 
 export interface UiPort {
-	info(text: string, opts?: { spinner?: boolean; terminal?: boolean }): Promise<void>;
+	info(
+		text: string,
+		opts?: { spinner?: boolean; terminal?: boolean },
+	): Promise<void>;
 	warn(text: string): Promise<void>;
 	error(text: string): Promise<void>;
 	confirm(q: string): Promise<boolean>;

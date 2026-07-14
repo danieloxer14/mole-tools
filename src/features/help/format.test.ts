@@ -100,10 +100,13 @@ describe("formatCommandHelp", () => {
 			name: "worktree-prune",
 			description: "Scan and prune extra git worktrees",
 			args: z.object({
-				baseDir: z.string().optional().describe(
-					"Directory to scan recursively for git repositories with extra worktrees.",
-				),
-			}) as any,
+				baseDir: z
+					.string()
+					.optional()
+					.describe(
+						"Directory to scan recursively for git repositories with extra worktrees.",
+					),
+			}) as unknown as z.ZodTypeAny,
 			help: {
 				usage: "mole-tools worktree-prune [--baseDir <path>]",
 				examples: ["--baseDir ~/dev"],
@@ -118,9 +121,7 @@ describe("formatCommandHelp", () => {
 		expect(result.ok).toBe(true);
 		if (result.ok) {
 			expect(result.text).toContain("worktree-prune");
-			expect(result.text).toContain(
-				"Scan and prune extra git worktrees",
-			);
+			expect(result.text).toContain("Scan and prune extra git worktrees");
 			expect(result.text).toContain("Usage:");
 			expect(result.text).toContain("[--baseDir <path>]");
 			expect(result.text).toContain("Options:");
@@ -144,11 +145,14 @@ describe("formatCommandHelp", () => {
 				.optional()
 				.describe(
 					"Directory to scan recursively for git repositories with extra worktrees.",
-				) as any,
+				) as z.ZodTypeAny,
 		});
 
 		// Add meta manually since zod v4's .meta() may not be available in all builds
-		(schema as any).shape.baseDir.meta = () => ({
+		const baseDir = (schema as z.ZodObject).shape.baseDir as z.ZodTypeAny & {
+			meta?: () => unknown;
+		};
+		baseDir.meta = () => ({
 			examples: ["~/dev", "/projects"],
 		});
 
@@ -205,10 +209,11 @@ describe("formatCommandHelp", () => {
 
 describe("formatUnknownCommand", () => {
 	test("renders error message with valid command list", () => {
-		const output = formatUnknownCommand(
-			"frobnicate",
-			["commit", "init", "cost-breakdown"],
-		);
+		const output = formatUnknownCommand("frobnicate", [
+			"commit",
+			"init",
+			"cost-breakdown",
+		]);
 
 		expect(output).toContain('Unknown command "frobnicate".');
 		expect(output).toContain("Available commands:");

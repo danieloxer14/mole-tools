@@ -56,7 +56,7 @@ function parseNumstat(
 		map.set(path, {
 			insertions: Number(insertions) || 0,
 			deletions: Number(deletions) || 0,
-				});
+		});
 	}
 	return map;
 }
@@ -73,8 +73,15 @@ function parseUnifiedDiff(text: string): Map<string, string> {
 	return map;
 }
 
-function parseWorktreePorcelain(text: string, repoRoot: string): WorktreeInfo[] {
-	interface RawWt { path: string; ref: string; isMain: boolean; }
+export function parseWorktreePorcelain(
+	text: string,
+	repoRoot: string,
+): WorktreeInfo[] {
+	interface RawWt {
+		path: string;
+		ref: string;
+		isMain: boolean;
+	}
 	const raw: RawWt[] = [];
 	let current: RawWt | null = null;
 
@@ -83,36 +90,42 @@ function parseWorktreePorcelain(text: string, repoRoot: string): WorktreeInfo[] 
 			if (current) raw.push(current);
 			current = null;
 			continue;
-				}
+		}
 
 		if (line.startsWith("worktree ")) {
 			if (current) raw.push(current);
-			const path = line.slice("worktree ".length).trim();
-			current = { path, ref: "", isMain: false };
+			const parsedPath = line.slice("worktree ".length).trim();
+			const path = parsedPath || line;
+			current = { path, ref: "detached", isMain: false };
 			// Path-based heuristic: the main worktree lives at the repo root,
 			// linked worktrees live under .git/worktrees/<name>/
 			if (path === repoRoot) current.isMain = true;
-			} else if (line === "bare" || line.startsWith("HEAD ") || line.startsWith("head ")) {
-			continue;
+		} else if (
+			line === "bare" ||
+			line.startsWith("HEAD ") ||
+			line.startsWith("head ")
+		) {
 			// Modern git uses "branch refs/heads/name"; older may use "symbolic ..."
-			} else if ((line.startsWith("symbolic ") || line.startsWith("branch ")) && current) {
+		} else if (
+			(line.startsWith("symbolic ") || line.startsWith("branch ")) &&
+			current
+		) {
 			const refPath = line.slice(line.indexOf(" ") + 1).trim();
 			current.ref = refPath.replace(/^refs\/heads\//, "");
-			} else if (line.startsWith("joint ") && current) {
+		} else if (line.startsWith("joint ") && current) {
 			current.isMain = true;
-			}
 		}
+	}
 
 	if (current) raw.push(current);
 
-	return raw.filter((w) => !w.isMain).map((w) => ({ path: w.path, ref: w.ref }));
+	return raw
+		.filter((w) => !w.isMain)
+		.map((w) => ({ path: w.path, ref: w.ref }));
 }
 
 export class GitAdapter implements Vcs {
-	private readonly _gitExec = this.execFn;
-	constructor(
-		private readonly execFn: GitExec = defaultExec,
-	) {}
+	constructor(private readonly execFn: GitExec = defaultExec) {}
 
 	private async exec(args: string[], input?: string): Promise<GitExecResult> {
 		const result = await this.execFn(args, input);
@@ -135,8 +148,8 @@ export class GitAdapter implements Vcs {
 				result.stderr.trim() || `git ${args.join(" ")} failed`,
 				result.stderr,
 				result.exitCode,
-					);
-				}
+			);
+		}
 		return result.stdout;
 	}
 
@@ -146,9 +159,9 @@ export class GitAdapter implements Vcs {
 
 	async defaultBranch(): Promise<string> {
 		const result = await this.exec([
-					"symbolic-ref",
-					"refs/remotes/origin/HEAD",
-				]);
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+		]);
 		if (result.exitCode !== 0) return "main";
 		return result.stdout.trim().replace(/^refs\/remotes\/origin\//, "");
 	}
@@ -170,7 +183,7 @@ export class GitAdapter implements Vcs {
 		const [numstat, patch] = await Promise.all([
 			this.run(["diff", ...range, "--numstat"]),
 			this.run(["diff", ...range]),
-				]);
+		]);
 		const stats = parseNumstat(numstat);
 		const patches = parseUnifiedDiff(patch);
 		return [...stats.entries()].map(([path, stat]) => ({
@@ -179,7 +192,7 @@ export class GitAdapter implements Vcs {
 			patch: patches.get(path) ?? null,
 			insertions: stat.insertions,
 			deletions: stat.deletions,
-				}));
+		}));
 	}
 
 	async commit(message: string): Promise<{ sha: string }> {
@@ -192,26 +205,26 @@ export class GitAdapter implements Vcs {
 		if (opts.setUpstream) {
 			await this.run(["push", "-u", "origin", opts.branch]);
 			return;
-				}
+		}
 		const result = await this.exec(["push"]);
 		if (result.exitCode === 0) return;
 		if (/has no upstream branch/i.test(result.stderr)) {
 			await this.run(["push", "-u", "origin", opts.branch]);
 			return;
-				}
+		}
 		throw new PortError(
 			result.stderr.trim() || "git push failed",
 			result.stderr,
 			result.exitCode,
-				);
+		);
 	}
 
 	async commitsAhead(base: string): Promise<CommitMeta[]> {
 		const out = await this.run([
-					"log",
-					`${base}..HEAD`,
-					`--pretty=format:%H${SEP}%s${SEP}%an${SEP}%aI`,
-				]);
+			"log",
+			`${base}..HEAD`,
+			`--pretty=format:%H${SEP}%s${SEP}%an${SEP}%aI`,
+		]);
 		return parseCommitLog(out);
 	}
 
@@ -223,7 +236,10 @@ export class GitAdapter implements Vcs {
 	}
 
 	async worktrees(repoRoot: string): Promise<WorktreeInfo[]> {
-		const result = await this.execIn(["worktree", "list", "--porcelain"], repoRoot);
+		const result = await this.execIn(
+			["worktree", "list", "--porcelain"],
+			repoRoot,
+		);
 		if (result.exitCode !== 0) return [];
 		return parseWorktreePorcelain(result.stdout, repoRoot);
 	}
@@ -235,40 +251,46 @@ export class GitAdapter implements Vcs {
 				result.stderr.trim() || `git worktree remove ${path} failed`,
 				result.stderr,
 				result.exitCode,
-					);
-				}
+			);
+		}
 	}
 
 	async forceRemoveWorktree(path: string, repoRoot: string): Promise<void> {
-		const result = await this.execIn(["worktree", "remove", "--force", path], repoRoot);
+		const result = await this.execIn(
+			["worktree", "remove", "--force", path],
+			repoRoot,
+		);
 		if (result.exitCode !== 0) {
 			throw new PortError(
 				result.stderr.trim() || `git worktree remove --force ${path} failed`,
 				result.stderr,
 				result.exitCode,
-					);
-				}
+			);
+		}
 	}
 
-	async showWorktreeStatus(repoRoot: string, worktreePath: string): Promise<string> {
+	async showWorktreeStatus(
+		_repoRoot: string,
+		worktreePath: string,
+	): Promise<string> {
 		const [statusResult, diffStatResult] = await Promise.all([
 			this.execIn(["status", "--short"], worktreePath),
 			this.execIn(["diff", "--stat"], worktreePath),
-				]);
+		]);
 
 		let output = `Worktree status for ${worktreePath}:\n\nStatus (short):\n`;
 		if (statusResult.stdout.trim()) {
 			output += statusResult.stdout;
-				} else {
+		} else {
 			output += "(clean working tree)\n";
-				}
+		}
 
 		output += "\nDiff stat:\n";
 		if (diffStatResult.stdout.trim()) {
 			output += diffStatResult.stdout;
-				} else {
+		} else {
 			output += "(no differences)\n";
-				}
+		}
 
 		return output;
 	}
@@ -293,7 +315,9 @@ export class GitAdapter implements Vcs {
 
 	async isAheadOfUpstream(branch: string): Promise<boolean> {
 		if (!(await this.hasUpstream(branch))) return false;
-		const count = (await this.run(["rev-list", "--count", "@{upstream}..HEAD"])).trim();
+		const count = (
+			await this.run(["rev-list", "--count", "@{upstream}..HEAD"])
+		).trim();
 		return parseInt(count, 10) > 0;
 	}
 
@@ -333,7 +357,7 @@ export class GitAdapter implements Vcs {
 		for (const block of blocks) {
 			const lines = block.split("\n");
 			if (lines.length < 1) continue;
-			const headerLine = lines[0];
+			const headerLine = lines[0] ?? "";
 			const parts = headerLine.split(SEP);
 			if (parts.length < 2 && !fileSet.has(headerLine)) {
 				continue;
@@ -342,7 +366,10 @@ export class GitAdapter implements Vcs {
 			const [author] = parts;
 			if (parts.length < 2 || !author) continue; // pure file line, skip
 			const commitFiles = new Set(
-				lines.slice(1).map((f) => f.trim()).filter((f) => fileSet.has(f)),
+				lines
+					.slice(1)
+					.map((f) => f.trim())
+					.filter((f) => fileSet.has(f)),
 			);
 			if (commitFiles.size > 0) {
 				const existing = authorCounts.get(author) || 0;
@@ -356,11 +383,7 @@ export class GitAdapter implements Vcs {
 	}
 
 	async recentAuthors(maxCount = 100): Promise<string[]> {
-		const out = await this.run([
-			"log",
-			`-n${maxCount}`,
-			"--format=%an",
-		]);
+		const out = await this.run(["log", `-n${maxCount}`, "--format=%an"]);
 		const seen = new Set<string>();
 		const result: string[] = [];
 		for (const line of out.split("\n")) {
@@ -381,15 +404,15 @@ export class GitAdapter implements Vcs {
 
 function parseCommitLog(text: string): CommitMeta[] {
 	return text
-			.split("\n")
-			.filter((line) => line.trim().length > 0)
-			.map((line) => {
+		.split("\n")
+		.filter((line) => line.trim().length > 0)
+		.map((line) => {
 			const [sha, subject, author, date] = line.split(SEP);
 			return {
 				sha: sha ?? "",
 				subject: subject ?? "",
 				author: author ?? "",
 				date: date ?? "",
-					};
-				});
+			};
+		});
 }

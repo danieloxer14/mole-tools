@@ -1,5 +1,5 @@
 import { CONFIG_TEMPLATE } from "../../src/adapters/config/loader";
-import type { Config, ProviderProfile } from "../../src/adapters/config/schema";
+import type { Config } from "../../src/adapters/config/schema";
 import type { Context, Logger } from "../../src/core/context";
 import { CostTracker } from "../../src/core/cost-tracker";
 import type { GitHost } from "../../src/ports/git-host";

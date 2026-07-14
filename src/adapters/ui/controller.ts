@@ -74,10 +74,20 @@ export class UiController {
 
 	private nextLogId = 0;
 
-	pushLog(level: LogEntry["level"], text: string, opts?: { spinner?: boolean; terminal?: boolean }): void {
+	pushLog(
+		level: LogEntry["level"],
+		text: string,
+		opts?: { spinner?: boolean; terminal?: boolean },
+	): void {
 		this.log = [
 			...this.log,
-			{ id: this.nextLogId++, level, text, ...(opts?.spinner ? { spinner: true } : {}), ...(opts?.terminal ? { terminal: true } : {}) },
+			{
+				id: this.nextLogId++,
+				level,
+				text,
+				...(opts?.spinner ? { spinner: true } : {}),
+				...(opts?.terminal ? { terminal: true } : {}),
+			},
 		];
 		this.emit();
 	}

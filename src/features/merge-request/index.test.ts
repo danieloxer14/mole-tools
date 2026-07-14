@@ -1,24 +1,33 @@
 import { describe, expect, test } from "bun:test";
-import { fakeContext } from "../../../test/fakes/fakeContext";
 import { FakeGitHost } from "../../../test/fakes/FakeGitHost";
 import { FakeLlm } from "../../../test/fakes/FakeLlm";
 import { FakeUiPort } from "../../../test/fakes/FakeUiPort";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
+import { fakeContext } from "../../../test/fakes/fakeContext";
 import { runMergeRequestFlow } from "./index";
 
-const commit = { sha: "1", subject: "feat: add feature", author: "A", date: "today" };
+const commit = {
+	sha: "1",
+	subject: "feat: add feature",
+	author: "A",
+	date: "today",
+};
 
 describe("merge-request flow", () => {
 	test("preflights host before default-branch guard and generation", async () => {
 		const calls: string[] = [];
 		const host = new FakeGitHost();
-		host.preflight = async () => { calls.push("preflight"); };
+		host.preflight = async () => {
+			calls.push("preflight");
+		};
 		const ctx = fakeContext({
 			gitHost: host,
 			vcs: new FakeVcs({ branch: "main", defaultBranch: "main" }),
 			llm: new FakeLlm(),
 		});
-		await expect(runMergeRequestFlow(ctx)).rejects.toThrow("Cannot open MR from main");
+		await expect(runMergeRequestFlow(ctx)).rejects.toThrow(
+			"Cannot open MR from main",
+		);
 		expect(calls).toEqual(["preflight"]);
 	});
 
@@ -31,7 +40,11 @@ describe("merge-request flow", () => {
 				{ confirm: true }, // create
 			]),
 			llm,
-			vcs: new FakeVcs({ staged: false, commitsAhead: [commit], mergeBaseDiff: [] }),
+			vcs: new FakeVcs({
+				staged: false,
+				commitsAhead: [commit],
+				mergeBaseDiff: [],
+			}),
 		});
 		const result = await runMergeRequestFlow(ctx);
 		expect(result.title).toBe("feat: add feature");
@@ -44,13 +57,15 @@ describe("merge-request flow", () => {
 		const vcs = new FakeVcs({
 			staged: false,
 			commitsAhead: [commit],
-			mergeBaseDiff: [{
-				path: "committed.ts",
-				statOnly: false,
-				patch: "+committed change",
-				insertions: 1,
-				deletions: 0,
-			}],
+			mergeBaseDiff: [
+				{
+					path: "committed.ts",
+					statOnly: false,
+					patch: "+committed change",
+					insertions: 1,
+					deletions: 0,
+				},
+			],
 		});
 		vcs.hasUnstagedChanges = async () => true;
 		const ctx = fakeContext({

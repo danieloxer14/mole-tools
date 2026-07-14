@@ -8,8 +8,20 @@ describe("merge-request prompt", () => {
 			issue: { key: "ABC-1", summary: "Summary", description: "Details" },
 			commits: ["feat: first", "fix: second"],
 			diff: [
-				{ path: "src/a.ts", statOnly: false, patch: "+code", insertions: 1, deletions: 0 },
-				{ path: "bun.lockb", statOnly: true, patch: null, insertions: 4, deletions: 2 },
+				{
+					path: "src/a.ts",
+					statOnly: false,
+					patch: "+code",
+					insertions: 1,
+					deletions: 0,
+				},
+				{
+					path: "bun.lockb",
+					statOnly: true,
+					patch: null,
+					insertions: 4,
+					deletions: 2,
+				},
 			],
 		});
 		expect(prompt).toContain("ABC-1");
@@ -20,7 +32,9 @@ describe("merge-request prompt", () => {
 	});
 
 	test("parses Title marker and fallback deterministically", () => {
-		expect(parseMergeRequestOutput("Title: feat: add thing\n\nBody\ntext")).toEqual({
+		expect(
+			parseMergeRequestOutput("Title: feat: add thing\n\nBody\ntext"),
+		).toEqual({
 			title: "feat: add thing",
 			body: "Body\ntext",
 		});

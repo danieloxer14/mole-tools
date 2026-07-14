@@ -5,7 +5,11 @@ import { AbortError } from "../../core/errors";
 import type { Issue } from "../../ports/issue-tracker";
 import type { FileDiff } from "../../ports/vcs";
 import { checkFormat } from "../../shared/format";
-import { buildMergeRequestPrompt, parseMergeRequestOutput, type ParsedMergeRequest } from "./prompt";
+import {
+	buildMergeRequestPrompt,
+	type ParsedMergeRequest,
+	parseMergeRequestOutput,
+} from "./prompt";
 
 const MAX_GENERATE_ATTEMPTS = 3;
 

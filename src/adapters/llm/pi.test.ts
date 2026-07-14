@@ -4,7 +4,10 @@ import { PiAdapter } from "./pi";
 describe("PiAdapter", () => {
 	test("reports both text-generation and agentic-workspace capabilities", () => {
 		const adapter = new PiAdapter({ binary: "pi" });
-		expect(adapter.capabilities()).toEqual(["text-generation", "agentic-workspace"]);
+		expect(adapter.capabilities()).toEqual([
+			"text-generation",
+			"agentic-workspace",
+		]);
 	});
 
 	test("constructor accepts binary and optional projectRoot", () => {

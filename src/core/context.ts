@@ -6,7 +6,12 @@ import { PiAdapter } from "../adapters/llm/pi";
 import { GitAdapter } from "../adapters/vcs/git";
 import type { GitHost } from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
-import type { AgentRequest, AgentResult, GenerateRequest, Llm } from "../ports/llm";
+import type {
+	AgentRequest,
+	AgentResult,
+	GenerateRequest,
+	Llm,
+} from "../ports/llm";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
 import { CostTracker } from "./cost-tracker";
@@ -22,7 +27,10 @@ export interface Context {
 	ui: UiPort;
 	vcs: Vcs;
 	llm: Llm; // convenience proxy — routes to the commit provider by default
-	getLlmFor(purpose: "commit" | "mergeRequest" | "ralph", providerKey?: string): Llm;
+	getLlmFor(
+		purpose: "commit" | "mergeRequest" | "ralph",
+		providerKey?: string,
+	): Llm;
 	issues: IssueTracker | null;
 	gitHost: GitHost | null;
 	log: Logger;
@@ -53,7 +61,8 @@ export class ProviderLlmProxy implements Llm {
 
 	get adapter(): Llm {
 		const a = this.adapters.get(this.profileKey);
-		if (!a) throw new Error(`No adapter wired for provider "${this.profileKey}"`);
+		if (!a)
+			throw new Error(`No adapter wired for provider "${this.profileKey}"`);
 		return a;
 	}
 }
@@ -87,7 +96,10 @@ export class RoutingLlmProxy implements Llm {
 		return this.forProvider(key).runAgent({ ...req, providerKey: undefined });
 	}
 
-	getLlmFor(purpose: "commit" | "mergeRequest" | "ralph", providerKey?: string): ProviderLlmProxy {
+	getLlmFor(
+		purpose: "commit" | "mergeRequest" | "ralph",
+		providerKey?: string,
+	): ProviderLlmProxy {
 		if (providerKey) return new ProviderLlmProxy(this.adapters, providerKey);
 		switch (purpose) {
 			case "commit":
@@ -136,14 +148,26 @@ function makeLogger(): Logger {
 }
 
 /** Build the per-provider Llm adapter map from config */
-function buildAdapterMap(config: Config, costTracker: CostTracker): Map<string, Llm> {
+function buildAdapterMap(
+	config: Config,
+	costTracker: CostTracker,
+): Map<string, Llm> {
 	const adapters = new Map<string, Llm>();
 
 	for (const [key, profile] of Object.entries(config.providers)) {
 		if ("baseUrl" in profile) {
-			adapters.set(key, new OllamaAdapter({ baseUrl: profile.baseUrl }, costTracker));
+			adapters.set(
+				key,
+				new OllamaAdapter({ baseUrl: profile.baseUrl }, costTracker),
+			);
 		} else {
-			adapters.set(key, new PiAdapter({ binary: profile.binary, projectRoot: profile.projectRoot }, costTracker));
+			adapters.set(
+				key,
+				new PiAdapter(
+					{ binary: profile.binary, projectRoot: profile.projectRoot },
+					costTracker,
+				),
+			);
 		}
 	}
 	return adapters;
@@ -162,8 +186,10 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
 		ui,
 		vcs: new GitAdapter(),
 		llm: llmProxy, // default routes to commit provider
-		getLlmFor: (purpose: "commit" | "mergeRequest" | "ralph", providerKey?: string) =>
-			llmProxy.getLlmFor(purpose, providerKey),
+		getLlmFor: (
+			purpose: "commit" | "mergeRequest" | "ralph",
+			providerKey?: string,
+		) => llmProxy.getLlmFor(purpose, providerKey),
 		issues:
 			config.jira.enabled && config.jira.url && config.jira.apiKey
 				? new JiraAdapter(

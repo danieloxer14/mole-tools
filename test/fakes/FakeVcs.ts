@@ -1,4 +1,10 @@
-import type { CommitMeta, FileDiff, LogQuery, Vcs, WorktreeInfo } from "../../src/ports/vcs";
+import type {
+	CommitMeta,
+	FileDiff,
+	LogQuery,
+	Vcs,
+	WorktreeInfo,
+} from "../../src/ports/vcs";
 
 export interface FakeVcsOptions {
 	branch?: string;
@@ -109,10 +115,14 @@ export class FakeVcs implements Vcs {
 
 	async forceRemoveWorktree(path: string, repoRoot: string): Promise<void> {
 		this.forceWorktreeCalls.push({ path, repoRoot });
-		if (this.opts.forceRemoveWorktreeError) throw this.opts.forceRemoveWorktreeError;
+		if (this.opts.forceRemoveWorktreeError)
+			throw this.opts.forceRemoveWorktreeError;
 	}
 
-	async showWorktreeStatus(_repoRoot: string, _worktreePath: string): Promise<string> {
+	async showWorktreeStatus(
+		_repoRoot: string,
+		_worktreePath: string,
+	): Promise<string> {
 		return this.opts.showWorktreeStatusOutput ?? "/fake/repo/wt: clean";
 	}
 }

@@ -16,11 +16,15 @@ function extractOptions(schema: z.ZodTypeAny): OptionInfo[] {
 	for (const [key, fieldSchema] of Object.entries(
 		(schema as z.ZodObject).shape,
 	)) {
-		const meta = (fieldSchema as any).meta?.();
+		const typedField = fieldSchema as z.ZodTypeAny & {
+			meta?: () => unknown;
+			description?: string;
+		};
+		const meta = typedField.meta?.();
 		options.push({
 			flag: `--${key}`,
 			valuePlaceholder: `<${key}>`,
-			description: (fieldSchema as any).description ?? undefined,
+			description: typedField.description ?? undefined,
 			examples: Array.isArray(meta?.examples) ? meta.examples : undefined,
 		});
 	}

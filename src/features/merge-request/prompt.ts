@@ -19,7 +19,9 @@ function renderDiff(files: FileDiff[]): string {
 }
 
 /** Build the complete context sent to the MR model. */
-export function buildMergeRequestPrompt(input: MergeRequestPromptInput): string {
+export function buildMergeRequestPrompt(
+	input: MergeRequestPromptInput,
+): string {
 	const sections = [input.system];
 	if (input.issue) {
 		sections.push(
@@ -51,9 +53,13 @@ export interface ParsedMergeRequest {
 export function parseMergeRequestOutput(output: string): ParsedMergeRequest {
 	const lines = output.trim().split("\n");
 	let title = (lines.shift() ?? "").trim();
-	if (/^title\s*:/i.test(title)) title = title.replace(/^title\s*:\s*/i, "").trim();
+	if (/^title\s*:/i.test(title))
+		title = title.replace(/^title\s*:\s*/i, "").trim();
 	if (lines[0]?.trim() === "") lines.shift();
-	return { title: title.replace(/[\r\n]+/g, " ").trim(), body: lines.join("\n").trim() };
+	return {
+		title: title.replace(/[\r\n]+/g, " ").trim(),
+		body: lines.join("\n").trim(),
+	};
 }
 
 export const parseMrOutput = parseMergeRequestOutput;

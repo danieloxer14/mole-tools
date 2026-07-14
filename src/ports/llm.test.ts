@@ -27,6 +27,7 @@ describe("Llm port contract", () => {
 	});
 
 	test("OllamaAdapter rejects agentic-workspace before any network request", async () => {
+		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (() => {
 			throw new Error("fetch should not be called");
 		}) as unknown as typeof fetch;
@@ -45,7 +46,7 @@ describe("Llm port contract", () => {
 		} catch (e) {
 			expect(e).toBeInstanceOf(UnsupportedCapabilityError);
 		} finally {
-			globalThis.fetch = global.fetch;
+			globalThis.fetch = originalFetch;
 		}
 	});
 
@@ -56,7 +57,9 @@ describe("Llm port contract", () => {
 	});
 
 	test("OllamaAdapter capabilities include only text-generation", () => {
-		const caps = new OllamaAdapter({ baseUrl: "http://localhost:11434" }).capabilities();
+		const caps = new OllamaAdapter({
+			baseUrl: "http://localhost:11434",
+		}).capabilities();
 		expect(caps).toEqual(["text-generation"]);
 	});
 });

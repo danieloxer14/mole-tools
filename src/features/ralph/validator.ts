@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { RalphTaskFileSchema, ChecklistItemSchema, type RalphTaskFile, type ChecklistItem, RalphError } from "./schema";
+import {
+	type ChecklistItem,
+	ChecklistItemSchema,
+	RalphError,
+	type RalphTaskFile,
+	RalphTaskFileSchema,
+} from "./schema";
 
 // ─── Required section headings (spec §3.1) ──────────────────────────────
 
@@ -43,10 +49,10 @@ export interface CheckboxChangeResult {
 // ─── REGEX HELPERS ──────────────────────────────────────────────────────
 
 /** Match a required `## Heading` at start of line */
-const HEADING_RE = /^##\s+(.+)$/;		// group 1 = heading text
+const HEADING_RE = /^##\s+(.+)$/; // group 1 = heading text
 
 /** Match a checkbox item: `- [ ] text` or `- [x] text` (case-insensitive x) */
-const CHECKBOX_RE = /^\s*-\s*\[([ xX])\]\s*(.+?)(?:\n|$)/;	// group 1 = "" | "x"|"X", group 2 = item text
+const CHECKBOX_RE = /^\s*-\s*\[([ xX])\]\s*(.+?)(?:\n|$)/; // group 1 = "" | "x"|"X", group 2 = item text
 
 /** Match any `## Heading` line regardless of content — used to find section boundaries */
 const ANY_HEADING_RE = /^##\s+.+$/;
@@ -57,11 +63,8 @@ const ANY_HEADING_RE = /^##\s+.+$/;
  * Extract the body of a required heading section.
  * Returns text between that heading and the next `##` heading (or end of file).
  */
-function extractSection(
-	lines: string[],
-	headingName: RequiredHeading,
-): string {
-	const headingIdx = lines.findIndex((l) => l === headingName);
+function extractSection(lines: string[], headingName: RequiredHeading): string {
+	const headingIdx = lines.indexOf(headingName);
 	if (headingIdx === -1) return "";
 
 	// Find the next heading after this one
@@ -73,7 +76,10 @@ function extractSection(
 		}
 	}
 
-	return lines.slice(headingIdx + 1, endIdx).join("\n").trim();
+	return lines
+		.slice(headingIdx + 1, endIdx)
+		.join("\n")
+		.trim();
 }
 
 /**
@@ -146,10 +152,12 @@ export function parseTaskFile(
 	const checklistBody = extractSection(lines, "## Task checklist");
 
 	if (!goal) {
-		return new RalphParseError("\"## Goal\" section is empty or missing content");
+		return new RalphParseError('"## Goal" section is empty or missing content');
 	}
 	if (!deliverable) {
-		return new RalphParseError("\"## Deliverable\" section is empty or missing content");
+		return new RalphParseError(
+			'"## Deliverable" section is empty or missing content',
+		);
 	}
 
 	// ── Parse and validate checklist items ────────────────────────────
@@ -157,7 +165,7 @@ export function parseTaskFile(
 
 	if (checklistItems.length === 0) {
 		return new RalphParseError(
-			"\"## Task checklist\" must contain at least one checkbox item",
+			'"## Task checklist" must contain at least one checkbox item',
 		);
 	}
 
@@ -180,7 +188,7 @@ export function parseTaskFile(
 	const hasUnchecked = validatedItems.some((item) => !item.done);
 	if (!hasUnchecked && !options.allowCompleted) {
 		return new RalphParseError(
-			"All tasks in \"## Task checklist\" are checked; at least one unchecked task is required on initial creation",
+			'All tasks in "## Task checklist" are checked; at least one unchecked task is required on initial creation',
 		);
 	}
 
@@ -248,9 +256,14 @@ export function validateCheckboxChange(
 
 	const changedIndexes: number[] = [];
 	for (let i = 0; i < beforeItems.length; i++) {
-		const beforeItem = beforeItems[i]!;
-		const afterItem = afterItems[i]!;
-		if (beforeItem.text.trim().toLowerCase() !== afterItem.text.trim().toLowerCase()) return { success: false };
+		const beforeItem = beforeItems[i];
+		const afterItem = afterItems[i];
+		if (!beforeItem || !afterItem) return { success: false };
+		if (
+			beforeItem.text.trim().toLowerCase() !==
+			afterItem.text.trim().toLowerCase()
+		)
+			return { success: false };
 		if (beforeItem.done === afterItem.done) continue;
 		if (!afterItem.done) return { success: false };
 		changedIndexes.push(i);
@@ -258,7 +271,8 @@ export function validateCheckboxChange(
 
 	// Progress must start at the selected task and contain no skipped tasks.
 	return {
-		success: changedIndexes.length > 0
-			&& changedIndexes.every((index, offset) => index === selectedIndex + offset),
+		success:
+			changedIndexes.length > 0 &&
+			changedIndexes.every((index, offset) => index === selectedIndex + offset),
 	};
 }

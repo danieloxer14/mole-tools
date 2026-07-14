@@ -2,12 +2,12 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Config } from "../../adapters/config/schema";
-import * as loader from "../../adapters/config/loader";
 import { FakeUiPort } from "../../../test/fakes/FakeUiPort";
-import { fakeContext } from "../../../test/fakes/fakeContext";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
-import { resolveBaseDir, runWorktreePrune } from "./index";
+import { fakeContext } from "../../../test/fakes/fakeContext";
+import * as loader from "../../adapters/config/loader";
+import type { Config } from "../../adapters/config/schema";
+import { runWorktreePrune } from "./index";
 
 let dir: string;
 
@@ -41,9 +41,8 @@ describe("runWorktreePrune — base-dir resolution", () => {
 		// Spy on updateConfig to verify persistence call
 		let persistArgs: string | undefined;
 		spyOn(loader, "updateConfig").mockImplementation(async (_partial) => {
-			persistArgs = (
-				_partial as { worktreePrune?: { baseDir: string } }
-			)?.worktreePrune?.baseDir;
+			persistArgs = (_partial as { worktreePrune?: { baseDir: string } })
+				?.worktreePrune?.baseDir;
 		});
 
 		const ui = new FakeUiPort([{ editText: promptedPath }]);
@@ -75,7 +74,7 @@ describe("runWorktreePrune — base-dir resolution", () => {
 
 		expect(result.baseDir).toBe(cliPath);
 		// No interactive prompts (editText/select/multiSelect/confirm) — just the info report
-		interactiveCalls(ui.transcript);
+		interactiveCalls();
 		expect(interactiveEntryCount(ui.transcript)).toBe(0);
 		expect(persistenceCalled).toBe(false); // CLI flag never persisted
 	});
@@ -101,25 +100,98 @@ describe("runWorktreePrune — base-dir resolution", () => {
 });
 
 describe("runWorktreePrune — selection and removal", () => {
+	test("shows a scanning spinner before repository discovery completes", async () => {
+		dir = await mkdtemp(join(tmpdir(), "mole-tools-wtprune-scan-spinner-"));
+		const repo = join(dir, "repo");
+		await mkdir(join(repo, ".git"), { recursive: true });
+		const extra = join(repo, "feature");
+		const ui = new FakeUiPort([{ multiSelect: [extra] }]);
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs: new FakeVcs({
+				worktrees: [
+					{ path: repo, ref: "main" },
+					{ path: extra, ref: "feature/x" },
+				],
+			}),
+		});
+
+		await runWorktreePrune(ctx, {});
+
+		const scanIndex = ui.transcript.findIndex(
+			(entry) =>
+				entry.kind === "info" && entry.text === "Scanning repositories...",
+		);
+		const promptIndex = ui.transcript.findIndex(
+			(entry) => entry.kind === "multiSelect",
+		);
+		expect(scanIndex).toBeGreaterThanOrEqual(0);
+		expect(ui.transcript[scanIndex]?.spinner).toBe(true);
+		expect(scanIndex).toBeLessThan(promptIndex);
+	});
+
+	test("shows spinners while removing and handling failed worktrees", async () => {
+		dir = await mkdtemp(join(tmpdir(), "mole-tools-wtprune-removal-spinner-"));
+		const repo = join(dir, "repo");
+		const extra = join(repo, "feature");
+		await mkdir(join(repo, ".git"), { recursive: true });
+		const ui = new FakeUiPort([{ multiSelect: [extra] }, { confirm: false }]);
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs: new FakeVcs({
+				worktrees: [
+					{ path: repo, ref: "main" },
+					{ path: extra, ref: "feature/x" },
+				],
+				removeWorktreeError: new Error("busy"),
+			}),
+		});
+
+		await runWorktreePrune(ctx, {});
+
+		const spinners = ui.transcript.filter(
+			(entry) => entry.kind === "info" && entry.spinner === true,
+		);
+		expect(spinners.map((entry) => entry.text)).toEqual([
+			"Scanning repositories...",
+			`Removing ${extra}...`,
+			`Handling failed removal of ${extra}...`,
+		]);
+	});
+
 	test("prompts once per repo with path/ref choices and removes selected worktrees", async () => {
 		dir = await mkdtemp(join(tmpdir(), "mole-tools-wtprune-selection-"));
 		const repo = join(dir, "repo");
 		const extra = join(repo, "feature");
 		await mkdir(join(repo, ".git"), { recursive: true });
-		const vcs = new FakeVcs({ worktrees: [
-			{ path: repo, ref: "main" },
-			{ path: extra, ref: "feature/x" },
-		] });
+		const vcs = new FakeVcs({
+			worktrees: [
+				{ path: repo, ref: "main" },
+				{ path: extra, ref: "feature/x" },
+			],
+		});
 		const ui = new FakeUiPort([{ multiSelect: [extra] }]);
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs });
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+		});
 
 		const result = await runWorktreePrune(ctx, {});
 
-		expect(ui.transcript.filter((entry) => entry.kind === "multiSelect")).toHaveLength(1);
+		expect(
+			ui.transcript.filter((entry) => entry.kind === "multiSelect"),
+		).toHaveLength(1);
 		const prompt = ui.transcript.find((entry) => entry.kind === "multiSelect");
-		expect((prompt?.opts as { label: string }[])[0]?.label).toContain("feature/x");
+		expect(
+			(prompt?.opts as { label: string }[] | undefined)?.[0]?.label,
+		).toContain("feature/x");
 		expect(vcs.worktreeCalls).toEqual([{ path: extra, repoRoot: repo }]);
-		expect(result.removals).toEqual([{ path: extra, repoRoot: repo, status: "removed" }]);
+		expect(result.removals).toEqual([
+			{ path: extra, repoRoot: repo, status: "removed" },
+		]);
 	});
 
 	test("issues one path/ref multi-select prompt for each repository with extras", async () => {
@@ -131,9 +203,16 @@ describe("runWorktreePrune — selection and removal", () => {
 		await mkdir(join(repoA, ".git"), { recursive: true });
 		await mkdir(join(repoB, ".git"), { recursive: true });
 		const vcs = new FakeVcs();
-		vcs.worktrees = async (repoRoot) => repoRoot === repoA
-			? [{ path: repoA, ref: "main" }, { path: extraA, ref: "feature/a" }]
-			: [{ path: repoB, ref: "main" }, { path: extraB, ref: "feature/b" }];
+		vcs.worktrees = async (repoRoot) =>
+			repoRoot === repoA
+				? [
+						{ path: repoA, ref: "main" },
+						{ path: extraA, ref: "feature/a" },
+					]
+				: [
+						{ path: repoB, ref: "main" },
+						{ path: extraB, ref: "feature/b" },
+					];
 		const ui = new FakeUiPort([
 			{ multiSelect: [extraA] },
 			{ multiSelect: [extraB] },
@@ -146,7 +225,9 @@ describe("runWorktreePrune — selection and removal", () => {
 
 		await runWorktreePrune(ctx, {});
 
-		const prompts = ui.transcript.filter((entry) => entry.kind === "multiSelect");
+		const prompts = ui.transcript.filter(
+			(entry) => entry.kind === "multiSelect",
+		);
 		expect(prompts).toHaveLength(2);
 		expect(prompts.map((prompt) => prompt.q)).toEqual([
 			expect.stringContaining(repoA),
@@ -156,7 +237,10 @@ describe("runWorktreePrune — selection and removal", () => {
 			[prompts[0], extraA, "feature/a"],
 			[prompts[1], extraB, "feature/b"],
 		] as const) {
-			const labels = (prompt?.opts as { label: string }[]).map((choice) => choice.label);
+			const labels =
+				(prompt?.opts as { label: string }[] | undefined)?.map(
+					(choice) => choice.label,
+				) ?? [];
 			expect(labels).toHaveLength(1);
 			expect(labels[0]).toContain(path);
 			expect(labels[0]).toContain(ref);
@@ -178,7 +262,9 @@ describe("runWorktreePrune — selection and removal", () => {
 		const result = await runWorktreePrune(ctx, {});
 
 		expect(result.extraWorktreeCount).toBe(0);
-		expect(ui.transcript.filter((entry) => entry.kind === "multiSelect")).toHaveLength(0);
+		expect(
+			ui.transcript.filter((entry) => entry.kind === "multiSelect"),
+		).toHaveLength(0);
 	});
 
 	test("continues removing selected worktrees after an individual failure", async () => {
@@ -188,16 +274,30 @@ describe("runWorktreePrune — selection and removal", () => {
 		const first = join(repo, "a");
 		const second = join(repo, "b");
 		const vcs = new FakeVcs({
-			worktrees: [{ path: repo, ref: "main" }, { path: first, ref: "a" }, { path: second, ref: "b" }],
+			worktrees: [
+				{ path: repo, ref: "main" },
+				{ path: first, ref: "a" },
+				{ path: second, ref: "b" },
+			],
 			removeWorktreeError: new Error("busy"),
 		});
-		const ui = new FakeUiPort([{ multiSelect: [first, second] }, { confirm: false }, { confirm: false }]);
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs });
+		const ui = new FakeUiPort([
+			{ multiSelect: [first, second] },
+			{ confirm: false },
+			{ confirm: false },
+		]);
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+		});
 
 		const result = await runWorktreePrune(ctx, {});
 
 		expect(vcs.worktreeCalls.map((call) => call.path)).toEqual([first, second]);
-		expect(result.removals.filter((removal) => removal.status === "declined")).toHaveLength(2);
+		expect(
+			result.removals.filter((removal) => removal.status === "declined"),
+		).toHaveLength(2);
 	});
 });
 
@@ -209,11 +309,23 @@ describe("runWorktreePrune — force-delete fallback", () => {
 		const first = join(repo, "a");
 		const second = join(repo, "b");
 		const vcs = new FakeVcs({
-			worktrees: [{ path: repo, ref: "main" }, { path: first, ref: "a" }, { path: second, ref: "b" }],
+			worktrees: [
+				{ path: repo, ref: "main" },
+				{ path: first, ref: "a" },
+				{ path: second, ref: "b" },
+			],
 			removeWorktreeError: new Error("busy"),
 		});
-		const ui = new FakeUiPort([{ multiSelect: [first, second] }, { confirm: false }, { confirm: false }]);
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs });
+		const ui = new FakeUiPort([
+			{ multiSelect: [first, second] },
+			{ confirm: false },
+			{ confirm: false },
+		]);
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+		});
 
 		await runWorktreePrune(ctx, {});
 
@@ -229,18 +341,34 @@ describe("runWorktreePrune — force-delete fallback", () => {
 		await mkdir(join(repo, ".git"), { recursive: true });
 		const extra = join(repo, "feature");
 		const vcs = new FakeVcs({
-			worktrees: [{ path: repo, ref: "main" }, { path: extra, ref: "feature/x" }],
+			worktrees: [
+				{ path: repo, ref: "main" },
+				{ path: extra, ref: "feature/x" },
+			],
 			removeWorktreeError: new Error("dirty"),
 			showWorktreeStatusOutput: " M important.ts",
 		});
 		const ui = new FakeUiPort([{ multiSelect: [extra] }, { confirm: false }]);
-		const llm = new (await import("../../../test/fakes/FakeLlm")).FakeLlm({ generationAttempts: [["loses important.ts"]] });
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs, llm });
+		const llm = new (await import("../../../test/fakes/FakeLlm")).FakeLlm({
+			generationAttempts: [["loses important.ts"]],
+		});
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+			llm,
+		});
 
 		await runWorktreePrune(ctx, {});
 
-		const summaryIndex = ui.transcript.findIndex((entry) => entry.kind === "info" && String(entry.text).includes("loses important.ts"));
-		const confirmIndex = ui.transcript.findIndex((entry) => entry.kind === "confirm");
+		const summaryIndex = ui.transcript.findIndex(
+			(entry) =>
+				entry.kind === "info" &&
+				String(entry.text).includes("loses important.ts"),
+		);
+		const confirmIndex = ui.transcript.findIndex(
+			(entry) => entry.kind === "confirm",
+		);
 		expect(summaryIndex).toBeGreaterThanOrEqual(0);
 		expect(summaryIndex).toBeLessThan(confirmIndex);
 	});
@@ -251,7 +379,15 @@ describe("runWorktreePrune — force-delete fallback", () => {
 		await mkdir(join(repo, ".git"), { recursive: true });
 		const paths = ["a", "b", "c"].map((name) => join(repo, name));
 		const failing = paths[1];
-		const base = new FakeVcs({ worktrees: [{ path: repo, ref: "main" }, ...paths.map((path) => ({ path, ref: path.split("/").pop()! }))] });
+		const base = new FakeVcs({
+			worktrees: [
+				{ path: repo, ref: "main" },
+				...paths.map((path) => ({
+					path,
+					ref: path.split("/").pop() ?? "unknown",
+				})),
+			],
+		});
 		const vcs = Object.assign(base, {
 			removeWorktree: async (path: string, repoRoot: string) => {
 				base.worktreeCalls.push({ path, repoRoot });
@@ -259,11 +395,17 @@ describe("runWorktreePrune — force-delete fallback", () => {
 			},
 		});
 		const ui = new FakeUiPort([{ multiSelect: paths }, { confirm: false }]);
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs });
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+		});
 
 		await runWorktreePrune(ctx, {});
 
-		expect(ui.transcript.filter((entry) => entry.kind === "confirm")).toHaveLength(1);
+		expect(
+			ui.transcript.filter((entry) => entry.kind === "confirm"),
+		).toHaveLength(1);
 	});
 
 	test("does not retry a declined force-delete", async () => {
@@ -271,9 +413,19 @@ describe("runWorktreePrune — force-delete fallback", () => {
 		const repo = join(dir, "repo");
 		await mkdir(join(repo, ".git"), { recursive: true });
 		const extra = join(repo, "feature");
-		const vcs = new FakeVcs({ worktrees: [{ path: repo, ref: "main" }, { path: extra, ref: "feature/x" }], removeWorktreeError: new Error("busy") });
+		const vcs = new FakeVcs({
+			worktrees: [
+				{ path: repo, ref: "main" },
+				{ path: extra, ref: "feature/x" },
+			],
+			removeWorktreeError: new Error("busy"),
+		});
 		const ui = new FakeUiPort([{ multiSelect: [extra] }, { confirm: false }]);
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs });
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+		});
 
 		const result = await runWorktreePrune(ctx, {});
 
@@ -287,9 +439,17 @@ describe("runWorktreePrune — final reporting", () => {
 		dir = await mkdtemp(join(tmpdir(), "mole-tools-wtprune-report-"));
 		const repo = join(dir, "repo");
 		await mkdir(join(repo, ".git"), { recursive: true });
-		const paths = ["normal", "force", "declined", "unresolved"].map((name) => join(repo, name));
+		const paths = ["normal", "force", "declined", "unresolved"].map((name) =>
+			join(repo, name),
+		);
 		const base = new FakeVcs({
-			worktrees: [{ path: repo, ref: "main" }, ...paths.map((path) => ({ path, ref: path.split("/").pop()! }))],
+			worktrees: [
+				{ path: repo, ref: "main" },
+				...paths.map((path) => ({
+					path,
+					ref: path.split("/").pop() ?? "unknown",
+				})),
+			],
 		});
 		const vcs = Object.assign(base, {
 			removeWorktree: async (path: string, repoRoot: string) => {
@@ -307,11 +467,18 @@ describe("runWorktreePrune — final reporting", () => {
 			{ confirm: false },
 			{ confirm: true },
 		]);
-		const ctx = fakeContext({ config: makeConfig({ worktreePrune: { baseDir: dir } }), ui, vcs });
+		const ctx = fakeContext({
+			config: makeConfig({ worktreePrune: { baseDir: dir } }),
+			ui,
+			vcs,
+		});
 
 		await runWorktreePrune(ctx, {});
 
-		const report = ui.transcript.find((entry) => entry.kind === "info" && String(entry.text).includes("Normal removals"));
+		const report = ui.transcript.find(
+			(entry) =>
+				entry.kind === "info" && String(entry.text).includes("Normal removals"),
+		);
 		expect(String(report?.text)).toContain("Normal removals: 1");
 		expect(String(report?.text)).toContain("Force-removed: 1");
 		expect(String(report?.text)).toContain("Declined/retained: 1");
@@ -328,14 +495,19 @@ describe("runWorktreePrune — empty-result behavior", () => {
 
 		// Stubs to detect if VCS methods were called
 		let worktreesCalled = false;
-		vcs.worktrees = async () => { worktreesCalled = true; return []; };
+		vcs.worktrees = async () => {
+			worktreesCalled = true;
+			return [];
+		};
 
 		const result = await runWorktreePrune(ctx, {});
 
 		expect(result.baseDir).toBe("/empty/dir");
 		// Nothing to prune message should appear
 		const infoEntry = ui.transcript.find(
-			(t) => t.kind === "info" && String(t.text).toLowerCase().includes("nothing to prune"),
+			(t) =>
+				t.kind === "info" &&
+				String(t.text).toLowerCase().includes("nothing to prune"),
 		);
 		expect(infoEntry).toBeDefined();
 		// No VCS calls should be made for the empty path
@@ -357,12 +529,18 @@ describe("runWorktreePrune — empty-result behavior", () => {
 		const result = await runWorktreePrune(ctx, {});
 
 		expect(result.extraWorktreeCount).toBe(0);
-		expect(ui.transcript.some((entry) =>
-			entry.kind === "info" && String(entry.text).toLowerCase().includes("nothing to prune"),
-		)).toBe(true);
-		expect(ui.transcript.filter((entry) =>
-			["multiSelect", "confirm"].includes(entry.kind),
-		)).toHaveLength(0);
+		expect(
+			ui.transcript.some(
+				(entry) =>
+					entry.kind === "info" &&
+					String(entry.text).toLowerCase().includes("nothing to prune"),
+			),
+		).toBe(true);
+		expect(
+			ui.transcript.filter((entry) =>
+				["multiSelect", "confirm"].includes(entry.kind),
+			),
+		).toHaveLength(0);
 		expect(vcs.worktreeCalls).toHaveLength(0);
 		expect(vcs.forceWorktreeCalls).toHaveLength(0);
 	});
@@ -371,7 +549,7 @@ describe("runWorktreePrune — empty-result behavior", () => {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function interactiveCalls(transcript: typeof FakeUiPort.prototype.transcript): void {
+function interactiveCalls(): void {
 	// no-op type guard — ensures we only test against transcript type
 }
 
@@ -380,7 +558,11 @@ function interactiveEntryCount(
 	transcript: typeof FakeUiPort.prototype.transcript,
 ): number {
 	const interactiveKinds = new Set([
-		"confirm", "select", "multiSelect", "editText", "editMultiline",
+		"confirm",
+		"select",
+		"multiSelect",
+		"editText",
+		"editMultiline",
 	]);
 	return transcript.filter((e) => interactiveKinds.has(e.kind)).length;
 }

@@ -3,11 +3,10 @@ import fsPromises from "node:fs/promises";
 import { join } from "node:path";
 
 import {
-	RalphStateFileSchema,
 	parseRalphStateFile,
-	parseRalphLockFile,
 	RalphError,
 	type RalphStateFile,
+	RalphStateFileSchema,
 } from "./schema";
 
 // ─── internals ──────────────────────────────────────────────────────────
@@ -87,7 +86,10 @@ async function atomicWrite(targetPath: string, content: string): Promise<void> {
 }
 
 /** Atomically write JSON content */
-async function atomicWriteJson(targetPath: string, data: unknown): Promise<void> {
+async function atomicWriteJson(
+	targetPath: string,
+	data: unknown,
+): Promise<void> {
 	const content = JSON.stringify(data, null, 2);
 	await atomicWrite(targetPath, content);
 }
@@ -132,7 +134,10 @@ function lockPath(name: string): string {
 /**
  * Write RalphState to `.ralph/<name>.state.json` with atomic rename-on-write.
  */
-export async function writeState(name: string, state: RalphStateFile): Promise<void> {
+export async function writeState(
+	name: string,
+	state: RalphStateFile,
+): Promise<void> {
 	RalphStateFileSchema.parse(state);
 	await atomicWriteJson(statePath(name), state);
 }
@@ -163,7 +168,10 @@ export async function readState(name: string): Promise<RalphStateFile> {
 // ─── Task file I/O ──────────────────────────────────────────────
 
 /** Write raw task Markdown atomically */
-export async function writeTaskFile(name: string, content: string): Promise<void> {
+export async function writeTaskFile(
+	name: string,
+	content: string,
+): Promise<void> {
 	await atomicWrite(taskPath(name), content);
 }
 
@@ -199,7 +207,11 @@ export function snapshotTaskFile(name: string): void {
  * Restore task file from snapshot and delete the snapshot.
  */
 export function discardSnapshot(name: string): void {
-	try { fs.unlinkSync(snapshotPath(name)); } catch { /* already absent */ }
+	try {
+		fs.unlinkSync(snapshotPath(name));
+	} catch {
+		/* already absent */
+	}
 }
 
 export function restoreSnapshot(name: string): void {
@@ -233,7 +245,12 @@ export function createLock(name: string, runId: string): LockHandle {
 
 	try {
 		const existingRaw = fs.readFileSync(path, "utf-8");
-		let existingParsed: { pid: number; runId?: string; lockedAt?: number; createdAt?: string } | null;
+		let existingParsed: {
+			pid: number;
+			runId?: string;
+			lockedAt?: number;
+			createdAt?: string;
+		} | null;
 		try {
 			existingParsed = JSON.parse(existingRaw) as typeof existingParsed;
 		} catch {
@@ -285,26 +302,41 @@ export function createLock(name: string, runId: string): LockHandle {
 
 		// A stale lock may have appeared after the initial inspection. Reclaim
 		// it only after rechecking, then retry exclusive creation once.
-		let current: { pid: number; runId?: string; lockedAt?: number; createdAt?: string };
+		let current: {
+			pid: number;
+			runId?: string;
+			lockedAt?: number;
+			createdAt?: string;
+		};
 		try {
 			current = JSON.parse(fs.readFileSync(path, "utf-8"));
 		} catch {
 			current = { pid: -1 };
 		}
 		if (!isLockStale(current.pid, current.lockedAt, current.createdAt)) {
-			throw new RalphError(`Loop "${name}" is already locked by PID ${current.pid}`);
+			throw new RalphError(
+				`Loop "${name}" is already locked by PID ${current.pid}`,
+			);
 		}
-		try { fs.unlinkSync(path); } catch { /* another owner may have reclaimed it */ }
+		try {
+			fs.unlinkSync(path);
+		} catch {
+			/* another owner may have reclaimed it */
+		}
 		const fd = fs.openSync(path, "wx");
-		try { fs.writeFileSync(fd, JSON.stringify(lockData), "utf-8"); }
-		finally { fs.closeSync(fd); }
+		try {
+			fs.writeFileSync(fd, JSON.stringify(lockData), "utf-8");
+		} finally {
+			fs.closeSync(fd);
+		}
 	}
 
 	return {
 		release(): void {
 			try {
 				const current = JSON.parse(fs.readFileSync(path, "utf-8"));
-				if (current.pid === process.pid && current.runId === runId) fs.unlinkSync(path);
+				if (current.pid === process.pid && current.runId === runId)
+					fs.unlinkSync(path);
 			} catch {
 				// Already gone or replaced — non-critical
 			}

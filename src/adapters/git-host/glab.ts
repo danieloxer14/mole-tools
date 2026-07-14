@@ -201,7 +201,8 @@ export class GlabAdapter implements GitHost {
 					responseType: typeof body,
 				});
 				return members.length > 0 ? members[0] : null;
-			}			for (const member of body) {
+			}
+			for (const member of body) {
 				members.push({
 					id: String(member.id ?? ""),
 					handle: String(member.username ?? member.name ?? ""),
@@ -217,7 +218,6 @@ export class GlabAdapter implements GitHost {
 		}
 
 		if (members.length === 0) {
-
 			return null;
 		}
 

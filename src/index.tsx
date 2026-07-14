@@ -52,28 +52,31 @@ cli
 for (const feature of features as Feature[]) {
 	// cac has no separate nested-command registry, so Ralph owns its three
 	// positional slots and dispatches init/run in the feature implementation.
-	const commandName = feature.name === "ralph"
-		? "ralph [subcommand] [name] [source]"
-		: feature.name;
+	const commandName =
+		feature.name === "ralph"
+			? "ralph [subcommand] [name] [source]"
+			: feature.name;
 	const cmd = cli.command(commandName, feature.description);
 	applyZodOptions(cmd, feature.args);
 	cmd.action(async (...actionArgs: unknown[]) => {
 		// Help is handled above and intentionally never enters this lifecycle.
 		await initializeLogger();
 		try {
-			const options = (feature.name === "ralph"
-			? actionArgs[actionArgs.length - 1]
-			: actionArgs[0]) as Record<string, unknown>;
+			const options = (
+				feature.name === "ralph"
+					? actionArgs[actionArgs.length - 1]
+					: actionArgs[0]
+			) as Record<string, unknown>;
 			let args: unknown;
 			try {
 				args = feature.args.parse(
 					feature.name === "ralph"
 						? {
-							...options,
-							subcommand: actionArgs[0],
-							name: actionArgs[1],
-							source: actionArgs[2],
-						}
+								...options,
+								subcommand: actionArgs[0],
+								name: actionArgs[1],
+								source: actionArgs[2],
+							}
 						: options,
 				);
 				// Positional Ralph arguments are intentionally excluded from its

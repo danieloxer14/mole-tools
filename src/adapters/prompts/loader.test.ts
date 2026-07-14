@@ -42,7 +42,9 @@ describe("loadPrompt", () => {
 		expect(prompt).toContain("TDD red → green");
 		expect(prompt).toContain("until the end of the current ticket");
 		expect(prompt).toContain("preserves recoverable progress");
-		expect(await Bun.file(join(dir, "ralph-init-system.md")).exists()).toBe(true);
+		expect(await Bun.file(join(dir, "ralph-init-system.md")).exists()).toBe(
+			true,
+		);
 	});
 
 	test("seeds the default ralph-implement-system prompt when missing", async () => {
@@ -53,7 +55,9 @@ describe("loadPrompt", () => {
 		expect(prompt).toContain("typechecking regularly");
 		expect(prompt).toContain("full test suite once at the end");
 		expect(prompt).toContain("Ralph task file");
-		expect(await Bun.file(join(dir, "ralph-implement-system.md")).exists()).toBe(true);
+		expect(
+			await Bun.file(join(dir, "ralph-implement-system.md")).exists(),
+		).toBe(true);
 	});
 
 	test("seeds the default ralph-reflection-system prompt when missing", async () => {
@@ -66,7 +70,9 @@ describe("loadPrompt", () => {
 		expect(prompt).toContain("next priorities");
 		expect(prompt).toContain("uncheck");
 		expect(prompt).toContain("add unchecked tasks");
-		expect(await Bun.file(join(dir, "ralph-reflection-system.md")).exists()).toBe(true);
+		expect(
+			await Bun.file(join(dir, "ralph-reflection-system.md")).exists(),
+		).toBe(true);
 	});
 
 	test("reads user-edited ralph-init-system prompt without overwriting", async () => {

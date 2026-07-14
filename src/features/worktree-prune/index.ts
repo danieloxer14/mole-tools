@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { Config } from "../../adapters/config/schema";
 import { updateConfig } from "../../adapters/config/loader";
 import type { Context } from "../../core/context";
 import type { Feature } from "../../core/feature";
@@ -19,7 +18,7 @@ export const worktreePruneArgs = z.object({
 export interface RemovalResult {
 	path: string;
 	repoRoot: string;
-	status: "removed" | "failed" | "force-removed" | "declined";
+	status: "removed" | "failed" | "force-removed" | "force-failed" | "declined";
 	error?: unknown;
 }
 
@@ -36,8 +35,10 @@ export async function resolveBaseDir(
 	cliBaseDir: string | undefined,
 	onPersisted?: (baseDir: string) => Promise<void>,
 ): Promise<string> {
-	const persisted = onPersisted ?? ((baseDir: string) =>
-		updateConfig({ worktreePrune: { baseDir } }).catch(() => {}));
+	const persisted =
+		onPersisted ??
+		((baseDir: string) =>
+			updateConfig({ worktreePrune: { baseDir } }).catch(() => {}));
 
 	// 1. CLI flag takes highest priority (never persisted — explicit override)
 	if (cliBaseDir?.trim()) return cliBaseDir.trim();
@@ -64,6 +65,7 @@ export async function runWorktreePrune(
 ): Promise<WorktreePruneResult> {
 	const baseDir = await resolveBaseDir(ctx, args.baseDir);
 
+	await ctx.ui.info("Scanning repositories...", { spinner: true });
 	const groups = await discoverExtraWorktrees(baseDir, ctx.vcs);
 	const repoCount = groups.length;
 	const extraWorktreeCount = groups.reduce(
@@ -84,10 +86,17 @@ export async function runWorktreePrune(
 
 	const selected: { path: string; repoRoot: string }[] = [];
 	for (const group of groups) {
-		const choices = group.worktrees.map((worktree) => ({
-			label: `${worktree.path} (${worktree.ref || "detached"})`,
-			value: worktree.path,
-		}));
+		const choices = group.worktrees.map((worktree) => {
+			const path =
+				typeof worktree.path === "string" && worktree.path
+					? worktree.path
+					: "unknown-worktree";
+			const ref =
+				typeof worktree.ref === "string" && worktree.ref
+					? worktree.ref
+					: "detached";
+			return { label: `${path} (${ref})`, value: path };
+		});
 		const paths = await ctx.ui.multiSelect(
 			`Select extra worktrees to prune for ${group.repoRoot}`,
 			choices,
@@ -97,6 +106,7 @@ export async function runWorktreePrune(
 
 	const removals: RemovalResult[] = [];
 	for (const item of selected) {
+		await ctx.ui.info(`Removing ${item.path}...`, { spinner: true });
 		try {
 			await ctx.vcs.removeWorktree(item.path, item.repoRoot);
 			removals.push({ ...item, status: "removed" });
@@ -107,7 +117,9 @@ export async function runWorktreePrune(
 
 	// Normal removal can fail for dirty or otherwise busy worktrees. Handle each
 	// failure independently so one decision never affects another worktree.
-	for (const removal of removals.filter((result) => result.status === "failed")) {
+	for (const removal of removals.filter(
+		(result) => result.status === "failed",
+	)) {
 		let summary = "";
 		try {
 			const snapshot = await ctx.vcs.showWorktreeStatus(
@@ -122,6 +134,9 @@ export async function runWorktreePrune(
 			await ctx.ui.info(`Potential loss for ${removal.path}: ${summary}`);
 		}
 
+		await ctx.ui.info(`Handling failed removal of ${removal.path}...`, {
+			spinner: true,
+		});
 		const force = await ctx.ui.confirm(
 			`Normal removal failed for ${removal.path}. Force-delete this worktree?`,
 		);
@@ -134,13 +149,18 @@ export async function runWorktreePrune(
 			removal.status = "force-removed";
 		} catch (error) {
 			removal.error = error;
+			removal.status = "force-failed";
 		}
 	}
 
 	const normalRemoved = removals.filter((r) => r.status === "removed").length;
-	const forceRemoved = removals.filter((r) => r.status === "force-removed").length;
+	const forceRemoved = removals.filter(
+		(r) => r.status === "force-removed",
+	).length;
 	const declined = removals.filter((r) => r.status === "declined").length;
-	const unresolved = removals.filter((r) => r.status === "failed").length;
+	const unresolved = removals.filter(
+		(r) => r.status === "failed" || r.status === "force-failed",
+	).length;
 	await ctx.ui.info(
 		[
 			`Pruned ${normalRemoved + forceRemoved} of ${selected.length} selected worktree(s).`,
@@ -156,7 +176,10 @@ export async function runWorktreePrune(
 // ---------------------------------------------------------------------------
 // Feature registration (discoveries/removal wired in later tickets)
 // ---------------------------------------------------------------------------
-export const worktreePrune: Feature<typeof worktreePruneArgs, WorktreePruneResult> = {
+export const worktreePrune: Feature<
+	typeof worktreePruneArgs,
+	WorktreePruneResult
+> = {
 	name: "worktree-prune",
 	description: "Scan a base directory for extra Git worktrees and remove them",
 	args: worktreePruneArgs,

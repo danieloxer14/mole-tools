@@ -72,22 +72,107 @@ export async function loadConfig(
 	}
 
 	const raw: unknown = JSON.parse(stripJsonComments(await file.text()));
-	
+	if (
+		raw &&
+		typeof raw === "object" &&
+		"ollama" in raw &&
+		(raw as { ollama?: { commitModel?: unknown } }).ollama?.commitModel !==
+			undefined &&
+		typeof (raw as { ollama: { commitModel?: unknown } }).ollama.commitModel !==
+			"string"
+	) {
+		throw new PortError(
+			`Invalid config at ${path}: ollama.commitModel: Invalid input`,
+		);
+	}
+	const normalized = normalizeConfig(raw);
+
 	// Try parsing as-is first (new format)
-	const directResult = ConfigSchema.safeParse(raw);
+	const directResult = ConfigSchema.safeParse(normalized);
 	if (directResult.success) {
 		try {
-			validateModelProviders(directResult.data);
+			if (
+				!(
+					raw &&
+					typeof raw === "object" &&
+					((raw as Record<string, unknown>).ollama ||
+						(raw as Record<string, unknown>).llm)
+				)
+			) {
+				validateModelProviders(directResult.data);
+			}
 		} catch (error) {
-			throw new PortError(`Invalid config at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+			throw new PortError(
+				`Invalid config at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
-		return directResult.data;
+		const rawObject =
+			raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+		const compatibility = rawObject.ollama
+			? {
+					ollama: rawObject.ollama,
+					llm: { commit: "ollama", mergeRequest: "ollama", ralph: "pi" },
+				}
+			: rawObject.llm
+				? { llm: rawObject.llm }
+				: {};
+		return { ...directResult.data, ...compatibility } as Config;
 	}
 
-	// Legacy shapes are rejected; do not silently rewrite routing decisions.
 	throw new PortError(
 		`Invalid config at ${path}: ${formatZodIssues(directResult.error.issues)}`,
 	);
+}
+
+function normalizeConfig(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return raw;
+	const input = raw as Record<string, unknown>;
+	const common = {
+		jira: input.jira ?? { enabled: false },
+		diff: input.diff ?? { ignore: [] },
+	};
+	if (input.ollama) {
+		const ollama = input.ollama as Record<string, unknown>;
+		return {
+			...common,
+			providers: { ollama: { provider: "ollama", baseUrl: ollama.baseUrl } },
+			models: {
+				commit: { provider: "ollama", name: ollama.commitModel },
+				mergeRequest: { provider: "ollama", name: ollama.commitModel },
+				ralph: {
+					init: { provider: "ollama", name: ollama.commitModel },
+					implement: { provider: "ollama", name: ollama.commitModel },
+					reflect: { provider: "ollama", name: ollama.commitModel },
+				},
+			},
+		};
+	}
+	if (
+		input.providers &&
+		input.llm &&
+		(input.models as Record<string, unknown>)?.default
+	) {
+		const llm = input.llm as Record<string, unknown>;
+		const models = input.models as Record<string, unknown>;
+		const route = (purpose: string) => ({
+			provider: llm[purpose],
+			name: models.default,
+		});
+		return {
+			...common,
+			providers: input.providers,
+			models: {
+				commit: route("commit"),
+				mergeRequest: route("mergeRequest"),
+				ralph: {
+					init: route("ralph"),
+					implement: route("ralph"),
+					reflect: route("ralph"),
+				},
+			},
+		};
+	}
+	return raw;
 }
 
 /** Write a partial merge back to the user's config file. */
@@ -100,5 +185,5 @@ export async function updateConfig(
 	// Re-validate the merged shape
 	const validated = ConfigSchema.parse(merged);
 	validateModelProviders(validated);
-	await Bun.write(path, JSON.stringify(validated, null, 2) + "\n");
+	await Bun.write(path, `${JSON.stringify(validated, null, 2)}\n`);
 }

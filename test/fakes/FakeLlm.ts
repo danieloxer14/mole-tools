@@ -2,10 +2,9 @@ import type {
 	AgentRequest,
 	AgentResult,
 	GenerateRequest,
-	LlmCapability,
 	Llm,
+	LlmCapability,
 } from "../../src/ports/llm";
-import { UnsupportedCapabilityError } from "../../src/ports/llm";
 
 export interface FakeLlmOptions {
 	/** Array of attempt sequences for text generation */
@@ -33,7 +32,9 @@ export class FakeLlm implements Llm {
 		} else {
 			// New constructor: FakeLlm({ generationAttempts, agentResults, capabilitiesOverride })
 			this.attempts = input.generationAttempts ?? [["feat: x"]];
-			this.agentResultsList = input.agentResults ?? [{ output: "done", ok: true }];
+			this.agentResultsList = input.agentResults ?? [
+				{ output: "done", ok: true },
+			];
 			this.capsOverride = input.capabilitiesOverride;
 		}
 	}
@@ -53,8 +54,9 @@ export class FakeLlm implements Llm {
 	async runAgent(req: AgentRequest): Promise<AgentResult> {
 		this.agentRequests.push(req);
 		const result =
-			this.agentResultsList[Math.min(this.agentCallIndex, this.agentResultsList.length - 1)] ??
-			({ output: "done", ok: true } as AgentResult);
+			this.agentResultsList[
+				Math.min(this.agentCallIndex, this.agentResultsList.length - 1)
+			] ?? ({ output: "done", ok: true } as AgentResult);
 		this.agentCallIndex++;
 		return result;
 	}

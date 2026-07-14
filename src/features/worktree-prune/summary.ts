@@ -14,12 +14,15 @@ export async function summarizeWorktree(
 ): Promise<string> {
 	try {
 		const model = ctx.config.models.commit.name;
-		const generation = collect(ctx.llm.generate({
-			model,
-			system: "Summarize the changes in a Git worktree concisely for a user deciding whether to delete it.",
-			prompt: `Here is the worktree's git status and diff snapshot:\n\n${snapshot}\n\nSummarize what would be lost.`,
-			task: "worktree-summary",
-		}));
+		const generation = collect(
+			ctx.llm.generate({
+				model,
+				system:
+					"Summarize the changes in a Git worktree concisely for a user deciding whether to delete it.",
+				prompt: `Here is the worktree's git status and diff snapshot:\n\n${snapshot}\n\nSummarize what would be lost.`,
+				task: "worktree-summary",
+			}),
+		);
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const timeout = new Promise<string>((resolve) => {
 			timer = setTimeout(() => resolve(""), timeoutMs);

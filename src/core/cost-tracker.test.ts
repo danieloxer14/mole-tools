@@ -22,18 +22,18 @@ describe("CostTracker", () => {
 		});
 
 		expect(tracker.getEntries()).toEqual([
-				{
-					type: "llm",
-					task: "commit-message",
-					inputTokens: 10,
-					outputTokens: 5,
-				},
-				{
-					type: "git",
-					task: "stagedDiff",
-					inputTokens: 0,
-					outputTokens: 20,
-				},
-			]);
+			{
+				type: "llm",
+				task: "commit-message",
+				inputTokens: 10,
+				outputTokens: 5,
+			},
+			{
+				type: "git",
+				task: "stagedDiff",
+				inputTokens: 0,
+				outputTokens: 20,
+			},
+		]);
 	});
 });

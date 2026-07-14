@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
 import { PortError } from "../../core/errors";
 import { CONFIG_TEMPLATE, loadConfig } from "./loader";
 import { resolveLlmProvider } from "./schema";
@@ -106,7 +106,7 @@ describe("resolveLlmProvider", () => {
 			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
 			diff: { ignore: [] },
 			llm: { commit: "ollama", mergeRequest: "ollama", ralph: "pi" } as const,
-		} as any;
+		} as never;
 		const result = resolveLlmProvider(config, "commit");
 		expect(result.providerKey).toBe("ollama");
 		expect(result.providerProfile).toEqual({
@@ -119,7 +119,10 @@ describe("resolveLlmProvider", () => {
 	test("returns the configured model for each feature purpose", () => {
 		const config = {
 			providers: {
-				ollama: { provider: "ollama" as const, baseUrl: "http://localhost:11434" },
+				ollama: {
+					provider: "ollama" as const,
+					baseUrl: "http://localhost:11434",
+				},
 				pix: { provider: "pi" as const, binary: "pi" },
 			},
 			models: { default: "gpt-4" } as const,

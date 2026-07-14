@@ -5,10 +5,9 @@ import type {
 	AgentRequest,
 	AgentResult,
 	GenerateRequest,
-	LlmCapability,
 	Llm,
+	LlmCapability,
 } from "../../ports/llm";
-import { UnsupportedCapabilityError } from "../../ports/llm";
 import { estimateTokens } from "../../shared/text";
 
 export interface PiConfig {
@@ -58,7 +57,10 @@ export class PiAdapter implements Llm {
 		await new Promise<void>((resolve, reject) => {
 			child.on("close", (code) => {
 				if (code === 0) resolve();
-				else reject(new PortError(`Pi exited with code ${code}`, stderr, code ?? 1));
+				else
+					reject(
+						new PortError(`Pi exited with code ${code}`, stderr, code ?? 1),
+					);
 			});
 			child.on("error", reject);
 		});
@@ -103,18 +105,34 @@ export class PiAdapter implements Llm {
 			let pendingStdout = "";
 
 			const preview = (value: unknown, maxLength = 240): string => {
-				const text = typeof value === "string" ? value : Array.isArray(value)
-					? value.map((part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("\n")
-					: "";
+				const text =
+					typeof value === "string"
+						? value
+						: Array.isArray(value)
+							? value
+									.map((part) =>
+										typeof part === "object" &&
+										part !== null &&
+										typeof (part as { text?: unknown }).text === "string"
+											? (part as { text: string }).text
+											: "",
+									)
+									.join("\n")
+							: "";
 				const compact = text.replace(/\s+/g, " ").trim();
-				return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+				return compact.length > maxLength
+					? `${compact.slice(0, maxLength - 1)}…`
+					: compact;
 			};
 			const toolDetail = (toolName: unknown, args: unknown): string => {
 				const input = args as Record<string, unknown> | null;
 				if (!input || typeof input !== "object") return "";
-				const target = [input.path, input.filePath, input.file].find((value): value is string => typeof value === "string");
+				const target = [input.path, input.filePath, input.file].find(
+					(value): value is string => typeof value === "string",
+				);
 				if (target) return target;
-				if (String(toolName) === "bash" && typeof input.command === "string") return preview(input.command, 160);
+				if (String(toolName) === "bash" && typeof input.command === "string")
+					return preview(input.command, 160);
 				return preview(JSON.stringify(input), 160);
 			};
 			const handleEvent = (line: string) => {
@@ -122,18 +140,33 @@ export class PiAdapter implements Llm {
 					const event = JSON.parse(line) as Record<string, unknown>;
 					if (event.type === "tool_execution_start") {
 						const detail = toolDetail(event.toolName, event.args);
-						req.onProgress?.(`${String(event.toolName)}${detail ? ` — ${detail}` : ""}…`);
+						req.onProgress?.(
+							`${String(event.toolName)}${detail ? ` — ${detail}` : ""}…`,
+						);
 					}
 					if (event.type === "tool_execution_end") {
 						const result = event.result as { content?: unknown } | undefined;
 						const detail = preview(result?.content);
-						req.onProgress?.(`${String(event.toolName)} ${event.isError ? "failed" : "completed"}${detail ? ` — ${detail}` : "."}`);
+						req.onProgress?.(
+							`${String(event.toolName)} ${event.isError ? "failed" : "completed"}${detail ? ` — ${detail}` : "."}`,
+						);
 					}
 					if (event.type === "message_end") {
-						const message = event.message as { role?: unknown; content?: unknown } | undefined;
-						if (message?.role === "assistant" && Array.isArray(message.content)) {
+						const message = event.message as
+							| { role?: unknown; content?: unknown }
+							| undefined;
+						if (
+							message?.role === "assistant" &&
+							Array.isArray(message.content)
+						) {
 							const text = message.content
-								.filter((part): part is { type: "text"; text: string } => typeof part === "object" && part !== null && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")
+								.filter(
+									(part): part is { type: "text"; text: string } =>
+										typeof part === "object" &&
+										part !== null &&
+										(part as { type?: unknown }).type === "text" &&
+										typeof (part as { text?: unknown }).text === "string",
+								)
 								.map((part) => part.text)
 								.join("");
 							if (text) output = text;
@@ -160,14 +193,21 @@ export class PiAdapter implements Llm {
 			const input = this.buildAgentInput(req);
 			child.stdin.end(input);
 
-			const abort = () => { child.kill("SIGTERM"); };
-			if (req.signal) req.signal.addEventListener("abort", abort, { once: true });
+			const abort = () => {
+				child.kill("SIGTERM");
+			};
+			if (req.signal)
+				req.signal.addEventListener("abort", abort, { once: true });
 
 			child.on("close", (code) => {
 				if (pendingStdout.trim()) handleEvent(pendingStdout);
 				if (req.signal) req.signal.removeEventListener("abort", abort);
 				const ok = code === 0 && !req.signal?.aborted;
-				resolve({ output, stderr: req.signal?.aborted ? "aborted" : stderr, ok });
+				resolve({
+					output,
+					stderr: req.signal?.aborted ? "aborted" : stderr,
+					ok,
+				});
 			});
 
 			child.on("error", (err) => {

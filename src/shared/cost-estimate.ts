@@ -32,7 +32,9 @@ export interface TokenUsage {
 	cacheWriteTokens: number;
 }
 
-export function deriveCacheUsage(entries: readonly CostEntry[]): CachedCostEntry[] {
+export function deriveCacheUsage(
+	entries: readonly CostEntry[],
+): CachedCostEntry[] {
 	const cumulativeInputsBefore: number[] = [];
 	let runningTotal = 0;
 	for (const entry of entries) {
@@ -41,27 +43,29 @@ export function deriveCacheUsage(entries: readonly CostEntry[]): CachedCostEntry
 	}
 
 	return entries.map((entry, i) => {
-			const availableCachedInput = cumulativeInputsBefore[i]!;
-			const reads = Math.min(entry.inputTokens, availableCachedInput);
-			const writes = entry.inputTokens - reads;
-			return {
-				entry,
-				cacheReadTokens: reads,
-				cacheWriteTokens: writes,
-			};
+		const availableCachedInput = cumulativeInputsBefore[i] ?? 0;
+		const reads = Math.min(entry.inputTokens, availableCachedInput);
+		const writes = entry.inputTokens - reads;
+		return {
+			entry,
+			cacheReadTokens: reads,
+			cacheWriteTokens: writes,
+		};
 	});
 }
 
-export function sumDerivedUsage(derived: readonly CachedCostEntry[]): TokenUsage {
+export function sumDerivedUsage(
+	derived: readonly CachedCostEntry[],
+): TokenUsage {
 	let inputTokens = 0;
 	let outputTokens = 0;
 	let cacheReadTokens = 0;
 	let cacheWriteTokens = 0;
 	for (const d of derived) {
-			inputTokens += d.entry.inputTokens;
-			outputTokens += d.entry.outputTokens;
-			cacheReadTokens += d.cacheReadTokens;
-			cacheWriteTokens += d.cacheWriteTokens;
+		inputTokens += d.entry.inputTokens;
+		outputTokens += d.entry.outputTokens;
+		cacheReadTokens += d.cacheReadTokens;
+		cacheWriteTokens += d.cacheWriteTokens;
 	}
 	return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
 }
@@ -75,25 +79,27 @@ function priceUsage(usage: TokenUsage, pricing: ModelPricing): number {
 	const cacheReadPerMillion = pricing.inputPerMillion * CACHE_READ_MULTIPLIER;
 	const cacheWritePerMillion = pricing.inputPerMillion * CACHE_WRITE_MULTIPLIER;
 	return (
-			(usage.inputTokens / 1_000_000) * pricing.inputPerMillion +
-			(usage.outputTokens / 1_000_000) * pricing.outputPerMillion +
-			(usage.cacheReadTokens / 1_000_000) * cacheReadPerMillion +
-			(usage.cacheWriteTokens / 1_000_000) * cacheWritePerMillion
+		(usage.inputTokens / 1_000_000) * pricing.inputPerMillion +
+		(usage.outputTokens / 1_000_000) * pricing.outputPerMillion +
+		(usage.cacheReadTokens / 1_000_000) * cacheReadPerMillion +
+		(usage.cacheWriteTokens / 1_000_000) * cacheWritePerMillion
 	);
 }
 
-export function estimateClaudeCosts(entries: readonly CostEntry[]): CostEstimate[] {
+export function estimateClaudeCosts(
+	entries: readonly CostEntry[],
+): CostEstimate[] {
 	const usage = sumDerivedUsage(deriveCacheUsage(entries));
 	return CLAUDE_PRICING.map((pricing) => ({
-			model: pricing.name,
-			cost: priceUsage(usage, pricing),
+		model: pricing.name,
+		cost: priceUsage(usage, pricing),
 	}));
 }
 
 export function estimateUsageCosts(usage: TokenUsage): CostEstimate[] {
 	return CLAUDE_PRICING.map((pricing) => ({
-			model: pricing.name,
-			cost: priceUsage(usage, pricing),
+		model: pricing.name,
+		cost: priceUsage(usage, pricing),
 	}));
 }
 
@@ -106,7 +112,7 @@ export function formatCostSavingsTable(entries: readonly CostEntry[]): string {
 	const estimates = estimateClaudeCosts(entries);
 	const nameWidth = Math.max(...estimates.map((e) => e.model.length));
 	const rows = estimates.map(
-			e => `   ${e.model.padEnd(nameWidth)}   ${formatUsd(e.cost)} saved`,
+		(e) => `   ${e.model.padEnd(nameWidth)}   ${formatUsd(e.cost)} saved`,
 	);
 	return ["$ saved vs. running this on Claude:", ...rows].join("\n");
 }

@@ -3,8 +3,18 @@ import type { Context } from "../../core/context";
 import type { Feature } from "../../core/feature";
 
 const cliArgs = z.object({
-	maxIterations: z.coerce.number().int().min(1).optional().describe("Maximum total worker iterations."),
-	reflectEvery: z.coerce.number().int().min(0).optional().describe("Run reflection every N iterations."),
+	maxIterations: z.coerce
+		.number()
+		.int()
+		.min(1)
+		.optional()
+		.describe("Maximum total worker iterations."),
+	reflectEvery: z.coerce
+		.number()
+		.int()
+		.min(0)
+		.optional()
+		.describe("Run reflection every N iterations."),
 });
 
 type RalphCliArgs = z.infer<typeof cliArgs> & {
@@ -14,21 +24,21 @@ type RalphCliArgs = z.infer<typeof cliArgs> & {
 };
 
 export {
-	classifySource,
-	ralphInitArgs,
-	runRalphInit,
 	type ClassifiedSource,
+	classifySource,
 	type RalphInitArgs,
 	type RalphInitResult,
+	ralphInitArgs,
+	runRalphInit,
 	type SourceKind,
 } from "./init";
 export {
-	ralphRunArgs,
-	runRalphRun,
-	runRalph,
-	RalphRunError,
 	type RalphRunArgs,
+	RalphRunError,
 	type RalphRunResult,
+	ralphRunArgs,
+	runRalph,
+	runRalphRun,
 } from "./run";
 
 import { ralphInitArgs, runRalphInit } from "./init";
@@ -41,7 +51,7 @@ export const ralph: Feature<typeof cliArgs> = {
 	args: cliArgs,
 	help: {
 		usage: [
-			"mole-tools ralph init <name> <source> [--maxIterations <number>] [--reflectEvery <number>]", 
+			"mole-tools ralph init <name> <source> [--maxIterations <number>] [--reflectEvery <number>]",
 			"mole-tools ralph run <name> [--maxIterations <total>]",
 		].join("\n  "),
 		examples: [
@@ -62,20 +72,31 @@ export const ralph: Feature<typeof cliArgs> = {
 			if (!args.name || args.source === undefined) {
 				throw new Error("Usage: mole-tools ralph init <name> <source>");
 			}
-			return runRalphInit(ctx, ralphInitArgs.parse({
-				name: args.name,
-				source: args.source,
-				maxIterations: args.maxIterations,
-				reflectEvery: args.reflectEvery,
-			}));
+			return runRalphInit(
+				ctx,
+				ralphInitArgs.parse({
+					name: args.name,
+					source: args.source,
+					maxIterations: args.maxIterations,
+					reflectEvery: args.reflectEvery,
+				}),
+			);
 		}
 		if (args.subcommand === "run") {
-			if (!args.name) throw new Error("Usage: mole-tools ralph run <name> [--maxIterations <total>]");
-			return runRalphRun(ctx, ralphRunArgs.parse({
-				name: args.name,
-				maxIterations: args.maxIterations,
-			}));
+			if (!args.name)
+				throw new Error(
+					"Usage: mole-tools ralph run <name> [--maxIterations <total>]",
+				);
+			return runRalphRun(
+				ctx,
+				ralphRunArgs.parse({
+					name: args.name,
+					maxIterations: args.maxIterations,
+				}),
+			);
 		}
-		throw new Error("Usage: mole-tools ralph <subcommand> ...\nAvailable subcommands: init, run");
+		throw new Error(
+			"Usage: mole-tools ralph <subcommand> ...\nAvailable subcommands: init, run",
+		);
 	},
 };

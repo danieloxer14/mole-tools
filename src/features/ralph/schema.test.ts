@@ -1,25 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
-	RalphError,
-	LoopNameSchema,
-	StatusEnum,
-	PhaseEnum,
-	PauseReasonEnum,
-	ChecklistItemSchema,
-	RalphTaskFileSchema,
-	RalphStateFileSchema,
-	RalphLockFileSchema,
-	parseRalphStateFile,
-	parseRalphLockFile,
-	type LoopName,
-	type Status,
-	type Phase,
-	type PauseReason,
 	type ChecklistItem,
-	type RalphTaskFile,
-	type RalphStateFile,
+	ChecklistItemSchema,
+	type LoopName,
+	LoopNameSchema,
+	PauseReasonEnum,
+	type Phase,
+	PhaseEnum,
+	parseRalphLockFile,
+	parseRalphStateFile,
+	RalphError,
 	type RalphLockFile,
+	RalphLockFileSchema,
+	type RalphStateFile,
+	RalphStateFileSchema,
+	type RalphTaskFile,
+	RalphTaskFileSchema,
+	type Status,
+	StatusEnum,
 } from "./schema";
 
 describe("LoopNameSchema", () => {
@@ -114,7 +113,10 @@ describe("ChecklistItemSchema", () => {
 	});
 
 	test("parses an unchecked item", () => {
-		const item = ChecklistItemSchema.parse({ text: "Implement feature", done: false });
+		const item = ChecklistItemSchema.parse({
+			text: "Implement feature",
+			done: false,
+		});
 		expect(item).toEqual({ text: "Implement feature", done: false });
 	});
 
@@ -143,11 +145,15 @@ describe("RalphTaskFileSchema", () => {
 	});
 
 	test("rejects missing goal", () => {
-		expect(() => RalphTaskFileSchema.parse({ ...validTask, goal: undefined })).toThrow();
+		expect(() =>
+			RalphTaskFileSchema.parse({ ...validTask, goal: undefined }),
+		).toThrow();
 	});
 
 	test("rejects empty checklist", () => {
-		expect(() => RalphTaskFileSchema.parse({ ...validTask, checklist: [] })).toThrow();
+		expect(() =>
+			RalphTaskFileSchema.parse({ ...validTask, checklist: [] }),
+		).toThrow();
 	});
 
 	test("rejects non-string goal", () => {
@@ -210,7 +216,10 @@ describe("RalphStateFileSchema", () => {
 
 	test("rejects invalid loop name", () => {
 		expect(() =>
-			RalphStateFileSchema.parse({ ...validInitialState, name: "Invalid Name" }),
+			RalphStateFileSchema.parse({
+				...validInitialState,
+				name: "Invalid Name",
+			}),
 		).toThrow();
 	});
 
@@ -277,15 +286,11 @@ describe("RalphLockFileSchema", () => {
 	});
 
 	test("rejects missing pid", () => {
-		expect(() =>
-			RalphLockFileSchema.parse({ runId: "some-id" }),
-		).toThrow();
+		expect(() => RalphLockFileSchema.parse({ runId: "some-id" })).toThrow();
 	});
 
 	test("rejects non-numeric pid", () => {
-		expect(() =>
-			RalphLockFileSchema.parse({ pid: "not-a-number" }),
-		).toThrow();
+		expect(() => RalphLockFileSchema.parse({ pid: "not-a-number" })).toThrow();
 	});
 });
 

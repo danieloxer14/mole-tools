@@ -38,31 +38,31 @@ describe("appendCostSession", () => {
 			feature: "commit",
 			startedAt: "2026-07-09T00:00:00.000Z",
 			entries: [entry],
-				};
+		};
 
-			await appendCostSession(session, path);
+		await appendCostSession(session, path);
 
-			expect(await listCostSessions(path)).toEqual([session]);
+		expect(await listCostSessions(path)).toEqual([session]);
 	});
 
 	test("appends subsequent sessions without clobbering earlier ones", async () => {
-				const path = await historyPath();
-			const first = {
-					id: "session-1",
-					feature: "commit",
-					startedAt: "2026-07-09T00:00:00.000Z",
-						entries: [entry],
-						};
-			const second = {
-					id: "session-2",
-				feature: "commit",
-					startedAt: "2026-07-09T01:00:00.000Z",
-						entries: [entry, entry],
-							};
+		const path = await historyPath();
+		const first = {
+			id: "session-1",
+			feature: "commit",
+			startedAt: "2026-07-09T00:00:00.000Z",
+			entries: [entry],
+		};
+		const second = {
+			id: "session-2",
+			feature: "commit",
+			startedAt: "2026-07-09T01:00:00.000Z",
+			entries: [entry, entry],
+		};
 
-				await appendCostSession(first, path);
-			await appendCostSession(second, path);
+		await appendCostSession(first, path);
+		await appendCostSession(second, path);
 
-				expect(await listCostSessions(path)).toEqual([first, second]);
+		expect(await listCostSessions(path)).toEqual([first, second]);
 	});
 });

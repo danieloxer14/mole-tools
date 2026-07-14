@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { fakeContext } from "../../../test/fakes/fakeContext";
 import { FakeLlm } from "../../../test/fakes/FakeLlm";
+import { fakeContext } from "../../../test/fakes/fakeContext";
 import { summarizeWorktree } from "./summary";
 
 describe("summarizeWorktree", () => {
 	test("calls the LLM with a git status/diff snapshot and returns generated text", async () => {
 		const llm = new FakeLlm([["The worktree contains uncommitted changes."]]);
 		const ctx = fakeContext({ llm });
-		const snapshot = " M src/index.ts\n diff --git a/src/index.ts b/src/index.ts";
+		const snapshot =
+			" M src/index.ts\n diff --git a/src/index.ts b/src/index.ts";
 
 		const result = await summarizeWorktree(ctx, snapshot);
 

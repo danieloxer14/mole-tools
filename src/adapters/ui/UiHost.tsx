@@ -5,6 +5,17 @@ import type { Choice } from "../../ports/ui";
 import type { LogEntry, Request, UiController } from "./controller";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const requestIds = new WeakMap<object, number>();
+let nextRequestId = 0;
+
+function requestId(request: Request): number {
+	let id = requestIds.get(request);
+	if (id === undefined) {
+		id = nextRequestId++;
+		requestIds.set(request, id);
+	}
+	return id;
+}
 
 function useSpinnerFrame(active: boolean): string {
 	const [frame, setFrame] = useState(0);
@@ -19,13 +30,27 @@ function useSpinnerFrame(active: boolean): string {
 }
 
 function LogLine({ entry, active }: { entry: LogEntry; active: boolean }) {
-	const color = entry.level === "error" ? "red" : entry.level === "warn" ? "yellow" : entry.terminal ? "gray" : "white";
+	const color =
+		entry.level === "error"
+			? "red"
+			: entry.level === "warn"
+				? "yellow"
+				: entry.terminal
+					? "gray"
+					: "white";
 	const spinnerFrame = useSpinnerFrame(active);
 	const [tool, ...details] = entry.text.split(" — ");
 	return (
 		<Text color={color}>
 			{active ? `${spinnerFrame} ` : ""}
-			{entry.terminal ? <><Text color="cyanBright">{tool}</Text>{details.length > 0 ? ` — ${details.join(" — ")}` : ""}</> : entry.text}
+			{entry.terminal ? (
+				<>
+					<Text color="cyanBright">{tool}</Text>
+					{details.length > 0 ? ` — ${details.join(" — ")}` : ""}
+				</>
+			) : (
+				entry.text
+			)}
 		</Text>
 	);
 }
@@ -78,11 +103,7 @@ function ConfirmView({ req }: { req: Extract<Request, { kind: "confirm" }> }) {
 
 function SelectView({ req }: { req: Extract<Request, { kind: "select" }> }) {
 	return (
-		<SingleSelectList
-			question={req.q}
-			opts={req.opts}
-			onSelect={req.resolve}
-		/>
+		<SingleSelectList question={req.q} opts={req.opts} onSelect={req.resolve} />
 	);
 }
 
@@ -224,7 +245,7 @@ export function UiHost({ controller }: { controller: UiController }) {
 					active={Boolean(entry.spinner) && i === log.length - 1}
 				/>
 			))}
-			{request ? <RequestView req={request} /> : null}
+			{request ? <RequestView key={requestId(request)} req={request} /> : null}
 		</Box>
 	);
 }

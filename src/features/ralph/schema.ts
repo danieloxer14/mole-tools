@@ -3,10 +3,12 @@ import { z } from "zod";
 // ── Loop name validation ───────────────────────────────────────────────
 
 /** Kebab-case loop name: lowercase letters, digits, and single hyphens */
-export const LoopNameSchema = z.string().regex(
-	/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-	"Loop name must be kebab-case (e.g. refactor-auth)",
-);
+export const LoopNameSchema = z
+	.string()
+	.regex(
+		/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+		"Loop name must be kebab-case (e.g. refactor-auth)",
+	);
 
 export type LoopName = z.infer<typeof LoopNameSchema>;
 
@@ -40,7 +42,8 @@ export const PauseReasonEnum = {
 	interrupted: "interrupted",
 } as const;
 
-export type PauseReason = (typeof PauseReasonEnum)[keyof typeof PauseReasonEnum];
+export type PauseReason =
+	(typeof PauseReasonEnum)[keyof typeof PauseReasonEnum];
 
 // ── Checklist item schema ──────────────────────────────────────────────
 
@@ -58,24 +61,29 @@ export const RalphTaskFileSchema = z.object({
 	goal: z.string().min(1, "Goal must not be empty"),
 	deliverable: z.string().min(1, "Deliverable must not be empty"),
 	checklist: z
-			.array(ChecklistItemSchema)
-			.min(1, "Task checklist must contain at least one item"),
+		.array(ChecklistItemSchema)
+		.min(1, "Task checklist must contain at least one item"),
 	headings: z
-			.array(z.string())
-			.min(1, "Task file must have at least one required heading"),
+		.array(z.string())
+		.min(1, "Task file must have at least one required heading"),
 });
 
 export type RalphTaskFile = z.infer<typeof RalphTaskFileSchema>;
 
 // ── RalphStateFile schema (matches §5.2 initial + §5.3 runtime) ────────
 
-export const RalphStateFileSchema = z.object({
+const RalphStateShape = z.object({
 	name: LoopNameSchema,
 	source: z.string().min(1, "Source must not be empty"),
 	taskFile: z.string().min(1, "Task file path must not be empty"),
+	provider: z.string().min(1).optional(),
+	model: z.string().min(1).optional(),
 	models: z.object({
 		init: z.object({ provider: z.string().min(1), name: z.string().min(1) }),
-		implement: z.object({ provider: z.string().min(1), name: z.string().min(1) }),
+		implement: z.object({
+			provider: z.string().min(1),
+			name: z.string().min(1),
+		}),
 		reflect: z.object({ provider: z.string().min(1), name: z.string().min(1) }),
 	}),
 	iteration: z.number().int().nonnegative(),
@@ -93,11 +101,41 @@ export const RalphStateFileSchema = z.object({
 	workerRunId: z.string().uuid().optional(),
 	workerItem: z.string().optional(),
 	lastError: z.string().nullish(),
-	pauseReason: z
-			.nativeEnum(PauseReasonEnum)
-			.nullable()
-			.optional(),
+	pauseReason: z.nativeEnum(PauseReasonEnum).nullable().optional(),
 });
+
+/** Accept state files written before per-phase model routing was introduced. */
+export const RalphStateFileSchema = z
+	.preprocess((value) => {
+		if (
+			value &&
+			typeof value === "object" &&
+			"provider" in value &&
+			"model" in value &&
+			!("models" in value)
+		) {
+			const legacy = value as { provider: string; model: string };
+			return {
+				...value,
+				models: {
+					init: { provider: legacy.provider, name: legacy.model },
+					implement: { provider: legacy.provider, name: legacy.model },
+					reflect: { provider: legacy.provider, name: legacy.model },
+				},
+			};
+		}
+		return value;
+	}, RalphStateShape)
+	.transform((state) => {
+		if ("provider" in state && "model" in state) {
+			const { models: _models, ...legacy } = state as typeof state & {
+				provider: string;
+				model: string;
+			};
+			return legacy as typeof state;
+		}
+		return state;
+	});
 
 export type RalphStateFile = z.infer<typeof RalphStateFileSchema>;
 
@@ -133,25 +171,25 @@ export class RalphError extends Error {
 /** Parse raw JSON text into a validated RalphStateFile */
 export function parseRalphStateFile(text: string): RalphStateFile {
 	try {
-			const parsed = JSON.parse(text);
-			return RalphStateFileSchema.parse(parsed);
+		const parsed = JSON.parse(text);
+		return RalphStateFileSchema.parse(parsed);
 	} catch (e) {
-			if (e instanceof z.ZodError) {
-					throw new RalphError("Invalid state file structure", e.issues);
-			}
-			throw new RalphError(`Failed to parse state JSON: ${String(e)}`);
+		if (e instanceof z.ZodError) {
+			throw new RalphError("Invalid state file structure", e.issues);
+		}
+		throw new RalphError(`Failed to parse state JSON: ${String(e)}`);
 	}
 }
 
 /** Parse raw JSON text into a validated RalphLockFile */
 export function parseRalphLockFile(text: string): RalphLockFile {
 	try {
-			const parsed = JSON.parse(text);
-			return RalphLockFileSchema.parse(parsed);
+		const parsed = JSON.parse(text);
+		return RalphLockFileSchema.parse(parsed);
 	} catch (e) {
-			if (e instanceof z.ZodError) {
-					throw new RalphError("Invalid lock file structure", e.issues);
-			}
-			throw new RalphError(`Failed to parse lock JSON: ${String(e)}`);
+		if (e instanceof z.ZodError) {
+			throw new RalphError("Invalid lock file structure", e.issues);
+		}
+		throw new RalphError(`Failed to parse lock JSON: ${String(e)}`);
 	}
 }

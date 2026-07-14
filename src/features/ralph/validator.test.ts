@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import {
-	parseTaskFile,
-	nextUncheckedTask,
-	validateCheckboxChange,
-	RalphParseError,
-	type ParseResult,
-} from "./validator";
 import type { RalphTaskFile } from "./schema";
+import {
+	nextUncheckedTask,
+	type ParseResult,
+	parseTaskFile,
+	RalphParseError,
+	validateCheckboxChange,
+} from "./validator";
 
 // ─── Test fixtures ────────────────────────────────────────────────────────
 
@@ -157,7 +157,7 @@ describe("parseTaskFile", () => {
 	});
 
 	test("rejects file with duplicate headings", () => {
-		const duplicated = VALID_TASK_FILE + `\n## Goal\nDuplicate goal section.\n`;
+		const duplicated = `${VALID_TASK_FILE}\n## Goal\nDuplicate goal section.\n`;
 		const result = parseTaskFile(duplicated);
 		expect(result).toBeInstanceOf(Error);
 		expect((result as Error).message).toContain("duplicate");
@@ -170,7 +170,10 @@ describe("parseTaskFile", () => {
 	});
 
 	test("accepts file where only some tasks are checked", () => {
-		const partial = VALID_TASK_FILE.replace("- [ ] Implement JWT encoder", "- [x] Implement JWT encoder");
+		const partial = VALID_TASK_FILE.replace(
+			"- [ ] Implement JWT encoder",
+			"- [x] Implement JWT encoder",
+		);
 		const result = parseTaskFile(partial);
 		expect(result).not.toBeInstanceOf(Error);
 		expect((result as RalphTaskFile).checklist[1].done).toBe(true);
@@ -294,8 +297,8 @@ describe("nextUncheckedTask", () => {
 		]);
 		const result = nextUncheckedTask(parsed);
 		expect(result).not.toBeNull();
-		expect(result!.index).toBe(1);
-		expect(result!.text).toBe("Pending task");
+		expect(result?.index).toBe(1);
+		expect(result?.text).toBe("Pending task");
 	});
 
 	test("returns null when all tasks are checked", () => {
@@ -313,8 +316,8 @@ describe("nextUncheckedTask", () => {
 			{ done: true, text: "Second task" },
 		]);
 		const result = nextUncheckedTask(parsed);
-		expect(result!.index).toBe(0);
-		expect(result!.text).toBe("First task");
+		expect(result?.index).toBe(0);
+		expect(result?.text).toBe("First task");
 	});
 
 	test("returns null for empty checklist", () => {

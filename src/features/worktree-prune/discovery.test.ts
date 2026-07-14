@@ -72,7 +72,7 @@ describe("discoverExtraWorktrees", () => {
 		const repoPath = await createFakeRepo(dir, "my-repo");
 
 		const worktrees: WorktreeInfo[] = [
-			{ path: repoPath, ref: "main" },                   // primary — filtered out
+			{ path: repoPath, ref: "main" }, // primary — filtered out
 			{ path: join(repoPath, "wt-feature-a"), ref: "feature/a" },
 			{ path: join(repoPath, "wt-fix-bug"), ref: "fix/bug" },
 		];
@@ -111,7 +111,7 @@ describe("discoverExtraWorktrees", () => {
 		const repoPath = await createFakeRepo(dir, "my-repo");
 
 		const worktrees: WorktreeInfo[] = [
-			{ path: repoPath, ref: "main" },  // only primary
+			{ path: repoPath, ref: "main" }, // only primary
 		];
 
 		const vcs = new FakeVcs({ worktrees });

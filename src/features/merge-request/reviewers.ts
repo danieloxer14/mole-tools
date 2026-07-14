@@ -191,7 +191,6 @@ export async function selectReviewers(
 
 	const repoRoot = await ctx.vcs.repoRoot();
 
-
 	// Try CODEOWNERS first for the member pool.
 	const path = await findCodeowners(repoRoot, ctx);
 
@@ -209,7 +208,6 @@ export async function selectReviewers(
 		).filter((member): member is HostMember => member !== null);
 	}
 
-
 	// Build suggestions from CODEOWNERS members, touch authors, and recent authors.
 	let suggestions = rankReviewerSuggestions(
 		members,
@@ -218,10 +216,8 @@ export async function selectReviewers(
 		currentUser,
 	);
 
-
 	// If no candidates ranked from CODEOWNERS pool, fall back to git history only.
 	if (suggestions.length === 0 && members.length === 0) {
-
 		const [touchAuthors, recentAuthors] = await Promise.all([
 			ctx.vcs.touchAuthorsForFiles(files, 200),
 			ctx.vcs.recentAuthors(100),
