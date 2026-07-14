@@ -19,17 +19,13 @@ function useSpinnerFrame(active: boolean): string {
 }
 
 function LogLine({ entry, active }: { entry: LogEntry; active: boolean }) {
-	const color =
-		entry.level === "error"
-			? "red"
-			: entry.level === "warn"
-				? "yellow"
-				: "gray";
+	const color = entry.level === "error" ? "red" : entry.level === "warn" ? "yellow" : entry.terminal ? "gray" : "white";
 	const spinnerFrame = useSpinnerFrame(active);
+	const [tool, ...details] = entry.text.split(" — ");
 	return (
 		<Text color={color}>
 			{active ? `${spinnerFrame} ` : ""}
-			{entry.text}
+			{entry.terminal ? <><Text color="cyanBright">{tool}</Text>{details.length > 0 ? ` — ${details.join(" — ")}` : ""}</> : entry.text}
 		</Text>
 	);
 }

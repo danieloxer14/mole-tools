@@ -41,6 +41,7 @@ export const ConfigSchema = z.object({
 	dynamicEnvRepos: z.array(z.string()).optional(),
 	dynamicEnvScript: z.string().optional(),
 	autoReviewer: z.object({ username: z.string() }).optional(),
+	worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
 }).strict();
 export type Config = z.infer<typeof ConfigSchema>;
 

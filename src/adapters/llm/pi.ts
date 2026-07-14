@@ -102,14 +102,32 @@ export class PiAdapter implements Llm {
 			let stderr = "";
 			let pendingStdout = "";
 
+			const preview = (value: unknown, maxLength = 240): string => {
+				const text = typeof value === "string" ? value : Array.isArray(value)
+					? value.map((part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("\n")
+					: "";
+				const compact = text.replace(/\s+/g, " ").trim();
+				return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+			};
+			const toolDetail = (toolName: unknown, args: unknown): string => {
+				const input = args as Record<string, unknown> | null;
+				if (!input || typeof input !== "object") return "";
+				const target = [input.path, input.filePath, input.file].find((value): value is string => typeof value === "string");
+				if (target) return target;
+				if (String(toolName) === "bash" && typeof input.command === "string") return preview(input.command, 160);
+				return preview(JSON.stringify(input), 160);
+			};
 			const handleEvent = (line: string) => {
 				try {
 					const event = JSON.parse(line) as Record<string, unknown>;
 					if (event.type === "tool_execution_start") {
-						req.onProgress?.(`Pi: running ${String(event.toolName)}…`);
+						const detail = toolDetail(event.toolName, event.args);
+						req.onProgress?.(`${String(event.toolName)}${detail ? ` — ${detail}` : ""}…`);
 					}
 					if (event.type === "tool_execution_end") {
-						req.onProgress?.(`Pi: ${String(event.toolName)} ${event.isError ? "failed" : "completed"}.`);
+						const result = event.result as { content?: unknown } | undefined;
+						const detail = preview(result?.content);
+						req.onProgress?.(`${String(event.toolName)} ${event.isError ? "failed" : "completed"}${detail ? ` — ${detail}` : "."}`);
 					}
 					if (event.type === "message_end") {
 						const message = event.message as { role?: unknown; content?: unknown } | undefined;

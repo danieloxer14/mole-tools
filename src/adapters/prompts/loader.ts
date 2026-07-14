@@ -34,7 +34,7 @@ Instruct future workers to reread this file every iteration rather than trusting
 Define the conditions for marking the loop complete: all tasks checked AND a full validation suite passes. Workers must not mark completion prematurely.
 
 ## Iteration protocol
-Instruct future workers to: select the first unchecked task, inspect current code before changes, implement with TDD verification, check the task only after verification passes, then update state and end the iteration.
+Instruct future workers to: select the first unchecked \`- [ ]\` task, inspect current code before changes, implement consecutive tasks with TDD verification until the end of the current ticket, and immediately check each task after its verification passes. Explain that updating the checklist task-by-task preserves recoverable progress if the process fails or quits; do not defer checklist updates until the ticket ends. Then update state and end the iteration.
 `,
 	"ralph-implement-system":
 		`Implement the work described by the ticket. Use TDD where possible, at pre-agreed seams. Run typechecking regularly, single test files regularly, and the full test suite once at the end. Once done, review the work according to the instructions in the Ralph task file.\n`,

@@ -47,7 +47,7 @@ export async function runRalphInit(ctx: Context, input: RalphInitArgs): Promise<
 	const systemPrompt = await loadPrompt("ralph-init-system");
 	const source = classifySource(args.source);
 	await ctx.ui.info(`Generating Ralph task file with ${models.init.name}…`, { spinner: true });
-	const result = await llm.runAgent({ purpose: "ralph", providerKey: models.init.provider, model: models.init.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "replace", prompt: `${systemPrompt}\n\n${generationRequest(source)}`, onProgress: (message) => { void ctx.ui.info(message, { spinner: true }); } });
+	const result = await llm.runAgent({ purpose: "ralph", providerKey: models.init.provider, model: models.init.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "replace", prompt: `${systemPrompt}\n\n${generationRequest(source)}`, onProgress: (message) => { void ctx.ui.info(message, { spinner: true, terminal: true }); } });
 	if (!result.ok) throw new Error(result.stderr?.trim() || "Ralph task generation failed");
 	if (!result.output.trim()) throw new Error("Ralph task generation returned empty output");
 	const parsed = parseTaskFile(result.output);

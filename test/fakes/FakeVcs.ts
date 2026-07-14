@@ -1,4 +1,4 @@
-import type { CommitMeta, FileDiff, LogQuery, Vcs } from "../../src/ports/vcs";
+import type { CommitMeta, FileDiff, LogQuery, Vcs, WorktreeInfo } from "../../src/ports/vcs";
 
 export interface FakeVcsOptions {
 	branch?: string;
@@ -13,11 +13,17 @@ export interface FakeVcsOptions {
 	upstream?: boolean;
 	ahead?: boolean;
 	mergeBaseDiff?: FileDiff[];
+	worktrees?: WorktreeInfo[];
+	removeWorktreeError?: Error;
+	forceRemoveWorktreeError?: Error;
+	showWorktreeStatusOutput?: string;
 }
 
 export class FakeVcs implements Vcs {
 	committedMessages: string[] = [];
 	pushCalls: { setUpstream: boolean; branch: string }[] = [];
+	worktreeCalls: { path: string; repoRoot: string }[] = [];
+	forceWorktreeCalls: { path: string; repoRoot: string }[] = [];
 
 	constructor(private readonly opts: FakeVcsOptions = {}) {}
 
@@ -90,5 +96,23 @@ export class FakeVcs implements Vcs {
 
 	async log(_opts: LogQuery): Promise<CommitMeta[]> {
 		return this.opts.log ?? [];
+	}
+
+	async worktrees(_repoRoot: string): Promise<WorktreeInfo[]> {
+		return this.opts.worktrees ?? [];
+	}
+
+	async removeWorktree(path: string, repoRoot: string): Promise<void> {
+		this.worktreeCalls.push({ path, repoRoot });
+		if (this.opts.removeWorktreeError) throw this.opts.removeWorktreeError;
+	}
+
+	async forceRemoveWorktree(path: string, repoRoot: string): Promise<void> {
+		this.forceWorktreeCalls.push({ path, repoRoot });
+		if (this.opts.forceRemoveWorktreeError) throw this.opts.forceRemoveWorktreeError;
+	}
+
+	async showWorktreeStatus(_repoRoot: string, _worktreePath: string): Promise<string> {
+		return this.opts.showWorktreeStatusOutput ?? "/fake/repo/wt: clean";
 	}
 }

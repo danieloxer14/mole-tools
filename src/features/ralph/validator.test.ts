@@ -357,7 +357,7 @@ describe("validateCheckboxChange", () => {
 		expect(result.success).toBe(false);
 	});
 
-	test("rejects when multiple checkboxes changed", () => {
+	test("accepts consecutive tasks completed from the selected task", () => {
 		const before = `## Task checklist
 - [ ] Write tests
 - [ ] Implement feature
@@ -367,6 +367,21 @@ describe("validateCheckboxChange", () => {
 - [x] Write tests
 - [x] Implement feature
 - [ ] Add docs
+`;
+		const result = validateCheckboxChange(before, after, "Write tests");
+		expect(result.success).toBe(true);
+	});
+
+	test("rejects progress that skips a task", () => {
+		const before = `## Task checklist
+- [ ] Write tests
+- [ ] Implement feature
+- [ ] Add docs
+`;
+		const after = `## Task checklist
+- [x] Write tests
+- [ ] Implement feature
+- [x] Add docs
 `;
 		const result = validateCheckboxChange(before, after, "Write tests");
 		expect(result.success).toBe(false);

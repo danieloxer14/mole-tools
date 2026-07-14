@@ -5,6 +5,7 @@ export interface LogEntry {
 	level: "info" | "warn" | "error";
 	text: string;
 	spinner?: boolean;
+	terminal?: boolean;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: resolve is invoked with the value the request kind expects; call sites (InkUiPort) keep that contract.
@@ -73,10 +74,10 @@ export class UiController {
 
 	private nextLogId = 0;
 
-	pushLog(level: LogEntry["level"], text: string, spinner?: boolean): void {
+	pushLog(level: LogEntry["level"], text: string, opts?: { spinner?: boolean; terminal?: boolean }): void {
 		this.log = [
 			...this.log,
-			{ id: this.nextLogId++, level, text, ...(spinner ? { spinner } : {}) },
+			{ id: this.nextLogId++, level, text, ...(opts?.spinner ? { spinner: true } : {}), ...(opts?.terminal ? { terminal: true } : {}) },
 		];
 		this.emit();
 	}

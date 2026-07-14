@@ -40,6 +40,8 @@ describe("loadPrompt", () => {
 		expect(prompt).toContain("## Completion gate");
 		expect(prompt).toContain("## Iteration protocol");
 		expect(prompt).toContain("TDD red → green");
+		expect(prompt).toContain("until the end of the current ticket");
+		expect(prompt).toContain("preserves recoverable progress");
 		expect(await Bun.file(join(dir, "ralph-init-system.md")).exists()).toBe(true);
 	});
 

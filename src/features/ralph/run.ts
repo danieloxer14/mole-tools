@@ -17,7 +17,7 @@ function diagnostic(result: { stderr?: string; output?: string }, fallback: stri
 	return text.length > 2000 ? text.slice(-2000) : text;
 }
 function taskRequest(taskFile: string, selected: string): string {
-	return ["Read the Ralph task file below and implement exactly the selected next task.", "Do not check, uncheck, add, remove, or rewrite any other checklist item.", "Inspect the workspace and verify your changes with appropriate tests.", "Only check the selected item after implementation and verification are complete.", `Selected task: ${selected}`, "\nRalph task file:\n", taskFile].join("\n");
+	return ["**Select** the first unchecked task (`- [ ]`) in the Task checklist above and implement the tasks until you reach the end of a ticket.", "Resume from already-checked tasks; do not redo them.", "Inspect the workspace and verify your changes with appropriate tests.", "Update the checklist immediately as each task is completed and verified. This records progress for recovery if the process fails or quits; do not defer checklist updates until the ticket ends.", `First unchecked task: ${selected}`, "\nRalph task file:\n", taskFile].join("\n");
 }
 function reflectionRequest(taskFile: string): string {
 	return ["Review the current Ralph loop implementation and task plan.", "Use the repository and verification evidence, then update the task file when necessary.", "You may uncheck inadequate tasks or add new unchecked tasks, but preserve all required headings and checklist meaning.", "\nRalph task file:\n", taskFile].join("\n");
@@ -64,10 +64,11 @@ export async function runRalphRun(ctx: Context, input: RalphRunArgs): Promise<Ra
 		state = { ...state, phase: PhaseEnum.reflecting, awaitingReview: finalReview, ...(finalReview ? { status: StatusEnum.completed } : {}) };
 		await writeState(args.name, state);
 		const prompt = await loadPrompt("ralph-reflection-system");
+		await ctx.ui.info(`Reflecting Ralph loop with ${state.models.reflect.name}…`, { spinner: true });
 		activeAbort = new AbortController();
 		let result: { ok: boolean; output: string; stderr?: string };
 		try {
-			result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.models.reflect.provider, model: state.models.reflect.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${prompt}\n\n${reflectionRequest(before)}`, signal: activeAbort.signal });
+			result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.models.reflect.provider, model: state.models.reflect.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${prompt}\n\n${reflectionRequest(before)}`, signal: activeAbort.signal, onProgress: (message) => { void ctx.ui.info(message, { spinner: true, terminal: true }); } });
 		} catch (error) {
 			result = { ok: false, output: "", stderr: error instanceof Error ? error.message : String(error) };
 		} finally { activeAbort = null; }
@@ -118,7 +119,7 @@ export async function runRalphRun(ctx: Context, input: RalphRunArgs): Promise<Ra
 			await ctx.ui.info(`Iteration ${state.iteration + 1}/${state.maxIterations} — ${selected.text}`, { spinner: true });
 			activeAbort = new AbortController();
 			let result: { ok: boolean; output: string; stderr?: string };
-			try { result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.models.implement.provider, model: state.models.implement.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${systemPrompt}\n\n${taskRequest(before, selected.text)}`, signal: activeAbort.signal }); }
+			try { result = await ctx.llm.runAgent({ purpose: "ralph", providerKey: state.models.implement.provider, model: state.models.implement.name, workspace: process.cwd(), permissionPolicy: "auto-approve", systemPromptMode: "append", prompt: `${systemPrompt}\n\n${taskRequest(before, selected.text)}`, signal: activeAbort.signal, onProgress: (message) => { void ctx.ui.info(message, { spinner: true, terminal: true }); } }); }
 			catch (error) { result = { ok: false, output: "", stderr: error instanceof Error ? error.message : String(error) }; }
 			activeAbort = null;
 			if (interrupted) { await pause("interrupted"); throw new RalphRunError("Ralph run interrupted", { name: args.name, status: "paused", iteration: state.iteration }); }

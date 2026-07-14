@@ -1,3 +1,8 @@
+export interface WorktreeInfo {
+	path: string;
+	ref: string;
+}
+
 export interface FileDiff {
 	path: string;
 	statOnly: boolean;
@@ -41,4 +46,8 @@ export interface Vcs {
 	recentAuthors(maxCount?: number): Promise<string[]>;
 	repoRoot(): Promise<string>;
 	log(opts: LogQuery): Promise<CommitMeta[]>;
+	worktrees(repoRoot: string): Promise<WorktreeInfo[]>;
+	removeWorktree(path: string, repoRoot: string): Promise<void>;
+	forceRemoveWorktree(path: string, repoRoot: string): Promise<void>;
+	showWorktreeStatus(repoRoot: string, worktreePath: string): Promise<string>;
 }

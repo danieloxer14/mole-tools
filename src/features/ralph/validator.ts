@@ -221,14 +221,11 @@ export function nextUncheckedTask(
 }
 
 /**
- * Validate that a checkbox change corresponds to exactly the selected task being checked.
+ * Validate a worker's progress from the selected first unchecked task.
  *
- * Detects:
- * - Correct single check = success
- * - Wrong item changed = failure
- * - Multiple items changed = failure
- * - Items added or removed = failure
- * - Previously checked item unchecked = failure
+ * A worker may complete one ticket's consecutive tasks in one iteration, so it
+ * may check a contiguous run beginning at the selected task. It may not skip a
+ * task, rewrite the checklist, or uncheck prior progress.
  */
 export function validateCheckboxChange(
 	before: string,
@@ -243,40 +240,25 @@ export function validateCheckboxChange(
 		return { success: false };
 	}
 
-	const changes: Array<{ index: number; text: string }> = [];
+	const selectedLower = selectedItem.trim().toLowerCase();
+	const selectedIndex = beforeItems.findIndex(
+		(item) => !item.done && item.text.trim().toLowerCase() === selectedLower,
+	);
+	if (selectedIndex === -1) return { success: false };
 
+	const changedIndexes: number[] = [];
 	for (let i = 0; i < beforeItems.length; i++) {
-		const bText = beforeItems[i].text.trim().toLowerCase();
-		const aText = afterItems[i].text.trim().toLowerCase();
-		const bDone = beforeItems[i].done;
-		const aDone = afterItems[i].done;
-
-		// Same text and same state => no change
-		if (bText === aText && bDone === aDone) continue;
-
-		// Text changed at this index => illegal mutation
-		if (bText !== aText) {
-			return { success: false };
-		}
-
-		// State changed — record it
-		if (bDone !== aDone) {
-			// Unchecking a previously done item is illegal
-			if (!aDone) return { success: false };
-			changes.push({ index: i, text: beforeItems[i].text });
-		}
+		const beforeItem = beforeItems[i]!;
+		const afterItem = afterItems[i]!;
+		if (beforeItem.text.trim().toLowerCase() !== afterItem.text.trim().toLowerCase()) return { success: false };
+		if (beforeItem.done === afterItem.done) continue;
+		if (!afterItem.done) return { success: false };
+		changedIndexes.push(i);
 	}
 
-	// A worker must check the selected item. An unchanged task file is a failed
-	// attempt (the runner will restore the snapshot and consume an iteration).
-	if (changes.length === 0) return { success: false };
-
-	// Must be exactly one change matching the selected item
-	if (changes.length !== 1) return { success: false };
-
-	const changed = changes[0];
-	const selectedLower = selectedItem.trim().toLowerCase();
-	const changedLower = changed.text.trim().toLowerCase();
-
-	return { success: selectedLower === changedLower };
+	// Progress must start at the selected task and contain no skipped tasks.
+	return {
+		success: changedIndexes.length > 0
+			&& changedIndexes.every((index, offset) => index === selectedIndex + offset),
+	};
 }

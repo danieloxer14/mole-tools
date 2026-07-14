@@ -38,7 +38,10 @@ export const CONFIG_TEMPLATE_TEXT = `{
   }
   // "dynamicEnvRepos": ["org/repo"]                  // repos offered the "create dynamic env" option
   // "dynamicEnvScript": "hack/local/dynamic-env.sh"  // handoff script for configured repositories
-  // "autoReviewer": { "username": "your-handle" }    // presence enables the "add auto-reviewer?" question
+  // "autoReviewer": { "username": "your-handle" },   // presence enables the "add auto-reviewer?" question
+  // "worktreePrune": {                               // persisted base directory for worktree-prune
+  //   "baseDir": "~/repos"                          // scanned for Git repos and extra worktrees
+  // }
 }
 `;
 
@@ -85,4 +88,17 @@ export async function loadConfig(
 	throw new PortError(
 		`Invalid config at ${path}: ${formatZodIssues(directResult.error.issues)}`,
 	);
+}
+
+/** Write a partial merge back to the user's config file. */
+export async function updateConfig(
+	partial: Partial<Config>,
+	path: string = defaultConfigPath(),
+): Promise<void> {
+	const existing = await loadConfig(path);
+	const merged = { ...existing, ...partial };
+	// Re-validate the merged shape
+	const validated = ConfigSchema.parse(merged);
+	validateModelProviders(validated);
+	await Bun.write(path, JSON.stringify(validated, null, 2) + "\n");
 }

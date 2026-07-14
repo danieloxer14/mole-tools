@@ -37,8 +37,8 @@ export class FakeUiPort implements UiPort {
 		return (entry as Record<ScriptKey, unknown>)[methodName] as T;
 	}
 
-	async info(text: string, opts?: { spinner?: boolean }): Promise<void> {
-		this.transcript.push({ kind: "info", text, spinner: opts?.spinner });
+	async info(text: string, opts?: { spinner?: boolean; terminal?: boolean }): Promise<void> {
+		this.transcript.push({ kind: "info", text, spinner: opts?.spinner, ...(opts?.terminal ? { terminal: true } : {}) });
 	}
 
 	async warn(text: string): Promise<void> {
