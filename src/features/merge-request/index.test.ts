@@ -4,7 +4,7 @@ import { FakeLlm } from "../../../test/fakes/FakeLlm";
 import { FakeUiPort } from "../../../test/fakes/FakeUiPort";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
 import { fakeContext } from "../../../test/fakes/fakeContext";
-import { runMergeRequestFlow } from "./index";
+import { mergeRequest, runMergeRequestFlow } from "./index";
 
 const commit = {
 	sha: "1",
@@ -12,6 +12,12 @@ const commit = {
 	author: "A",
 	date: "today",
 };
+
+describe("merge-request args schema", () => {
+	test("rejects whitespace-only context with Zod error", () => {
+		expect(() => mergeRequest.args.parse({ context: " \n\t " })).toThrow();
+	});
+});
 
 describe("merge-request flow", () => {
 	test("preflights host before default-branch guard and generation", async () => {
@@ -50,6 +56,53 @@ describe("merge-request flow", () => {
 		expect(result.title).toBe("feat: add feature");
 		expect(result.commits).toEqual(["feat: add feature"]);
 		expect(llm.requests[0]?.prompt).toContain("feat: add feature");
+	});
+
+	test("forwards context to both staged commit and MR generation", async () => {
+		const context = "Emphasize rollout safety and customer impact";
+		const llm = new FakeLlm([
+			["feat: commit staged changes"],
+			["Title: feat: open merge request\n\nDescription"],
+		]);
+		const ctx = fakeContext({
+			gitHost: new FakeGitHost(),
+			llm,
+			vcs: new FakeVcs({ staged: true, commitsAhead: [commit] }),
+			ui: new FakeUiPort([
+				{ select: "accept" },
+				{ confirm: false }, // draft
+				{ confirm: true }, // create
+			]),
+		});
+
+		await expect(runMergeRequestFlow(ctx, { context })).resolves.toMatchObject({
+			title: "feat: open merge request",
+		});
+		expect(llm.requests).toHaveLength(2);
+		for (const request of llm.requests) {
+			expect(request.prompt).toContain("Additional user context:");
+			expect(request.prompt).toContain(context);
+		}
+	});
+
+	test("retains context across MR title-format retries", async () => {
+		const context = "Focus on operational impact";
+		const llm = new FakeLlm([
+			["not conventional"],
+			["Title: feat: open merge request\n\nDescription"],
+		]);
+		const ctx = fakeContext({
+			gitHost: new FakeGitHost(),
+			llm,
+			vcs: new FakeVcs({ staged: false, commitsAhead: [commit] }),
+			ui: new FakeUiPort([{ confirm: false }, { confirm: true }]),
+		});
+
+		await runMergeRequestFlow(ctx, { context });
+		expect(llm.requests).toHaveLength(2);
+		for (const request of llm.requests) {
+			expect(request.prompt).toContain(context);
+		}
 	});
 
 	test("allows unstaged changes but only sends the merge-base diff", async () => {

@@ -12,6 +12,24 @@ import { FakeUiPort } from "../fakes/FakeUiPort";
 import { FakeVcs } from "../fakes/FakeVcs";
 import { fakeContext } from "../fakes/fakeContext";
 
+describe("commit args schema", () => {
+	test("rejects whitespace-only context with Zod error", () => {
+		expect(() => commit.args.parse({ context: "   " })).toThrow();
+	});
+
+	test("accepts valid non-blank context", () => {
+		const result = commit.args.parse({
+			context: "Emphasize the migration risk",
+		});
+		expect(result.context).toBe("Emphasize the migration risk");
+	});
+
+	test("accepts empty object (no context)", () => {
+		const result = commit.args.parse({});
+		expect(result).toEqual({});
+	});
+});
+
 describe("commit feature", () => {
 	// #2 — nothing staged
 	test("aborts with 'No staged changes' when nothing is staged", async () => {
@@ -122,6 +140,38 @@ describe("commit feature", () => {
 		const result = await commit.run(ctx, {});
 		expect(result.committed).toBe(true);
 		expect(llm.requests).toHaveLength(2);
+	});
+
+	// #9b — context propagates to every LLM request across retries
+	test("context appears in every LLM request including retries", async () => {
+		const llm = new FakeLlm([["not conventional"], ["feat: valid message"]]);
+		const ctx = fakeContext({
+			llm,
+			ui: new FakeUiPort([{ select: "accept" }, { confirm: false }]),
+		});
+		await commit.run(ctx, { context: "Emphasize the migration risk" });
+		expect(llm.requests).toHaveLength(2);
+		for (const req of llm.requests) {
+			expect(req.prompt).toContain("Additional user context:");
+			expect(req.prompt).toContain("Emphasize the migration risk");
+		}
+	});
+
+	// #9c — multi-word context with internal newlines/spaces is accepted and preserved
+	test("multi-word multiline context is accepted and preserved in prompt", async () => {
+		const llm = new FakeLlm([["feat: add feature"]]);
+		const ctx = fakeContext({
+			llm,
+			ui: new FakeUiPort([{ select: "accept" }, { confirm: false }]),
+		});
+		await commit.run(ctx, {
+			context:
+				"This is a long context message\nwith multiple lines\n  and internal spacing.",
+		});
+		const prompt = llm.requests[0]?.prompt ?? "";
+		expect(prompt).toContain("This is a long context message");
+		expect(prompt).toContain("with multiple lines");
+		expect(prompt).toContain("and internal spacing.");
 	});
 
 	// #10 — valid message shown with accept/edit/reject

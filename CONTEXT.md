@@ -49,6 +49,9 @@ A feature-owned provider/model selection in global configuration, for example `c
 ### LLM capability
 An explicit operation an LLM provider supports. `text-generation` serves commit and merge-request; `agentic-workspace` serves Ralph. A provider that lacks a requested capability fails at preflight before external work. `Context.llm` routes a feature purpose to its configured provider without exposing provider names to feature code.
 
+### User-supplied generation context
+Optional, invocation-scoped, non-blank free text supplied through the `--context` CLI option to guide an LLM-generated commit message or merge-request title and description. Its internal whitespace is preserved; it has no tool-level length limit and is not persisted. Prompt builders render it immediately after the feature prompt as a clearly labelled guiding-instruction section, before Jira, commit, and diff evidence. For a merge-request invocation that commits staged changes, the same context guides the internal commit generation as well as merge-request generation.
+
 ### Feature help metadata
 Optional command-level documentation colocated on a feature. It may include usage, examples, and notes. It does not replace generated data from the feature's name, description, or zod args.
 

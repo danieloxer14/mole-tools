@@ -9,7 +9,15 @@ import { runCommitFlow } from "../commit";
 import { generateMergeRequest } from "./generate";
 import { selectReviewers } from "./reviewers";
 
-const args = z.object({});
+const args = z.object({
+	context: z
+		.string()
+		.trim()
+		.min(1, "--context must not be blank")
+		.optional()
+		.describe("Extra guidance for the generated merge request")
+		.meta({ examples: ["Emphasize the migration risk and rollout plan."] }),
+});
 
 export interface MergeRequestCandidate {
 	title: string;
@@ -39,8 +47,14 @@ async function maybeFetchIssue(ctx: Context): Promise<Issue | null> {
 	return issue;
 }
 
+export interface MergeRequestFlowOptions {
+	/** Optional user-supplied guidance for the merge request and commit generation. */
+	context?: string;
+}
+
 export async function runMergeRequestFlow(
 	ctx: Context,
+	options: MergeRequestFlowOptions = {},
 ): Promise<MergeRequestResult> {
 	// Host preflight is deliberately first: do not spend git/Jira/Ollama work
 	// before discovering that glab cannot perform the final operation.
@@ -59,7 +73,7 @@ export async function runMergeRequestFlow(
 	}
 
 	if (await ctx.vcs.hasStagedChanges()) {
-		await runCommitFlow(ctx, { askToPush: false });
+		await runCommitFlow(ctx, { askToPush: false, context: options.context });
 	}
 
 	const upstream = await ctx.vcs.hasUpstream(branch);
@@ -85,6 +99,7 @@ export async function runMergeRequestFlow(
 		issue,
 		commits: commits.map((commit) => commit.subject),
 		diff,
+		context: options.context,
 	});
 	await ctx.ui.info(`Title: ${candidate.title}\n\n${candidate.body}`);
 
@@ -155,11 +170,17 @@ export const mergeRequest: Feature<typeof args, MergeRequestResult> = {
 	description: "Generate and review a GitLab merge request",
 	args,
 	help: {
-		usage: "mole-tools merge-request",
-		examples: [""],
-		notes: ["Prepares an MR candidate from the current branch and commits."],
+		usage: "mole-tools merge-request [--context <text>]",
+		examples: [
+			'mole-tools merge-request --context "Emphasize the migration risk and rollout plan."',
+		],
+		notes: [
+			"Prepares an MR candidate from the current branch and commits.",
+			"If staged changes exist, a commit is generated first using the same --context guidance.",
+			"Use --context to supply invocation-scoped guidance for the LLM without changing configured prompts.",
+		],
 	},
-	async run(ctx) {
-		return runMergeRequestFlow(ctx);
+	async run(ctx, args) {
+		return runMergeRequestFlow(ctx, { context: args.context });
 	},
 };

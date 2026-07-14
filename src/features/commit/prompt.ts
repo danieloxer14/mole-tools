@@ -15,8 +15,12 @@ export function buildCommitPrompt(
 	system: string,
 	issue: Issue | null,
 	diff: FileDiff[],
+	context?: string,
 ): string {
 	const sections = [system];
+	if (context) {
+		sections.push(`Additional user context:\n${context}`);
+	}
 	if (issue) {
 		sections.push(
 			`Here is the work item details:\nTicket ${issue.key}: ${issue.summary}\n${issue.description}`,

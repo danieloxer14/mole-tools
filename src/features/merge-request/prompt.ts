@@ -6,6 +6,7 @@ export interface MergeRequestPromptInput {
 	issue?: Issue | null;
 	commits: string[];
 	diff: FileDiff[];
+	context?: string;
 }
 
 function renderDiff(files: FileDiff[]): string {
@@ -23,6 +24,9 @@ export function buildMergeRequestPrompt(
 	input: MergeRequestPromptInput,
 ): string {
 	const sections = [input.system];
+	if (input.context) {
+		sections.push(`Additional user context:\n${input.context}`);
+	}
 	if (input.issue) {
 		sections.push(
 			`Here are the Jira work item details:\nTicket ${input.issue.key}: ${input.issue.summary}\n${input.issue.description}`,

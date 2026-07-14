@@ -10,7 +10,15 @@ import { filterDiff } from "../../shared/diff";
 import { checkFormat } from "../../shared/format";
 import { buildCommitPrompt } from "./prompt";
 
-const args = z.object({});
+const args = z.object({
+	context: z
+		.string()
+		.trim()
+		.min(1, "--context must not be blank")
+		.optional()
+		.describe("Extra guidance for the generated commit message")
+		.meta({ examples: ["Emphasize the migration risk and rollout plan."] }),
+});
 
 export interface CommitResult {
 	committed: true;
@@ -70,6 +78,8 @@ async function generateValid(ctx: Context, prompt: string): Promise<string> {
 export interface CommitFlowOptions {
 	/** When false, commit locally without offering the standalone push prompt. */
 	askToPush?: boolean;
+	/** Optional user-supplied guidance for the generated commit message. */
+	context?: string;
 }
 
 export async function runCommitFlow(
@@ -86,7 +96,7 @@ export async function runCommitFlow(
 		`Fetched diff (${diff.length} file${diff.length === 1 ? "" : "s"})`,
 	);
 	const systemPrompt = await loadPrompt("commit-system");
-	const prompt = buildCommitPrompt(systemPrompt, issue, diff);
+	const prompt = buildCommitPrompt(systemPrompt, issue, diff, options.context);
 	const message = await generateValid(ctx, prompt);
 	await ctx.ui.info(message);
 
@@ -118,15 +128,18 @@ export const commit: Feature<typeof args, CommitResult> = {
 	description: "Generate a commit message for staged changes",
 	args,
 	help: {
-		usage: "mole-tools commit",
-		examples: [""],
+		usage: "mole-tools commit [--context <text>]",
+		examples: [
+			'mole-tools commit --context "Emphasize the migration risk and rollout plan."',
+		],
 		notes: [
 			"Works on currently staged git changes only.",
 			"If your branch name contains a Jira ticket key (e.g. PROJ-123), it will fetch issue details and include them in the generation prompt.",
 			"You can accept, edit, or reject the generated message. After accepting you are asked whether to push.",
+			"Use --context to supply invocation-scoped guidance for the LLM without changing configured prompts.",
 		],
 	},
-	async run(ctx, _args) {
-		return runCommitFlow(ctx, { askToPush: true });
+	async run(ctx, args) {
+		return runCommitFlow(ctx, { askToPush: true, context: args.context });
 	},
 };

@@ -17,6 +17,7 @@ export interface GenerateMergeRequestInput {
 	issue?: Issue | null;
 	commits: string[];
 	diff: FileDiff[];
+	context?: string;
 }
 
 /** Generate an MR candidate, retrying only when the title violates format rules. */
