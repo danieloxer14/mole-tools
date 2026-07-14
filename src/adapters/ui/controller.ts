@@ -31,6 +31,39 @@ export type Request =
 	  }
 	| { kind: "pause"; message: string; resolve: Resolve };
 
+function completedRequestText(request: Request, value: unknown): string {
+	const question =
+		request.kind === "editText" || request.kind === "editMultiline"
+			? request.prompt
+			: request.kind === "stream"
+				? request.label
+				: request.kind === "pause"
+					? request.message
+					: request.q;
+
+	if (request.kind === "stream") {
+		return [question ?? "", String(value)].filter(Boolean).join("\n");
+	}
+	if (request.kind === "pause") return question;
+	if (request.kind === "confirm") {
+		return `${question} → ${value ? "Yes" : "No"}`;
+	}
+	if (request.kind === "editText" || request.kind === "editMultiline") {
+		return `${question} → ${String(value)}`;
+	}
+	if (request.kind === "multiSelect") {
+		const selected = new Set(value as unknown[]);
+		return `${question} → ${
+			request.opts
+				.filter((option) => selected.has(option.value))
+				.map((option) => option.label)
+				.join(", ") || "none"
+		}`;
+	}
+	const option = request.opts.find((candidate) => candidate.value === value);
+	return `${question} → ${option?.label ?? String(value)}`;
+}
+
 export class UiController {
 	current: Request | null = null;
 	log: LogEntry[] = [];
@@ -49,17 +82,19 @@ export class UiController {
 		make: (resolve: (v: T) => void, reject: (e: unknown) => void) => Request,
 	): Promise<T> {
 		return new Promise((resolve, reject) => {
+			let request: Request;
 			const wrappedResolve = (v: T) => {
 				this.current = null;
+				this.pushLog("info", completedRequestText(request, v));
 				resolve(v);
-				this.emit();
 			};
 			const wrappedReject = (e: unknown) => {
 				this.current = null;
 				reject(e);
 				this.emit();
 			};
-			this.current = make(wrappedResolve, wrappedReject);
+			request = make(wrappedResolve, wrappedReject);
+			this.current = request;
 			this.emit();
 		});
 	}

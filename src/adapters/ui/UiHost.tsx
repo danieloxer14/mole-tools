@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Static, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Choice } from "../../ports/ui";
@@ -236,15 +236,20 @@ export function UiHost({ controller }: { controller: UiController }) {
 		controller.getLogSnapshot,
 	);
 
+	// Ink normally redraws the complete tree in place. Static keeps completed
+	// output out of that redraw, so the terminal can retain it in scrollback.
+	const activeSpinner =
+		log.length > 0 && log[log.length - 1]?.spinner ? log.length - 1 : -1;
+	const historicalLog = activeSpinner === -1 ? log : log.slice(0, -1);
+
 	return (
 		<Box flexDirection="column">
-			{log.map((entry, i) => (
-				<LogLine
-					key={entry.id}
-					entry={entry}
-					active={Boolean(entry.spinner) && i === log.length - 1}
-				/>
-			))}
+			<Static items={historicalLog}>
+				{(entry) => <LogLine key={entry.id} entry={entry} active={false} />}
+			</Static>
+			{activeSpinner >= 0 ? (
+				<LogLine entry={log[activeSpinner] as LogEntry} active />
+			) : null}
 			{request ? <RequestView key={requestId(request)} req={request} /> : null}
 		</Box>
 	);
