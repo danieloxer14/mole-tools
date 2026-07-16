@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { ZodBoolean, ZodDefault, ZodObject } from "zod";
+import { ZodBoolean, ZodDefault, ZodObject, ZodOptional } from "zod";
 import type { Feature } from "../../core/feature";
 
 interface OptionInfo {
@@ -12,6 +12,8 @@ interface OptionInfo {
 function isBooleanField(schema: z.ZodTypeAny): boolean {
 	if (schema instanceof ZodBoolean) return true;
 	if (schema instanceof ZodDefault)
+		return isBooleanField(schema.unwrap() as z.ZodTypeAny);
+	if (schema instanceof ZodOptional)
 		return isBooleanField(schema.unwrap() as z.ZodTypeAny);
 	return false;
 }

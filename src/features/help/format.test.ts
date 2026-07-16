@@ -142,7 +142,7 @@ describe("formatCommandHelp", () => {
 		const feature = makeFeature({
 			name: "commit",
 			args: z.object({
-				auto: z.boolean().describe("Skip prompts and do not push"),
+				auto: z.boolean().optional().default(false).describe("Skip prompts and do not push"),
 			}),
 		});
 
