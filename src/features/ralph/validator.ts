@@ -115,7 +115,7 @@ function extractChecklistItems(sectionBody: string): ChecklistItem[] {
  * Validates that:
  * - All six baseline headings are present exactly once
  * - Generated task files may additionally require a non-empty References section
- *   and groups of no more than five checklist tasks
+ *   and grouped checklist tasks
  * - Goal and Deliverable sections are non-empty
  * - Task checklist contains at least one unchecked item
  *
@@ -175,18 +175,15 @@ export function parseTaskFile(
 		return new RalphParseError('"## References" section is empty or missing content');
 	}
 	if (options.requireGroupedChecklist) {
-		let groupTaskCount: number | null = null;
+		let hasGroup = false;
 		for (const line of checklistBody.split("\n")) {
 			if (/^###\s+\S/.test(line)) {
-				groupTaskCount = 0;
+				hasGroup = true;
 				continue;
 			}
 			if (!CHECKBOX_RE.test(line)) continue;
-			if (groupTaskCount === null)
+			if (!hasGroup)
 				return new RalphParseError('Each checklist task must belong to a ### group');
-			groupTaskCount++;
-			if (groupTaskCount > 5)
-				return new RalphParseError('A checklist group may contain at most five tasks');
 		}
 	}
 

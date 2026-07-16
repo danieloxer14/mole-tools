@@ -40,7 +40,6 @@ describe("loadPrompt", () => {
 		expect(prompt).toContain("## Stale-prompt guard");
 		expect(prompt).toContain("## Completion gate");
 		expect(prompt).toContain("## Iteration protocol");
-		expect(prompt).toContain("at most five checkbox tasks");
 		expect(prompt).toContain("red and green together in the same checkbox");
 		expect(prompt).toContain("current group or ticket is complete or five tasks have been implemented");
 		expect(prompt).toContain("preserve recoverable progress");

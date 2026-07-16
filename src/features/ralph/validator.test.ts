@@ -99,7 +99,7 @@ describe("parseTaskFile", () => {
 		expect((result as RalphTaskFile).headings).toContain("## Goal");
 	});
 
-	test("requires references and groups of no more than five tasks for generated files", () => {
+	test("requires references and grouped tasks for generated files", () => {
 		const withoutReferences = parseTaskFile(MINIMAL_VALID_TASK_FILE, {
 			requireReferences: true,
 			requireGroupedChecklist: true,
@@ -111,12 +111,11 @@ describe("parseTaskFile", () => {
 			"## Task checklist\n- [ ] Do the thing",
 			"## References\n- specs/feature.md — feature source\n\n## Task checklist\n### Feature ticket\n- [ ] One\n- [ ] Two\n- [ ] Three\n- [ ] Four\n- [ ] Five\n- [ ] Six",
 		);
-		const tooLargeGroup = parseTaskFile(grouped, {
+		const largeGroup = parseTaskFile(grouped, {
 			requireReferences: true,
 			requireGroupedChecklist: true,
 		});
-		expect(tooLargeGroup).toBeInstanceOf(Error);
-		expect((tooLargeGroup as Error).message).toContain("at most five tasks");
+		expect(largeGroup).not.toBeInstanceOf(Error);
 	});
 
 	test("rejects file missing ## Goal heading", () => {

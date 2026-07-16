@@ -29,7 +29,7 @@ Describe the concrete artifact(s) that constitute completion.
 List the source and every relevant repository artifact already found while planning (for example, the spec, implementation plan, ticket files, ADRs, and relevant tests). Use stable paths or URLs and a short purpose for each. This is the worker's starting map: include enough detail that it can open these references directly instead of rediscovering them each session.
 
 ## Task checklist
-Decompose the work into small, independently verifiable tasks. Organize every checkbox beneath a clearly named \`###\` group that maps to a ticket or coherent implementation slice. A group contains at most five checkbox tasks; create more groups as needed, even when one ticket has many tasks. Each task must be an unchecked checkbox. For TDD work, keep red and green together in the same checkbox as two explicit parts (for example, \`Red: add a failing test. Green: implement the smallest passing change.\`); never create separate red and green checklist tasks. Include at least one unchecked task.
+Decompose the work into small, independently verifiable tasks. Organize every checkbox beneath a clearly named \`###\` group that maps to a ticket or coherent implementation slice. Each task must be an unchecked checkbox. For TDD work, keep red and green together in the same checkbox as two explicit parts (for example, \`Red: add a failing test. Green: implement the smallest passing change.\`); never create separate red and green checklist tasks. Include at least one unchecked task.
 
 ## Stale-prompt guard
 Instruct future workers to reread this file every iteration rather than trusting prior context.
