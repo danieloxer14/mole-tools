@@ -42,8 +42,8 @@ describe("loadConfig", () => {
 			provider: "ollama",
 			baseUrl: "http://localhost:11434",
 		});
-		expect(config.llm.commit).toBe("ollama");
-		expect(config.ollama?.commitModel).toBe("custom-model"); // legacy field preserved
+		expect((config as any).llm.commit).toBe("ollama");
+		expect((config as any).ollama?.commitModel).toBe("custom-model"); // legacy field preserved
 	});
 
 	test("throws a precise error for a bad config key", async () => {
@@ -59,15 +59,22 @@ describe("loadConfig", () => {
 			providers: {
 				ollama: { provider: "ollama", baseUrl: "http://localhost:11434" },
 			},
-			llm: { commit: "ollama", mergeRequest: "ollama", ralph: "pi" },
-			models: { default: "llama3.1" },
+			models: {
+				commit: { provider: "ollama", name: "llama3.1" },
+				mergeRequest: { provider: "ollama", name: "llama3.1" },
+				ralph: {
+					init: { provider: "ollama", name: "llama3.1" },
+					implement: { provider: "ollama", name: "llama3.1" },
+					reflect: { provider: "ollama", name: "llama3.1" },
+				},
+			},
 			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
 			diff: { ignore: [] },
-		};
+		} as const;
 		await Bun.write(path, JSON.stringify(valid));
 		const config = await loadConfig(path);
 		expect(config.providers).toEqual(valid.providers);
-		expect(config.llm).toEqual(valid.llm);
+		expect(config.models).toEqual(valid.models);
 	});
 
 	test("migrates legacy ollama-only config to new format with providers", async () => {
@@ -83,7 +90,7 @@ describe("loadConfig", () => {
 		await Bun.write(path, JSON.stringify(legacy));
 		const config = await loadConfig(path);
 		expect(config).toBeDefined();
-		expect(config.providers?.ollama?.baseUrl).toBe("http://localhost:11434");
+		expect("baseUrl" in (config.providers?.ollama ?? {}) ? (config.providers?.ollama as { baseUrl: string }).baseUrl : undefined).toBe("http://localhost:11434");
 	});
 });
 
@@ -125,9 +132,17 @@ describe("resolveLlmProvider", () => {
 				},
 				pix: { provider: "pi" as const, binary: "pi" },
 			},
-			models: { default: "gpt-4" } as const,
+			models: {
+				commit: { provider: "ollama", name: "gpt-4" },
+				mergeRequest: { provider: "pix", name: "gpt-4" },
+				ralph: {
+					init: { provider: "pix", name: "gpt-4" },
+					implement: { provider: "pix", name: "gpt-4" },
+					reflect: { provider: "pix", name: "gpt-4" },
+				},
+			} as const,
 			llm: { commit: "ollama", mergeRequest: "pix", ralph: "pix" } as const,
-			diff: { ignore: [] } as const,
+			diff: { ignore: [] },
 			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" } as const,
 		};
 		const commit = resolveLlmProvider(config, "commit");

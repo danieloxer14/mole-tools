@@ -1,0 +1,3 @@
+{"type":"session","id":"session-contradictory"}
+{"type":"usage","inputTokens":9999,"outputTokens":9999,"cost":99}
+{"type":"message_end","message":{"role":"assistant","usage":{"inputTokens":7,"outputTokens":2,"cacheReadTokens":1,"cacheWriteTokens":0,"cost":{"total":0.003}}}}

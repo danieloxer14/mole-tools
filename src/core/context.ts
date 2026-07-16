@@ -192,16 +192,13 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
 		) => llmProxy.getLlmFor(purpose, providerKey),
 		issues:
 			config.jira.enabled && config.jira.url && config.jira.apiKey
-				? new JiraAdapter(
-						{
-							url: config.jira.url,
-							apiKey: config.jira.apiKey,
-							email: config.jira.email,
-						},
-						costTracker,
-					)
+				? new JiraAdapter({
+						url: config.jira.url,
+						apiKey: config.jira.apiKey,
+						email: config.jira.email,
+					})
 				: null,
-		gitHost: new GlabAdapter(costTracker),
+		gitHost: new GlabAdapter(),
 		log: makeLogger(),
 		costTracker,
 	};

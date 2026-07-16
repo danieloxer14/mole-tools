@@ -6,7 +6,7 @@ import {
 	estimateUsageCosts,
 	formatUsd,
 	sumDerivedUsage,
-} from "../../shared/cost-estimate";
+} from "../../shared/cost/catalog";
 import { renderTable } from "../../shared/table-renderer";
 
 /** Empty cell for zero values. */
@@ -39,12 +39,12 @@ function formatEntriesTable(
 			const d = derived[i];
 			if (!d) return null;
 			// Skip entries with no token usage (non-LLM operations like git-host)
-			if (entry.inputTokens === 0 && entry.outputTokens === 0) return null;
+			const inputTokens = entry.usage?.inputTokens ?? 0;
+			const outputTokens = entry.usage?.outputTokens ?? 0;
+			if (inputTokens === 0 && outputTokens === 0) return null;
 			const entryUsage = {
-				inputTokens: entry.inputTokens,
-				// Git outputs are not charged here; they only count toward cost if
-				// consumed as input by a subsequent LLM stage.
-				outputTokens: entry.type === "git" ? 0 : entry.outputTokens,
+				inputTokens,
+				outputTokens,
 				cacheReadTokens: d.cacheReadTokens,
 				cacheWriteTokens: d.cacheWriteTokens,
 			};
@@ -54,8 +54,8 @@ function formatEntriesTable(
 				entry.type.toUpperCase(),
 				entry.task,
 				// Right-aligned numeric / currency columns — display the cost-adjusted token counts
-				String(entry.inputTokens),
-				String(entryUsage.outputTokens),
+				String(inputTokens),
+				String(outputTokens),
 				fmt(d.cacheReadTokens),
 				fmt(d.cacheWriteTokens),
 				costs[0]?.cost !== undefined ? formatUsd(costs[0]?.cost) : "", // Haiku 4.5

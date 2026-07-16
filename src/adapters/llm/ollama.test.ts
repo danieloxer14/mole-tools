@@ -65,7 +65,7 @@ describe("OllamaAdapter", () => {
 		});
 	});
 
-	test("records llm cost using Ollama's reported token counts", async () => {
+	test("maps reported evaluation counts to normalized reported usage", async () => {
 		globalThis.fetch = (async () =>
 			new Response(
 				ndjsonStream([
@@ -93,13 +93,15 @@ describe("OllamaAdapter", () => {
 			{
 				type: "llm",
 				task: "commit-message",
-				inputTokens: 42,
-				outputTokens: 7,
+				provider: "ollama",
+				model: "llama3.1",
+				usage: { inputTokens: 42, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+				usdCost: { source: "zero", amount: 0 },
 			},
 		]);
 	});
 
-	test("falls back to estimated tokens when Ollama omits eval counts", async () => {
+	test("marks usage estimated when Ollama omits evaluation counts", async () => {
 		globalThis.fetch = (async () =>
 			new Response(
 				ndjsonStream([{ response: "hi", done: false }, { done: true }]),
@@ -124,13 +126,30 @@ describe("OllamaAdapter", () => {
 			{
 				type: "llm",
 				task: "commit-message",
-				inputTokens: 2,
-				outputTokens: 1,
+				provider: "ollama",
+				model: "llama3.1",
+				usage: { inputTokens: 2, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, source: "estimated" },
+				usdCost: { source: "zero", amount: 0 },
 			},
 		]);
 	});
 
-	test("records identical calls as separate entries with same raw token counts", async () => {
+	test("marks partial evaluation counts estimated", async () => {
+		globalThis.fetch = (async () => new Response(
+			ndjsonStream([{ response: "hi", done: false }, { done: true, prompt_eval_count: 42 }]),
+			{ status: 200 },
+		)) as unknown as typeof fetch;
+		const costTracker = new CostTracker();
+		const adapter = new OllamaAdapter({ baseUrl: "http://localhost:11434" }, costTracker);
+		for await (const _ of adapter.generate({ model: "llama3.1", system: "sys", prompt: "diff", task: "commit-message" })) {
+			// drain
+		}
+		expect(costTracker.getEntries()[0]?.usage).toEqual({
+			inputTokens: 42, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, source: "estimated",
+		});
+	});
+
+	test("uses shared catalog zero USD provenance for local Ollama", async () => {
 		globalThis.fetch = (async () =>
 			new Response(
 				ndjsonStream([
@@ -160,16 +179,14 @@ describe("OllamaAdapter", () => {
 
 		expect(costTracker.getEntries()).toEqual([
 			{
-				type: "llm",
-				task: "commit-message",
-				inputTokens: 42,
-				outputTokens: 7,
+				type: "llm", task: "commit-message", provider: "ollama", model: "llama3.1",
+				usage: { inputTokens: 42, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+				usdCost: { source: "zero", amount: 0 },
 			},
 			{
-				type: "llm",
-				task: "commit-message",
-				inputTokens: 42,
-				outputTokens: 7,
+				type: "llm", task: "commit-message", provider: "ollama", model: "llama3.1",
+				usage: { inputTokens: 42, outputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+				usdCost: { source: "zero", amount: 0 },
 			},
 		]);
 	});
@@ -232,7 +249,7 @@ describe("OllamaAdapter", () => {
 
 		try {
 			await adapter.runAgent(agentReq);
-			expect.fail("Should have thrown");
+			throw new Error("Should have thrown");
 		} catch (e) {
 			expect(e).toBeInstanceOf(UnsupportedCapabilityError);
 			expect((e as Error).message).toContain("agentic-workspace");

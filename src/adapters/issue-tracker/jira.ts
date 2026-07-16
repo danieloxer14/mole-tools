@@ -1,7 +1,6 @@
-import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import type { Issue, IssueTracker } from "../../ports/issue-tracker";
-import { estimateTokens, truncateWords } from "../../shared/text";
+import { truncateWords } from "../../shared/text";
 
 const MAX_DESCRIPTION_WORDS = 500;
 
@@ -20,10 +19,7 @@ interface JiraIssueResponse {
 }
 
 export class JiraAdapter implements IssueTracker {
-	constructor(
-		private readonly cfg: JiraConfig,
-		private readonly costTracker: CostTracker = new CostTracker(),
-	) {}
+	constructor(private readonly cfg: JiraConfig) {}
 
 	private authHeader(): string {
 		// Jira Cloud API tokens require Basic auth with the account email;
@@ -69,12 +65,6 @@ export class JiraAdapter implements IssueTracker {
 		}
 
 		const data = (await res.json()) as JiraIssueResponse;
-		this.costTracker.record({
-			type: "jira",
-			task: "fetchIssue",
-			inputTokens: 0,
-			outputTokens: estimateTokens(JSON.stringify(data)),
-		});
 		return {
 			key: data.key,
 			summary: data.fields.summary,

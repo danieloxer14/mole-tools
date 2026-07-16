@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { CostTracker } from "../../core/cost-tracker";
 import type { PortError } from "../../core/errors";
 import { GlabAdapter, type GlabExec, type GlabExecResult } from "./glab";
 
@@ -23,7 +22,7 @@ describe("GlabAdapter", () => {
 			if (!result) throw new Error(`unscripted glab call: ${key}`);
 			return result;
 		};
-		return new GlabAdapter(exec, new CostTracker());
+		return new GlabAdapter(exec);
 	}
 
 	describe("preflight", () => {
@@ -175,12 +174,33 @@ describe("GlabAdapter", () => {
 		});
 
 		test("returns null for user not found", async () => {
-			const glab = makeGlab({ "api /users?username=nobody": fail("", 404) });
+			const glab = makeGlab({
+				"api /users?username=nobody": fail("", 404),
+				"api /users?search=nobody": fail("", 404),
+			});
 			expect(await glab.resolveHandle("nobody")).toBeNull();
 		});
 
+		test("resolves a git author name to its GitLab username", async () => {
+			const glab = makeGlab({
+				"api /users?username=Cara%20Fisher": ok("[]"),
+				"api /users?search=Cara%20Fisher": ok(
+					JSON.stringify([{ id: 8, username: "caraf", name: "Cara Fisher" }]),
+				),
+			});
+			expect(await glab.resolveHandle("Cara Fisher")).toEqual({
+				id: "8",
+				handle: "caraf",
+				displayName: "Cara Fisher",
+				kind: "user",
+			});
+		});
+
 		test("returns null for user with empty response body", async () => {
-			const glab = makeGlab({ "api /users?username=ghost": ok("[]") });
+			const glab = makeGlab({
+				"api /users?username=ghost": ok("[]"),
+				"api /users?search=ghost": ok("[]"),
+			});
 			expect(await glab.resolveHandle("ghost")).toBeNull();
 		});
 
@@ -370,7 +390,7 @@ describe("GlabAdapter", () => {
 				draft: false,
 				reviewers: ["a", "b"],
 			});
-			const reviewerCount = calls[0].filter((c) => c === "--reviewer").length;
+			const reviewerCount = calls[0]!.filter((c) => c === "--reviewer").length;
 			expect(reviewerCount).toBe(2);
 		});
 

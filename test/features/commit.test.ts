@@ -1,4 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { appendCostSession, listCostSessions } from "../../src/adapters/cost-history/file";
+import { runWithCostAccounting } from "../../src/core/cost-accounting";
+import { CostTracker } from "../../src/core/cost-tracker";
 import {
 	AbortError,
 	PortError,
@@ -11,6 +17,22 @@ import { FakeLlm } from "../fakes/FakeLlm";
 import { FakeUiPort } from "../fakes/FakeUiPort";
 import { FakeVcs } from "../fakes/FakeVcs";
 import { fakeContext } from "../fakes/fakeContext";
+
+class AccountingLlm extends FakeLlm {
+	constructor(private readonly tracker: import("../../src/core/cost-tracker").CostTracker) {
+		super([["feat: add x"]]);
+	}
+
+	override async *generate(req: import("../../src/ports/llm").GenerateRequest): AsyncIterable<string> {
+		for await (const chunk of super.generate(req)) yield chunk;
+		this.tracker.record({
+			type: "llm", task: req.task, provider: "pi", model: req.model,
+			providerSessionId: "pi-session-secret",
+			usage: { inputTokens: 4, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+			usdCost: { source: "actual", amount: 0.01 },
+		});
+	}
+}
 
 class NoInputUiPort extends FakeUiPort {
 	override async select<T>(): Promise<T> {
@@ -49,6 +71,39 @@ describe("commit args schema", () => {
 });
 
 describe("commit feature", () => {
+	test("keeps a Pi-backed commit successful when post-settle accounting fails", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "mole-commit-accounting-"));
+		const path = join(directory, "cost-history.jsonl");
+		const tracker = new CostTracker();
+		const ctx = fakeContext({ llm: new AccountingLlm(tracker), costTracker: tracker });
+		let attempts = 0;
+		try {
+			const result = await runWithCostAccounting({
+				feature: "commit", startedAt: new Date().toISOString(), tracker: ctx.costTracker,
+				run: async () => {
+					const committed = await runCommitFlow(ctx, { auto: true });
+					return committed;
+			},
+			options: { path, append: async (session, target) => {
+					attempts++;
+					if (attempts === 1) throw new Error("session content: /tmp/private-token");
+					return appendCostSession(session, target);
+			} },
+			});
+			expect(result.committed).toBe(true);
+			expect((ctx.vcs as FakeVcs).committedMessages).toHaveLength(1);
+			const entries = (await listCostSessions(path)).flatMap((session) => session.entries);
+			expect(entries).toHaveLength(1);
+			expect(entries[0]?.provider).toBe("pi");
+			expect(entries[0]?.usdCost).toEqual({ source: "unavailable" });
+			expect(entries[0]?.usage).toBeUndefined();
+			expect(entries[0]?.accountingDiagnostic).toBe("[sensitive content redacted]");
+			expect(entries[0]?.accountingDiagnostic).not.toContain("/tmp");
+			expect(entries[0]?.accountingDiagnostic).not.toContain("session content");
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
 	test("auto mode commits once without UI input or pushing", async () => {
 		const vcs = new FakeVcs();
 		const ui = new NoInputUiPort();

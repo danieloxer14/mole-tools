@@ -17,8 +17,9 @@ const REQUIRED_HEADINGS = [
 	"## Completion gate",
 	"## Iteration protocol",
 ] as const;
+const REFERENCES_HEADING = "## References";
 
-type RequiredHeading = (typeof REQUIRED_HEADINGS)[number];
+type RequiredHeading = (typeof REQUIRED_HEADINGS)[number] | typeof REFERENCES_HEADING;
 
 // ─── Parse error type ──────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ function extractSection(lines: string[], headingName: RequiredHeading): string {
 	// Find the next heading after this one
 	let endIdx = lines.length;
 	for (let i = headingIdx + 1; i < lines.length; i++) {
-		if (ANY_HEADING_RE.test(lines[i])) {
+		if (ANY_HEADING_RE.test(lines[i] ?? "")) {
 			endIdx = i;
 			break;
 		}
@@ -95,8 +96,8 @@ function extractChecklistItems(sectionBody: string): ChecklistItem[] {
 		const match = line.match(CHECKBOX_RE);
 		if (!match) continue;
 
-		const checked = match[1].toLowerCase() === "x";
-		const text = match[2].trim();
+		const checked = match[1]!.toLowerCase() === "x";
+		const text = match[2]!.trim();
 
 		if (!text) continue; // skip empty checkbox items
 
@@ -112,7 +113,9 @@ function extractChecklistItems(sectionBody: string): ChecklistItem[] {
  * Parse a raw Markdown task file into a validated `RalphTaskFile`.
  *
  * Validates that:
- * - All six required headings are present exactly once
+ * - All six baseline headings are present exactly once
+ * - Generated task files may additionally require a non-empty References section
+ *   and groups of no more than five checklist tasks
  * - Goal and Deliverable sections are non-empty
  * - Task checklist contains at least one unchecked item
  *
@@ -120,7 +123,11 @@ function extractChecklistItems(sectionBody: string): ChecklistItem[] {
  */
 export function parseTaskFile(
 	rawMd: string,
-	options: { allowCompleted?: boolean } = {},
+	options: {
+		allowCompleted?: boolean;
+		requireReferences?: boolean;
+		requireGroupedChecklist?: boolean;
+	} = {},
 ): ParseResult {
 	const lines = rawMd.split("\n");
 
@@ -140,7 +147,10 @@ export function parseTaskFile(
 	}
 
 	// ── Check all required headings present ────────────────────────────
-	const missing = REQUIRED_HEADINGS.filter((h) => !headingSet.has(h));
+	const missing = [
+		...REQUIRED_HEADINGS,
+		...(options.requireReferences ? [REFERENCES_HEADING] : []),
+	].filter((h) => !headingSet.has(h));
 	if (missing.length > 0) {
 		return new RalphParseError(
 			`Missing required heading(s): ${missing.map((h) => `"${h}"`).join(", ")}`,
@@ -150,6 +160,7 @@ export function parseTaskFile(
 	// ── Extract section content ────────────────────────────────────────
 	const goal = extractSection(lines, "## Goal");
 	const deliverable = extractSection(lines, "## Deliverable");
+	const references = extractSection(lines, REFERENCES_HEADING);
 	const checklistBody = extractSection(lines, "## Task checklist");
 
 	if (!goal) {
@@ -159,6 +170,24 @@ export function parseTaskFile(
 		return new RalphParseError(
 			'"## Deliverable" section is empty or missing content',
 		);
+	}
+	if (options.requireReferences && !references) {
+		return new RalphParseError('"## References" section is empty or missing content');
+	}
+	if (options.requireGroupedChecklist) {
+		let groupTaskCount: number | null = null;
+		for (const line of checklistBody.split("\n")) {
+			if (/^###\s+\S/.test(line)) {
+				groupTaskCount = 0;
+				continue;
+			}
+			if (!CHECKBOX_RE.test(line)) continue;
+			if (groupTaskCount === null)
+				return new RalphParseError('Each checklist task must belong to a ### group');
+			groupTaskCount++;
+			if (groupTaskCount > 5)
+				return new RalphParseError('A checklist group may contain at most five tasks');
+		}
 	}
 
 	// ── Parse and validate checklist items ────────────────────────────
@@ -178,7 +207,7 @@ export function parseTaskFile(
 		} catch (e) {
 			if (e instanceof z.ZodError) {
 				return new RalphParseError(
-					`Invalid checklist item "${item.text ?? "?"}": ${e.issues[0].message}`,
+					`Invalid checklist item "${item.text ?? "?"}": ${e.issues[0]?.message ?? "invalid checklist item"}`,
 				);
 			}
 			throw e;
@@ -225,7 +254,7 @@ export function nextUncheckedTask(
 
 	return {
 		index: idx,
-		text: parsed.checklist[idx].text,
+		text: parsed.checklist[idx]!.text,
 	};
 }
 

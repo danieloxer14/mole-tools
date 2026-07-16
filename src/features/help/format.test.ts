@@ -14,7 +14,7 @@ function makeFeature(overrides?: Partial<Feature>): Feature {
 		description: "A test command",
 		args,
 		run: async () => ({}),
-		...(overrides as Feature),
+		...overrides,
 	};
 }
 
@@ -170,7 +170,7 @@ describe("formatCommandHelp", () => {
 		const baseDir = (schema as z.ZodObject).shape.baseDir as z.ZodTypeAny & {
 			meta?: () => unknown;
 		};
-		baseDir.meta = () => ({
+		(baseDir as any).meta = () => ({
 			examples: ["~/dev", "/projects"],
 		});
 
@@ -200,9 +200,11 @@ describe("formatCommandHelp", () => {
 		const result = formatCommandHelp(features, "frobnicate");
 
 		expect(result.ok).toBe(false);
-		expect(result.command).toBe("frobnicate");
-		expect(result.known).toContain("commit");
-		expect(result.known).toContain("init");
+		if (!result.ok) {
+			expect(result.command).toBe("frobnicate");
+			expect(result.known).toContain("commit");
+			expect(result.known).toContain("init");
+		}
 	});
 
 	test("omits Options section when no args", () => {

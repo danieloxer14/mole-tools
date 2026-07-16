@@ -20,6 +20,7 @@ const args = z.object({
 		.meta({ examples: ["Emphasize the migration risk and rollout plan."] }),
 	auto: z
 		.boolean()
+		.optional()
 		.default(false)
 		.describe(
 			"Non-interactive local commit — skips all prompts, does not push",

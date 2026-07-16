@@ -44,7 +44,7 @@ function completedRequestText(request: Request, value: unknown): string {
 	if (request.kind === "stream") {
 		return [question ?? "", String(value)].filter(Boolean).join("\n");
 	}
-	if (request.kind === "pause") return question;
+	if (request.kind === "pause") return question ?? "";
 	if (request.kind === "confirm") {
 		return `${question} → ${value ? "Yes" : "No"}`;
 	}

@@ -15,6 +15,8 @@ import {
 	RalphLockFileSchema,
 	type RalphStateFile,
 	RalphStateFileSchema,
+	RalphCostRecordSchema,
+	type RalphCostRecord,
 	type RalphTaskFile,
 	RalphTaskFileSchema,
 	type Status,
@@ -97,11 +99,12 @@ describe("PhaseEnum", () => {
 });
 
 describe("PauseReasonEnum", () => {
-	test("exports the three pause reason values", () => {
+	test("exports the pause reason values", () => {
 		expect(PauseReasonEnum).toEqual({
 			max_iterations_reached: "max_iterations_reached",
 			reflection_failed: "reflection_failed",
 			interrupted: "interrupted",
+			cost_accounting_failed: "cost_accounting_failed",
 		});
 	});
 });
@@ -169,8 +172,79 @@ describe("RalphTaskFileSchema", () => {
 	});
 });
 
+describe("RalphCostRecordSchema", () => {
+	const validState = {
+		name: "test-loop",
+		source: "source.md",
+		taskFile: ".ralph/test-loop.md",
+		models: {
+			init: { provider: "pi", name: "model" },
+			implement: { provider: "pi", name: "model" },
+			reflect: { provider: "pi", name: "model" },
+		},
+		iteration: 0,
+		maxIterations: 1,
+		reflectEvery: 0,
+		active: false,
+		status: StatusEnum.ready,
+		lastReflectionAt: 0,
+		phase: PhaseEnum.ready,
+		awaitingReview: false,
+	};
+	const validRecord: RalphCostRecord = {
+		id: "550e8400-e29b-41d4-a716-446655440000",
+		provider: "pi",
+		model: "model",
+		providerSessionId: "session-123",
+		phase: "implement",
+		iteration: 1,
+		ok: true,
+		startedAt: 1000,
+		completedAt: 2000,
+		usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+		usdCost: { amount: 0.01, source: "estimated" },
+		accountingDiagnostic: "worker accounting fallback",
+	};
+
+	test("accepts a valid record and empty ledger", () => {
+		expect(RalphCostRecordSchema.parse(validRecord)).toEqual(validRecord);
+		expect(RalphCostRecordSchema.parse({ ...validRecord, usdCost: { source: "unavailable" } }).usdCost).toEqual({ source: "unavailable" });
+		expect(
+			RalphStateFileSchema.parse({ ...validState, costLedger: [] }).costLedger,
+		).toEqual([]);
+	});
+
+	test("requires provider and model attribution", () => {
+		for (const patch of [{ provider: "" }, { model: "" }, { provider: undefined }, { model: undefined }])
+			expect(() => RalphCostRecordSchema.parse({ ...validRecord, ...patch })).toThrow();
+	});
+
+	test("rejects malformed UUID, phase, iteration, usage, and USD fields", () => {
+		for (const patch of [
+			{ id: "not-a-uuid" },
+			{ phase: "bad" },
+			{ iteration: -1 },
+			{ usage: { inputTokens: -1, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" } },
+			{ usdCost: { amount: -1, source: "actual" } },
+		])
+			expect(() =>
+				RalphCostRecordSchema.parse({ ...validRecord, ...patch }),
+			).toThrow();
+	});
+
+	test("rejects extra fields (strict record)", () => {
+		expect(() =>
+			RalphCostRecordSchema.parse({ ...validRecord, extra: true }),
+		).toThrow();
+	});
+
+	test("rejects state without a cost ledger", () => {
+		expect(() => RalphStateFileSchema.parse(validState)).toThrow();
+	});
+});
+
 describe("RalphStateFileSchema", () => {
-	const validInitialState: RalphStateFile = {
+	const validInitialState = {
 		name: "refactor-auth",
 		source: "specs/auth.md",
 		taskFile: ".ralph/refactor-auth.md",
@@ -184,9 +258,10 @@ describe("RalphStateFileSchema", () => {
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		costLedger: [],
 	};
 
-	const validRuntimeState: RalphStateFile = {
+	const validRuntimeState = {
 		...validInitialState,
 		active: true,
 		status: StatusEnum.in_progress,
@@ -331,6 +406,7 @@ describe("parseRalphStateFile", () => {
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		costLedger: [],
 	});
 
 	test("parses valid JSON into RalphStateFile", () => {
@@ -404,6 +480,11 @@ describe("Type exports", () => {
 			taskFile: ".ralph/test-loop.md",
 			provider: "pi",
 			model: "model-name",
+			models: {
+				init: { provider: "pi", name: "model-name" },
+				implement: { provider: "pi", name: "model-name" },
+				reflect: { provider: "pi", name: "model-name" },
+			},
 			iteration: 0,
 			maxIterations: 10,
 			reflectEvery: 3,
@@ -412,6 +493,7 @@ describe("Type exports", () => {
 			lastReflectionAt: 0,
 			phase: PhaseEnum.ready,
 			awaitingReview: false,
+			costLedger: [],
 		};
 		expect(state.name).toBe("test-loop");
 	});
@@ -423,6 +505,11 @@ describe("Type exports", () => {
 			taskFile: ".ralph/test-loop.md",
 			provider: "pi",
 			model: "model-name",
+			models: {
+				init: { provider: "pi", name: "model-name" },
+				implement: { provider: "pi", name: "model-name" },
+				reflect: { provider: "pi", name: "model-name" },
+			},
 			iteration: 5,
 			maxIterations: 20,
 			reflectEvery: 5,
@@ -431,6 +518,7 @@ describe("Type exports", () => {
 			lastReflectionAt: 3,
 			phase: PhaseEnum.implementing,
 			awaitingReview: false,
+			costLedger: [],
 			startedAt: Date.now(),
 			completedAt: undefined,
 			workerRunId: "run-uuid",

@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { loadPrompt } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
-import { UnsupportedCapabilityError } from "../../ports/llm";
+import { UnsupportedCapabilityError, type AgentResult } from "../../ports/llm";
+import { deriveRalphUsdCost, formatRalphCostSummary, normalizeRalphUsage } from "../../shared/ralph-cost";
+import { CostAccountingError } from "../../shared/cost/errors";
 import {
 	createLock,
 	discardSnapshot,
@@ -53,10 +55,10 @@ function diagnostic(
 }
 function taskRequest(taskFile: string, selected: string): string {
 	return [
-		"**Select** the first unchecked task (`- [ ]`) in the Task checklist above and implement the tasks until you reach the end of a ticket.",
-		"Resume from already-checked tasks; do not redo them.",
-		"Inspect the workspace and verify your changes with appropriate tests.",
-		"Update the checklist immediately as each task is completed and verified. This records progress for recovery if the process fails or quits; do not defer checklist updates until the ticket ends.",
+		"**Select** the first unchecked task (`- [ ]`) in the Task checklist above. Continue with consecutive tasks in its current group or ticket, stopping when that group or ticket is complete or after five implemented tasks, whichever comes first.",
+		"Resume from already-checked tasks; do not redo them. Read the References section first and use its paths and URLs rather than rediscovering planning context.",
+		"Inspect the workspace and verify every change with appropriate tests. Keep each TDD red/green cycle within one checklist task; never check a standalone red or green task.",
+		"Update the checklist immediately as each task is completed and verified. This records progress for recovery if the process fails or quits; do not defer checklist updates until the group or ticket ends.",
 		`First unchecked task: ${selected}`,
 		"\nRalph task file:\n",
 		taskFile,
@@ -95,8 +97,13 @@ export async function runRalphRun(
 		state = { ...state, maxIterations: args.maxIterations };
 		await writeState(args.name, state);
 	}
+	const printPersistedSummary = async () => {
+		const persisted = await readState(args.name);
+		await ctx.ui.info(formatRalphCostSummary(args.name, persisted.status, persisted.costLedger));
+	};
 	if (state.status === StatusEnum.completed) {
 		await ctx.ui.info(`Ralph loop "${args.name}" is already completed.`);
+		await printPersistedSummary();
 		return { name: args.name, status: "completed", iteration: state.iteration };
 	}
 	const llm = ctx.getLlmFor("ralph", state.models.implement.provider);
@@ -126,7 +133,7 @@ export async function runRalphRun(
 	process.once("SIGINT", onInterrupt);
 
 	const pause = async (
-		reason: "reflection_failed" | "interrupted" | "max_iterations_reached",
+		reason: "reflection_failed" | "interrupted" | "max_iterations_reached" | "cost_accounting_failed",
 		error?: string,
 	) => {
 		state = {
@@ -154,12 +161,14 @@ export async function runRalphRun(
 		};
 		await writeState(args.name, state);
 		const prompt = await loadPrompt("ralph-reflection-system");
+		const startedAt = Date.now();
 		await ctx.ui.info(
 			`Reflecting Ralph loop with ${state.models.reflect.name}…`,
 			{ spinner: true },
 		);
 		activeAbort = new AbortController();
-		let result: { ok: boolean; output: string; stderr?: string };
+		let result: AgentResult;
+		let accountingFailure: string | undefined;
 		try {
 			result = await ctx.llm.runAgent({
 				purpose: "ralph",
@@ -175,16 +184,46 @@ export async function runRalphRun(
 				},
 			});
 		} catch (error) {
+			accountingFailure = error instanceof CostAccountingError ? error.diagnostic : undefined;
 			result = {
 				ok: false,
 				output: "",
 				stderr: error instanceof Error ? error.message : String(error),
+				usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, source: "estimated" },
+				usdCost: { source: "unavailable" },
 			};
 		} finally {
 			activeAbort = null;
 		}
+		// Persist every settled reflection result before validating its task-file changes.
+		const reflectionRecord = {
+			id: crypto.randomUUID(),
+			provider: state.models.reflect.provider,
+			model: state.models.reflect.name,
+			phase: "reflect" as const,
+			...(finalReview ? {} : { iteration: state.iteration }),
+			ok: result.ok,
+			startedAt,
+			completedAt: Date.now(),
+			providerSessionId: result.providerSessionId,
+			usage: normalizeRalphUsage(result.usage),
+			usdCost: deriveRalphUsdCost(
+				normalizeRalphUsage(result.usage),
+				state.models.reflect.provider,
+				state.models.reflect.name,
+				result.usdCost,
+			),
+		};
+		state = { ...state, costLedger: [...state.costLedger, ...(accountingFailure ? [{ ...reflectionRecord, accountingDiagnostic: accountingFailure, usdCost: { source: "unavailable" as const } }] : [reflectionRecord])] };
+		await writeState(args.name, state);
+		if (accountingFailure) {
+			await pause("cost_accounting_failed", accountingFailure);
+			await printPersistedSummary();
+			throw new RalphRunError(accountingFailure, { name: args.name, status: "paused", iteration: state.iteration });
+		}
 		if (interrupted) {
 			await pause("interrupted");
+			await printPersistedSummary();
 			throw new RalphRunError("Ralph run interrupted", {
 				name: args.name,
 				status: "paused",
@@ -204,6 +243,7 @@ export async function runRalphRun(
 					: "Invalid reflection task file";
 			restoreSnapshot(args.name);
 			await pause("reflection_failed", error);
+			await printPersistedSummary();
 			throw new RalphRunError(error, {
 				name: args.name,
 				status: "paused",
@@ -235,6 +275,7 @@ export async function runRalphRun(
 					: { phase: PhaseEnum.implementing }),
 		};
 		await writeState(args.name, state);
+		await printPersistedSummary();
 		return hasWork ? "reopened" : "complete";
 	};
 
@@ -254,6 +295,7 @@ export async function runRalphRun(
 		while (true) {
 			if (interrupted) {
 				await pause("interrupted");
+				await printPersistedSummary();
 				throw new RalphRunError("Ralph run interrupted", {
 					name: args.name,
 					status: "paused",
@@ -278,6 +320,7 @@ export async function runRalphRun(
 			}
 			if (state.iteration >= state.maxIterations) {
 				await pause("max_iterations_reached");
+				await printPersistedSummary();
 				const message = `Maximum iterations reached. Resume with --maxIterations ${state.maxIterations + 1}`;
 				await ctx.ui.warn(message);
 				throw new RalphRunError(message, {
@@ -297,8 +340,10 @@ export async function runRalphRun(
 				`Iteration ${state.iteration + 1}/${state.maxIterations} — ${selected.text}`,
 				{ spinner: true },
 			);
+			const startedAt = Date.now();
 			activeAbort = new AbortController();
-			let result: { ok: boolean; output: string; stderr?: string };
+			let result: AgentResult;
+			let accountingFailure: string | undefined;
 			try {
 				result = await ctx.llm.runAgent({
 					purpose: "ralph",
@@ -314,15 +359,52 @@ export async function runRalphRun(
 					},
 				});
 			} catch (error) {
+				accountingFailure = error instanceof CostAccountingError ? error.diagnostic : undefined;
 				result = {
 					ok: false,
 					output: "",
 					stderr: error instanceof Error ? error.message : String(error),
+					usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, source: "estimated" },
+					usdCost: { source: "unavailable" },
 				};
 			}
 			activeAbort = null;
+			// Settled workers are ledgered before any validation or transition handling.
+			state = {
+				...state,
+				iteration: state.iteration + 1,
+				costLedger: [
+					...state.costLedger,
+					{
+						id: crypto.randomUUID(),
+						provider: state.models.implement.provider,
+						model: state.models.implement.name,
+						phase: "implement",
+						iteration: state.iteration + 1,
+						ok: result.ok,
+						startedAt,
+						completedAt: Date.now(),
+						providerSessionId: result.providerSessionId,
+						...(accountingFailure ? { accountingDiagnostic: accountingFailure } : {}),
+						usage: normalizeRalphUsage(result.usage),
+						usdCost: accountingFailure ? { source: "unavailable" as const } : deriveRalphUsdCost(
+							normalizeRalphUsage(result.usage),
+							state.models.implement.provider,
+							state.models.implement.name,
+							result.usdCost,
+						),
+					},
+				],
+			};
+			await writeState(args.name, state);
+			if (accountingFailure) {
+				await pause("cost_accounting_failed", accountingFailure);
+				await printPersistedSummary();
+				throw new RalphRunError(accountingFailure, { name: args.name, status: "paused", iteration: state.iteration });
+			}
 			if (interrupted) {
 				await pause("interrupted");
+				await printPersistedSummary();
 				throw new RalphRunError("Ralph run interrupted", {
 					name: args.name,
 					status: "paused",
@@ -341,7 +423,6 @@ export async function runRalphRun(
 			const changedCorrectly = checkboxChange?.success === true;
 			state = {
 				...state,
-				iteration: state.iteration + 1,
 				lastError: changedCorrectly
 					? null
 					: !result.ok

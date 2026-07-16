@@ -30,7 +30,7 @@ describe("merge-request reviewers", () => {
 			null,
 		);
 		expect(result.map((item) => item.handle)).toEqual(["asmith", "bob"]);
-		expect(result[0].commits).toBe(3);
+		expect(result[0]!.commits).toBe(3);
 	});
 
 	test("excludes the authenticated user and pads from CODEOWNERS", () => {
@@ -57,7 +57,7 @@ describe("merge-request reviewers", () => {
 			"Bob Jones",
 			"Charlie Day",
 		]);
-		expect(result[0].commits).toBe(5);
+		expect(result[0]!.commits).toBe(5);
 		expect(result.every((s) => s.source !== "codeowners")).toBe(true);
 	});
 

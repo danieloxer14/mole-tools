@@ -25,8 +25,11 @@ Summarize what the work achieves in one or two sentences.
 ## Deliverable
 Describe the concrete artifact(s) that constitute completion.
 
+## References
+List the source and every relevant repository artifact already found while planning (for example, the spec, implementation plan, ticket files, ADRs, and relevant tests). Use stable paths or URLs and a short purpose for each. This is the worker's starting map: include enough detail that it can open these references directly instead of rediscovering them each session.
+
 ## Task checklist
-Decompose the work into small, independently verifiable tasks. Each task must be an unchecked \`- [ ]\` checkbox. Tasks should follow a TDD red → green approach: write a failing test, make it pass, then move on. Include at least one unchecked task.
+Decompose the work into small, independently verifiable tasks. Organize every checkbox beneath a clearly named \`###\` group that maps to a ticket or coherent implementation slice. A group contains at most five checkbox tasks; create more groups as needed, even when one ticket has many tasks. Each task must be an unchecked checkbox. For TDD work, keep red and green together in the same checkbox as two explicit parts (for example, \`Red: add a failing test. Green: implement the smallest passing change.\`); never create separate red and green checklist tasks. Include at least one unchecked task.
 
 ## Stale-prompt guard
 Instruct future workers to reread this file every iteration rather than trusting prior context.
@@ -35,7 +38,7 @@ Instruct future workers to reread this file every iteration rather than trusting
 Define the conditions for marking the loop complete: all tasks checked AND a full validation suite passes. Workers must not mark completion prematurely.
 
 ## Iteration protocol
-Instruct future workers to: select the first unchecked \`- [ ]\` task, inspect current code before changes, implement consecutive tasks with TDD verification until the end of the current ticket, and immediately check each task after its verification passes. Explain that updating the checklist task-by-task preserves recoverable progress if the process fails or quits; do not defer checklist updates until the ticket ends. Then update state and end the iteration.
+Instruct future workers to reread the task file and its References section, select the first unchecked \`- [ ]\` task, and inspect current code before changes. In one worker session, continue implementing and verifying consecutive checklist tasks, checking each immediately after its verification passes, until the current group or ticket is complete or five tasks have been implemented, whichever comes first. Explain that task-by-task updates preserve recoverable progress if the process fails or quits; do not defer checklist updates until the group or ticket ends. Then update state and end the iteration.
 `,
 	"ralph-implement-system": `Implement the work described by the ticket. Use TDD where possible, at pre-agreed seams. Run typechecking regularly, single test files regularly, and the full test suite once at the end. Once done, review the work according to the instructions in the Ralph task file.\n`,
 	"ralph-reflection-system": `You are conducting an implementation review for a Ralph loop. Answer each question below based on the current state of the task file, repository, and verification evidence:

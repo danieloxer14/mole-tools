@@ -117,12 +117,12 @@ export function matchAuthorToMember(
 		(member: HostMember) =>
 			first !== "" &&
 			last !== "" &&
-			normalized(member.handle).startsWith(first[0]) &&
+			normalized(member.handle).startsWith(first[0] ?? "") &&
 			normalized(member.handle).includes(last),
 		(member: HostMember) =>
 			first !== "" &&
 			last !== "" &&
-			normalized(member.handle).startsWith(last[0]) &&
+			normalized(member.handle).startsWith(last[0] ?? "") &&
 			normalized(member.handle).includes(first),
 		(member: HostMember) =>
 			normalized(member.handle).startsWith(name) ||
@@ -227,6 +227,23 @@ export async function selectReviewers(
 			recentAuthors,
 			currentUser,
 		);
+
+		// Git history contains display names, not necessarily GitLab usernames.
+		// Resolve every fallback candidate before passing it to `glab mr create`;
+		// otherwise "Cara Fisher" becomes the invalid handle "carafisher".
+		suggestions = (
+			await Promise.all(
+				suggestions.map(async (suggestion) => {
+					const member = await ctx.gitHost?.resolveHandle(suggestion.displayName);
+					if (!member || member.kind !== "user") return null;
+					return {
+						...suggestion,
+						handle: member.handle,
+						displayName: member.displayName ?? suggestion.displayName,
+					};
+				}),
+			)
+		).filter((suggestion): suggestion is ReviewerSuggestion => suggestion !== null);
 	}
 
 	// If no candidates were ranked, return early (nothing to show).

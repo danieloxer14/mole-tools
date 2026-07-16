@@ -84,8 +84,8 @@ describe("parseTaskFile", () => {
 		expect((result as RalphTaskFile).goal).toContain("authentication");
 		expect((result as RalphTaskFile).deliverable).toContain("Auth service");
 		expect((result as RalphTaskFile).checklist).toHaveLength(3);
-		expect((result as RalphTaskFile).checklist[0].done).toBe(false);
-		expect((result as RalphTaskFile).checklist[0].text).toBe(
+		expect((result as RalphTaskFile).checklist[0]!.done).toBe(false);
+		expect((result as RalphTaskFile).checklist[0]!.text).toBe(
 			"Write tests for JWT encoding",
 		);
 	});
@@ -97,6 +97,26 @@ describe("parseTaskFile", () => {
 		expect((result as RalphTaskFile).deliverable).toBe("Something done.");
 		expect((result as RalphTaskFile).checklist).toHaveLength(1);
 		expect((result as RalphTaskFile).headings).toContain("## Goal");
+	});
+
+	test("requires references and groups of no more than five tasks for generated files", () => {
+		const withoutReferences = parseTaskFile(MINIMAL_VALID_TASK_FILE, {
+			requireReferences: true,
+			requireGroupedChecklist: true,
+		});
+		expect(withoutReferences).toBeInstanceOf(Error);
+		expect((withoutReferences as Error).message).toContain("## References");
+
+		const grouped = MINIMAL_VALID_TASK_FILE.replace(
+			"## Task checklist\n- [ ] Do the thing",
+			"## References\n- specs/feature.md — feature source\n\n## Task checklist\n### Feature ticket\n- [ ] One\n- [ ] Two\n- [ ] Three\n- [ ] Four\n- [ ] Five\n- [ ] Six",
+		);
+		const tooLargeGroup = parseTaskFile(grouped, {
+			requireReferences: true,
+			requireGroupedChecklist: true,
+		});
+		expect(tooLargeGroup).toBeInstanceOf(Error);
+		expect((tooLargeGroup as Error).message).toContain("at most five tasks");
 	});
 
 	test("rejects file missing ## Goal heading", () => {
@@ -176,7 +196,7 @@ describe("parseTaskFile", () => {
 		);
 		const result = parseTaskFile(partial);
 		expect(result).not.toBeInstanceOf(Error);
-		expect((result as RalphTaskFile).checklist[1].done).toBe(true);
+		expect((result as RalphTaskFile).checklist[1]!.done).toBe(true);
 	});
 
 	test("rejects empty string", () => {
@@ -216,9 +236,9 @@ Protocol.
 		const result = parseTaskFile(mixedCase);
 		expect(result).not.toBeInstanceOf(Error);
 		const parsed = result as RalphTaskFile;
-		expect(parsed.checklist[0].done).toBe(true);
-		expect(parsed.checklist[1].done).toBe(true);
-		expect(parsed.checklist[2].done).toBe(false);
+		expect(parsed.checklist[0]!.done).toBe(true);
+		expect(parsed.checklist[1]!.done).toBe(true);
+		expect(parsed.checklist[2]!.done).toBe(false);
 	});
 
 	test("collects only required headings in the headings array", () => {

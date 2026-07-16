@@ -17,6 +17,7 @@ import {
 	StatusEnum,
 } from "./schema";
 import { parseTaskFile, RalphParseError } from "./validator";
+import { deriveRalphUsdCost, formatRalphCostSummary, normalizeRalphUsage } from "../../shared/ralph-cost";
 
 export const ralphInitArgs = z.object({
 	name: LoopNameSchema,
@@ -112,6 +113,7 @@ export async function runRalphInit(
 	await ctx.ui.info(`Generating Ralph task file with ${models.init.name}…`, {
 		spinner: true,
 	});
+	const startedAt = Date.now();
 	const result = await llm.runAgent({
 		purpose: "ralph",
 		providerKey: models.init.provider,
@@ -124,12 +126,28 @@ export async function runRalphInit(
 			void ctx.ui.info(message, { spinner: true, terminal: true });
 		},
 	});
+	const completedAt = Date.now();
 	if (!result.ok)
 		throw new Error(result.stderr?.trim() || "Ralph task generation failed");
 	if (!result.output.trim())
 		throw new Error("Ralph task generation returned empty output");
-	const parsed = parseTaskFile(result.output);
+	const parsed = parseTaskFile(result.output, {
+		requireReferences: true,
+		requireGroupedChecklist: true,
+	});
 	if (parsed instanceof RalphParseError) throw parsed;
+	const initRecord = {
+		id: crypto.randomUUID(),
+		provider: models.init.provider,
+		model: models.init.name,
+		phase: "init" as const,
+		ok: result.ok,
+		startedAt,
+		completedAt,
+		providerSessionId: result.providerSessionId,
+		usage: normalizeRalphUsage(result.usage),
+		usdCost: deriveRalphUsdCost(normalizeRalphUsage(result.usage), models.init.provider, models.init.name, result.usdCost),
+	};
 	const state: RalphStateFile = {
 		name: args.name,
 		source: args.source,
@@ -143,6 +161,7 @@ export async function runRalphInit(
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		costLedger: [initRecord],
 	};
 	try {
 		await writeTaskFile(args.name, result.output);
@@ -155,5 +174,6 @@ export async function runRalphInit(
 	const statePath = `.ralph/${args.name}.state.json`;
 	await ctx.ui.info(`Created ${taskPath}`);
 	await ctx.ui.info(`Created ${statePath}`);
+	await ctx.ui.info(formatRalphCostSummary(args.name, state.status, state.costLedger));
 	return { name: args.name, taskPath, statePath, models };
 }

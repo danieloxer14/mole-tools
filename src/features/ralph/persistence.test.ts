@@ -41,6 +41,11 @@ function makeState(overrides = {}): RalphStateFile {
 		taskFile: ".ralph/test-loop.md",
 		provider: "pi",
 		model: "llama3.1",
+		models: {
+			init: { provider: "pi", name: "llama3.1" },
+			implement: { provider: "pi", name: "llama3.1" },
+			reflect: { provider: "pi", name: "llama3.1" },
+		},
 		iteration: 0,
 		maxIterations: 20,
 		reflectEvery: 5,
@@ -49,6 +54,7 @@ function makeState(overrides = {}): RalphStateFile {
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		costLedger: [],
 		...overrides,
 	};
 }
@@ -114,6 +120,13 @@ describe("writeState / readState", () => {
 		expect(loaded.active).toBe(true);
 		expect(loaded.startedAt).toBe(1234567890);
 		expect(loaded.workerItem).toBe("- [ ] Write tests");
+	});
+
+	test("rejects state writes missing the required cost ledger", async () => {
+		const invalid = makeState({ costLedger: undefined });
+		await expect(
+			writeState("test-loop", invalid as unknown as RalphStateFile),
+		).rejects.toThrow();
 	});
 
 	test("throws RalphError when reading non-existent state", async () => {
@@ -226,7 +239,7 @@ describe("createLock", () => {
 		// Lock file should be removed after release
 		try {
 			await access(lockPath, constants.F_OK);
-			expect.fail("Lock file should have been removed");
+			throw new Error("Lock file should have been removed");
 		} catch {
 			// expected — file no longer exists
 		}

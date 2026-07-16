@@ -1,19 +1,19 @@
 import cac from "cac";
 import packageJson from "../package.json";
 import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
-import { appendCostSession } from "./adapters/cost-history/file";
 import { runInInk } from "./app";
 import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
 import type { Feature } from "./core/feature";
 import { closeLogger, initializeLogger } from "./core/logger";
+import { runWithCostAccounting } from "./core/cost-accounting";
 import { features } from "./core/registry";
 import {
 	formatCommandHelp,
 	formatGeneralHelp,
 	formatUnknownCommand,
 } from "./features/help/format";
-import { formatCostSavingsTable } from "./shared/cost-estimate";
+import { formatCostSavingsTable } from "./shared/cost/catalog";
 import { applyZodOptions } from "./cli/options";
 
 export { applyZodOptions } from "./cli/options";
@@ -24,9 +24,7 @@ cli.version(packageJson.version);
 // Help command — registered before features so it takes priority.
 // This path intentionally bypasses loadConfig, buildContext, and runInInk.
 cli
-	.command("help [command]", "Show help for available tools", {
-		ignoreImplicitRegistration: false,
-	})
+	.command("help [command]", "Show help for available tools")
 	.action((command?: string) => {
 		if (!command) {
 			console.log(formatGeneralHelp(features));
@@ -98,17 +96,15 @@ for (const feature of features as Feature[]) {
 			process.exitCode = await runInInk(async (ui) => {
 				try {
 					const ctx = buildContext({ config, ui });
-					await feature.run(ctx, args);
+					await runWithCostAccounting({
+						feature: feature.name,
+						startedAt,
+						tracker: ctx.costTracker,
+						run: () => feature.run(ctx, args),
+						options: { onWarning: (message) => void ui.warn(message) },
+					});
 					const entries = ctx.costTracker.getEntries();
-					if (entries.length > 0) {
-						await appendCostSession({
-							id: crypto.randomUUID(),
-							feature: feature.name,
-							startedAt,
-							entries: [...entries],
-						});
-						await ui.info(formatCostSavingsTable(entries));
-					}
+					if (entries.length > 0) await ui.info(formatCostSavingsTable(entries));
 					return 0;
 				} catch (e) {
 					return handleError(e, ui);

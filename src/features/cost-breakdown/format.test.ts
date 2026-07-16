@@ -11,10 +11,31 @@ describe("formatSessionBreakdown", () => {
 			{
 				type: "llm",
 				task: "commit-message",
-				inputTokens: 100,
-				outputTokens: 10,
+				provider: "pi",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: 100,
+					outputTokens: 10,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					source: "reported",
+				},
+				usdCost: { source: "actual", amount: 0.01 },
 			},
-			{ type: "git", task: "stagedDiff", inputTokens: 0, outputTokens: 20 },
+			{
+				type: "llm",
+				task: "stagedDiff",
+				provider: "pi",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: 0,
+					outputTokens: 20,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					source: "reported",
+				},
+				usdCost: { source: "actual", amount: 0.01 },
+			},
 		],
 	};
 
@@ -31,10 +52,10 @@ describe("formatSessionBreakdown", () => {
 		expect(output).toContain("Opus 4.8");
 	});
 
-	test("renders both LLM and GIT entry types as uppercase in per-entry table", () => {
+	test("renders normalized LLM entries as uppercase in per-entry table", () => {
 		const output = formatSessionBreakdown(session, 1);
 		expect(output).toContain("LLM");
-		expect(output).toContain("GIT");
+		expect(output).not.toContain("GIT");
 	});
 
 	test("per-entry detail table includes cache info columns", () => {
@@ -43,20 +64,25 @@ describe("formatSessionBreakdown", () => {
 		expect(output).toContain("commit-message");
 	});
 
-	test("omits model cost table and per-entry table when no LLM entries exist", () => {
+	test("omits entries without usage from the detail table", () => {
 		const onlyGit: CostSession = {
 			id: "session-no-llm",
 			feature: "commit",
 			startedAt: "2026-07-09T00:00:00.000Z",
 			entries: [
-				{ type: "git", task: "rev-parse", inputTokens: 0, outputTokens: 3 },
+				{
+					type: "llm",
+					task: "rev-parse",
+					provider: "pi",
+					model: "claude-sonnet-4-5",
+					usdCost: { source: "unavailable" },
+				},
 			],
 		};
 
 		const output = formatSessionBreakdown(onlyGit, 1);
 
-		// Git-only entry with 0 input tokens → no cache reads or writes AND git costs are 0
-		expect(output).toContain("rev-parse");
-		// Should contain header but NOT model cost table headers because totals are all zero-cost
+		// Entries without normalized usage have no detail row.
+		expect(output).not.toContain("rev-parse");
 	});
 });

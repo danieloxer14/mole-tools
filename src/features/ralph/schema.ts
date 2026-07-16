@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { usageSchema, usdCostSchema } from "../../shared/cost/schema";
 
 // ── Loop name validation ───────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export const PauseReasonEnum = {
 	max_iterations_reached: "max_iterations_reached",
 	reflection_failed: "reflection_failed",
 	interrupted: "interrupted",
+	cost_accounting_failed: "cost_accounting_failed",
 } as const;
 
 export type PauseReason =
@@ -70,6 +72,25 @@ export const RalphTaskFileSchema = z.object({
 
 export type RalphTaskFile = z.infer<typeof RalphTaskFileSchema>;
 
+// ── Ralph cost ledger ─────────────────────────────────────────────────
+
+export const RalphCostRecordSchema = z.strictObject({
+	id: z.string().uuid(),
+	provider: z.string().min(1),
+	model: z.string().min(1),
+	providerSessionId: z.string().min(1).optional(),
+	phase: z.enum(["init", "implement", "reflect"]),
+	iteration: z.number().int().nonnegative().optional(),
+	ok: z.boolean(),
+	startedAt: z.number().int().nonnegative(),
+	completedAt: z.number().int().nonnegative(),
+	usage: usageSchema,
+	usdCost: usdCostSchema,
+	accountingDiagnostic: z.string().min(1).optional(),
+});
+
+export type RalphCostRecord = z.infer<typeof RalphCostRecordSchema>;
+
 // ── RalphStateFile schema (matches §5.2 initial + §5.3 runtime) ────────
 
 const RalphStateShape = z.object({
@@ -94,6 +115,7 @@ const RalphStateShape = z.object({
 	lastReflectionAt: z.number().int().nonnegative(),
 	phase: z.nativeEnum(PhaseEnum),
 	awaitingReview: z.boolean(),
+	costLedger: z.array(RalphCostRecordSchema),
 
 	// ── Runtime additions (§5.3) — absent until first run/ completion ──
 	startedAt: z.number().optional(),
@@ -125,17 +147,7 @@ export const RalphStateFileSchema = z
 			};
 		}
 		return value;
-	}, RalphStateShape)
-	.transform((state) => {
-		if ("provider" in state && "model" in state) {
-			const { models: _models, ...legacy } = state as typeof state & {
-				provider: string;
-				model: string;
-			};
-			return legacy as typeof state;
-		}
-		return state;
-	});
+	}, RalphStateShape);
 
 export type RalphStateFile = z.infer<typeof RalphStateFileSchema>;
 

@@ -1,3 +1,8 @@
+import type { Usage, UsdCost } from "../shared/cost/schema";
+
+export type LlmUsage = Usage;
+export type { UsdCost } from "../shared/cost/schema";
+
 // ─── Capability values ──────────────────────────────────────────────────
 
 export type LlmCapability = "text-generation" | "agentic-workspace";
@@ -23,6 +28,7 @@ export interface GenerateRequest {
 	system: string;
 	prompt: string;
 	task: string;
+	signal?: AbortSignal;
 }
 
 // Renamed from LlmRequest for clarity but kept alias for backward compat
@@ -57,15 +63,26 @@ export interface AgentRequest {
 	signal?: AbortSignal;
 }
 
-// ─── Agent execution result ─────────────────────────────────────────────
+// ─── Agent usage and execution result ──────────────────────────────────
+
+
 
 export interface AgentResult {
+	/** Provider/model metadata retained by test fakes and accounting consumers. */
+	provider?: string;
+	model?: string;
 	/** Full stdout captured from the agent process */
 	output: string;
 	/** Diagnostics / stderr from the agent process */
 	stderr?: string;
 	/** Whether the agent completed successfully (non-zero exit = failure) */
 	ok: boolean;
+	/** Token usage for this completed operation. */
+	usage: Usage;
+	/** Provider-reported or derived USD cost. */
+	usdCost: UsdCost;
+	/** Provider-native session identifier, when available. */
+	providerSessionId?: string;
 }
 
 // ─── Llm port interface ────────────────────────────────────────────────

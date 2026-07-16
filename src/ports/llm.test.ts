@@ -42,7 +42,7 @@ describe("Llm port contract", () => {
 				systemPromptMode: "replace",
 				prompt: "do thing",
 			});
-			expect.fail("Should have thrown");
+			throw new Error("Should have thrown");
 		} catch (e) {
 			expect(e).toBeInstanceOf(UnsupportedCapabilityError);
 		} finally {

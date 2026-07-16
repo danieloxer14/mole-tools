@@ -1,4 +1,3 @@
-import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import { logger } from "../../core/logger";
 import type {
@@ -29,24 +28,7 @@ async function defaultGlabExec(args: string[]): Promise<GlabExecResult> {
 }
 
 export class GlabAdapter implements GitHost {
-	private readonly execFn: GlabExec;
-	private readonly _costTracker: CostTracker;
-
-	/** Accept a tracker for production use, or an executor plus tracker for tests. */
-	constructor(costTracker?: CostTracker);
-	constructor(execFn: GlabExec, costTracker?: CostTracker);
-	constructor(
-		execOrTracker: GlabExec | CostTracker = defaultGlabExec,
-		costTracker = new CostTracker(),
-	) {
-		if (typeof execOrTracker === "function") {
-			this.execFn = execOrTracker;
-			this._costTracker = costTracker;
-		} else {
-			this.execFn = defaultGlabExec;
-			this._costTracker = execOrTracker;
-		}
-	}
+	constructor(private readonly execFn: GlabExec = defaultGlabExec) {}
 
 	async preflight(): Promise<void> {
 		let result = await this._exec(["--version"]);
@@ -100,7 +82,7 @@ export class GlabAdapter implements GitHost {
 		for (const line of lines) {
 			const urlMatch = line.match(/(https?:\/\/[^\s]+)/);
 			if (urlMatch) {
-				return { url: urlMatch[1] };
+				return { url: urlMatch[1]! };
 			}
 		}
 
@@ -159,7 +141,7 @@ export class GlabAdapter implements GitHost {
 			);
 		}
 
-		return { url: urlMatch[1] };
+		return { url: urlMatch[1]! };
 	}
 
 	async resolveGroup(handle: string): Promise<HostMember | null> {
@@ -184,7 +166,7 @@ export class GlabAdapter implements GitHost {
 					page,
 					exitCode: result.exitCode,
 				});
-				return members.length > 0 ? members[0] : null;
+				return members.length > 0 ? members[0]! : null;
 			}
 
 			let body: unknown;
@@ -192,7 +174,7 @@ export class GlabAdapter implements GitHost {
 				body = JSON.parse(result.stdout);
 			} catch (error) {
 				logger.warn("glab.resolve-group.invalid-json", { handle, page, error });
-				return members.length > 0 ? members[0] : null;
+				return members.length > 0 ? members[0]! : null;
 			}
 			if (!Array.isArray(body)) {
 				logger.warn("glab.resolve-group.unexpected-response", {
@@ -200,7 +182,7 @@ export class GlabAdapter implements GitHost {
 					page,
 					responseType: typeof body,
 				});
-				return members.length > 0 ? members[0] : null;
+				return members.length > 0 ? members[0]! : null;
 			}
 			for (const member of body) {
 				members.push({
@@ -222,61 +204,56 @@ export class GlabAdapter implements GitHost {
 		}
 
 		return {
-			id: members[0].id,
+			id: members[0]!.id,
 			handle: handle,
 			kind: "group",
 		};
 	}
 
 	async resolveUser(handle: string): Promise<HostMember | null> {
-		const encoded = encodeURIComponent(handle);
+		// CODEOWNERS gives us usernames, so prefer the exact username lookup. Git
+		// history, however, gives us author names (e.g. "Cara Fisher"), which
+		// need GitLab's broader search to find the actual username ("caraf").
+		const compact = (value: string) =>
+			value.toLowerCase().replace(/[^a-z0-9]/g, "");
+		const queries = ["username", "search"] as const;
+		for (const query of queries) {
+			const encoded = encodeURIComponent(handle);
+			const result = await this._exec(["api", `/users?${query}=${encoded}`]);
 
-		// glab api accepts a single endpoint argument; keep the query string on it.
-		const result = await this._exec(["api", `/users?username=${encoded}`]);
+			if (result.exitCode !== 0 || !result.stdout.trim()) continue;
 
-		if (result.exitCode !== 0 || !result.stdout.trim()) {
-			logger.warn("glab.resolve-user.failed", {
-				handle,
-				exitCode: result.exitCode,
-				reason: result.exitCode !== 0 ? "non-zero-exit" : "empty-stdout",
-			});
-			return null;
+			let body: unknown;
+			try {
+				body = JSON.parse(result.stdout);
+			} catch (error) {
+				logger.warn("glab.resolve-user.invalid-json", { handle, query, error });
+				continue;
+			}
+			if (!Array.isArray(body) || body.length === 0) continue;
+
+			const user = body.find((candidate) => {
+				if (!candidate || typeof candidate !== "object") return false;
+				const record = candidate as Record<string, unknown>;
+				return [record.username, record.name].some(
+					(value) =>
+						typeof value === "string" && compact(value) === compact(handle),
+				);
+			}) as Record<string, unknown> | undefined;
+			if (!user) continue;
+			return {
+				id: String(user.id ?? ""),
+				handle: String(user.username ?? handle),
+				displayName: String(user.name ?? user.username ?? handle),
+				kind: "user",
+			};
 		}
 
-		let body: unknown;
-		try {
-			body = JSON.parse(result.stdout);
-		} catch (error) {
-			logger.warn("glab.resolve-user.invalid-json", { handle, error });
-			return null;
-		}
-		if (!Array.isArray(body) || body.length === 0) {
-			logger.warn("glab.resolve-user.no-match", {
-				handle,
-				responseType: Array.isArray(body) ? "array" : typeof body,
-				resultCount: Array.isArray(body) ? body.length : null,
-			});
-			return null;
-		}
-
-		const user = body[0] as Record<string, unknown>;
-
-		return {
-			id: String(user.id ?? ""),
-			handle: String(user.username ?? handle),
-			displayName: String(user.name ?? user.username ?? handle),
-			kind: "user",
-		};
+		logger.warn("glab.resolve-user.no-match", { handle });
+		return null;
 	}
 
 	async _exec(args: string[]): Promise<GlabExecResult> {
-		const result = await this.execFn(args);
-		this._costTracker.record({
-			type: "git-host",
-			task: args[0] ?? "glab",
-			inputTokens: 0,
-			outputTokens: 0,
-		});
-		return result;
+		return this.execFn(args);
 	}
 }

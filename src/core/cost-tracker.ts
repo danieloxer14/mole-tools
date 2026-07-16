@@ -1,15 +1,13 @@
-export interface CostEntry {
-	type: string;
-	task: string;
-	inputTokens: number;
-	outputTokens: number;
-}
+import { costEntrySchema } from "../shared/cost/schema";
+import type { CostEntry } from "../shared/cost/schema";
+
+export type { CostEntry } from "../shared/cost/schema";
 
 export class CostTracker {
 	private entries: CostEntry[] = [];
 
 	record(entry: CostEntry): void {
-		this.entries.push(entry);
+		this.entries.push(costEntrySchema.parse(entry));
 	}
 
 	getEntries(): readonly CostEntry[] {

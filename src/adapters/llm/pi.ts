@@ -1,6 +1,8 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CostTracker } from "../../core/cost-tracker";
-import { PortError } from "../../core/errors";
 import type {
 	AgentRequest,
 	AgentResult,
@@ -8,7 +10,9 @@ import type {
 	Llm,
 	LlmCapability,
 } from "../../ports/llm";
-import { estimateTokens } from "../../shared/text";
+import { deriveUsdCost } from "../../shared/cost/catalog";
+import { CostAccountingError } from "../../shared/cost/errors";
+import { parsePiSessionJsonl, type ParsedPiSession } from "./pi-session-parser";
 
 export interface PiConfig {
 	binary: string;
@@ -20,209 +24,150 @@ const SUPPORTED_CAPABILITIES: LlmCapability[] = [
 	"agentic-workspace",
 ];
 
-export class PiAdapter implements Llm {
-	constructor(
-		private readonly cfg: PiConfig,
-		private readonly costTracker: CostTracker = new CostTracker(),
-	) {}
+type SessionRequest = GenerateRequest | AgentRequest;
+interface SessionResult {
+	lines: string[];
+	stderr: string;
+	parsed?: ParsedPiSession;
+	aborted: boolean;
+}
 
-	capabilities(): LlmCapability[] {
-		return SUPPORTED_CAPABILITIES;
+function numberField(value: unknown): number | undefined {
+	const number = typeof value === "number" ? value : Number(value);
+	return Number.isFinite(number) ? number : undefined;
+}
+
+function firstNumber(value: Record<string, unknown>, keys: string[]): number | undefined {
+	for (const key of keys) {
+		const number = numberField(value[key]);
+		if (number !== undefined) return number;
 	}
+	return undefined;
+}
 
-	/**
-	 * Text generation via Pi subprocess.
-	 * For now we delegate to a simple non-interactive prompt call.
-	 * Ollama remains the default for commit/MR — this path exists as the extension seam.
-	 */
-	async *generate(req: GenerateRequest): AsyncIterable<string> {
-		const child = spawn(this.cfg.binary, ["-p", "--model", req.model], {
-			cwd: this.cfg.projectRoot ?? process.cwd(),
-			stdio: ["pipe", "pipe", "pipe"],
-		});
+function preview(value: unknown, maxLength = 240): string {
+	const text = typeof value === "string" ? value : Array.isArray(value)
+		? value.map((part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("\n")
+		: "";
+	const compact = text.replace(/\s+/g, " ").trim();
+	return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}…` : compact;
+}
 
-		child.stdin.end(`${req.system}\n\n${req.prompt}`);
+function toolOutput(result: unknown): string {
+	if (!result || typeof result !== "object") return preview(result);
+	const content = (result as { content?: unknown }).content;
+	if (Array.isArray(content)) {
+		const text = content
+			.filter((part): part is { text: string } => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string")
+			.map((part) => part.text)
+			.join("\n")
+			.trim();
+		if (text) return text;
+	}
+	return preview(result);
+}
 
-		let stdout = "";
+/** Owns Pi's temporary session directory and settles only from its completed JSONL. */
+async function withPiSession(
+	cfg: PiConfig,
+	req: SessionRequest,
+	input: string,
+	onEvent?: (event: Record<string, unknown>) => void,
+): Promise<SessionResult> {
+	const directory = await mkdtemp(join(tmpdir(), "mole-pi-"));
+	let child: ChildProcess | undefined;
+	let aborted = false;
+	try {
+		const args = ["-p", "--mode", "json", "--session-dir", directory, "--model", req.model];
+		if ("permissionPolicy" in req && req.permissionPolicy === "auto-approve") args.push("--approve");
+		child = spawn(cfg.binary, args, { cwd: cfg.projectRoot ?? process.cwd(), stdio: ["pipe", "pipe", "pipe"], detached: true });
+		let pending = "";
 		let stderr = "";
-
-		child.stdout.on("data", (chunk: Buffer) => {
-			stdout += chunk.toString();
+		const lines: string[] = [];
+		let sessionId: string | undefined;
+		const handle = (line: string) => {
+			if (!line.trim()) return;
+			lines.push(line);
+			try {
+				const event = JSON.parse(line) as Record<string, unknown>;
+				if ((event.type === "session" || event.type === "session_header" || event.type === "session-start") && typeof event.id === "string") sessionId = event.id;
+				onEvent?.(event);
+			} catch { /* JSONL is validated by the completed-session parser. */ }
+		};
+		child.stdout?.on("data", (chunk: Buffer) => {
+			pending += chunk.toString();
+			const split = pending.split("\n");
+			pending = split.pop() ?? "";
+			for (const line of split) handle(line);
 		});
-
-		child.stderr.on("data", (chunk: Buffer) => {
-			stderr += chunk.toString();
+		child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+		const abort = () => {
+			aborted = true;
+			try { if (child?.pid) process.kill(-child.pid, "SIGTERM"); else child?.kill("SIGTERM"); } catch { child?.kill("SIGTERM"); }
+		};
+		const signal = "signal" in req ? req.signal : undefined;
+		signal?.addEventListener("abort", abort, { once: true });
+		child.stdin?.end(input);
+		const code = await new Promise<number>((resolve, reject) => {
+			child?.once("error", (error) => reject(new CostAccountingError(`Pi subprocess error: ${error.message}`, error)));
+			child?.once("close", (value) => resolve(value ?? 1));
 		});
+		if (pending.trim()) handle(pending);
+		signal?.removeEventListener("abort", abort);
+		if (aborted) throw new CostAccountingError("Pi operation was cancelled");
+		if (code !== 0) throw new CostAccountingError(`Pi exited with code ${code}: ${stderr}`, stderr);
+		if (!sessionId) throw new CostAccountingError("Pi session header is missing");
+		const parsed = await parsePiSessionJsonl(directory, sessionId);
+		return { lines, stderr, parsed, aborted: false };
+	} finally {
+		if (child && !child.killed) {
+			try { if (child.pid) process.kill(-child.pid, "SIGTERM"); else child.kill("SIGTERM"); } catch { child.kill("SIGTERM"); }
+		}
+		await rm(directory, { recursive: true, force: true });
+	}
+}
 
-		await new Promise<void>((resolve, reject) => {
-			child.on("close", (code) => {
-				if (code === 0) resolve();
-				else
-					reject(
-						new PortError(`Pi exited with code ${code}`, stderr, code ?? 1),
-					);
-			});
-			child.on("error", reject);
-		});
+export class PiAdapter implements Llm {
+	constructor(private readonly cfg: PiConfig, private readonly costTracker: CostTracker = new CostTracker()) {}
+	capabilities(): LlmCapability[] { return SUPPORTED_CAPABILITIES; }
 
-		const tokens = stdout.split("\n").filter(Boolean);
-		for (const token of tokens) yield token;
-
-		this.costTracker.record({
-			type: "llm",
-			task: req.task,
-			inputTokens: estimateTokens(req.system + req.prompt),
-			outputTokens: estimateTokens(stdout),
-		});
+	async *generate(req: GenerateRequest): AsyncIterable<string> {
+		const result = await withPiSession(this.cfg, req, `${req.system}\n\n${req.prompt}`);
+		for (const line of result.lines) {
+			try {
+				const event = JSON.parse(line) as Record<string, unknown>;
+				if (event.type !== "message_end") continue;
+				const message = event.message as { role?: unknown; content?: unknown } | undefined;
+				if (message?.role === "assistant" && Array.isArray(message.content)) yield message.content.map((part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("");
+			} catch { /* parser has already validated the persisted stream. */ }
+		}
+		if (result.parsed) this.record(req, result.parsed);
 	}
 
 	runAgent(req: AgentRequest): Promise<AgentResult> {
-		return new Promise((resolve, reject) => {
-			const args = [
-				"-p", // non-interactive prompt mode
-				"--mode",
-				"json", // exposes tool and lifecycle events while retaining machine-readable output
-				"--model",
-				req.model,
-			];
-
-			if (req.permissionPolicy === "auto-approve") {
-				args.push("--approve");
+		let output = "";
+		const resultPromise = withPiSession(this.cfg, req, this.buildAgentInput(req), (event) => {
+			if (event.type === "tool_execution_start") req.onProgress?.(`${String(event.toolName)}…`);
+			if (event.type === "tool_execution_end") {
+				const status = event.isError ? "failed" : "completed";
+				const output = toolOutput(event.result);
+				req.onProgress?.(`${String(event.toolName)} ${status}.${output ? `\n${output}` : ""}`);
 			}
-
-			if (req.signal?.aborted) {
-				resolve({ output: "", stderr: "aborted before start", ok: false });
-				return;
+			if (event.type === "message_end") {
+				const message = event.message as { role?: unknown; content?: unknown } | undefined;
+				if (message?.role === "assistant" && Array.isArray(message.content)) output = message.content.map((part) => typeof part === "object" && part !== null && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("");
 			}
-
-			const child = spawn(this.cfg.binary, args, {
-				cwd: this.cfg.projectRoot ?? process.cwd(),
-				stdio: ["pipe", "pipe", "pipe"],
-			});
-
-			let output = "";
-			let stderr = "";
-			let pendingStdout = "";
-
-			const preview = (value: unknown, maxLength = 240): string => {
-				const text =
-					typeof value === "string"
-						? value
-						: Array.isArray(value)
-							? value
-									.map((part) =>
-										typeof part === "object" &&
-										part !== null &&
-										typeof (part as { text?: unknown }).text === "string"
-											? (part as { text: string }).text
-											: "",
-									)
-									.join("\n")
-							: "";
-				const compact = text.replace(/\s+/g, " ").trim();
-				return compact.length > maxLength
-					? `${compact.slice(0, maxLength - 1)}…`
-					: compact;
-			};
-			const toolDetail = (toolName: unknown, args: unknown): string => {
-				const input = args as Record<string, unknown> | null;
-				if (!input || typeof input !== "object") return "";
-				const target = [input.path, input.filePath, input.file].find(
-					(value): value is string => typeof value === "string",
-				);
-				if (target) return target;
-				if (String(toolName) === "bash" && typeof input.command === "string")
-					return preview(input.command, 160);
-				return preview(JSON.stringify(input), 160);
-			};
-			const handleEvent = (line: string) => {
-				try {
-					const event = JSON.parse(line) as Record<string, unknown>;
-					if (event.type === "tool_execution_start") {
-						const detail = toolDetail(event.toolName, event.args);
-						req.onProgress?.(
-							`${String(event.toolName)}${detail ? ` — ${detail}` : ""}…`,
-						);
-					}
-					if (event.type === "tool_execution_end") {
-						const result = event.result as { content?: unknown } | undefined;
-						const detail = preview(result?.content);
-						req.onProgress?.(
-							`${String(event.toolName)} ${event.isError ? "failed" : "completed"}${detail ? ` — ${detail}` : "."}`,
-						);
-					}
-					if (event.type === "message_end") {
-						const message = event.message as
-							| { role?: unknown; content?: unknown }
-							| undefined;
-						if (
-							message?.role === "assistant" &&
-							Array.isArray(message.content)
-						) {
-							const text = message.content
-								.filter(
-									(part): part is { type: "text"; text: string } =>
-										typeof part === "object" &&
-										part !== null &&
-										(part as { type?: unknown }).type === "text" &&
-										typeof (part as { text?: unknown }).text === "string",
-								)
-								.map((part) => part.text)
-								.join("");
-							if (text) output = text;
-						}
-					}
-				} catch {
-					// Preserve unexpected output for diagnostics rather than failing the agent run.
-					stderr += `${line}\n`;
-				}
-			};
-
-			child.stdout?.on("data", (chunk: Buffer) => {
-				pendingStdout += chunk.toString();
-				const lines = pendingStdout.split("\n");
-				pendingStdout = lines.pop() ?? "";
-				for (const line of lines) if (line.trim()) handleEvent(line);
-			});
-
-			child.stderr?.on("data", (chunk: Buffer) => {
-				stderr += chunk.toString();
-			});
-
-			// Send the prompt (with system prompt mode applied)
-			const input = this.buildAgentInput(req);
-			child.stdin.end(input);
-
-			const abort = () => {
-				child.kill("SIGTERM");
-			};
-			if (req.signal)
-				req.signal.addEventListener("abort", abort, { once: true });
-
-			child.on("close", (code) => {
-				if (pendingStdout.trim()) handleEvent(pendingStdout);
-				if (req.signal) req.signal.removeEventListener("abort", abort);
-				const ok = code === 0 && !req.signal?.aborted;
-				resolve({
-					output,
-					stderr: req.signal?.aborted ? "aborted" : stderr,
-					ok,
-				});
-			});
-
-			child.on("error", (err) => {
-				if (req.signal) req.signal.removeEventListener("abort", abort);
-				reject(new PortError(`Pi subprocess error: ${err.message}`, ""));
-			});
+		});
+		return resultPromise.then((settled) => {
+			if (settled.aborted) throw new CostAccountingError("Pi operation was cancelled");
+			const parsed = settled.parsed!;
+			this.record(req, parsed);
+			return { output, stderr: settled.stderr, ok: true, usage: parsed.usage, usdCost: parsed.usdCost ?? deriveUsdCost(parsed.usage, "pi", req.model), providerSessionId: parsed.providerSessionId };
 		});
 	}
 
-	private buildAgentInput(req: AgentRequest): string {
-		switch (req.systemPromptMode) {
-			case "replace":
-				return req.prompt;
-			case "append":
-				return `${req.prompt}`;
-		}
+	private record(req: SessionRequest, parsed: ParsedPiSession): void {
+		this.costTracker.record({ type: "llm", task: "task" in req ? req.task : req.purpose, provider: "pi", model: req.model, providerSessionId: parsed.providerSessionId, usage: parsed.usage, usdCost: parsed.usdCost ?? deriveUsdCost(parsed.usage, "pi", req.model) });
 	}
+	private buildAgentInput(req: AgentRequest): string { return req.systemPromptMode === "replace" ? req.prompt : req.prompt; }
 }

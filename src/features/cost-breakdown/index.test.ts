@@ -20,10 +20,12 @@ afterEach(async () => {
 });
 
 const entry: CostEntry = {
-	type: "git",
+	type: "llm",
 	task: "stagedDiff",
-	inputTokens: 0,
-	outputTokens: 5,
+	provider: "ollama",
+	model: "llama3.1",
+	usage: { inputTokens: 0, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+	usdCost: { source: "zero", amount: 0 },
 };
 
 describe("runCostBreakdown", () => {
@@ -87,14 +89,18 @@ describe("runCostBreakdown", () => {
 					{
 						type: "llm",
 						task: "mr-description",
-						inputTokens: 120,
-						outputTokens: 45,
+						provider: "ollama",
+						model: "llama3.1",
+						usage: { inputTokens: 120, outputTokens: 45, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+						usdCost: { source: "zero", amount: 0 },
 					},
 					{
-						type: "git-host",
+						type: "llm",
 						task: "mr",
-						inputTokens: 0,
-						outputTokens: 0,
+						provider: "ollama",
+						model: "llama3.1",
+						usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, source: "reported" },
+						usdCost: { source: "zero", amount: 0 },
 					},
 				],
 			},

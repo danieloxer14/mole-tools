@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { CostTracker } from "../../core/cost-tracker";
 import { PortError } from "../../core/errors";
 import { JiraAdapter } from "./jira";
 
@@ -141,7 +140,7 @@ describe("JiraAdapter", () => {
 		await expect(adapter.fetchIssue("AST-1")).rejects.toThrow(PortError);
 	});
 
-	test("records a jira cost entry sized by the response body", async () => {
+	test("does not record a pseudo-cost entry", async () => {
 		globalThis.fetch = (async () =>
 			new Response(
 				JSON.stringify({
@@ -151,20 +150,13 @@ describe("JiraAdapter", () => {
 				{ status: 200 },
 			)) as unknown as typeof fetch;
 
-		const costTracker = new CostTracker();
-		const adapter = new JiraAdapter(
-			{ url: "https://jira.example.com", apiKey: "secret" },
-			costTracker,
-		);
-		await adapter.fetchIssue("AST-1");
-
-		expect(costTracker.getEntries()).toHaveLength(1);
-		expect(costTracker.getEntries()[0]).toMatchObject({
-			type: "jira",
-			task: "fetchIssue",
-			inputTokens: 0,
+		const adapter = new JiraAdapter({
+			url: "https://jira.example.com",
+			apiKey: "secret",
 		});
-		expect(costTracker.getEntries()[0]?.outputTokens).toBeGreaterThan(0);
+		await expect(adapter.fetchIssue("AST-1")).resolves.toMatchObject({
+			key: "AST-1",
+		});
 	});
 
 	test("throws PortError on other non-ok statuses", async () => {
