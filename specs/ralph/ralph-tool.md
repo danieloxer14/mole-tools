@@ -46,9 +46,10 @@ mole-tools ralph init <name> <source> --model <model> \
 - The provider comes from the `ralph` feature profile in global configuration.
   Ralph requires its provider to support `agentic-workspace`; unsupported
   providers (including Ollama) fail during preflight before external work.
-- Defaults: `maxIterations=20`, `reflectEvery=5`. Every iteration processes
-  exactly one task. `reflectEvery=0` suppresses periodic reflection but never
-  the final review.
+- Defaults: `maxIterations=20`, `reflectEvery=5`. Each worker session starts
+  with the first unchecked task and may process up to five consecutive tasks in
+  its current group or ticket. `reflectEvery=0` suppresses periodic reflection
+  but never the final review.
 - The command runs from the target repository. All loop artifacts are relative
   to that working directory.
 
@@ -83,16 +84,19 @@ fences, commentary, or implementation). It must direct the agent to:
 
 1. gather context from the supplied source and the current repository;
 2. summarize the goal and concrete deliverable;
-3. decompose work into small, independently verifiable tasks that follow a
-   TDD red → green approach, with each task represented by an unchecked
-   `- [ ]` checkbox;
-4. include a stale-prompt guard, completion gate, and loop instructions.
+3. provide a References section with the source and already-discovered specs,
+   plans, tickets, ADRs, and relevant tests so workers can open them directly;
+4. decompose work into small, independently verifiable tasks, grouped into
+   clearly named slices of at most five checkbox tasks. TDD red
+   and green work belongs together as two parts of one checkbox;
+5. include a stale-prompt guard, completion gate, and loop instructions.
 
 Its required Markdown headings are exactly:
 
 ```markdown
 ## Goal
 ## Deliverable
+## References
 ## Task checklist
 ## Stale-prompt guard
 ## Completion gate
@@ -160,12 +164,13 @@ reformat or otherwise edit the generated task plan.
 
 Its required protocol makes later workers:
 
-1. reread this file at the beginning of every iteration, rather than trusting
-   prior session context;
-2. select only the next unchecked checklist task;
+1. reread this file and its References section at the beginning of every
+   iteration, rather than trusting prior session context;
+2. select the first unchecked checklist task;
 3. inspect current code and state before changing code;
-4. implement that one task with TDD red → green verification;
-5. check that task only after its relevant verification passes;
+4. implement consecutive tasks with TDD red → green verification, stopping when
+   the current group or ticket is complete or after five tasks;
+5. check each task only after its relevant verification passes;
 6. update state and end that iteration;
 7. mark the loop completed only if every task is checked and the full validation
    suite passes.
@@ -240,7 +245,8 @@ The seeded `ralph-implement-system.md` reads:
 
 For every worker, Ralph loads this user-editable file and passes it to the LLM
 port as an appended system prompt. The Ralph task file is supplied as input
-along with a request to execute exactly the next unchecked task. The selected
+along with a request to start at the first unchecked task and execute up to five
+consecutive tasks in its current group or ticket. The selected
 provider adapter preserves its normal and project-local context while adding
 this implementation policy.
 
@@ -271,7 +277,8 @@ For each iteration:
    `phase=paused`, and `pauseReason=max_iterations_reached`; remove the lock,
    print the cap-increase command, and exit nonzero.
 2. Read and snapshot the task file afresh, then choose its first unchecked
-   task. This is the sole task permitted to change in the worker session.
+   task. The worker may complete consecutive tasks in that task's group or
+   ticket, but no more than five tasks in one session.
 3. Run the persisted provider through the injected LLM port as a
    non-interactive, auto-approved workspace-agent session, with the persisted
    model, implementation prompt in append mode, and the task file plus
@@ -280,16 +287,16 @@ For each iteration:
 4. Show an Ink spinner such as `Iteration 4/20 — <task>` throughout the
    subprocess. Append concise lifecycle log entries for starts, verification,
    retries, reflections, pauses, and completion.
-5. Reread the task file when the agent operation exits. A successful worker must have checked
-   exactly the selected checkbox and must not have changed another checklist
-   item. Mole-tools then increments `iteration`, retains worker diagnostics,
-   clears `lastError`, and continues.
-6. A nonzero provider exit, unchanged selected checkbox, changed wrong/multiple
-   checkboxes, or invalid task structure is a failed attempt. Mole-tools
-   restores the pre-worker task snapshot, increments `iteration`, records
-   `lastError`, and immediately continues the normal loop. Thus retries consume
-   the same pool as regular iterations without carrying an invalid checkbox
-   change forward.
+5. Reread the task file when the agent operation exits. A successful worker must
+   have checked at least one checklist item without rewriting, removing, or
+   unchecking checklist tasks. Mole-tools then increments `iteration`, retains
+   worker diagnostics, clears `lastError`, and continues.
+6. A nonzero provider exit, no completed checklist task, an invalid checklist
+   change, or invalid task structure is a failed attempt. Mole-tools restores
+   the pre-worker task snapshot, increments `iteration`, records `lastError`,
+   and immediately continues the normal loop. Thus retries consume the same
+   pool as regular iterations without carrying an invalid checkbox change
+   forward.
 7. After every iteration count divisible by a nonzero `reflectEvery`, run the
    periodic reflection in §7.5. Failed attempts count toward this cadence.
 
