@@ -138,8 +138,8 @@ export async function writeState(
 	name: string,
 	state: RalphStateFile,
 ): Promise<void> {
-	RalphStateFileSchema.parse(state);
-	await atomicWriteJson(statePath(name), state);
+	const normalized = RalphStateFileSchema.parse(state);
+	await atomicWriteJson(statePath(name), normalized);
 }
 
 /**

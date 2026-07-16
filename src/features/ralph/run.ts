@@ -5,6 +5,11 @@ import { UnsupportedCapabilityError, type AgentResult } from "../../ports/llm";
 import { deriveRalphUsdCost, formatRalphCostSummary, normalizeRalphUsage } from "../../shared/ralph-cost";
 import { CostAccountingError } from "../../shared/cost/errors";
 import {
+	iterationSummaryPrompt,
+	parseIterationSummary,
+	trimIterationSummary,
+} from "./handoff";
+import {
 	createLock,
 	discardSnapshot,
 	type LockHandle,
@@ -53,13 +58,21 @@ function diagnostic(
 	const text = result.stderr?.trim() || result.output?.trim() || fallback;
 	return text.length > 2000 ? text.slice(-2000) : text;
 }
-function taskRequest(taskFile: string, selected: string): string {
+function taskRequest(
+	taskFile: string,
+	selected: string,
+	iterationSummary: string,
+): string {
 	return [
 		"**Select** the first unchecked task (`- [ ]`) in the Task checklist above. Continue with consecutive tasks in its current group or ticket, stopping when that group or ticket is complete or after five implemented tasks, whichever comes first.",
 		"Resume from already-checked tasks; do not redo them. Read the References section first and use its paths and URLs rather than rediscovering planning context.",
 		"Inspect the workspace and verify every change with appropriate tests. Keep each TDD red/green cycle within one checklist task; never check a standalone red or green task.",
 		"Update the checklist immediately as each task is completed and verified. This records progress for recovery if the process fails or quits; do not defer checklist updates until the group or ticket ends.",
+		"End your response with this concise handoff block. Keep it near 2,000 characters and fill every line:",
+		"RALPH_ITERATION_SUMMARY\nDone: ...\nVerification: ...\nBlockers: ...\nNext: ...\nEND_RALPH_ITERATION_SUMMARY",
 		`First unchecked task: ${selected}`,
+		"\nPrevious Ralph iteration handoff summary (advisory quick reference):\n",
+		iterationSummaryPrompt(iterationSummary),
 		"\nRalph task file:\n",
 		taskFile,
 	].join("\n");
@@ -352,7 +365,7 @@ export async function runRalphRun(
 					workspace: process.cwd(),
 					permissionPolicy: "auto-approve",
 					systemPromptMode: "append",
-					prompt: `${systemPrompt}\n\n${taskRequest(before, selected.text)}`,
+					prompt: `${systemPrompt}\n\n${taskRequest(before, selected.text, trimIterationSummary(state.iterationSummary))}`,
 					signal: activeAbort.signal,
 					onProgress: (message) => {
 						void ctx.ui.info(message, { spinner: true, terminal: true });
@@ -438,6 +451,10 @@ export async function runRalphRun(
 				await ctx.ui.warn(`Iteration failed; retrying: ${state.lastError}`);
 			} else {
 				discardSnapshot(args.name);
+				state = {
+					...state,
+					iterationSummary: parseIterationSummary(result.output),
+				};
 				await writeState(args.name, state);
 				await ctx.ui.info(`Iteration ${state.iteration} verified.`);
 			}

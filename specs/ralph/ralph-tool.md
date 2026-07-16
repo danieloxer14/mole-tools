@@ -193,7 +193,8 @@ Path: `.ralph/<name>.state.json`
   "status": "ready",
   "lastReflectionAt": 0,
   "phase": "ready",
-  "awaitingReview": false
+  "awaitingReview": false,
+  "iterationSummary": ""
 }
 ```
 
@@ -241,14 +242,25 @@ The seeded `ralph-implement-system.md` reads:
 > Implement the work described by the ticket. Use TDD where possible, at
 > pre-agreed seams. Run typechecking regularly, single test files regularly,
 > and the full test suite once at the end. Once done, review the work according
-> to the instructions in the Ralph task file.
+> to the instructions in the Ralph task file. End every response with:
+>
+> ```text
+> RALPH_ITERATION_SUMMARY
+> Done: ...
+> Verification: ...
+> Blockers: ...
+> Next: ...
+> END_RALPH_ITERATION_SUMMARY
+> ```
 
 For every worker, Ralph loads this user-editable file and passes it to the LLM
 port as an appended system prompt. The Ralph task file is supplied as input
 along with a request to start at the first unchecked task and execute up to five
-consecutive tasks in its current group or ticket. The selected
-provider adapter preserves its normal and project-local context while adding
-this implementation policy.
+consecutive tasks in its current group or ticket. Each worker also receives the
+latest advisory iteration handoff summary, or an explicit first-iteration empty
+marker, and must end its response with a tagged Done/Verification/Blockers/Next
+summary. The selected provider adapter preserves its normal and project-local
+context while adding this implementation policy.
 
 The user-editable reflection prompt remains the source of review instructions;
 it is appended for reflection sessions instead of the implementation prompt.
@@ -289,8 +301,10 @@ For each iteration:
    retries, reflections, pauses, and completion.
 5. Reread the task file when the agent operation exits. A successful worker must
    have checked at least one checklist item without rewriting, removing, or
-   unchecking checklist tasks. Mole-tools then increments `iteration`, retains
-   worker diagnostics, clears `lastError`, and continues.
+   unchecking checklist tasks. Mole-tools then increments `iteration`, parses and
+   stores its latest handoff summary (or an empty fallback), retains worker
+   diagnostics, clears `lastError`, and continues. Summary context is advisory;
+   the task file, repository, and verification evidence remain authoritative.
 6. A nonzero provider exit, no completed checklist task, an invalid checklist
    change, or invalid task structure is a failed attempt. Mole-tools restores
    the pre-worker task snapshot, increments `iteration`, records `lastError`,

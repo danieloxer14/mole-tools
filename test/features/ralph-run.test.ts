@@ -151,6 +151,7 @@ describe("ralph run cost ledger", () => {
 			name: "demo",
 		});
 		const state = await readState("demo");
+		expect(state.iterationSummary).toBe("");
 		expect(state.costLedger.map((r) => [r.phase, r.iteration])).toEqual([
 			["implement", 1],
 			["reflect", 1],

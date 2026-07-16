@@ -54,6 +54,7 @@ function makeState(overrides = {}): RalphStateFile {
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		iterationSummary: "",
 		costLedger: [],
 		...overrides,
 	};

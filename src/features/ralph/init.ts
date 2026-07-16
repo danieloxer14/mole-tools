@@ -161,6 +161,7 @@ export async function runRalphInit(
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		iterationSummary: "",
 		costLedger: [initRecord],
 	};
 	try {

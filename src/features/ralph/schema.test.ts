@@ -258,6 +258,7 @@ describe("RalphStateFileSchema", () => {
 		lastReflectionAt: 0,
 		phase: PhaseEnum.ready,
 		awaitingReview: false,
+		iterationSummary: "",
 		costLedger: [],
 	};
 
@@ -329,6 +330,14 @@ describe("RalphStateFileSchema", () => {
 		const state = { ...validInitialState, reflectEvery: 0 };
 		const parsed = RalphStateFileSchema.parse(state);
 		expect(parsed.reflectEvery).toBe(0);
+	});
+
+	test("does not cap persisted summaries in the state schema", () => {
+		const parsed = RalphStateFileSchema.parse({
+			...validInitialState,
+			iterationSummary: "x".repeat(2001),
+		});
+		expect(parsed.iterationSummary).toHaveLength(2001);
 	});
 
 	test("rejects negative iteration count", () => {
@@ -493,6 +502,7 @@ describe("Type exports", () => {
 			lastReflectionAt: 0,
 			phase: PhaseEnum.ready,
 			awaitingReview: false,
+			iterationSummary: "",
 			costLedger: [],
 		};
 		expect(state.name).toBe("test-loop");
@@ -518,6 +528,7 @@ describe("Type exports", () => {
 			lastReflectionAt: 3,
 			phase: PhaseEnum.implementing,
 			awaitingReview: false,
+			iterationSummary: "",
 			costLedger: [],
 			startedAt: Date.now(),
 			completedAt: undefined,

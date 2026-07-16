@@ -40,7 +40,7 @@ Define the conditions for marking the loop complete: all tasks checked AND a ful
 ## Iteration protocol
 Instruct future workers to reread the task file and its References section, select the first unchecked \`- [ ]\` task, and inspect current code before changes. In one worker session, continue implementing and verifying consecutive checklist tasks, checking each immediately after its verification passes, until the current group or ticket is complete or five tasks have been implemented, whichever comes first. Explain that task-by-task updates preserve recoverable progress if the process fails or quits; do not defer checklist updates until the group or ticket ends. Then update state and end the iteration.
 `,
-	"ralph-implement-system": `Implement the work described by the ticket. Use TDD where possible, at pre-agreed seams. Run typechecking regularly, single test files regularly, and the full test suite once at the end. Once done, review the work according to the instructions in the Ralph task file.\n`,
+	"ralph-implement-system": `Implement the work described by the ticket. Use TDD where possible, at pre-agreed seams. Run typechecking regularly, single test files regularly, and the full test suite once at the end. Once done, review the work according to the instructions in the Ralph task file. End every response with this concise block:\nRALPH_ITERATION_SUMMARY\nDone: ...\nVerification: ...\nBlockers: ...\nNext: ...\nEND_RALPH_ITERATION_SUMMARY\n`,
 	"ralph-reflection-system": `You are conducting an implementation review for a Ralph loop. Answer each question below based on the current state of the task file, repository, and verification evidence:
 
 1. What has been accomplished so far?

@@ -18,6 +18,7 @@
 | 06 | Worker loop: agent + checklist tracking | 00, 04, 05 | Continuous fresh agent iterations with checkbox validation and retries |
 | 07 | Reflection & completion gate + interrupt handling | 00, 06 | Periodic/final agent reflection, reopening work, graceful Ctrl+C shutdown |
 | 08 | Register `ralph` feature + help | 05 | CLI wiring in registry, subcommand docs, discoverability via `mole-tools help` |
+| 09 | Persist Ralph iteration handoff summaries | 06 | Carry latest worker summary through state into next worker prompt |
 
 ## Review notes
 

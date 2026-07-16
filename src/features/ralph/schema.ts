@@ -116,6 +116,8 @@ const RalphStateShape = z.object({
 	phase: z.nativeEnum(PhaseEnum),
 	awaitingReview: z.boolean(),
 	costLedger: z.array(RalphCostRecordSchema),
+	/** Latest worker handoff; advisory context only. */
+	iterationSummary: z.string(),
 
 	// ── Runtime additions (§5.3) — absent until first run/ completion ──
 	startedAt: z.number().optional(),
@@ -126,19 +128,25 @@ const RalphStateShape = z.object({
 	pauseReason: z.nativeEnum(PauseReasonEnum).nullable().optional(),
 });
 
-/** Accept state files written before per-phase model routing was introduced. */
+/** Accept state files written before per-phase model routing or handoffs existed. */
 export const RalphStateFileSchema = z
 	.preprocess((value) => {
+		if (!value || typeof value !== "object") return value;
+
+		const withSummary = {
+			...(value as Record<string, unknown>),
+			// Upgrade state files created before iteration handoffs existed.
+			iterationSummary:
+				"iterationSummary" in value ? (value as Record<string, unknown>).iterationSummary : "",
+		};
 		if (
-			value &&
-			typeof value === "object" &&
 			"provider" in value &&
 			"model" in value &&
 			!("models" in value)
 		) {
 			const legacy = value as { provider: string; model: string };
 			return {
-				...value,
+				...withSummary,
 				models: {
 					init: { provider: legacy.provider, name: legacy.model },
 					implement: { provider: legacy.provider, name: legacy.model },
@@ -146,7 +154,7 @@ export const RalphStateFileSchema = z
 				},
 			};
 		}
-		return value;
+		return withSummary;
 	}, RalphStateShape);
 
 export type RalphStateFile = z.infer<typeof RalphStateFileSchema>;
