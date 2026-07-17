@@ -1,5 +1,5 @@
-import type { Usage, UsdCost } from "./cost/schema";
 import { deriveUsdCost, lookupPrice, type ModelPricing } from "./cost/catalog";
+import type { Usage, UsdCost } from "./cost/schema";
 
 export type RalphModelPricing = ModelPricing;
 export { lookupPrice as lookupRalphModelPricing };
@@ -7,10 +7,18 @@ export { lookupPrice as lookupRalphModelPricing };
 /** Normalize provider output before it crosses the Ralph persistence boundary. */
 export function normalizeRalphUsage(usage: Partial<Usage> | undefined): Usage {
 	return {
-		inputTokens: Number.isFinite(usage?.inputTokens) ? Math.max(0, usage!.inputTokens!) : 0,
-		outputTokens: Number.isFinite(usage?.outputTokens) ? Math.max(0, usage!.outputTokens!) : 0,
-		cacheReadTokens: Number.isFinite(usage?.cacheReadTokens) ? Math.max(0, usage!.cacheReadTokens!) : 0,
-		cacheWriteTokens: Number.isFinite(usage?.cacheWriteTokens) ? Math.max(0, usage!.cacheWriteTokens!) : 0,
+		inputTokens: Number.isFinite(usage?.inputTokens)
+			? Math.max(0, usage?.inputTokens ?? 0)
+			: 0,
+		outputTokens: Number.isFinite(usage?.outputTokens)
+			? Math.max(0, usage?.outputTokens ?? 0)
+			: 0,
+		cacheReadTokens: Number.isFinite(usage?.cacheReadTokens)
+			? Math.max(0, usage?.cacheReadTokens ?? 0)
+			: 0,
+		cacheWriteTokens: Number.isFinite(usage?.cacheWriteTokens)
+			? Math.max(0, usage?.cacheWriteTokens ?? 0)
+			: 0,
 		source: usage?.source === "reported" ? "reported" : "estimated",
 	};
 }
@@ -25,48 +33,117 @@ export interface RalphCostRecordLike {
 
 export interface RalphCostAggregate {
 	label: string;
-	usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number };
+	usage: {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadTokens: number;
+		cacheWriteTokens: number;
+	};
 	usdCost?: UsdCost;
 	providerSessionIds?: string[];
 }
 
 function sumUsage(records: readonly RalphCostRecordLike[]) {
-	return records.reduce((sum, record) => ({
-		inputTokens: sum.inputTokens + record.usage.inputTokens,
-		outputTokens: sum.outputTokens + record.usage.outputTokens,
-		cacheReadTokens: sum.cacheReadTokens + (record.usage.cacheReadTokens ?? 0),
-		cacheWriteTokens: sum.cacheWriteTokens + (record.usage.cacheWriteTokens ?? 0),
-	}), { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+	return records.reduce(
+		(sum, record) => ({
+			inputTokens: sum.inputTokens + record.usage.inputTokens,
+			outputTokens: sum.outputTokens + record.usage.outputTokens,
+			cacheReadTokens:
+				sum.cacheReadTokens + (record.usage.cacheReadTokens ?? 0),
+			cacheWriteTokens:
+				sum.cacheWriteTokens + (record.usage.cacheWriteTokens ?? 0),
+		}),
+		{
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+		},
+	);
 }
 
-function sessionIds(records: readonly RalphCostRecordLike[]): string[] | undefined {
-	const ids = records.flatMap((record) => record.providerSessionId ? [record.providerSessionId] : []);
+function sessionIds(
+	records: readonly RalphCostRecordLike[],
+): string[] | undefined {
+	const ids = records.flatMap((record) =>
+		record.providerSessionId ? [record.providerSessionId] : [],
+	);
 	return ids.length ? ids : undefined;
 }
 
-function aggregateUsd(records: readonly RalphCostRecordLike[]): UsdCost | undefined {
+function aggregateUsd(
+	records: readonly RalphCostRecordLike[],
+): UsdCost | undefined {
 	if (records.some((record) => !record.usdCost)) return undefined;
-	const costs = records.map((record) => record.usdCost!);
-	if (costs.some((cost) => cost.source === "unavailable")) return { source: "unavailable" };
-	const amount = costs.reduce((sum, cost) => sum + (cost.source === "unavailable" ? 0 : cost.amount), 0);
-	const source = costs.some((cost) => cost.source === "estimated") ? "estimated" as const
-		: costs.some((cost) => cost.source === "actual") ? "actual" as const : "zero" as const;
+	const costs = records
+		.map((record) => record.usdCost)
+		.filter((cost): cost is UsdCost => cost !== undefined);
+	if (costs.some((cost) => cost.source === "unavailable"))
+		return { source: "unavailable" };
+	const amount = costs.reduce(
+		(sum, cost) => sum + (cost.source === "unavailable" ? 0 : cost.amount),
+		0,
+	);
+	const source = costs.some((cost) => cost.source === "estimated")
+		? ("estimated" as const)
+		: costs.some((cost) => cost.source === "actual")
+			? ("actual" as const)
+			: ("zero" as const);
 	return { amount, source };
 }
 
 /** Derive display rows without mutating or storing totals in the ledger. */
-export function aggregateRalphCosts(records: readonly RalphCostRecordLike[]): { rows: RalphCostAggregate[]; total: RalphCostAggregate } {
+export function aggregateRalphCosts(records: readonly RalphCostRecordLike[]): {
+	rows: RalphCostAggregate[];
+	total: RalphCostAggregate;
+} {
 	const rows: RalphCostAggregate[] = [];
 	const init = records.filter((record) => record.phase === "init");
-	if (init.length) rows.push({ label: "Init", usage: sumUsage(init), usdCost: aggregateUsd(init), ...(sessionIds(init) ? { providerSessionIds: sessionIds(init) } : {}) });
-	const iterations = [...new Set(records.filter((record) => record.iteration !== undefined).map((record) => record.iteration!))].sort((a, b) => a - b);
+	if (init.length)
+		rows.push({
+			label: "Init",
+			usage: sumUsage(init),
+			usdCost: aggregateUsd(init),
+			...(sessionIds(init) ? { providerSessionIds: sessionIds(init) } : {}),
+		});
+	const iterations = [
+		...new Set(
+			records
+				.filter((record) => record.iteration !== undefined)
+				.flatMap((record) =>
+					record.iteration === undefined ? [] : [record.iteration],
+				),
+		),
+	].sort((a, b) => a - b);
 	for (const iteration of iterations) {
 		const grouped = records.filter((record) => record.iteration === iteration);
-		rows.push({ label: `Iteration ${iteration}`, usage: sumUsage(grouped), usdCost: aggregateUsd(grouped), ...(sessionIds(grouped) ? { providerSessionIds: sessionIds(grouped) } : {}) });
+		rows.push({
+			label: `Iteration ${iteration}`,
+			usage: sumUsage(grouped),
+			usdCost: aggregateUsd(grouped),
+			...(sessionIds(grouped)
+				? { providerSessionIds: sessionIds(grouped) }
+				: {}),
+		});
 	}
-	const finalReflections = records.filter((record) => record.phase === "reflect" && record.iteration === undefined);
-	if (finalReflections.length) rows.push({ label: "Final reflection", usage: sumUsage(finalReflections), usdCost: aggregateUsd(finalReflections), ...(sessionIds(finalReflections) ? { providerSessionIds: sessionIds(finalReflections) } : {}) });
-	const total: RalphCostAggregate = { label: "Total", usage: sumUsage(records), usdCost: aggregateUsd(records), ...(sessionIds(records) ? { providerSessionIds: sessionIds(records) } : {}) };
+	const finalReflections = records.filter(
+		(record) => record.phase === "reflect" && record.iteration === undefined,
+	);
+	if (finalReflections.length)
+		rows.push({
+			label: "Final reflection",
+			usage: sumUsage(finalReflections),
+			usdCost: aggregateUsd(finalReflections),
+			...(sessionIds(finalReflections)
+				? { providerSessionIds: sessionIds(finalReflections) }
+				: {}),
+		});
+	const total: RalphCostAggregate = {
+		label: "Total",
+		usage: sumUsage(records),
+		usdCost: aggregateUsd(records),
+		...(sessionIds(records) ? { providerSessionIds: sessionIds(records) } : {}),
+	};
 	return { rows, total };
 }
 
@@ -94,7 +171,9 @@ export function formatRalphCostSummary(
 ): string {
 	const { rows, total } = aggregateRalphCosts(records);
 	const hasCache = records.some(
-		(record) => record.usage.cacheReadTokens !== undefined || record.usage.cacheWriteTokens !== undefined,
+		(record) =>
+			record.usage.cacheReadTokens !== undefined ||
+			record.usage.cacheWriteTokens !== undefined,
 	);
 	const lines = [`Ralph cost — ${name} — ${status}`];
 	for (const row of [...rows, total]) {
