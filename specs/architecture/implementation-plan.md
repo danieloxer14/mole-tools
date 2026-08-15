@@ -248,7 +248,7 @@ add real-integration and standalone-binary smoke checks.
   fails the run if coverage drops below it — every phase gate implicitly runs it.
 - **Excluded** (justified, not lazy): `src/index.tsx` cac wiring (Phase 7
   integration exercises it) and `adapters/ui/UiHost.tsx` Ink render (Phase 5
-  manual real-terminal smoke). Everything else — ports usage, pure fns,
+  manual real-terminal smoke). Everything else — port contracts, pure fns,
   adapters, controller, feature flow — is inside the threshold.
 - **Per-phase coverage owners:** Phase 2 pure fns → 100% (trivial); Phase 3
   loader → all branches (bootstrap / bad-key / valid); Phase 4 adapters → both

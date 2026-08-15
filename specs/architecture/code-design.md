@@ -73,7 +73,7 @@ src/
   ports/                    # INTERFACES ONLY — no implementation
     ui.ts                   # UiPort
     vcs.ts                  # Vcs (git)
-    llm.ts                  # Llm (provider-neutral, capability-aware)
+    llm.ts                   # Llm (provider-neutral text generation)
     issue-tracker.ts        # IssueTracker (Jira today)
     git-host.ts             # GitHost (GitLab today, GitHub later)
 
@@ -84,7 +84,7 @@ src/
       InkUiPort.ts          # UiPort impl writing to the controller
     vcs/git.ts              # shell-out via Bun $
     llm/ollama.ts           # raw fetch → /api/generate, text-generation
-    llm/pi.ts               # Pi subprocess, text/agent capabilities
+    llm/pi.ts               # Pi subprocess, text generation
     issue-tracker/jira.ts
     git-host/gitlab.ts
     config/
@@ -200,10 +200,9 @@ export interface Context {
   config: Config;              // plain, zod-validated value (NOT a port)
   ui: UiPort;                  // always present
   vcs: Vcs;                    // git, always present
-  llm: Llm;                    // capability-aware, purpose-routed provider
+  llm: Llm;                    // purpose-routed provider
   issues: IssueTracker | null; // null when jira.enabled === false
   gitHost: GitHost | null;     // null until a feature needs it / provider unset
-  log: Logger;
 }
 
 export function buildContext(input: { config: Config; ui: UiPort }): Context {
@@ -215,7 +214,6 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
     llm: makeLlmRouter(config), // routes feature purpose to configured adapter
     issues: config.jira.enabled ? new JiraAdapter(config.jira) : null,
     gitHost: makeGitHost(config),   // provider switch: "gitlab" → GitLabAdapter
-    log: makeLogger(),
   };
 }
 ```
@@ -227,13 +225,11 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
   null check is where "no ticket context, proceed" lives.
 - **Provider selection** (`GitLab` now, `GitHub` later) is a switch inside
   `makeGitHost(config)` — the only place that knows the concrete host.
-- **LLM selection is feature-owned:** configuration uses profiles such as
-  `commit: { provider, model }`, `mergeRequest: { provider, model }`, and
-  `ralph: { provider }`, with connection details under `providers`. The
-  Context-level LLM router resolves a request purpose to its adapter; provider
-  names and provider-specific configuration never enter a feature flow. Ralph
-  supplies its required CLI model and persists that model plus the resolved
-  provider selection; the router resolves that persisted selection on resume.
+- **LLM selection is feature-owned:** configuration uses explicit routes such as
+  `commit: { provider, name }` and `mergeRequest: { provider, name }`, with
+  connection details under `providers`. The Context-level LLM router resolves
+  each request purpose to its configured adapter; provider-specific configuration
+  never enters a feature flow.
 
 ---
 
@@ -255,13 +251,18 @@ export interface Vcs {
   log(opts: LogQuery): Promise<CommitMeta[]>;
 }
 
-// ports/llm.ts — provider-neutral capabilities
+// ports/llm.ts — provider-neutral text generation
+export interface GenerateRequest {
+  providerKey?: string;
+  model: string;
+  system: string;
+  prompt: string;
+  signal?: AbortSignal;
+}
+
 export interface Llm {
-  capabilities: ReadonlySet<LlmCapability>;
-  /** Yields token chunks. Non-streaming callers just collect them. */
+  /** Yields text chunks. Non-streaming callers just collect them. */
   generate(req: GenerateRequest): AsyncIterable<string>;
-  /** Runs a workspace-capable agent and returns output/diagnostics. */
-  runAgent(req: AgentRequest): Promise<AgentResult>;
 }
 
 // ports/issue-tracker.ts
@@ -278,11 +279,10 @@ export interface GitHost {
 }
 ```
 
-- **Providers do not leak into the `Llm` port** — no `baseUrl`, `/api/generate`,
-  Pi flags, or subprocess handles appear in the interface. Adapters expose
-  explicit `text-generation` and `agentic-workspace` capabilities; unsupported
-  operations fail before external work. A Context-level router selects the
-  provider/model from feature-owned configuration.
+- **Providers do not leak into the `Llm` port** — no `baseUrl`,
+  `/api/generate`, Pi flags, or subprocess handles appear in the interface. A
+  Context-level router selects the provider and model from feature-owned
+  configuration.
 - The `Vcs` port returns **structured** data (`FileDiff[]`, `CommitMeta[]`); the
   adapter parses git's stdout, so features never touch raw text.
 
@@ -438,11 +438,10 @@ Three tiers, each with a clean seam:
 
 - `FakeUiPort` both **scripts** responses (a queued answer per interaction) and
   **records** a transcript so tests assert *what the user was shown*.
-- `FakeLlm` scripts text and agent operations, exercising streaming and
-  workspace-agent paths deterministically.
-- Fakes throw the same `PortError`/`AbortError`/unsupported-capability types on
-  demand, so failure paths (Ollama down, Pi failure, push rejected, Jira fetch
-  fails) are e2e-testable without real infrastructure.
+- `FakeLlm` scripts text chunks and exercises streaming deterministically.
+- Fakes throw the same `PortError`/`AbortError` types on demand, so failure paths
+  (Ollama down, Pi failure, push rejected, Jira fetch fails) are e2e-testable
+  without real infrastructure.
 
 Example e2e seam:
 
@@ -459,7 +458,7 @@ expect(ctx.vcs.commit).toHaveBeenCalledWith("feat: x");
 
 ## 11. How to add a new tool (the whole checklist)
 
-1. Add any new external boundary or provider capability as a **port** contract in `ports/` (interface only).
+1. Add any new external boundary or provider as a **port** contract in `ports/` (interface only).
 2. Implement its **adapter** in `adapters/`; wire it into `buildContext`.
 3. Create `features/<name>/index.ts` exporting a `Feature` (`name`,
    `description`, `args` zod schema, `run`). Keep `run()` linear — push logic

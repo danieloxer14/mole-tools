@@ -1,6 +1,6 @@
 # mole-tools
 
-Global CLI for common git/dev workflows. AI-powered commit messages, merge requests, and durable implementation loops — running fast against your local Ollama or any configured provider.
+Global CLI for common git/dev workflows. AI-powered commit messages and merge requests — running fast against your local Ollama or any configured provider.
 
 ## Install
 
@@ -61,20 +61,13 @@ Each provider is given a key (e.g. `ollama`, `pi`) referenced later by model rou
 ```jsonc
 {
   "models": {
-    "commit":         { "provider": "ollama", "name": "gemma3:12b" },
-    "mergeRequest":   { "provider": "ollama", "name": "gemma3:12b" },
-    "ralph": {
-      "init":        { "provider": "pi", "name": "qwen3.6" },
-      "implement":   { "provider": "pi", "name": "qwen3.6" },
-      "reflect":     { "provider": "pi", "name": "gemma3:12b" }
-    }
+    "commit":       { "provider": "ollama", "name": "gemma3:12b" },
+    "mergeRequest": { "provider": "ollama", "name": "gemma3:12b" }
   }
 }
 ```
 
-Every route is **required** and must reference an existing provider key. There are no defaults or `@model:` CLI overrides — if a route is missing, the tool fails at startup. For Ralph you can (and probably should) choose different models per phase; e.g. a strong reasoning model for init/implement and a lighter one for reflection.
-
-Model selections made during `ralph init` are persisted in `.ralph/<name>.state.json`, so later runs remain deterministic even if your global config changes.
+Every route is **required** and must reference an existing provider key. If a route is missing, the tool fails at startup.
 
 #### Optional Sections
 
@@ -117,13 +110,14 @@ Instead of editing the bundled system prompts, you can place custom `.md` files 
 ├── config.json
 └── prompts/
     ├── commit-system.md
-    ├── mr-system.md
-    ├── ralph-init-system.md
-    ├── ralph-implement-system.md
-    └── ralph-reflection-system.md
+    └── mr-system.md
 ```
 
-If a file exists it is loaded in full; if it is missing the built-in default is used (and written to the prompts dir for future editing). Five prompt slots are available — one per AI task the tool performs. Edit these to change tone, style conventions, or add repo-specific instructions without touching config.json.
+If a file exists it is loaded in full; if it is missing the built-in default is used (and written to the prompts dir for future editing). Two prompt slots are available — one for commit generation and one for merge-request generation. Edit these to change tone, style conventions, or add repo-specific instructions without touching config.json.
+
+#### Upgrading
+
+Configs written by earlier versions must remove `models.mrReview`, `models.ralph`, and the top-level `mrReview` block. Otherwise startup fails with `Invalid config at <path>`.
 
 ---
 
@@ -173,43 +167,6 @@ mole-tools merge-request --context "migration risk"   # extra inline guidance
 **How it works.** Preflight GitLab connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
 
 **Configuration.** Uses the `mergeRequest` model route. Customise the system prompt via `~/.config/mole-tools/prompts/mr-system.md`. Requires a GitLab host to be reachable (configured through the `pi` provider or environment).
-
----
-
-### `ralph init` / `ralph run` — Durable Implementation Loops
-
-Ralph is an AI-driven implementation loop. You give it a spec, task document, or brief; it decomposes the work into tasks and then iteratively implements them until everything is done.
-
-```bash
-mole-tools ralph init <name> <source> [--maxIterations N] [--reflectEvery N]
-mole-tools ralph run  <name>             [--maxIterations N]
-```
-
-| Argument / Option | Description |
-|---|---|
-| `<name>` | Loop name in kebab-case (e.g. `refactor-auth`). Artifacts stored in `.ralph/<name>.md` and `.ralph/<name>.state.json`. |
-| `<source>` | Path to a local file, an HTTP(S) URL, or inline text treated as the brief/spec. |
-| `--maxIterations <N>` | Upper bound on total worker iterations (default: 20). |
-| `--reflectEvery <N>` | Run a reflection/review pass every N implement iterations (default: 5; set to 0 to disable). |
-
-**How it works.**
-
-- **init:** Classifies the source → prompts you for model names per phase (init/implement/reflect) → an agentic workspace agent reads the repository and runs with the `ralph-init-system` prompt to produce a structured task file → task file written to `.ralph/<name>.md`, state saved in JSON.
-- **run:** Reads the persisted state → enters the implement loop: re-reads the task file, picks the next unchecked task, implements it (ideally TDD), verifies it, checks off the box → every `reflectEvery` iterations a reflection model reviews progress and may adjust the task file → stops when all tasks are complete, iteration cap is reached, or you interrupt. Loops survive crashes and restart seamlessly.
-
-**Configuration.** Uses the three sub-routes under `models.ralph` (init/implement/reflect) from config.json for defaults. Final per-loop model choices are captured at init time in `.ralph/<name>.state.json`. System prompts customisable via the three corresponding prompt override files under `~/.config/mole-tools/prompts/`.
-
----
-
-### `cost-breakdown` — Session Cost History
-
-Shows a paginated breakdown of token/cost history across all previous feature runs.
-
-```bash
-mole-tools cost-breakdown
-```
-
-No options. Runs through each recorded session newest-first; press Enter to advance. Cost history is stored automatically after every feature run — nothing to configure manually.
 
 ---
 
@@ -297,7 +254,7 @@ Bumps `package.json`, builds the binary, commits and tags `v<version>`, pushes t
 | Path | Description |
 |---|---|
 | `src/index.tsx` | CLI entry point — command registration, config loading, Ink UI bootstrap |
-| `src/core/` | Context, cost accounting, error handling, feature interface |
-| `src/features/` | One directory per feature (commit, merge-request, ralph, etc.) |
+| `src/core/` | Context, error handling, feature interface |
+| `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
 | `specs/` | Design docs and architecture notes |

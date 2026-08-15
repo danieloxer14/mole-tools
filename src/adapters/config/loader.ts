@@ -18,13 +18,8 @@ export const CONFIG_TEMPLATE_TEXT = `{
     }
   },
   "models": {
-    "commit": { "provider": "ollama", "name": "qwen3.6" },
-    "mergeRequest": { "provider": "ollama", "name": "qwen3.6" },
-    "ralph": {
-      "init": { "provider": "pi", "name": "qwen3.6" },
-      "implement": { "provider": "pi", "name": "qwen3.6" },
-      "reflect": { "provider": "pi", "name": "qwen3.6" }
-    }
+    "commit": { "provider": "ollama", "name": "gemma4:12b" },
+    "mergeRequest": { "provider": "ollama", "name": "gemma4:12b" }
   },
   "jira": {
     "enabled": false,
@@ -111,7 +106,7 @@ export async function loadConfig(
 		const compatibility = rawObject.ollama
 			? {
 					ollama: rawObject.ollama,
-					llm: { commit: "ollama", mergeRequest: "ollama", ralph: "pi" },
+					llm: { commit: "ollama", mergeRequest: "ollama" },
 				}
 			: rawObject.llm
 				? { llm: rawObject.llm }
@@ -139,11 +134,6 @@ function normalizeConfig(raw: unknown): unknown {
 			models: {
 				commit: { provider: "ollama", name: ollama.commitModel },
 				mergeRequest: { provider: "ollama", name: ollama.commitModel },
-				ralph: {
-					init: { provider: "ollama", name: ollama.commitModel },
-					implement: { provider: "ollama", name: ollama.commitModel },
-					reflect: { provider: "ollama", name: ollama.commitModel },
-				},
 			},
 		};
 	}
@@ -164,11 +154,6 @@ function normalizeConfig(raw: unknown): unknown {
 			models: {
 				commit: route("commit"),
 				mergeRequest: route("mergeRequest"),
-				ralph: {
-					init: route("ralph"),
-					implement: route("ralph"),
-					reflect: route("ralph"),
-				},
 			},
 		};
 	}

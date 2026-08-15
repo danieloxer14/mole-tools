@@ -35,8 +35,7 @@ and how it's installed globally on PATH.
 
 ## 2. Why this shape
 
-- Stated driver for a standalone CLI over the existing Claude skills: **speed +
-  zero token cost** (local Ollama, no Claude round-trip). Everything leans lean.
+- Stated driver for a standalone CLI over the existing Claude skills: **speed + local inference** (Ollama, no Claude round-trip). Everything leans lean.
 - **Not** a stated goal: shipping a single binary to non-Node teammates. So the
   binary is a convenience (fast startup, no `node` invocation), not a
   cross-platform distribution mandate — hence macOS-arm64-only is fine.
@@ -160,6 +159,4 @@ Script responsibilities:
 - CI/CD release pipeline (manual for now).
 - Homebrew tap / npm publish.
 - Auto-update.
-- The merge-request command internals (next session) — but the subcommand slot,
-  `cac` routing, and config keys (`ollama.mrModel`, `mrSystemPrompt`,
-  `dynamicEnvRepos`, `autoReviewer`) are reserved for it.
+- Future host integrations may add subcommands without changing the registry-backed CLI shape. Current merge-request routing uses `models.mergeRequest`; connection details live under `providers`.

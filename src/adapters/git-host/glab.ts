@@ -81,8 +81,9 @@ export class GlabAdapter implements GitHost {
 		const lines = result.stdout.trim().split("\n").filter(Boolean);
 		for (const line of lines) {
 			const urlMatch = line.match(/(https?:\/\/[^\s]+)/);
-			if (urlMatch) {
-				return { url: urlMatch[1]! };
+			const url = urlMatch?.[1];
+			if (url) {
+				return { url };
 			}
 		}
 
@@ -133,15 +134,14 @@ export class GlabAdapter implements GitHost {
 			);
 		}
 
-		const urlMatch = result.stdout.match(/(https?:\/\/[^\s]+)/);
-		if (!urlMatch) {
+		const url = result.stdout.match(/(https?:\/\/[^\s]+)/)?.[1];
+		if (!url) {
 			throw new PortError(
 				"MR created but no URL found in output",
 				result.stdout,
 			);
 		}
-
-		return { url: urlMatch[1]! };
+		return { url };
 	}
 
 	async resolveGroup(handle: string): Promise<HostMember | null> {
@@ -166,7 +166,7 @@ export class GlabAdapter implements GitHost {
 					page,
 					exitCode: result.exitCode,
 				});
-				return members.length > 0 ? members[0]! : null;
+				return members.at(0) ?? null;
 			}
 
 			let body: unknown;
@@ -174,7 +174,7 @@ export class GlabAdapter implements GitHost {
 				body = JSON.parse(result.stdout);
 			} catch (error) {
 				logger.warn("glab.resolve-group.invalid-json", { handle, page, error });
-				return members.length > 0 ? members[0]! : null;
+				return members.at(0) ?? null;
 			}
 			if (!Array.isArray(body)) {
 				logger.warn("glab.resolve-group.unexpected-response", {
@@ -182,7 +182,7 @@ export class GlabAdapter implements GitHost {
 					page,
 					responseType: typeof body,
 				});
-				return members.length > 0 ? members[0]! : null;
+				return members.at(0) ?? null;
 			}
 			for (const member of body) {
 				members.push({
@@ -203,8 +203,10 @@ export class GlabAdapter implements GitHost {
 			return null;
 		}
 
+		const firstMember = members.at(0);
+		if (!firstMember) return null;
 		return {
-			id: members[0]!.id,
+			id: firstMember.id,
 			handle: handle,
 			kind: "group",
 		};

@@ -24,8 +24,8 @@ describe("formatGeneralHelp", () => {
 			makeFeature({ name: "commit", description: "Commit with AI" }),
 			makeFeature({ name: "init", description: "Initialize config" }),
 			makeFeature({
-				name: "cost-breakdown",
-				description: "Show cost breakdown",
+				name: "worktree-prune",
+				description: "Scan and prune extra git worktrees",
 			}),
 		];
 
@@ -37,17 +37,17 @@ describe("formatGeneralHelp", () => {
 		expect(output).toContain("Commit with AI");
 		expect(output).toContain("init\t");
 		expect(output).toContain("Initialize config");
-		expect(output).toContain("cost-breakdown\t");
-		expect(output).toContain("Show cost breakdown");
+		expect(output).toContain("worktree-prune\t");
+		expect(output).toContain("Scan and prune extra git worktrees");
 		expect(output).toContain('Run "mole-tools help <command>" for details.');
 
-		// Check order: commit before init before cost-breakdown
+		// Check order: commit before init before worktree-prune
 		const commitIdx = output.indexOf("commit\t");
 		const initIdx = output.indexOf("init\t");
-		const costIdx = output.indexOf("cost-breakdown\t");
+		const worktreePruneIdx = output.indexOf("worktree-prune\t");
 		expect(commitIdx).toBeGreaterThan(0);
 		expect(initIdx).toBeGreaterThan(commitIdx);
-		expect(costIdx).toBeGreaterThan(initIdx);
+		expect(worktreePruneIdx).toBeGreaterThan(initIdx);
 	});
 
 	test("handles empty feature list", () => {
@@ -142,7 +142,11 @@ describe("formatCommandHelp", () => {
 		const feature = makeFeature({
 			name: "commit",
 			args: z.object({
-				auto: z.boolean().optional().default(false).describe("Skip prompts and do not push"),
+				auto: z
+					.boolean()
+					.optional()
+					.default(false)
+					.describe("Skip prompts and do not push"),
 			}),
 		});
 
@@ -167,10 +171,9 @@ describe("formatCommandHelp", () => {
 		});
 
 		// Add meta manually since zod v4's .meta() may not be available in all builds
-		const baseDir = (schema as z.ZodObject).shape.baseDir as z.ZodTypeAny & {
-			meta?: () => unknown;
-		};
-		(baseDir as any).meta = () => ({
+		const baseDir = (schema as z.ZodObject).shape.baseDir as z.ZodTypeAny;
+		const baseDirMetadata = baseDir as unknown as { meta?: () => unknown };
+		baseDirMetadata.meta = () => ({
 			examples: ["~/dev", "/projects"],
 		});
 
@@ -232,14 +235,14 @@ describe("formatUnknownCommand", () => {
 		const output = formatUnknownCommand("frobnicate", [
 			"commit",
 			"init",
-			"cost-breakdown",
+			"worktree-prune",
 		]);
 
 		expect(output).toContain('Unknown command "frobnicate".');
 		expect(output).toContain("Available commands:");
 		expect(output).toContain("commit");
 		expect(output).toContain("init");
-		expect(output).toContain("cost-breakdown");
+		expect(output).toContain("worktree-prune");
 	});
 
 	test("renders empty known list", () => {

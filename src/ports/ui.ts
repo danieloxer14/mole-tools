@@ -12,7 +12,11 @@ export interface UiPort {
 	error(text: string): Promise<void>;
 	confirm(q: string): Promise<boolean>;
 	select<T>(q: string, opts: Choice<T>[]): Promise<T>;
-	multiSelect<T>(q: string, opts: Choice<T>[]): Promise<T[]>;
+	multiSelect<T>(
+		q: string,
+		opts: Choice<T>[],
+		options?: { suppressCompletionLog?: boolean },
+	): Promise<T[]>;
 	editText(prompt: string, initial: string): Promise<string>;
 	editMultiline(prompt: string, initial: string): Promise<string>;
 	stream(source: AsyncIterable<string>, label?: string): Promise<string>;

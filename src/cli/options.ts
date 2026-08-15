@@ -4,9 +4,9 @@ import { z } from "zod";
 function unwrapToCore(schema: z.ZodTypeAny): z.ZodTypeAny {
 	let current = schema;
 	while (current instanceof z.ZodDefault || current instanceof z.ZodOptional) {
-		// TypeScript narrowest to union; both have unwrap() returning inner type.
-		current =
-			current instanceof z.ZodDefault ? current.unwrap() : current.unwrap();
+		current = (
+			current as z.ZodDefault | z.ZodOptional
+		).unwrap() as z.ZodTypeAny;
 	}
 	return current;
 }

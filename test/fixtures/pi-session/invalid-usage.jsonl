@@ -1,2 +1,0 @@
-{"type":"session","id":"session-invalid"}
-{"type":"message_end","message":{"role":"assistant","usage":{"inputTokens":-1,"outputTokens":2,"cacheReadTokens":0,"cacheWriteTokens":0}}}

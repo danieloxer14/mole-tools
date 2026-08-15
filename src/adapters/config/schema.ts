@@ -32,11 +32,6 @@ export const ModelsConfigSchema = z
 	.object({
 		commit: ModelRouteSchema,
 		mergeRequest: ModelRouteSchema,
-		ralph: z.object({
-			init: ModelRouteSchema,
-			implement: ModelRouteSchema,
-			reflect: ModelRouteSchema,
-		}),
 	})
 	.strict();
 
@@ -60,7 +55,7 @@ export const ConfigSchema = z
 	.strict();
 export type Config = z.infer<typeof ConfigSchema>;
 
-export type RoutingPurpose = "commit" | "mergeRequest" | "ralph";
+export type RoutingPurpose = "commit" | "mergeRequest";
 
 export function resolveLlmProvider(
 	config: Config,
@@ -75,8 +70,7 @@ export function resolveLlmProvider(
 		legacy.ollama &&
 		legacy.llm
 	) {
-		const providerKey =
-			legacy.llm[purpose === "ralph" ? "ralph" : purpose] ?? "ollama";
+		const providerKey = legacy.llm[purpose] ?? "ollama";
 		return {
 			providerKey,
 			providerProfile: {
@@ -91,8 +85,7 @@ export function resolveLlmProvider(
 		legacy.llm &&
 		config.providers
 	) {
-		const providerKey =
-			legacy.llm[purpose === "ralph" ? "ralph" : purpose] ?? "ollama";
+		const providerKey = legacy.llm[purpose] ?? "ollama";
 		const providerProfile = config.providers[providerKey];
 		if (!providerProfile) {
 			throw new Error(`provider '${providerKey}' is not defined in providers`);
@@ -104,8 +97,7 @@ export function resolveLlmProvider(
 			model: String(legacyModels.default ?? ""),
 		};
 	}
-	const route =
-		purpose === "ralph" ? config.models.ralph.init : config.models[purpose];
+	const route = config.models[purpose];
 	const providerProfile = config.providers[route.provider];
 	if (!providerProfile) {
 		throw new Error(
@@ -115,14 +107,11 @@ export function resolveLlmProvider(
 	return { providerKey: route.provider, providerProfile, model: route.name };
 }
 
-/** Validate every route, including Ralph's phase routes, with a useful path. */
+/** Validate every configured route with a useful path. */
 export function validateModelProviders(config: Config): void {
 	const routes: Array<[string, ModelRoute]> = [
 		["models.commit", config.models.commit],
 		["models.mergeRequest", config.models.mergeRequest],
-		["models.ralph.init", config.models.ralph.init],
-		["models.ralph.implement", config.models.ralph.implement],
-		["models.ralph.reflect", config.models.ralph.reflect],
 	];
 	for (const [path, route] of routes) {
 		if (!config.providers[route.provider]) {

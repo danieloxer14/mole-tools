@@ -390,7 +390,7 @@ describe("GlabAdapter", () => {
 				draft: false,
 				reviewers: ["a", "b"],
 			});
-			const reviewerCount = calls[0]!.filter((c) => c === "--reviewer").length;
+			const reviewerCount = calls[0]?.filter((c) => c === "--reviewer").length;
 			expect(reviewerCount).toBe(2);
 		});
 

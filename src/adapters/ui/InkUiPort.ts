@@ -36,12 +36,17 @@ export class InkUiPort implements UiPort {
 		}));
 	}
 
-	multiSelect<T>(q: string, opts: Choice<T>[]): Promise<T[]> {
+	multiSelect<T>(
+		q: string,
+		opts: Choice<T>[],
+		options?: { suppressCompletionLog?: boolean },
+	): Promise<T[]> {
 		return this.controller.request<T[]>((resolve) => ({
 			kind: "multiSelect",
 			q,
 			opts: opts as Choice<unknown>[],
 			resolve,
+			...options,
 		}));
 	}
 

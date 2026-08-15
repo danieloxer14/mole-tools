@@ -20,7 +20,6 @@ export async function summarizeWorktree(
 				system:
 					"Summarize the changes in a Git worktree concisely for a user deciding whether to delete it.",
 				prompt: `Here is the worktree's git status and diff snapshot:\n\n${snapshot}\n\nSummarize what would be lost.`,
-				task: "worktree-summary",
 			}),
 		);
 		let timer: ReturnType<typeof setTimeout> | undefined;

@@ -2,19 +2,16 @@ import cac from "cac";
 import packageJson from "../package.json";
 import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
 import { runInInk } from "./app";
+import { applyZodOptions } from "./cli/options";
 import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
-import type { Feature } from "./core/feature";
 import { closeLogger, initializeLogger } from "./core/logger";
-import { runWithCostAccounting } from "./core/cost-accounting";
 import { features } from "./core/registry";
 import {
 	formatCommandHelp,
 	formatGeneralHelp,
 	formatUnknownCommand,
 } from "./features/help/format";
-import { formatCostSavingsTable } from "./shared/cost/catalog";
-import { applyZodOptions } from "./cli/options";
 
 export { applyZodOptions } from "./cli/options";
 
@@ -42,45 +39,17 @@ cli
 		}
 	});
 
-for (const feature of features as Feature[]) {
-	// cac has no separate nested-command registry, so Ralph owns its three
-	// positional slots and dispatches init/run in the feature implementation.
-	const commandName =
-		feature.name === "ralph"
-			? "ralph [subcommand] [name] [source]"
-			: feature.name;
-	const cmd = cli.command(commandName, feature.description);
+for (const feature of features) {
+	const cmd = cli.command(feature.name, feature.description);
 	applyZodOptions(cmd, feature.args);
 	cmd.action(async (...actionArgs: unknown[]) => {
 		// Help is handled above and intentionally never enters this lifecycle.
 		await initializeLogger();
 		try {
-			const options = (
-				feature.name === "ralph"
-					? actionArgs[actionArgs.length - 1]
-					: actionArgs[0]
-			) as Record<string, unknown>;
+			const options = actionArgs[0] as Record<string, unknown>;
 			let args: unknown;
 			try {
-				args = feature.args.parse(
-					feature.name === "ralph"
-						? {
-								...options,
-								subcommand: actionArgs[0],
-								name: actionArgs[1],
-								source: actionArgs[2],
-							}
-						: options,
-				);
-				// Positional Ralph arguments are intentionally excluded from its
-				// option schema (and therefore from the Options help section).
-				if (feature.name === "ralph" && args && typeof args === "object") {
-					Object.assign(args, {
-						subcommand: actionArgs[0],
-						name: actionArgs[1],
-						source: actionArgs[2],
-					});
-				}
+				args = feature.args.parse(options);
 			} catch (e) {
 				console.error(e instanceof Error ? e.message : String(e));
 				process.exitCode = 1;
@@ -92,19 +61,10 @@ for (const feature of features as Feature[]) {
 			// would race with that and always report "config already exists".
 			const config =
 				feature.name === "init" ? CONFIG_TEMPLATE : await loadConfig();
-			const startedAt = new Date().toISOString();
 			process.exitCode = await runInInk(async (ui) => {
 				try {
 					const ctx = buildContext({ config, ui });
-					await runWithCostAccounting({
-						feature: feature.name,
-						startedAt,
-						tracker: ctx.costTracker,
-						run: () => feature.run(ctx, args),
-						options: { onWarning: (message) => void ui.warn(message) },
-					});
-					const entries = ctx.costTracker.getEntries();
-					if (entries.length > 0) await ui.info(formatCostSavingsTable(entries));
+					await feature.run(ctx, args);
 					return 0;
 				} catch (e) {
 					return handleError(e, ui);

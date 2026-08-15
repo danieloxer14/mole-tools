@@ -37,6 +37,32 @@ describe("UiController", () => {
 		expect(() => controller.resolveCurrent("x")).not.toThrow();
 	});
 
+	test("suppresses only requested multi-select completion logs", async () => {
+		const controller = new UiController();
+		const hidden = controller.request<string[]>((resolve) => ({
+			kind: "multiSelect",
+			q: "Select reviewers",
+			opts: [{ label: "Reviewer", value: "reviewer" }],
+			resolve,
+			suppressCompletionLog: true,
+		}));
+		controller.resolveCurrent(["reviewer"]);
+		await hidden;
+		expect(controller.getLogSnapshot()).toEqual([]);
+
+		const visible = controller.request<string[]>((resolve) => ({
+			kind: "multiSelect",
+			q: "Select labels",
+			opts: [{ label: "Bug", value: "bug" }],
+			resolve,
+		}));
+		controller.resolveCurrent(["bug"]);
+		await visible;
+		expect(controller.getLogSnapshot().map((entry) => entry.text)).toEqual([
+			"Select labels → Bug",
+		]);
+	});
+
 	test("request exposes a reject callback that rejects the pending promise", async () => {
 		const controller = new UiController();
 		const promise = controller.request<string>((resolve, reject) => ({

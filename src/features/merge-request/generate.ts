@@ -39,7 +39,6 @@ export async function generateMergeRequest(
 				model,
 				system,
 				prompt,
-				task: "merge-request",
 			}),
 			"Generating merge request",
 		);

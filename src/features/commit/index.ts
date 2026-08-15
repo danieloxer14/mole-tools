@@ -69,7 +69,6 @@ async function generateValid(ctx: Context, prompt: string): Promise<string> {
 				model,
 				system: "",
 				prompt,
-				task: "commit-message",
 			}),
 			"Generating commit message",
 		);

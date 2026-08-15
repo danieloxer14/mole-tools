@@ -19,6 +19,7 @@ export type Request =
 			q: string;
 			opts: Choice<unknown>[];
 			resolve: Resolve;
+			suppressCompletionLog?: boolean;
 	  }
 	| { kind: "editText"; prompt: string; initial: string; resolve: Resolve }
 	| { kind: "editMultiline"; prompt: string; initial: string; resolve: Resolve }
@@ -85,7 +86,8 @@ export class UiController {
 			let request: Request;
 			const wrappedResolve = (v: T) => {
 				this.current = null;
-				this.pushLog("info", completedRequestText(request, v));
+				if (request.kind !== "multiSelect" || !request.suppressCompletionLog)
+					this.pushLog("info", completedRequestText(request, v));
 				resolve(v);
 			};
 			const wrappedReject = (e: unknown) => {

@@ -10,14 +10,16 @@ describe("commit CLI option parsing", () => {
 		const autoCommand = withAuto.command("commit");
 		applyZodOptions(autoCommand, commit.args);
 		const autoArgs = commit.args.parse(
-			withAuto.parse(["bun", "mole-tools", "commit", "--auto"], { run: false }).options,
+			withAuto.parse(["bun", "mole-tools", "commit", "--auto"], { run: false })
+				.options,
 		);
 
 		const withoutAuto = cac("mole-tools");
 		const defaultCommand = withoutAuto.command("commit");
 		applyZodOptions(defaultCommand, commit.args);
 		const defaultArgs = commit.args.parse(
-			withoutAuto.parse(["bun", "mole-tools", "commit"], { run: false }).options,
+			withoutAuto.parse(["bun", "mole-tools", "commit"], { run: false })
+				.options,
 		);
 
 		expect(autoArgs.auto).toBe(true);
@@ -36,10 +38,9 @@ describe("commit CLI option parsing", () => {
 		applyZodOptions(cmd, schema);
 
 		// Should work as bare flag (no <value> placeholder)
-		const parsed = cli.parse(
-			["bun", "mole-tools", "commit", "--auto"],
-			{ run: false },
-		);
+		const parsed = cli.parse(["bun", "mole-tools", "commit", "--auto"], {
+			run: false,
+		});
 		const args = schema.parse(parsed.options);
 
 		expect(args.auto).toBe(true);

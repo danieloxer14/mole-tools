@@ -17,11 +17,6 @@ function makeConfig(overrides?: Partial<Config>): Config {
 		models: {
 			commit: { provider: "ollama", name: "qwen3.6" },
 			mergeRequest: { provider: "ollama", name: "qwen3.6" },
-			ralph: {
-				init: { provider: "ollama", name: "qwen3.6" },
-				implement: { provider: "ollama", name: "qwen3.6" },
-				reflect: { provider: "ollama", name: "qwen3.6" },
-			},
 		},
 		jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
 		diff: { ignore: [] },

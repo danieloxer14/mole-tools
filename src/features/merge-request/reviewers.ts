@@ -234,8 +234,10 @@ export async function selectReviewers(
 		suggestions = (
 			await Promise.all(
 				suggestions.map(async (suggestion) => {
-					const member = await ctx.gitHost?.resolveHandle(suggestion.displayName);
-					if (!member || member.kind !== "user") return null;
+					const member = await ctx.gitHost?.resolveHandle(
+						suggestion.displayName,
+					);
+					if (member?.kind !== "user") return null;
 					return {
 						...suggestion,
 						handle: member.handle,
@@ -243,7 +245,9 @@ export async function selectReviewers(
 					};
 				}),
 			)
-		).filter((suggestion): suggestion is ReviewerSuggestion => suggestion !== null);
+		).filter(
+			(suggestion): suggestion is ReviewerSuggestion => suggestion !== null,
+		);
 	}
 
 	// If no candidates were ranked, return early (nothing to show).

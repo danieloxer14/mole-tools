@@ -1,7 +1,6 @@
 import { CONFIG_TEMPLATE } from "../../src/adapters/config/loader";
-import type { Config } from "../../src/adapters/config/schema";
-import type { Context, Logger } from "../../src/core/context";
-import { CostTracker } from "../../src/core/cost-tracker";
+import type { Config, RoutingPurpose } from "../../src/adapters/config/schema";
+import type { Context } from "../../src/core/context";
 import type { GitHost } from "../../src/ports/git-host";
 import type { IssueTracker } from "../../src/ports/issue-tracker";
 import type { Llm } from "../../src/ports/llm";
@@ -12,12 +11,6 @@ import { FakeLlm } from "./FakeLlm";
 import { FakeUiPort } from "./FakeUiPort";
 import { FakeVcs } from "./FakeVcs";
 
-const noopLogger: Logger = {
-	info() {},
-	warn() {},
-	error() {},
-};
-
 export function fakeContext(
 	overrides: {
 		config?: Config;
@@ -26,8 +19,6 @@ export function fakeContext(
 		llm?: Llm;
 		issues?: IssueTracker | null;
 		gitHost?: GitHost | null;
-		log?: Logger;
-		costTracker?: CostTracker;
 	} = {},
 ): Context {
 	const llm = overrides.llm ?? new FakeLlm();
@@ -37,11 +28,9 @@ export function fakeContext(
 		ui: overrides.ui ?? new FakeUiPort(),
 		vcs: overrides.vcs ?? new FakeVcs(),
 		llm,
-		getLlmFor: (_purpose: "commit" | "mergeRequest" | "ralph"): Llm => llm,
+		getLlmFor: (_purpose: RoutingPurpose): Llm => llm,
 		issues: overrides.issues !== undefined ? overrides.issues : null,
 		gitHost:
 			overrides.gitHost !== undefined ? overrides.gitHost : new FakeGitHost(),
-		log: overrides.log ?? noopLogger,
-		costTracker: overrides.costTracker ?? new CostTracker(),
 	};
 }

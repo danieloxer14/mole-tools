@@ -19,22 +19,9 @@ describe("summarizeWorktree", () => {
 
 	test("returns an empty string when the LLM throws", async () => {
 		const llm = {
-			capabilities: () => ["text-generation" as const],
 			generate: () => {
 				throw new Error("provider unavailable");
 			},
-			runAgent: async () => ({
-				output: "",
-				ok: false,
-				usage: {
-					inputTokens: 0,
-					outputTokens: 0,
-					cacheReadTokens: 0,
-					cacheWriteTokens: 0,
-					source: "estimated" as const,
-				},
-				usdCost: { source: "zero" as const, amount: 0 },
-			}),
 		};
 		const ctx = fakeContext({ llm });
 
@@ -43,23 +30,10 @@ describe("summarizeWorktree", () => {
 
 	test("returns an empty string when the LLM times out", async () => {
 		const llm = {
-			capabilities: () => ["text-generation" as const],
 			generate: () => ({
 				[Symbol.asyncIterator]: () => ({
 					next: () => new Promise<IteratorResult<string>>(() => {}),
 				}),
-			}),
-			runAgent: async () => ({
-				output: "",
-				ok: false,
-				usage: {
-					inputTokens: 0,
-					outputTokens: 0,
-					cacheReadTokens: 0,
-					cacheWriteTokens: 0,
-					source: "estimated" as const,
-				},
-				usdCost: { source: "zero" as const, amount: 0 },
 			}),
 		};
 		const ctx = fakeContext({ llm });
