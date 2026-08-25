@@ -1,5 +1,6 @@
 import { PortError } from "../../core/errors";
 import type {
+	AddWorktreeInput,
 	CommitMeta,
 	FileDiff,
 	LogQuery,
@@ -152,6 +153,21 @@ export class GitAdapter implements Vcs {
 		}
 		return result.stdout;
 	}
+	private async runIn(
+		args: string[],
+		cwd: string,
+		input?: string,
+	): Promise<string> {
+		const result = await this.execIn(args, cwd, input);
+		if (result.exitCode !== 0) {
+			throw new PortError(
+				result.stderr.trim() || `git ${args.join(" ")} failed`,
+				result.stderr,
+				result.exitCode,
+			);
+		}
+		return result.stdout;
+	}
 
 	async currentBranch(): Promise<string> {
 		return (await this.run(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
@@ -178,11 +194,71 @@ export class GitAdapter implements Vcs {
 	async rangeDiff(base: string): Promise<FileDiff[]> {
 		return this.diffBetween([`${base}..HEAD`]);
 	}
+	async cloneRepo(remoteUrl: string, destination: string): Promise<void> {
+		await this.run(["clone", remoteUrl, destination]);
+	}
+
+	async fetchRef(repoRoot: string, remote: string, ref: string): Promise<void> {
+		await this.runIn(["fetch", remote, ref], repoRoot);
+	}
+
+	async mergeBase(repoRoot: string, a: string, b: string): Promise<string> {
+		return (await this.runIn(["merge-base", a, b], repoRoot)).trim();
+	}
+
+	async addWorktree(input: AddWorktreeInput): Promise<void> {
+		await this.runIn(
+			["worktree", "add", "--detach", input.path, input.sha],
+			input.repoRoot,
+		);
+	}
+
+	async diffRange(
+		repoRoot: string,
+		from: string,
+		to: string,
+	): Promise<FileDiff[]> {
+		return this.diffBetweenIn([from, to], repoRoot);
+	}
+
+	async remoteUrl(repoRoot: string, remote: string): Promise<string | null> {
+		const result = await this.execIn(["remote", "get-url", remote], repoRoot);
+		if (result.exitCode !== 0) return null;
+		const url = result.stdout.trim();
+		return url.length > 0 ? url : null;
+	}
+
+	async readFileAtRevision(
+		repoRoot: string,
+		revision: string,
+		path: string,
+	): Promise<string | null> {
+		const result = await this.execIn(["show", `${revision}:${path}`], repoRoot);
+		return result.exitCode === 0 ? result.stdout : null;
+	}
 
 	private async diffBetween(range: string[]): Promise<FileDiff[]> {
 		const [numstat, patch] = await Promise.all([
 			this.run(["diff", ...range, "--numstat"]),
 			this.run(["diff", ...range]),
+		]);
+		const stats = parseNumstat(numstat);
+		const patches = parseUnifiedDiff(patch);
+		return [...stats.entries()].map(([path, stat]) => ({
+			path,
+			statOnly: false,
+			patch: patches.get(path) ?? null,
+			insertions: stat.insertions,
+			deletions: stat.deletions,
+		}));
+	}
+	private async diffBetweenIn(
+		range: string[],
+		cwd: string,
+	): Promise<FileDiff[]> {
+		const [numstat, patch] = await Promise.all([
+			this.runIn(["diff", ...range, "--numstat"], cwd),
+			this.runIn(["diff", ...range], cwd),
 		]);
 		const stats = parseNumstat(numstat);
 		const patches = parseUnifiedDiff(patch);
@@ -231,8 +307,11 @@ export class GitAdapter implements Vcs {
 	async log(opts: LogQuery): Promise<CommitMeta[]> {
 		const args = ["log", `--pretty=format:%H${SEP}%s${SEP}%an${SEP}%aI`];
 		if (opts.maxCount) args.push(`-n${opts.maxCount}`);
-		if (opts.base) args.push(`${opts.base}..HEAD`);
-		return parseCommitLog(await this.run(args));
+		if (opts.base) args.push(`${opts.base}..${opts.head ?? "HEAD"}`);
+		const out = opts.cwd
+			? await this.runIn(args, opts.cwd)
+			: await this.run(args);
+		return parseCommitLog(out);
 	}
 
 	async worktrees(repoRoot: string): Promise<WorktreeInfo[]> {

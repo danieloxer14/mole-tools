@@ -37,6 +37,13 @@ export const CONFIG_TEMPLATE_TEXT = `{
   // "worktreePrune": {                               // persisted base directory for worktree-prune
   //   "baseDir": "~/repos"                          // scanned for Git repos and extra worktrees
   // }
+  // "review": {
+  //   "agent": "omp",                            // "omp" or "claude"
+  //   // "binary": "omp",                         // optional executable override
+  //   // "model": "model-name",                   // optional OMP model
+  //   "layerTimeoutSeconds": 600,
+  //   "largeFileLineThreshold": 800
+  // }
 }
 `;
 
@@ -125,6 +132,8 @@ function normalizeConfig(raw: unknown): unknown {
 	const common = {
 		jira: input.jira ?? { enabled: false },
 		diff: input.diff ?? { ignore: [] },
+		worktreePrune: input.worktreePrune,
+		review: input.review,
 	};
 	if (input.ollama) {
 		const ollama = input.ollama as Record<string, unknown>;

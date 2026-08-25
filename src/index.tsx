@@ -40,13 +40,33 @@ cli
 	});
 
 for (const feature of features) {
-	const cmd = cli.command(feature.name, feature.description);
+	const command = `${feature.name}${(feature.positionals ?? [])
+		.map((positional) => ` <${positional}>`)
+		.join("")}`;
+	const cmd = cli.command(command, feature.description);
 	applyZodOptions(cmd, feature.args);
 	cmd.action(async (...actionArgs: unknown[]) => {
 		// Help is handled above and intentionally never enters this lifecycle.
 		await initializeLogger();
 		try {
-			const options = actionArgs[0] as Record<string, unknown>;
+			const lastArg = actionArgs.at(-1);
+			const options: Record<string, unknown> =
+				lastArg && typeof lastArg === "object"
+					? { ...(lastArg as Record<string, unknown>) }
+					: {};
+			const positionalValues = actionArgs.slice(
+				0,
+				feature.positionals ? -1 : actionArgs.length - 1,
+			);
+			for (const [index, name] of (feature.positionals ?? []).entries()) {
+				const value = positionalValues[index];
+				if (value !== undefined) options[name] = value;
+			}
+			if (feature.name === "review" && "open" in options) {
+				options.noOpen = options.open === false;
+				delete options.open;
+			}
+
 			let args: unknown;
 			try {
 				args = feature.args.parse(options);

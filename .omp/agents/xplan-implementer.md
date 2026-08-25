@@ -3,7 +3,7 @@ name: xplan-implementer
 description: "Implements exactly one xplan ticket and proves it with the ticket's Verify command"
 tools: read, write, edit, ast_edit, grep, glob, bash, lsp
 spawns: ""
-model: "@default"
+model: "@IMPLEMENTER"
 output:
   properties:
     outcome:
@@ -23,7 +23,7 @@ output:
 
 Read `.omp/xplan/plans/cwe-we-remove-everything-except-the-commit-merge-request-and/cwe-we-remove-everything-except-the-commit-merge-request-and.plan.md` and the ticket brief handed to you. The plan is authoritative where it disagrees with the brief.
 
-Implement **only** this ticket. Stay inside the ticket's `files` where it declares any; never edit another ticket's declared files.
+Implement this ticket. Prefer the ticket's declared `files` and stay within them when sufficient; edit additional files when the acceptance criteria genuinely require it or when preserving an existing contract demands it. Never edit another ticket's declared files unless that ticket's acceptance criteria require a shared change. Report every working-tree path you created or modified.
 
 Run the ticket's single Verify command yourself and require it to pass. Return `outcome: "failed"` with the failure in `explanation` if it does not — never claim success you did not observe.
 

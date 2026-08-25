@@ -11,6 +11,7 @@ export interface Feature<A extends z.ZodTypeAny = z.ZodTypeAny, R = unknown> {
 	name: string;
 	description: string;
 	args: A;
+	positionals?: readonly string[];
 	help?: FeatureHelp;
 	run(ctx: Context, args: z.input<A>): Promise<R>;
 }

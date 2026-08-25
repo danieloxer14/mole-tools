@@ -1,11 +1,27 @@
 import { PortError } from "../../core/errors";
 import { logger } from "../../core/logger";
 import type {
+	CreateDiscussionInput,
 	CreateMrInput,
+	DiffRefs,
+	DiscussionPosition,
 	GitHost,
+	HostDiscussion,
 	HostMember,
+	HostNote,
 	HostUser,
+	MrApprovalState,
+	MrDetail,
 } from "../../ports/git-host";
+import { validatePosition } from "../../shared/gitlab-position";
+import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
+import {
+	GitLabApprovalStateSchema,
+	GitLabDiscussionPageSchema,
+	GitLabDiscussionSchema,
+	GitLabMergeRequestSchema,
+	GitLabPositionPayloadSchema,
+} from "./glab-schemas";
 
 export interface GlabExecResult {
 	stdout: string;
@@ -13,18 +29,147 @@ export interface GlabExecResult {
 	exitCode: number;
 }
 
-export type GlabExec = (args: string[]) => Promise<GlabExecResult>;
+export type GlabExec = (
+	args: string[],
+	input?: string,
+) => Promise<GlabExecResult>;
 
-async function defaultGlabExec(args: string[]): Promise<GlabExecResult> {
+async function defaultGlabExec(
+	args: string[],
+	input?: string,
+): Promise<GlabExecResult> {
 	const proc = Bun.spawn(["glab", ...args], {
+		stdin: input !== undefined ? "pipe" : undefined,
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	return {
-		stdout: await new Response(proc.stdout).text(),
-		stderr: await new Response(proc.stderr).text(),
-		exitCode: await proc.exited,
-	};
+	if (input !== undefined && proc.stdin && typeof proc.stdin !== "number") {
+		proc.stdin.write(input);
+		proc.stdin.end();
+	}
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return { stdout, stderr, exitCode };
+}
+
+function apiPath(ref: MrRef, resource: string): string {
+	return `projects/${encodeProjectPath(ref.projectPath)}/merge_requests/${ref.iid}${resource}`;
+}
+
+function glabApiError(
+	result: GlabExecResult,
+	operation: string,
+): PortError | null {
+	if (result.exitCode === 0) return null;
+	return new PortError(
+		result.stderr?.trim() || `${operation} failed`,
+		result.stderr,
+		result.exitCode,
+	);
+}
+
+function invalidPayload(operation: string, detail: string): PortError {
+	return new PortError(`Invalid GitLab ${operation} response: ${detail}`);
+}
+
+function parseJsonDocuments(text: string, operation: string): unknown[] {
+	const source = text.trim();
+	if (!source) throw invalidPayload(operation, "empty response");
+
+	try {
+		return [JSON.parse(source) as unknown];
+	} catch {
+		// --paginate can emit one JSON value per page. Scan complete JSON
+		// values so both newline-delimited and concatenated pages work.
+		const documents: unknown[] = [];
+		let start = -1;
+		let depth = 0;
+		let inString = false;
+		let escaped = false;
+
+		for (let index = 0; index < source.length; index++) {
+			const character = source[index];
+			if (start < 0) {
+				if (character === "{" || character === "[") {
+					start = index;
+					depth = 1;
+				} else if (!/\s/.test(character)) {
+					throw invalidPayload(operation, "invalid JSON");
+				}
+				continue;
+			}
+			if (inString) {
+				if (escaped) {
+					escaped = false;
+				} else if (character === "\\") {
+					escaped = true;
+				} else if (character === '"') {
+					inString = false;
+				}
+				continue;
+			}
+			if (character === '"') {
+				inString = true;
+				continue;
+			}
+			if (character === "{" || character === "[") depth++;
+			if (character === "}" || character === "]") depth--;
+			if (depth === 0) {
+				const document = source.slice(start, index + 1);
+				try {
+					documents.push(JSON.parse(document) as unknown);
+				} catch {
+					throw invalidPayload(operation, "invalid JSON");
+				}
+				start = -1;
+			}
+		}
+
+		if (start >= 0 || inString || documents.length === 0) {
+			throw invalidPayload(operation, "invalid JSON");
+		}
+		return documents;
+	}
+}
+
+function parsePayload<T>(
+	schema: {
+		safeParse(
+			value: unknown,
+		):
+			| { success: true; data: T }
+			| { success: false; error: { issues: { message: string }[] } };
+	},
+	value: unknown,
+	operation: string,
+): T {
+	const parsed = schema.safeParse(value);
+	if (parsed.success) return parsed.data;
+	const issue = parsed.error.issues[0]?.message ?? "schema validation failed";
+	throw invalidPayload(operation, issue);
+}
+
+function mapApprovalIdentity(value: unknown, operation: string): string {
+	if (typeof value === "string") return value;
+	if (!value || typeof value !== "object") {
+		throw invalidPayload(operation, "approval identity is invalid");
+	}
+	const record = value as Record<string, unknown>;
+	const candidate =
+		record.user && typeof record.user === "object"
+			? (record.user as Record<string, unknown>)
+			: record;
+	const identity = candidate.username ?? candidate.name;
+	if (typeof identity !== "string" || identity.trim().length === 0) {
+		throw invalidPayload(
+			operation,
+			"approval identity has no username or name",
+		);
+	}
+	return identity;
 }
 
 export class GlabAdapter implements GitHost {
@@ -88,6 +233,255 @@ export class GlabAdapter implements GitHost {
 		}
 
 		return null;
+	}
+
+	async fetchMr(ref: MrRef): Promise<MrDetail> {
+		const result = await this._exec([
+			"api",
+			"--hostname",
+			ref.host,
+			apiPath(ref, ""),
+		]);
+		const executionError = glabApiError(result, "merge request fetch");
+		if (executionError) throw executionError;
+
+		const documents = parseJsonDocuments(result.stdout, "merge request");
+		if (documents.length !== 1) {
+			throw invalidPayload("merge request", "expected one JSON object");
+		}
+		const payload = parsePayload(
+			GitLabMergeRequestSchema,
+			documents[0],
+			"merge request",
+		);
+		if (payload.iid !== ref.iid) {
+			throw new PortError(
+				`GitLab merge request IID mismatch: requested ${ref.iid}, received ${payload.iid}`,
+			);
+		}
+
+		const author = payload.author.username ?? payload.author.name;
+		if (!author) {
+			throw invalidPayload("merge request", "author has no username or name");
+		}
+
+		const diffRefs: DiffRefs = {
+			baseSha: payload.diff_refs.base_sha,
+			startSha: payload.diff_refs.start_sha,
+			headSha: payload.diff_refs.head_sha,
+		};
+		return {
+			iid: payload.iid,
+			projectPath: ref.projectPath,
+			title: payload.title,
+			description: payload.description ?? "",
+			webUrl: payload.web_url,
+			author,
+			sourceBranch: payload.source_branch,
+			targetBranch: payload.target_branch,
+			headSha: payload.sha ?? diffRefs.headSha,
+			diffRefs,
+			state: payload.state,
+		};
+	}
+
+	async fetchApprovalState(ref: MrRef): Promise<MrApprovalState> {
+		const result = await this._exec([
+			"api",
+			"--hostname",
+			ref.host,
+			apiPath(ref, "/approvals"),
+		]);
+		const executionError = glabApiError(result, "approval fetch");
+		if (executionError) throw executionError;
+
+		const documents = parseJsonDocuments(result.stdout, "approval");
+		if (documents.length !== 1) {
+			throw invalidPayload("approval", "expected one JSON object");
+		}
+		const payload = parsePayload(
+			GitLabApprovalStateSchema,
+			documents[0],
+			"approval",
+		);
+		const approvedBy = payload.approved_by.map((entry) =>
+			mapApprovalIdentity(entry, "approval"),
+		);
+		const currentUser = await this.currentUser();
+		const currentIdentities = currentUser
+			? new Set(
+					[currentUser.handle, currentUser.displayName]
+						.filter((identity): identity is string => Boolean(identity))
+						.map((identity) => identity.toLowerCase()),
+				)
+			: null;
+		const approved =
+			currentIdentities !== null &&
+			approvedBy.some((identity) =>
+				currentIdentities.has(identity.toLowerCase()),
+			);
+		const rules = (payload.rules ?? []).map((rule) => {
+			const ruleApprovedBy = rule.approved_by.map((entry) =>
+				mapApprovalIdentity(entry, "approval"),
+			);
+			return {
+				name: rule.name,
+				approvalsRequired: rule.approvals_required,
+				approvalsLeft:
+					rule.approvals_left ??
+					Math.max(0, rule.approvals_required - ruleApprovedBy.length),
+				approvedBy: ruleApprovedBy,
+			};
+		});
+		return {
+			approved,
+			currentUser: currentUser?.handle || null,
+			approvalsLeft: payload.approvals_left ?? null,
+			approvedBy,
+			rules,
+		};
+	}
+
+	async approveMr(ref: MrRef): Promise<MrApprovalState> {
+		const mr = await this.fetchMr(ref);
+		const result = await this._exec([
+			"api",
+			"--hostname",
+			ref.host,
+			"--method",
+			"POST",
+			"--field",
+			`sha=${mr.headSha}`,
+			apiPath(ref, "/approve"),
+		]);
+		const executionError = glabApiError(result, "approval");
+		if (executionError) throw executionError;
+		return this.fetchApprovalState(ref);
+	}
+
+	async unapproveMr(ref: MrRef): Promise<MrApprovalState> {
+		const result = await this._exec([
+			"api",
+			"--hostname",
+			ref.host,
+			"--method",
+			"POST",
+			apiPath(ref, "/unapprove"),
+		]);
+		const executionError = glabApiError(result, "unapproval");
+		if (executionError) throw executionError;
+		return this.fetchApprovalState(ref);
+	}
+
+	async listDiscussions(ref: MrRef): Promise<HostDiscussion[]> {
+		const result = await this._exec([
+			"api",
+			"--hostname",
+			ref.host,
+			"--paginate",
+			apiPath(ref, "/discussions"),
+		]);
+		const executionError = glabApiError(result, "discussion fetch");
+		if (executionError) throw executionError;
+
+		const documents = parseJsonDocuments(result.stdout, "discussion");
+		const discussions = documents.flatMap((document) =>
+			parsePayload(GitLabDiscussionPageSchema, document, "discussion"),
+		);
+		return discussions.map((discussion) => this.mapDiscussion(discussion));
+	}
+
+	async createDiscussion(
+		input: CreateDiscussionInput,
+	): Promise<HostDiscussion> {
+		if (!input.body.trim()) {
+			throw new PortError("Cannot create an empty GitLab discussion");
+		}
+		let position: CreateDiscussionInput["position"];
+		if (input.position !== undefined) {
+			if (!input.parsedDiff || !input.diffRefs) {
+				throw new PortError(
+					"Positioned GitLab discussions require parsedDiff and diffRefs",
+				);
+			}
+			const parsedPosition = parsePayload(
+				GitLabPositionPayloadSchema,
+				input.position,
+				"discussion position",
+			);
+			position = validatePosition(
+				parsedPosition,
+				input.parsedDiff,
+				input.diffRefs,
+			);
+		} else if ("parsedDiff" in input || "diffRefs" in input) {
+			throw new PortError(
+				"Unpositioned GitLab discussions cannot include parsedDiff or diffRefs",
+			);
+		}
+
+		const requestBody: { body: string; position?: typeof position } = {
+			body: input.body,
+		};
+		if (position) requestBody.position = position;
+		const result = await this._exec(
+			[
+				"api",
+				"--hostname",
+				input.ref.host,
+				"--method",
+				"POST",
+				"--header",
+				"Content-Type: application/json",
+				"--input",
+				"-",
+				apiPath(input.ref, "/discussions"),
+			],
+			JSON.stringify(requestBody),
+		);
+		const executionError = glabApiError(result, "discussion create");
+		if (executionError) throw executionError;
+
+		const documents = parseJsonDocuments(result.stdout, "discussion");
+		if (documents.length !== 1) {
+			throw invalidPayload("discussion", "expected one JSON object");
+		}
+		return this.mapDiscussion(
+			parsePayload(GitLabDiscussionSchema, documents[0], "discussion"),
+		);
+	}
+
+	private mapDiscussion(discussion: GitLabDiscussion): HostDiscussion {
+		const positionedNote = discussion.notes.find(
+			(note) => note.position !== null,
+		);
+		const position: DiscussionPosition | null = positionedNote?.position
+			? {
+					newPath: positionedNote.position.new_path,
+					oldPath: positionedNote.position.old_path,
+					newLine: positionedNote.position.new_line,
+					oldLine: positionedNote.position.old_line,
+				}
+			: null;
+		return {
+			id: String(discussion.id),
+			resolved:
+				discussion.resolved ?? discussion.notes.some((note) => note.resolved),
+			notes: discussion.notes.map((note): HostNote => {
+				const author = note.author.username ?? note.author.name;
+				if (!author) {
+					throw invalidPayload("discussion", "note author is missing");
+				}
+				return {
+					id: String(note.id),
+					author,
+					body: note.body,
+					createdAt: note.created_at,
+					system: note.system,
+				};
+			}),
+			position,
+		};
 	}
 
 	async resolveHandle(handle: string): Promise<HostMember | null> {
@@ -255,7 +649,7 @@ export class GlabAdapter implements GitHost {
 		return null;
 	}
 
-	async _exec(args: string[]): Promise<GlabExecResult> {
-		return this.execFn(args);
+	async _exec(args: string[], input?: string): Promise<GlabExecResult> {
+		return this.execFn(args, input);
 	}
 }

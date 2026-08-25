@@ -1,3 +1,5 @@
+import { ClaudeAgentAdapter } from "../adapters/agent/claude";
+import { OmpAgentAdapter } from "../adapters/agent/omp";
 import {
 	type Config,
 	type RoutingPurpose,
@@ -11,6 +13,7 @@ import { GitAdapter } from "../adapters/vcs/git";
 import type { GitHost } from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
 import type { GenerateRequest, Llm } from "../ports/llm";
+import type { ReviewAgent } from "../ports/review-agent";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
 
@@ -20,6 +23,7 @@ export interface Context {
 	vcs: Vcs;
 	llm: Llm; // convenience proxy — routes to the commit provider by default
 	getLlmFor(purpose: RoutingPurpose, providerKey?: string): Llm;
+	reviewAgent: ReviewAgent;
 	issues: IssueTracker | null;
 	gitHost: GitHost | null;
 }
@@ -116,8 +120,23 @@ function buildAdapterMap(config: Config): Map<string, Llm> {
 	return adapters;
 }
 
-export function buildContext(input: { config: Config; ui: UiPort }): Context {
-	const { config, ui } = input;
+function buildReviewAgent(config: Config): ReviewAgent {
+	const review = config.review;
+	const agent = review?.agent ?? "omp";
+	const binary = review?.binary ?? agent;
+
+	if (agent === "claude") {
+		return new ClaudeAgentAdapter({ binary, model: review?.model });
+	}
+	return new OmpAgentAdapter({ binary, model: review?.model });
+}
+
+export function buildContext(input: {
+	config: Config;
+	ui: UiPort;
+	reviewAgent?: ReviewAgent;
+}): Context {
+	const { config, ui, reviewAgent } = input;
 	validateModelProviders(config);
 	const adapterMap = buildAdapterMap(config);
 
@@ -128,6 +147,7 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
 		ui,
 		vcs: new GitAdapter(),
 		llm: llmProxy, // default routes to commit provider
+		reviewAgent: reviewAgent ?? buildReviewAgent(config),
 		getLlmFor: (purpose: RoutingPurpose, providerKey?: string) =>
 			llmProxy.getLlmFor(purpose, providerKey),
 		issues:

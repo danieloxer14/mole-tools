@@ -18,20 +18,25 @@ function isBooleanField(schema: z.ZodTypeAny): boolean {
 	return false;
 }
 
-function extractOptions(schema: z.ZodTypeAny): OptionInfo[] {
+function extractOptions(
+	schema: z.ZodTypeAny,
+	positionals: readonly string[] = [],
+): OptionInfo[] {
 	if (!(schema instanceof ZodObject)) return [];
 
+	const positionalNames = new Set(positionals);
 	const options: OptionInfo[] = [];
 	for (const [key, fieldSchema] of Object.entries(
 		(schema as z.ZodObject).shape,
 	)) {
+		if (positionalNames.has(key)) continue;
 		const typedField = fieldSchema as z.ZodTypeAny & {
 			meta?: () => unknown;
 			description?: string;
 		};
 		const meta = typedField.meta?.();
 		options.push({
-			flag: `--${key}`,
+			flag: `--${key === "noOpen" ? "no-open" : key}`,
 			valuePlaceholder: isBooleanField(fieldSchema) ? undefined : `<${key}>`,
 			description: typedField.description ?? undefined,
 			examples: Array.isArray(meta?.examples) ? meta.examples : undefined,
@@ -42,19 +47,20 @@ function extractOptions(schema: z.ZodTypeAny): OptionInfo[] {
 
 function buildUsageLine(
 	commandName: string,
+	positionals: readonly string[],
 	options: OptionInfo[],
 	helpUsage?: string,
 ): string {
 	if (helpUsage) return helpUsage;
 
-	if (options.length === 0) return ``;
-
+	const positionalText = positionals.map((name) => `<${name}>`).join(" ");
 	const flags = options
 		.map(
 			(o) => `[${o.flag}${o.valuePlaceholder ? ` ${o.valuePlaceholder}` : ""}]`,
 		)
 		.join(" ");
-	return `mole-tools ${commandName} ${flags}`;
+	const suffix = [positionalText, flags].filter(Boolean).join(" ");
+	return suffix ? `mole-tools ${commandName} ${suffix}` : ``;
 }
 
 export function formatGeneralHelp(features: Feature[]): string {
@@ -87,16 +93,25 @@ export function formatCommandHelp(
 		return { ok: false, command, known: features.map((f) => f.name) };
 	}
 
-	const options = extractOptions(feature.args);
+	const options = extractOptions(feature.args, feature.positionals);
 	const lines: string[] = [];
 
 	lines.push(`${feature.name}`);
 	lines.push("");
 	lines.push(feature.description);
 
-	if (feature.help?.usage || options.length > 0) {
+	if (
+		feature.help?.usage ||
+		options.length > 0 ||
+		feature.positionals?.length
+	) {
 		lines.push("");
-		const usageLine = buildUsageLine(command, options, feature.help?.usage);
+		const usageLine = buildUsageLine(
+			command,
+			feature.positionals ?? [],
+			options,
+			feature.help?.usage,
+		);
 		if (usageLine) {
 			lines.push("Usage:");
 			lines.push(`  ${usageLine}`);

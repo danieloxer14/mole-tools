@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
+import { FakeReviewAgent } from "../../test/fakes/FakeReviewAgent";
 import { FakeUiPort } from "../../test/fakes/FakeUiPort";
+import { ClaudeAgentAdapter } from "../adapters/agent/claude";
+import { OmpAgentAdapter } from "../adapters/agent/omp";
 import { ConfigSchema } from "../adapters/config/schema";
 import type { GenerateRequest, Llm } from "../ports/llm";
 import { buildContext, RoutingLlmProxy } from "./context";
@@ -105,4 +108,30 @@ test("buildContext wires Ollama and Pi provider profiles", () => {
 	expect(context.getLlmFor("mergeRequest")).toBe(
 		context.getLlmFor("mergeRequest"),
 	);
+});
+
+test("selects the configured review agent and accepts an override", () => {
+	const defaultContext = buildContext({
+		config,
+		ui: new FakeUiPort(),
+	});
+	expect(defaultContext.reviewAgent).toBeInstanceOf(OmpAgentAdapter);
+
+	const claudeConfig = ConfigSchema.parse({
+		...config,
+		review: { agent: "claude" },
+	});
+	const claudeContext = buildContext({
+		config: claudeConfig,
+		ui: new FakeUiPort(),
+	});
+	expect(claudeContext.reviewAgent).toBeInstanceOf(ClaudeAgentAdapter);
+
+	const fake = new FakeReviewAgent();
+	const overriddenContext = buildContext({
+		config: claudeConfig,
+		ui: new FakeUiPort(),
+		reviewAgent: fake,
+	});
+	expect(overriddenContext.reviewAgent).toBe(fake);
 });

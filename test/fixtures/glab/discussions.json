@@ -1,0 +1,39 @@
+[
+	{
+		"id": "discussion-1",
+		"notes": [
+			{
+				"id": 101,
+				"author": { "username": "reviewer", "name": "Review User" },
+				"body": "Please keep this branch-free.",
+				"created_at": "2026-08-15T10:00:00Z",
+				"system": false,
+				"resolved": true,
+				"position": {
+					"base_sha": "base-sha",
+					"start_sha": "start-sha",
+					"head_sha": "head-sha",
+					"old_path": "src/old.ts",
+					"new_path": "src/new.ts",
+					"old_line": null,
+					"new_line": 12,
+					"position_type": "text"
+				}
+			}
+		]
+	},
+	{
+		"id": "discussion-2",
+		"notes": [
+			{
+				"id": "note-102",
+				"author": { "name": "System User" },
+				"body": "A system note.",
+				"created_at": "2026-08-15T10:05:00Z",
+				"system": true,
+				"position": null
+			}
+		],
+		"resolved": false
+	}
+]

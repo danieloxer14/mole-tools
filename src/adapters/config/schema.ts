@@ -35,6 +35,21 @@ export const ModelsConfigSchema = z
 	})
 	.strict();
 
+export const ReviewConfigSchema = z
+	.object({
+		agent: z.enum(["omp", "claude"]).default("omp"),
+		binary: z.string().min(1).optional(),
+		model: z.string().min(1).optional(),
+		layerTimeoutSeconds: z.number().int().positive().default(600),
+		largeFileLineThreshold: z.number().int().positive().default(800),
+	})
+	.strict()
+	.default({
+		agent: "omp",
+		layerTimeoutSeconds: 600,
+		largeFileLineThreshold: 800,
+	});
+
 export const ConfigSchema = z
 	.object({
 		providers: z.record(z.string().min(1), ProviderProfileSchema),
@@ -51,6 +66,7 @@ export const ConfigSchema = z
 		dynamicEnvScript: z.string().optional(),
 		autoReviewer: z.object({ username: z.string() }).optional(),
 		worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
+		review: ReviewConfigSchema,
 	})
 	.strict();
 export type Config = z.infer<typeof ConfigSchema>;

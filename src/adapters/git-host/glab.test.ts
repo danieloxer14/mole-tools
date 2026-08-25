@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { PortError } from "../../core/errors";
+import { PortError } from "../../core/errors";
+import type { CreateDiscussionInput } from "../../ports/git-host";
+import { parseFileDiff } from "../../shared/diff-parse";
+import { buildPosition } from "../../shared/gitlab-position";
+import type { MrRef } from "../../shared/mr-url";
 import { GlabAdapter, type GlabExec, type GlabExecResult } from "./glab";
 
 function ok(stdout: string): GlabExecResult {
@@ -441,6 +445,323 @@ describe("GlabAdapter", () => {
 			});
 			expect(calls[0]).toContain("--source-branch");
 			expect(calls[0]).toContain("dev");
+		});
+	});
+
+	describe("createDiscussion", () => {
+		const ref: MrRef = {
+			host: "gitlab.example.com",
+			projectPath: "group/sub/project",
+			iid: 42,
+		};
+
+		const parsedDiff = parseFileDiff({
+			path: "src/app.ts",
+			statOnly: false,
+			patch: [
+				"diff --git a/src/app.ts b/src/app.ts",
+				"--- a/src/app.ts",
+				"+++ b/src/app.ts",
+				"@@ -1,1 +1,2 @@",
+				"-old",
+				"+new",
+				"+added",
+			].join("\n"),
+			insertions: 2,
+			deletions: 1,
+		});
+		const refs = {
+			baseSha: "base-sha",
+			startSha: "start-sha",
+			headSha: "head-sha",
+		};
+
+		test("posts body and validated position as JSON stdin", async () => {
+			const position = buildPosition(
+				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 2 },
+				parsedDiff,
+				refs,
+			);
+			const calls: { args: string[]; input?: string }[] = [];
+			const response = JSON.stringify({
+				id: "discussion-1",
+				resolved: false,
+				notes: [
+					{
+						id: 1,
+						author: { username: "alice" },
+						body: "Review this",
+						created_at: "2026-08-16T00:00:00Z",
+						system: false,
+						position,
+					},
+				],
+			});
+			const exec: GlabExec = async (args, input) => {
+				calls.push({ args, input });
+				return ok(response);
+			};
+
+			const discussion = await new GlabAdapter(exec).createDiscussion({
+				ref,
+				body: "Review this",
+				position,
+				parsedDiff,
+				diffRefs: refs,
+			});
+
+			expect(discussion.id).toBe("discussion-1");
+			expect(calls).toHaveLength(1);
+			expect(calls[0]?.args).toEqual([
+				"api",
+				"--hostname",
+				"gitlab.example.com",
+				"--method",
+				"POST",
+				"--header",
+				"Content-Type: application/json",
+				"--input",
+				"-",
+				"projects/group%2Fsub%2Fproject/merge_requests/42/discussions",
+			]);
+			expect(JSON.parse(calls[0]?.input ?? "")).toEqual({
+				body: "Review this",
+				position,
+			});
+		});
+		test("posts unpositioned discussion body as JSON stdin", async () => {
+			const calls: { args: string[]; input?: string }[] = [];
+			const exec: GlabExec = async (args, input) => {
+				calls.push({ args, input });
+				return ok(
+					JSON.stringify({
+						id: "discussion-2",
+						resolved: false,
+						notes: [],
+					}),
+				);
+			};
+
+			await new GlabAdapter(exec).createDiscussion({
+				ref,
+				body: "General review note",
+			});
+
+			expect(calls).toHaveLength(1);
+			expect(JSON.parse(calls[0]?.input ?? "")).toEqual({
+				body: "General review note",
+			});
+		});
+
+		test("rejects stale line codes before host write", async () => {
+			const position = buildPosition(
+				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 2 },
+				parsedDiff,
+				refs,
+			);
+			const calls: { args: string[]; input?: string }[] = [];
+			const exec: GlabExec = async (args, input) => {
+				calls.push({ args, input });
+				return ok("unreachable");
+			};
+			const stale = structuredClone(position);
+			if (stale.line_range) {
+				stale.line_range.start.line_code = "stale-line-code";
+			}
+
+			await expect(
+				new GlabAdapter(exec).createDiscussion({
+					ref,
+					body: "Review this",
+					position: stale,
+					parsedDiff,
+					diffRefs: refs,
+				}),
+			).rejects.toBeInstanceOf(PortError);
+			expect(calls).toEqual([]);
+		});
+
+		test("rejects positions from a stale MR head before host write", async () => {
+			const position = buildPosition(
+				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 1 },
+				parsedDiff,
+				refs,
+			);
+			const calls: { args: string[]; input?: string }[] = [];
+			const exec: GlabExec = async (args, input) => {
+				calls.push({ args, input });
+				return ok("unreachable");
+			};
+
+			await expect(
+				new GlabAdapter(exec).createDiscussion({
+					ref,
+					body: "Review this",
+					position,
+					parsedDiff,
+					diffRefs: { ...refs, headSha: "new-head-sha" },
+				}),
+			).rejects.toThrow("current diff refs");
+			expect(calls).toEqual([]);
+		});
+		test("rejects positioned payload without parsed diff before host write", async () => {
+			const position = buildPosition(
+				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 1 },
+				parsedDiff,
+				refs,
+			);
+			const calls: { args: string[]; input?: string }[] = [];
+			const exec: GlabExec = async (args, input) => {
+				calls.push({ args, input });
+				return ok("unreachable");
+			};
+			const invalid = {
+				ref,
+				body: "Review this",
+				position,
+				diffRefs: refs,
+			} as unknown as CreateDiscussionInput;
+
+			await expect(
+				new GlabAdapter(exec).createDiscussion(invalid),
+			).rejects.toThrow("require parsedDiff and diffRefs");
+			expect(calls).toEqual([]);
+		});
+	});
+	describe("approval", () => {
+		const ref: MrRef = {
+			host: "gitlab.example.com",
+			projectPath: "group/sub/project",
+			iid: 42,
+		};
+		const approvalPath =
+			"projects/group%2Fsub%2Fproject/merge_requests/42/approvals";
+		const approvalPayload = {
+			user_has_approved: false,
+			approvals_left: 1,
+			approved_by: [{ user: { username: "alice", name: "Alice" } }],
+			rules: [
+				{
+					name: "Maintainers",
+					approvals_required: 2,
+					approvals_left: 1,
+					approved_by: [{ user: { name: "Alice" } }],
+				},
+			],
+		};
+
+		test("fetches and normalizes approval state", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${approvalPath}`]: ok(
+					JSON.stringify(approvalPayload),
+				),
+				"api /user": ok(
+					JSON.stringify({ id: 1, username: "alice", name: "Alice" }),
+				),
+			});
+
+			await expect(glab.fetchApprovalState(ref)).resolves.toEqual({
+				approved: true,
+				currentUser: "alice",
+				approvalsLeft: 1,
+				approvedBy: ["alice"],
+				rules: [
+					{
+						name: "Maintainers",
+						approvalsRequired: 2,
+						approvalsLeft: 1,
+						approvedBy: ["Alice"],
+					},
+				],
+			});
+		});
+
+		test("posts current MR head SHA before refetching after approve", async () => {
+			const mrPath = "projects/group%2Fsub%2Fproject/merge_requests/42";
+			const mrPayload = {
+				iid: 42,
+				title: "Review",
+				description: null,
+				web_url:
+					"https://gitlab.example.com/group/sub/project/-/merge_requests/42",
+				author: { username: "bob" },
+				source_branch: "feature",
+				target_branch: "main",
+				sha: "head-sha",
+				diff_refs: {
+					base_sha: "base-sha",
+					start_sha: "start-sha",
+					head_sha: "head-sha",
+				},
+				state: "opened",
+			};
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}`]: ok(JSON.stringify(mrPayload)),
+				[`api --hostname ${ref.host} --method POST --field sha=head-sha projects/group%2Fsub%2Fproject/merge_requests/42/approve`]:
+					ok("{}"),
+				[`api --hostname ${ref.host} ${approvalPath}`]: ok(
+					JSON.stringify({
+						...approvalPayload,
+						user_has_approved: true,
+						approvals_left: 0,
+					}),
+				),
+				"api /user": ok(
+					JSON.stringify({ id: 1, username: "alice", name: "Alice" }),
+				),
+			});
+
+			await expect(glab.approveMr(ref)).resolves.toMatchObject({
+				approved: true,
+				approvalsLeft: 0,
+			});
+			expect(calls).toEqual([
+				["api", "--hostname", ref.host, mrPath],
+				[
+					"api",
+					"--hostname",
+					ref.host,
+					"--method",
+					"POST",
+					"--field",
+					"sha=head-sha",
+					"projects/group%2Fsub%2Fproject/merge_requests/42/approve",
+				],
+				["api", "--hostname", ref.host, approvalPath],
+				["api", "/user"],
+			]);
+		});
+
+		test("posts unapprove then refetches approval state", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} --method POST projects/group%2Fsub%2Fproject/merge_requests/42/unapprove`]:
+					ok("{}"),
+				[`api --hostname ${ref.host} ${approvalPath}`]: ok(
+					JSON.stringify({
+						...approvalPayload,
+						approved_by: [],
+						approvals_left: 2,
+					}),
+				),
+				"api /user": ok(
+					JSON.stringify({ id: 1, username: "alice", name: "Alice" }),
+				),
+			});
+
+			await expect(glab.unapproveMr(ref)).resolves.toMatchObject({
+				approved: false,
+				approvalsLeft: 2,
+				approvedBy: [],
+			});
+		});
+
+		test("rejects malformed approval payload", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${approvalPath}`]: ok("{}"),
+			});
+			await expect(glab.fetchApprovalState(ref)).rejects.toThrow(
+				"Invalid GitLab approval response",
+			);
 		});
 	});
 });

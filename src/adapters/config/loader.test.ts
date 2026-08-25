@@ -30,6 +30,12 @@ describe("loadConfig", () => {
 			commit: { provider: "ollama", name: "gemma4:12b" },
 			mergeRequest: { provider: "ollama", name: "gemma4:12b" },
 		});
+		expect(CONFIG_TEMPLATE.review).toEqual({
+			agent: "omp",
+			layerTimeoutSeconds: 600,
+			largeFileLineThreshold: 800,
+		});
+		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
 	});
 
 	test("bootstraps a template when no config file exists, then continues", async () => {
@@ -120,6 +126,76 @@ describe("loadConfig", () => {
 
 		expect(config.providers).toEqual(valid.providers);
 		expect(config.models).toEqual(valid.models);
+	});
+	test("loads previously supported worktree prune settings", async () => {
+		const path = await configPath();
+		const valid = {
+			providers: {
+				ollama: { provider: "ollama", baseUrl: "http://localhost:11434" },
+			},
+			models: {
+				commit: { provider: "ollama", name: "llama3.1" },
+				mergeRequest: { provider: "ollama", name: "llama3.1" },
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			worktreePrune: { baseDir: "/tmp/repos" },
+		} as const;
+		await Bun.write(path, JSON.stringify(valid));
+
+		const config = await loadConfig(path);
+
+		expect(config.worktreePrune).toEqual(valid.worktreePrune);
+	});
+	test("loads optional review agent settings with strict defaults", async () => {
+		const path = await configPath();
+		const valid = {
+			providers: {
+				ollama: { provider: "ollama", baseUrl: "http://localhost:11434" },
+			},
+			models: {
+				commit: { provider: "ollama", name: "llama3.1" },
+				mergeRequest: { provider: "ollama", name: "llama3.1" },
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			review: {
+				agent: "claude",
+				binary: "claude-custom",
+				model: "review-model",
+				layerTimeoutSeconds: 30,
+				largeFileLineThreshold: 200,
+			},
+		} as const;
+		await Bun.write(path, JSON.stringify(valid));
+
+		const config = await loadConfig(path);
+
+		expect(config.review).toEqual(valid.review);
+	});
+
+	test("rejects unknown review settings under strict parsing", async () => {
+		const path = await configPath();
+		await Bun.write(
+			path,
+			JSON.stringify({
+				providers: {
+					ollama: {
+						provider: "ollama",
+						baseUrl: "http://localhost:11434",
+					},
+				},
+				models: {
+					commit: { provider: "ollama", name: "llama3.1" },
+					mergeRequest: { provider: "ollama", name: "llama3.1" },
+				},
+				jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+				diff: { ignore: [] },
+				review: { agent: "omp", unsupported: true },
+			}),
+		);
+
+		await expect(loadConfig(path)).rejects.toThrow(/review.*unsupported/);
 	});
 
 	test("migrates provider and legacy llm config without removed routes", async () => {

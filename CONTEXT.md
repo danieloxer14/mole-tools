@@ -28,5 +28,62 @@ Optional command-level documentation colocated on a feature. It may include invo
 ### Zod argument metadata
 Descriptions and examples attached to individual zod argument schemas with `.describe(...)` and `.meta({ examples: [...] })`. This is the canonical place for option-level help text.
 
+### Interactive review (`mole-tools review`)
+The feature that reviews one GitLab merge request in a local three-column web
+UI. Invoke it as
+`mole-tools review <mr-url> [--mode code|plan] [--no-open] [--refresh]`.
+`--mode` defaults to `code` and selects only the layer prompt; `plan` frames
+the same diff/chat/comment flow around requirements and acceptance criteria.
+`--no-open` suppresses browser launch. `--refresh` re-fetches the MR head and
+rebuilds the detached worktree before serving.
+
+### Review URL and run token
+The URL printed by `mole-tools review` points to
+`http://127.0.0.1:<ephemeral-port>/?t=<random-token>`. Token is minted for one
+CLI run and is never persisted. Every `/api/*` request must carry token as
+`?t=<token>` or `X-Mole-Token`; missing or wrong token gets `401`. Server is
+loopback-only and exists only while CLI process runs.
+
+### Review worktree
+A detached worktree checked out at MR head for safe inspection. Review first
+uses current directory when its `origin` matches MR; otherwise it reuses or
+creates cache clone under `~/.config/mole-tools/repos/` and worktree under
+`~/.config/mole-tools/worktrees/<host>/<project>/mr-<iid>/`. Chat and comment
+agents have read-only tools. Layer output is written outside worktree. CLI
+exit stops server but leaves worktree and review state on disk; cleanup is
+deliberate through `worktree-prune`, not automatic.
+
+### ReviewAgent
+Provider-neutral port for review turns. It exposes `preflight()` and a
+streaming `run({ sessionId?, cwd, systemPromptFile, message, writeDir?,
+signal? })`. Adapters normalize `omp` or `claude` NDJSON into session, text,
+tool, error, turn-end, and diagnostic events. `Llm` remains one-shot and
+continues to serve commit and merge-request generation.
+
+### Review session
+Provider conversation identified by `chatSessionId` in per-MR review state.
+First chat turn seeds MR metadata, layer guide, and changed-file list; later
+turns resume same session with message, new line tags, and open file only.
+User/assistant entries append to `chat.ndjson`. Comment drafts deliberately
+start fresh sessions and do not advance chat session.
+
+### Review layer
+Generated guide entry with `title`, `tldr`, `files[]`, optional `bdd[]`, plus
+persisted id/done/stale state. Guide auto-runs once when pending, caches when
+ready, and can be Regenerated or Retried. A layer curates files from the full
+changed-file tree; global and per-layer viewed-file coverage are separate.
+
+### Positioned discussion
+A local comment draft anchored to one diff side and inclusive line range.
+New-side anchors use `new_line`; deleted-side anchors use `old_line`. Ranges
+cannot cross sides and must resolve against current diff refs before explicit
+Send posts one GitLab discussion. Existing discussions remain read-only.
+
+### Review sync
+Explicit re-synchronization after a head-SHA change. Refresh checks current
+head and reports staleness without mutating state. Sync recreates detached
+worktree at new head, recomputes merge base/diff/refs, marks layers stale,
+preserves chat/drafts, and stamps drafts whose anchors no longer resolve.
+
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

@@ -1,0 +1,20 @@
+{
+	"iid": 42,
+	"title": "Improve parser",
+	"description": "Adds structured diff parsing.",
+	"web_url": "https://gitlab.example.com/group/sub/project/-/merge_requests/42",
+	"author": {
+		"id": 7,
+		"username": "alice",
+		"name": "Alice Example"
+	},
+	"source_branch": "feature/parser",
+	"target_branch": "main",
+	"sha": "head-sha",
+	"diff_refs": {
+		"base_sha": "base-sha",
+		"start_sha": "start-sha",
+		"head_sha": "head-sha"
+	},
+	"state": "opened"
+}

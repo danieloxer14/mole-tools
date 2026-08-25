@@ -17,7 +17,8 @@ export function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
 		const core = unwrapToCore(fieldSchema);
 		const isBoolean = core instanceof z.ZodBoolean;
 		if (isBoolean) {
-			cmd.option(`--${key}`, `Set ${key}`);
+			const flag = key === "noOpen" ? "no-open" : key;
+			cmd.option(`--${flag}`, `Set ${key}`);
 		} else {
 			cmd.option(`--${key} <value>`, `Set ${key}`);
 		}

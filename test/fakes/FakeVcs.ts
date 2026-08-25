@@ -1,24 +1,33 @@
 import type {
+	AddWorktreeInput,
 	CommitMeta,
 	FileDiff,
 	LogQuery,
 	Vcs,
 	WorktreeInfo,
 } from "../../src/ports/vcs";
-
 export interface FakeVcsOptions {
 	branch?: string;
 	defaultBranch?: string;
+	repoRoot?: string;
+	remoteUrl?: string | null;
 	staged?: boolean;
 	diff?: FileDiff[];
 	commitError?: Error;
 	pushError?: Error;
+	cloneError?: Error;
+	fetchError?: Error;
+	mergeBaseError?: Error;
+	addWorktreeError?: Error;
+	diffRangeError?: Error;
 	commitsAhead?: CommitMeta[];
 	rangeDiff?: FileDiff[];
+	diffRange?: FileDiff[];
 	log?: CommitMeta[];
 	upstream?: boolean;
 	ahead?: boolean;
 	mergeBaseDiff?: FileDiff[];
+	mergeBase?: string;
 	worktrees?: WorktreeInfo[];
 	removeWorktreeError?: Error;
 	forceRemoveWorktreeError?: Error;
@@ -30,6 +39,13 @@ export class FakeVcs implements Vcs {
 	pushCalls: { setUpstream: boolean; branch: string }[] = [];
 	worktreeCalls: { path: string; repoRoot: string }[] = [];
 	forceWorktreeCalls: { path: string; repoRoot: string }[] = [];
+	cloneCalls: { remoteUrl: string; destination: string }[] = [];
+	fetchRefCalls: { repoRoot: string; remote: string; ref: string }[] = [];
+	mergeBaseCalls: { repoRoot: string; a: string; b: string }[] = [];
+	addWorktreeCalls: AddWorktreeInput[] = [];
+	diffRangeCalls: { repoRoot: string; from: string; to: string }[] = [];
+	remoteUrlCalls: { repoRoot: string; remote: string }[] = [];
+	logCalls: LogQuery[] = [];
 
 	constructor(private readonly opts: FakeVcsOptions = {}) {}
 
@@ -93,14 +109,51 @@ export class FakeVcs implements Vcs {
 	}
 
 	async repoRoot(): Promise<string> {
-		return "/tmp/fake-repo";
+		return this.opts.repoRoot ?? "/tmp/fake-repo";
+	}
+
+	async cloneRepo(remoteUrl: string, destination: string): Promise<void> {
+		this.cloneCalls.push({ remoteUrl, destination });
+		if (this.opts.cloneError) throw this.opts.cloneError;
+	}
+
+	async fetchRef(repoRoot: string, remote: string, ref: string): Promise<void> {
+		this.fetchRefCalls.push({ repoRoot, remote, ref });
+		if (this.opts.fetchError) throw this.opts.fetchError;
+	}
+
+	async mergeBase(repoRoot: string, a: string, b: string): Promise<string> {
+		this.mergeBaseCalls.push({ repoRoot, a, b });
+		if (this.opts.mergeBaseError) throw this.opts.mergeBaseError;
+		return this.opts.mergeBase ?? "fake-merge-base";
+	}
+
+	async addWorktree(input: AddWorktreeInput): Promise<void> {
+		this.addWorktreeCalls.push(input);
+		if (this.opts.addWorktreeError) throw this.opts.addWorktreeError;
+	}
+
+	async diffRange(
+		repoRoot: string,
+		from: string,
+		to: string,
+	): Promise<FileDiff[]> {
+		this.diffRangeCalls.push({ repoRoot, from, to });
+		if (this.opts.diffRangeError) throw this.opts.diffRangeError;
+		return this.opts.diffRange ?? this.opts.rangeDiff ?? [];
+	}
+
+	async remoteUrl(repoRoot: string, remote: string): Promise<string | null> {
+		this.remoteUrlCalls.push({ repoRoot, remote });
+		return this.opts.remoteUrl ?? null;
 	}
 
 	async rangeDiff(_base: string): Promise<FileDiff[]> {
 		return this.opts.rangeDiff ?? [];
 	}
 
-	async log(_opts: LogQuery): Promise<CommitMeta[]> {
+	async log(opts: LogQuery): Promise<CommitMeta[]> {
+		this.logCalls.push(opts);
 		return this.opts.log ?? [];
 	}
 
