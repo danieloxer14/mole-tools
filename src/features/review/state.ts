@@ -27,6 +27,38 @@ export const LineSelectionSchema = z.object({
 });
 export type LineSelection = z.infer<typeof LineSelectionSchema>;
 
+/**
+ * Selection for a comment/tag anchored to a rendered-markdown block rather
+ * than a diff line. Rendered blocks have no diff side/hunk to anchor to, so
+ * this carries the source line range plus the quoted block text instead.
+ */
+export const MarkdownSelectionSchema = z
+	.object({
+		kind: z.literal("markdown"),
+		path: z.string().min(1),
+		startLine: z.number().int().positive(),
+		endLine: z.number().int().positive(),
+		quote: z.string(),
+	})
+	.strict()
+	.refine((selection) => selection.endLine >= selection.startLine, {
+		message: "endLine must be greater than or equal to startLine",
+		path: ["endLine"],
+	});
+export type MarkdownSelection = z.infer<typeof MarkdownSelectionSchema>;
+
+export const DraftSelectionSchema = z.union([
+	LineSelectionSchema,
+	MarkdownSelectionSchema,
+]);
+export type DraftSelection = z.infer<typeof DraftSelectionSchema>;
+
+export function isMarkdownSelection(
+	selection: DraftSelection,
+): selection is MarkdownSelection {
+	return "kind" in selection && selection.kind === "markdown";
+}
+
 export const LayerSchema = z.object({
 	title: z.string().min(1),
 	tldr: z.string().min(1),
@@ -44,7 +76,7 @@ export type LayerDoc = z.infer<typeof LayerDocSchema>;
 export const DraftSchema = z.object({
 	id: z.string(),
 	body: z.string(),
-	selection: LineSelectionSchema,
+	selection: DraftSelectionSchema,
 	filePath: z.string(),
 	status: z.enum(["draft", "sending", "posted", "failed"]),
 	error: z.string().nullable().default(null),

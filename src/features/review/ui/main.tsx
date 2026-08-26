@@ -11,9 +11,10 @@ import {
 import { createRoot } from "react-dom/client";
 import type { HostDiscussion, MrApprovalState } from "../../../ports/git-host";
 import type { ParsedFileDiff } from "../../../shared/diff-parse";
+import { type ChatTag, chatTagsEqual } from "../chat-tags";
 import type { ReviewApiState } from "../routes";
 import type { Draft, LineSelection } from "../state";
-import type { ChatEntry, ChatTag } from "../store";
+import type { ChatEntry } from "../store";
 import {
 	clampColumnWidth,
 	initialColumnWidth,
@@ -32,6 +33,7 @@ import {
 	defaultFileViewMode,
 	type FileViewMode,
 	isMarkdownPath,
+	type MarkdownBlockSelection,
 } from "./components/DiffView";
 import { LayerPane } from "./components/LayerPane";
 import { SyncBanner } from "./components/SyncBanner";
@@ -770,13 +772,21 @@ function ReviewApp() {
 			? (fileViewModes[selectedPath] ?? defaultFileViewMode(selectedFile))
 			: "diff";
 
+	// selectedFile is intentionally excluded from this effect's deps below:
+	// `/api/state` refetches (chat polling, layer-stream completion, comment
+	// sends, ...) replace `data` with a new object graph for an unchanged
+	// file, which would otherwise re-trigger this effect on every refetch and
+	// cancel in-flight rendered-markdown work (mermaid/Shiki) before it
+	// finishes. selectedPath, selectedFile.binary, and selectedFile.status are
+	// the only primitives this effect's behavior actually depends on.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: selectedFile identity churns on every unrelated /api/state refetch; only its binary/status primitives matter here.
 	useEffect(() => {
 		if (!selectedFile || selectedFile.binary) {
 			setFileContents(null);
 			setFileContentsError(null);
 			return;
 		}
-		const path = filePath(selectedFile);
+		const path = selectedPath as string;
 		const renderedMarkdown =
 			selectedViewMode === "rendered" && isMarkdownPath(path);
 		const side =
@@ -797,7 +807,13 @@ function ReviewApp() {
 		return () => {
 			active = false;
 		};
-	}, [selectedFile, selectedViewMode, token]);
+	}, [
+		selectedPath,
+		selectedFile?.binary,
+		selectedFile?.status,
+		selectedViewMode,
+		token,
+	]);
 
 	if (error)
 		return (
@@ -905,6 +921,44 @@ function ReviewApp() {
 			body: JSON.stringify({
 				selection: target,
 				filePath: target.path,
+			}),
+		})
+			.then(async (response) => {
+				if (!response.ok)
+					throw new Error(`Comment creation failed (${response.status})`);
+				return (await response.json()) as Draft;
+			})
+			.then((draft) => {
+				setData((current) =>
+					current
+						? { ...current, drafts: [...current.drafts, draft] }
+						: current,
+				);
+			})
+			.catch((reason: unknown) => {
+				setCommentError(
+					reason instanceof Error ? reason.message : String(reason),
+				);
+			});
+	};
+
+	const createMarkdownCommentDraft = (selection: MarkdownBlockSelection) => {
+		setCommentError(null);
+		void fetch(apiUrl("/api/comments/draft", token), {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"X-Mole-Token": token,
+			},
+			body: JSON.stringify({
+				selection: {
+					kind: "markdown",
+					path: selection.path,
+					startLine: selection.startLine,
+					endLine: selection.endLine,
+					quote: selection.quote,
+				},
+				filePath: selection.path,
 			}),
 		})
 			.then(async (response) => {
@@ -1381,29 +1435,30 @@ function ReviewApp() {
 	const handleLineSelection = (selection: DiffLineSelection) => {
 		if (!activeChatId) return;
 		patchChat(activeChatId, (current) => ({
-			tags: current.tags.some(
-				(tag) =>
-					tag.path === selection.path &&
-					tag.side === selection.side &&
-					tag.startLine === selection.startLine &&
-					tag.endLine === selection.endLine &&
-					tag.hunk === selection.hunk,
-			)
+			tags: current.tags.some((tag) => chatTagsEqual(tag, selection))
 				? current.tags
 				: [...current.tags, selection],
+		}));
+	};
+	const handleMarkdownTag = (selection: MarkdownBlockSelection) => {
+		if (!activeChatId) return;
+		const tag: ChatTag = {
+			kind: "markdown",
+			path: selection.path,
+			startLine: selection.startLine,
+			endLine: selection.endLine,
+			quote: selection.quote,
+		};
+		patchChat(activeChatId, (current) => ({
+			tags: current.tags.some((candidate) => chatTagsEqual(candidate, tag))
+				? current.tags
+				: [...current.tags, tag],
 		}));
 	};
 	const removeChatTag = (tag: ChatTag) => {
 		if (!activeChatId) return;
 		patchChat(activeChatId, (current) => ({
-			tags: current.tags.filter(
-				(candidate) =>
-					candidate.path !== tag.path ||
-					candidate.side !== tag.side ||
-					candidate.startLine !== tag.startLine ||
-					candidate.endLine !== tag.endLine ||
-					candidate.hunk !== tag.hunk,
-			),
+			tags: current.tags.filter((candidate) => !chatTagsEqual(candidate, tag)),
 		}));
 	};
 	const clearTags = () => {
@@ -1518,6 +1573,8 @@ function ReviewApp() {
 					onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
 					onLineSelection={handleLineSelection}
 					onCommentSelection={createCommentDraft}
+					onMarkdownTag={handleMarkdownTag}
+					onMarkdownComment={createMarkdownCommentDraft}
 					onCancelDraft={cancelCommentDraft}
 					onEditDraft={updateCommentDraft}
 					onSendDraft={sendCommentDraft}

@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { logger } from "../../core/logger";
+import { ChatTagSchema } from "./chat-tags";
 import type { ReviewPaths } from "./paths";
 import {
 	CHAT_ID_PATTERN,
@@ -12,21 +13,6 @@ import {
 	type ReviewState,
 	ReviewStateSchema,
 } from "./state";
-
-export const ChatTagSchema = z
-	.object({
-		path: z.string().min(1),
-		side: z.enum(["new", "old"]),
-		startLine: z.number().int().positive(),
-		endLine: z.number().int().positive(),
-		hunk: z.string().min(1),
-	})
-	.strict()
-	.refine((tag) => tag.endLine >= tag.startLine, {
-		message: "endLine must be greater than or equal to startLine",
-		path: ["endLine"],
-	});
-export type ChatTag = z.infer<typeof ChatTagSchema>;
 
 export const ChatEntrySchema = z
 	.object({

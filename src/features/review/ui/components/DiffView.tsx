@@ -17,8 +17,12 @@ import type {
 	DiffLine,
 	ParsedFileDiff,
 } from "../../../../shared/diff-parse";
-import { escapeHtml, renderMarkdownHtml } from "../../../../shared/markdown";
-import type { Draft } from "../../state";
+import {
+	escapeHtml,
+	renderMarkdownBlocks,
+	wrapMarkdownBlocksWithActions,
+} from "../../../../shared/markdown";
+import { type Draft, isMarkdownSelection } from "../../state";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
@@ -29,6 +33,14 @@ export interface DiffLineSelection {
 	startLine: number;
 	endLine: number;
 	hunk: string;
+}
+
+/** Selection for a Tag/Comment action anchored to a rendered-markdown block. */
+export interface MarkdownBlockSelection {
+	path: string;
+	startLine: number;
+	endLine: number;
+	quote: string;
 }
 
 interface DiffViewProps {
@@ -45,6 +57,8 @@ interface DiffViewProps {
 	onExpandDiff?: (file: ParsedFileDiff) => Promise<ParsedFileDiff | null>;
 	onLineSelection?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
+	onMarkdownTag?: (selection: MarkdownBlockSelection) => void;
+	onMarkdownComment?: (selection: MarkdownBlockSelection) => void;
 	onCancelDraft?: CommentDraftProps["onCancel"];
 	onEditDraft?: CommentDraftProps["onEdit"];
 	onSendDraft?: CommentDraftProps["onSend"];
@@ -94,31 +108,77 @@ function CodeHighlight({ text, language }: CodeHighlightProps) {
 	return <>{text}</>;
 }
 let nextMermaidId = 0;
+let nextCodeBlockId = 0;
 let mermaidConfigured = false;
+const mermaidRenderCache = new Map<
+	string,
+	{ svg: string; bindFunctions?: (element: Element) => void }
+>();
+const codeHighlightCache = new Map<string, string>();
 
 interface RenderedMarkdown {
 	html: string;
 	mermaidSources: Map<string, string>;
+	codeSources: Map<string, { code: string; lang: string }>;
+	blockRanges: Map<string, { startLine: number; endLine: number }>;
 }
 
 function renderMarkdown(source: string): RenderedMarkdown {
 	const mermaidSources = new Map<string, string>();
-	const html = renderMarkdownHtml(source, (renderer) => {
-		const defaultCode = renderer.code.bind(renderer);
+	const codeSources = new Map<string, { code: string; lang: string }>();
+	const blocks = renderMarkdownBlocks(source, (renderer) => {
+		const defaultTable = renderer.table.bind(renderer);
 		renderer.code = (token: Tokens.Code) => {
-			if (token.lang?.trim().toLowerCase() !== "mermaid") {
-				return defaultCode(token);
+			if (token.lang?.trim().toLowerCase() === "mermaid") {
+				const id = `mole-mermaid-${nextMermaidId++}`;
+				mermaidSources.set(id, token.text);
+				return `<div class="mermaid-block" data-mermaid-id="${id}">Loading diagram...</div>`;
 			}
-			const id = `mole-mermaid-${nextMermaidId++}`;
-			mermaidSources.set(id, token.text);
-			return `<div class="mermaid-block" data-mermaid-id="${id}">Loading diagram...</div>`;
+			const id = `mole-code-${nextCodeBlockId++}`;
+			codeSources.set(id, {
+				code: token.text,
+				lang: token.lang?.trim() || "text",
+			});
+			return `<div class="code-block" data-code-block-id="${id}"><pre><code>${escapeHtml(
+				token.text,
+			)}</code></pre></div>`;
 		};
 		renderer.html = ({ text }: Tokens.HTML | Tokens.Tag) => escapeHtml(text);
+		renderer.table = (token: Tokens.Table) =>
+			`<div class="rendered-table-wrap">${defaultTable(token)}</div>`;
 	});
-	return { html, mermaidSources };
+	const { html: bodyHtml, blockRanges } = wrapMarkdownBlocksWithActions(blocks);
+	const html = DOMPurify.sanitize(bodyHtml, {
+		ADD_ATTR: [
+			"data-mermaid-id",
+			"data-code-block-id",
+			"data-block-id",
+			"data-source-line-start",
+			"data-source-line-end",
+		],
+		FORBID_TAGS: ["embed", "iframe", "object", "script", "style"],
+	});
+	return { html, mermaidSources, codeSources, blockRanges };
 }
 
-function RenderedMarkdown({ source }: { source: string }) {
+function RenderedMarkdown({
+	source,
+	path,
+	drafts,
+	commentDraftProps,
+	onTagBlock,
+	onCommentBlock,
+}: {
+	source: string;
+	path: string;
+	drafts: readonly Draft[];
+	commentDraftProps: Pick<
+		CommentDraftProps,
+		"onCancel" | "onEdit" | "onSend" | "onRetry"
+	>;
+	onTagBlock?: (selection: MarkdownBlockSelection) => void;
+	onCommentBlock?: (selection: MarkdownBlockSelection) => void;
+}) {
 	const parsed = useMemo(() => {
 		try {
 			return { error: null, value: renderMarkdown(source) };
@@ -134,55 +194,185 @@ function RenderedMarkdown({ source }: { source: string }) {
 	useEffect(() => {
 		const rendered = parsed.value;
 		const container = containerRef.current;
-		if (!rendered || !container || rendered.mermaidSources.size === 0) {
+		if (
+			!rendered ||
+			!container ||
+			(rendered.mermaidSources.size === 0 && rendered.codeSources.size === 0)
+		) {
 			return;
 		}
-		if (!mermaidConfigured) {
-			mermaid.initialize({
-				securityLevel: "strict",
-				startOnLoad: false,
-				theme: "dark",
-			});
-			mermaidConfigured = true;
+		const tasks: Promise<void>[] = [];
+		if (rendered.mermaidSources.size > 0) {
+			if (!mermaidConfigured) {
+				mermaid.initialize({
+					securityLevel: "strict",
+					startOnLoad: false,
+					theme: "dark",
+					htmlLabels: false,
+				});
+				mermaidConfigured = true;
+			}
+			const mermaidPlaceholders = [
+				...container.querySelectorAll<HTMLElement>("[data-mermaid-id]"),
+			];
+			tasks.push(
+				...mermaidPlaceholders.map(async (placeholder, index) => {
+					const id = placeholder.dataset.mermaidId;
+					const mermaidSource = id
+						? rendered.mermaidSources.get(id)
+						: undefined;
+					if (mermaidSource === undefined) return;
+					// A prior (possibly interrupted) render of this exact diagram may
+					// have already completed; reuse it instead of re-racing mermaid.
+					const cached = mermaidRenderCache.get(mermaidSource);
+					if (cached) {
+						placeholder.replaceChildren();
+						placeholder.innerHTML = DOMPurify.sanitize(cached.svg, {
+							USE_PROFILES: { svg: true, svgFilters: true },
+						});
+						cached.bindFunctions?.(placeholder);
+						return;
+					}
+					try {
+						const result = await mermaid.render(
+							`mole-mermaid-render-${index}-${id ?? "unknown"}`,
+							mermaidSource,
+						);
+						mermaidRenderCache.set(mermaidSource, result);
+						if (!placeholder.isConnected) return;
+						placeholder.replaceChildren();
+						placeholder.innerHTML = DOMPurify.sanitize(result.svg, {
+							USE_PROFILES: { svg: true, svgFilters: true },
+						});
+						result.bindFunctions?.(placeholder);
+					} catch (reason: unknown) {
+						if (!placeholder.isConnected) return;
+						const error = document.createElement("p");
+						error.className = "mermaid-error";
+						error.textContent = `Mermaid render failed: ${
+							reason instanceof Error ? reason.message : String(reason)
+						}`;
+						const sourceBlock = document.createElement("pre");
+						sourceBlock.className = "mermaid-source";
+						sourceBlock.textContent = mermaidSource;
+						placeholder.replaceChildren(error, sourceBlock);
+					}
+				}),
+			);
 		}
-		let cancelled = false;
-		const placeholders = [
-			...container.querySelectorAll<HTMLElement>("[data-mermaid-id]"),
-		];
-		void Promise.all(
-			placeholders.map(async (placeholder, index) => {
-				const id = placeholder.dataset.mermaidId;
-				const source = id ? rendered.mermaidSources.get(id) : undefined;
-				if (source === undefined) return;
-				try {
-					const result = await mermaid.render(
-						`mole-mermaid-render-${index}-${id ?? "unknown"}`,
-						source,
-					);
-					if (cancelled) return;
-					placeholder.replaceChildren();
-					placeholder.innerHTML = DOMPurify.sanitize(result.svg, {
-						USE_PROFILES: { svg: true, svgFilters: true },
-					});
-					result.bindFunctions?.(placeholder);
-				} catch (reason: unknown) {
-					if (cancelled) return;
-					const error = document.createElement("p");
-					error.className = "mermaid-error";
-					error.textContent = `Mermaid render failed: ${
-						reason instanceof Error ? reason.message : String(reason)
-					}`;
-					const sourceBlock = document.createElement("pre");
-					sourceBlock.className = "mermaid-source";
-					sourceBlock.textContent = source;
-					placeholder.replaceChildren(error, sourceBlock);
-				}
-			}),
-		);
-		return () => {
-			cancelled = true;
-		};
+		if (rendered.codeSources.size > 0) {
+			const codePlaceholders = [
+				...container.querySelectorAll<HTMLElement>("[data-code-block-id]"),
+			];
+			tasks.push(
+				...codePlaceholders.map(async (placeholder) => {
+					const id = placeholder.dataset.codeBlockId;
+					const entry = id ? rendered.codeSources.get(id) : undefined;
+					if (entry === undefined) return;
+					const cacheKey = `${entry.lang}\u0000${entry.code}`;
+					// A prior (possibly interrupted) highlight of this exact snippet may
+					// have already completed; reuse it instead of re-racing Shiki.
+					const cached = codeHighlightCache.get(cacheKey);
+					if (cached !== undefined) {
+						placeholder.replaceChildren();
+						placeholder.innerHTML = DOMPurify.sanitize(cached);
+						return;
+					}
+					try {
+						const highlighted = await codeToHtml(entry.code, {
+							lang: entry.lang || "text",
+							theme: "github-dark",
+						});
+						codeHighlightCache.set(cacheKey, highlighted);
+						if (!placeholder.isConnected) return;
+						placeholder.replaceChildren();
+						placeholder.innerHTML = DOMPurify.sanitize(highlighted);
+					} catch {
+						// Unknown language to Shiki: keep the escaped plain-text fallback.
+					}
+				}),
+			);
+		}
+		void Promise.all(tasks);
 	}, [parsed.value]);
+
+	// React can reset this container's innerHTML back to the placeholder markup
+	// on a later re-render even when `source`/`parsed.value` haven't changed
+	// (e.g. a sibling state update from unrelated polling). Re-applying any
+	// already-resolved mermaid/Shiki result after every render closes that
+	// window immediately instead of leaving the placeholder stuck until an
+	// unrelated remount (e.g. toggling view mode) happens to retrigger it.
+	useEffect(() => {
+		const rendered = parsed.value;
+		const container = containerRef.current;
+		if (!rendered) return;
+		for (const placeholder of container?.querySelectorAll<HTMLElement>(
+			"[data-mermaid-id]",
+		) ?? []) {
+			if (placeholder.dataset.moleApplied === "1") continue;
+			const mermaidSource = placeholder.dataset.mermaidId
+				? rendered.mermaidSources.get(placeholder.dataset.mermaidId)
+				: undefined;
+			const cached = mermaidSource
+				? mermaidRenderCache.get(mermaidSource)
+				: undefined;
+			if (!cached) continue;
+			placeholder.replaceChildren();
+			placeholder.innerHTML = DOMPurify.sanitize(cached.svg, {
+				USE_PROFILES: { svg: true, svgFilters: true },
+			});
+			cached.bindFunctions?.(placeholder);
+			placeholder.dataset.moleApplied = "1";
+		}
+		for (const placeholder of container?.querySelectorAll<HTMLElement>(
+			"[data-code-block-id]",
+		) ?? []) {
+			if (placeholder.dataset.moleApplied === "1") continue;
+			const entry = placeholder.dataset.codeBlockId
+				? rendered.codeSources.get(placeholder.dataset.codeBlockId)
+				: undefined;
+			const cached = entry
+				? codeHighlightCache.get(`${entry.lang}\u0000${entry.code}`)
+				: undefined;
+			if (cached === undefined) continue;
+			placeholder.replaceChildren();
+			placeholder.innerHTML = DOMPurify.sanitize(cached);
+			placeholder.dataset.moleApplied = "1";
+		}
+	});
+
+	useEffect(() => {
+		const rendered = parsed.value;
+		const container = containerRef.current;
+		if (!rendered || !container) return;
+		const handleBlockActionClick = (event: Event) => {
+			const target = event.target as HTMLElement;
+			const button = target.closest<HTMLElement>(
+				".markdown-block-tag, .markdown-block-comment",
+			);
+			if (!button) return;
+			const blockId = button.dataset.blockId;
+			const range = blockId ? rendered.blockRanges.get(blockId) : undefined;
+			if (!range) return;
+			const quote = source
+				.split("\n")
+				.slice(range.startLine - 1, range.endLine)
+				.join("\n");
+			const selection: MarkdownBlockSelection = {
+				path,
+				startLine: range.startLine,
+				endLine: range.endLine,
+				quote,
+			};
+			if (button.classList.contains("markdown-block-tag")) {
+				onTagBlock?.(selection);
+			} else {
+				onCommentBlock?.(selection);
+			}
+		};
+		container.addEventListener("click", handleBlockActionClick);
+		return () => container.removeEventListener("click", handleBlockActionClick);
+	}, [parsed.value, path, source, onTagBlock, onCommentBlock]);
 
 	if (parsed.error) {
 		return (
@@ -193,28 +383,65 @@ function RenderedMarkdown({ source }: { source: string }) {
 		);
 	}
 	if (!parsed.value) return null;
+	const markdownDrafts = drafts.filter(
+		(draft) =>
+			draft.filePath === path &&
+			draft.status !== "posted" &&
+			isMarkdownSelection(draft.selection),
+	);
 	return (
-		<div
-			className="rendered-markdown"
-			ref={containerRef}
-			// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
-			dangerouslySetInnerHTML={{ __html: parsed.value.html }}
-		/>
+		<div className="markdown-view">
+			<div
+				className="rendered-markdown"
+				ref={containerRef}
+				// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
+				dangerouslySetInnerHTML={{ __html: parsed.value.html }}
+			/>
+			{markdownDrafts.length > 0 ? (
+				<div className="markdown-draft-list">
+					{markdownDrafts.map((draft) => (
+						<CommentDraft key={draft.id} draft={draft} {...commentDraftProps} />
+					))}
+				</div>
+			) : null}
+		</div>
 	);
 }
 
 function MarkdownView({
 	fileContents,
 	fileContentsError,
+	path,
+	drafts,
+	commentDraftProps,
+	onTagBlock,
+	onCommentBlock,
 }: {
 	fileContents: string | null;
 	fileContentsError: string | null;
+	path: string;
+	drafts: readonly Draft[];
+	commentDraftProps: Pick<
+		CommentDraftProps,
+		"onCancel" | "onEdit" | "onSend" | "onRetry"
+	>;
+	onTagBlock?: (selection: MarkdownBlockSelection) => void;
+	onCommentBlock?: (selection: MarkdownBlockSelection) => void;
 }) {
 	if (fileContentsError)
 		return <p className="render-error">{fileContentsError}</p>;
 	if (fileContents === null)
 		return <p className="placeholder">Loading file...</p>;
-	return <RenderedMarkdown source={fileContents} />;
+	return (
+		<RenderedMarkdown
+			source={fileContents}
+			path={path}
+			drafts={drafts}
+			commentDraftProps={commentDraftProps}
+			onTagBlock={onTagBlock}
+			onCommentBlock={onCommentBlock}
+		/>
+	);
 }
 
 interface SelectableLine {
@@ -286,6 +513,7 @@ function draftMatchesLine(
 	line: DiffLine,
 	endOnly: boolean,
 ): boolean {
+	if (isMarkdownSelection(draft.selection)) return false;
 	const lineNumber =
 		draft.selection.side === "old" ? line.oldLine : line.newLine;
 	const path = draft.selection.side === "old" ? file.oldPath : file.newPath;
@@ -855,6 +1083,8 @@ export function DiffView({
 	onExpandDiff,
 	onLineSelection,
 	onCommentSelection,
+	onMarkdownTag,
+	onMarkdownComment,
 	onCancelDraft,
 	onEditDraft,
 	onSendDraft,
@@ -965,6 +1195,11 @@ export function DiffView({
 				<MarkdownView
 					fileContents={fileContents}
 					fileContentsError={fileContentsError}
+					path={path}
+					drafts={drafts}
+					commentDraftProps={commentDraftProps}
+					onTagBlock={onMarkdownTag}
+					onCommentBlock={onMarkdownComment}
 				/>
 			) : null}
 			{!showingRendered || binary ? (

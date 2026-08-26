@@ -8,7 +8,8 @@ import {
 } from "react";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
-import type { ChatEntry, ChatTag } from "../../store";
+import { type ChatTag, isMarkdownChatTag } from "../../chat-tags";
+import type { ChatEntry } from "../../store";
 
 export interface ChatToolActivity {
 	id: number;
@@ -49,7 +50,15 @@ export interface ChatPaneProps {
 }
 
 function tagLabel(tag: ChatTag): string {
-	return `${tag.path}:${tag.side}:${tag.startLine}-${tag.endLine}`;
+	return isMarkdownChatTag(tag)
+		? `${tag.path}:${tag.startLine}-${tag.endLine}`
+		: `${tag.path}:${tag.side}:${tag.startLine}-${tag.endLine}`;
+}
+
+function tagKey(tag: ChatTag): string {
+	return isMarkdownChatTag(tag)
+		? `${tag.path}-markdown-${tag.startLine}-${tag.endLine}`
+		: `${tag.path}-${tag.side}-${tag.startLine}-${tag.endLine}-${tag.hunk}`;
 }
 
 // Line ranges sometimes come back with a typographic dash (en/em dash)
@@ -328,11 +337,7 @@ export function ChatPane({
 						{entry.tags.length > 0 ? (
 							<ul className="chat-message-tags">
 								{entry.tags.map((tag) => (
-									<li
-										key={`${tag.path}-${tag.side}-${tag.startLine}-${tag.endLine}`}
-									>
-										{tagLabel(tag)}
-									</li>
+									<li key={tagKey(tag)}>{tagLabel(tag)}</li>
 								))}
 							</ul>
 						) : null}
@@ -383,8 +388,8 @@ export function ChatPane({
 						{tags.map((tag) => (
 							<span
 								className="chat-tag"
-								key={`${tag.path}-${tag.side}-${tag.startLine}-${tag.endLine}-${tag.hunk}`}
-								title={tag.hunk}
+								key={tagKey(tag)}
+								title={isMarkdownChatTag(tag) ? (tag.quote ?? "") : tag.hunk}
 							>
 								{tagLabel(tag)}
 								<button

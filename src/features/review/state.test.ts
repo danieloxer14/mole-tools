@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { getReviewPaths } from "./paths";
 import {
 	CHAT_ID_PATTERN,
+	DraftSelectionSchema,
 	deriveChatTitle,
 	ensureChats,
+	isMarkdownSelection,
 	LEGACY_CHAT_ID,
+	LineSelectionSchema,
 	type ReviewState,
 	ReviewStateSchema,
 } from "./state";
@@ -398,5 +401,61 @@ describe("ReviewStore", () => {
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("DraftSelectionSchema", () => {
+	test("accepts a diff-line selection and reports it as non-markdown", () => {
+		const selection = DraftSelectionSchema.parse({
+			path: "src/app.ts",
+			side: "new",
+			startLine: 4,
+			endLine: 6,
+		});
+		expect(isMarkdownSelection(selection)).toBe(false);
+	});
+
+	test("accepts a markdown-block selection and reports it as markdown", () => {
+		const selection = DraftSelectionSchema.parse({
+			kind: "markdown",
+			path: "README.md",
+			startLine: 4,
+			endLine: 6,
+			quote: "## Heading\n\nBody.",
+		});
+		expect(isMarkdownSelection(selection)).toBe(true);
+	});
+
+	test("rejects a markdown-block selection with a reversed line range", () => {
+		expect(() =>
+			DraftSelectionSchema.parse({
+				kind: "markdown",
+				path: "README.md",
+				startLine: 6,
+				endLine: 4,
+				quote: "Body.",
+			}),
+		).toThrow();
+	});
+
+	test("rejects a markdown-kind selection missing the required quote", () => {
+		expect(() =>
+			DraftSelectionSchema.parse({
+				kind: "markdown",
+				path: "README.md",
+				startLine: 4,
+				endLine: 6,
+			}),
+		).toThrow();
+	});
+
+	test("still accepts a bare diff selection missing the markdown discriminant", () => {
+		const selection = LineSelectionSchema.parse({
+			path: "src/app.ts",
+			side: "old",
+			startLine: 1,
+			endLine: 1,
+		});
+		expect(isMarkdownSelection(selection)).toBe(false);
 	});
 });

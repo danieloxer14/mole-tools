@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Draft } from "../../state";
+import { type Draft, isMarkdownSelection } from "../../state";
 
 export interface CommentDraftProps {
 	draft: Draft;
@@ -52,8 +52,9 @@ export function CommentDraft({
 				<span>{statusLabel(draft.status)}</span>
 			</header>
 			<p className="comment-position">
-				{draft.filePath}:{draft.selection.side}:{draft.selection.startLine}-
-				{draft.selection.endLine}
+				{isMarkdownSelection(draft.selection)
+					? `${draft.filePath}:${draft.selection.startLine}-${draft.selection.endLine}`
+					: `${draft.filePath}:${draft.selection.side}:${draft.selection.startLine}-${draft.selection.endLine}`}
 			</p>
 			{editing && canEdit ? (
 				<textarea

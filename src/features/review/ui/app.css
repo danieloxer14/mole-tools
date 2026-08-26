@@ -763,13 +763,19 @@ button.active {
 	padding: 12px;
 }
 .rendered-markdown pre code {
+	background: none;
+	border-radius: 0;
 	padding: 0;
+}
+.rendered-table-wrap {
+	margin: 1em 0;
+	max-width: 100%;
+	overflow-x: auto;
 }
 .rendered-markdown table {
 	border-collapse: collapse;
-	margin: 1em 0;
-	max-width: 100%;
-	overflow: auto;
+	max-width: none;
+	width: max-content;
 }
 .rendered-markdown th,
 .rendered-markdown td {
@@ -795,6 +801,32 @@ button.active {
 .mermaid-block svg {
 	height: auto;
 	max-width: 100%;
+}
+.rendered-markdown .markdown-block {
+	position: relative;
+}
+.rendered-markdown .markdown-block-actions {
+	display: flex;
+	float: right;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-size: 0.62rem;
+	gap: 4px;
+	margin-left: 8px;
+	opacity: 0;
+}
+.rendered-markdown .markdown-block-actions button {
+	font: inherit;
+	padding: 2px 5px;
+}
+.rendered-markdown .markdown-block:hover .markdown-block-actions,
+.rendered-markdown .markdown-block-actions:focus-within {
+	opacity: 1;
+}
+.markdown-draft-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 12px;
 }
 .mermaid-error {
 	color: #ffb0a8;

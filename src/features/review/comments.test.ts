@@ -225,4 +225,81 @@ describe("comment drafts", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
+
+	test("creates a markdown-block draft and posts it as an unpositioned general note", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comments-markdown-"));
+		try {
+			const markdownSelection = {
+				kind: "markdown" as const,
+				path: "README.md",
+				startLine: 3,
+				endLine: 5,
+				quote: "## Section\n\nBody text.",
+			};
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({ token, store });
+
+			const created = await routes(
+				jsonRequest(`/api/comments/draft?t=${token}`, "POST", {
+					selection: markdownSelection,
+					filePath: markdownSelection.path,
+				}),
+			);
+			expect(created.status).toBe(201);
+			const draft = DraftSchema.parse(await created.json());
+			expect(draft.selection).toEqual(markdownSelection);
+
+			const edited = await routes(
+				jsonRequest(`/api/comments/${draft.id}?t=${token}`, "PUT", {
+					body: "Please fix this section.",
+				}),
+			);
+			expect(edited.status).toBe(200);
+
+			let sendCount = 0;
+			let capturedInput: unknown;
+			const routesWithHost = createReviewRoutes({
+				token,
+				store,
+				gitHost: {
+					createDiscussion: async (input: unknown) => {
+						sendCount++;
+						capturedInput = input;
+						return discussion("discussion-markdown-1");
+					},
+				},
+			});
+			const sent = await routesWithHost(
+				request(`/api/comments/${draft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			expect(sent.status).toBe(200);
+			expect(sendCount).toBe(1);
+			expect(capturedInput).not.toHaveProperty("position");
+			if (
+				!capturedInput ||
+				typeof capturedInput !== "object" ||
+				!("body" in capturedInput) ||
+				typeof capturedInput.body !== "string"
+			) {
+				throw new Error("createDiscussion was not called with a body");
+			}
+			const { body } = capturedInput;
+			expect(body).toContain("README.md");
+			expect(body).toContain("3-5");
+			expect(body).toContain("Body text.");
+			expect(body).toContain("Please fix this section.");
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				status: "posted",
+				postedDiscussionId: "discussion-markdown-1",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 });

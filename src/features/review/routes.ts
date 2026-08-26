@@ -14,6 +14,7 @@ import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
 import { runChatTurn, validateChatTags } from "./chat";
+import type { ChatTag } from "./chat-tags";
 import {
 	generateLayers,
 	type LayerGenerationResult,
@@ -32,13 +33,15 @@ import {
 	type ChatMeta,
 	createChatMeta,
 	type Draft,
+	type DraftSelection,
+	DraftSelectionSchema,
 	deriveChatTitle,
-	type LineSelection,
-	LineSelectionSchema,
+	isMarkdownSelection,
+	type MarkdownSelection,
 	type ReviewState,
 	ReviewStateSchema,
 } from "./state";
-import type { ChatTag, ReviewStore } from "./store";
+import type { ReviewStore } from "./store";
 
 const DEFAULT_LARGE_FILE_LINE_THRESHOLD = 800;
 
@@ -330,7 +333,7 @@ function commentSseError(message: string, status: number): Response {
 }
 
 interface CommentDraftRequestPayload {
-	selection: LineSelection;
+	selection: DraftSelection;
 	filePath: string;
 }
 
@@ -338,7 +341,7 @@ function validateCommentDraftRequest(
 	body: Record<string, unknown> | null,
 ): CommentDraftRequestPayload | string {
 	if (!body) return "Expected a JSON object";
-	const selection = LineSelectionSchema.safeParse(body.selection);
+	const selection = DraftSelectionSchema.safeParse(body.selection);
 	if (!selection.success)
 		return `Invalid comment selection: ${selection.error.message}`;
 	if (selection.data.endLine < selection.data.startLine)
@@ -491,11 +494,12 @@ export function createReviewRoutes(
 	}
 
 	function diffForDraft(draft: Draft): ParsedFileDiff | null {
-		if (draft.filePath !== draft.selection.path) return null;
+		const selection = draft.selection;
+		if (draft.filePath !== selection.path) return null;
+		if (isMarkdownSelection(selection)) return null;
 		return (
 			currentDiff.find((file) => {
-				const path =
-					draft.selection.side === "new" ? file.newPath : file.oldPath;
+				const path = selection.side === "new" ? file.newPath : file.oldPath;
 				return path === draft.filePath;
 			}) ?? null
 		);
@@ -952,9 +956,34 @@ export function createReviewRoutes(
 		return emptyResponse(204);
 	}
 
+	function formatMarkdownCommentBody(
+		draft: Draft,
+		selection: MarkdownSelection,
+	): string {
+		const lineRange =
+			selection.startLine === selection.endLine
+				? `${selection.startLine}`
+				: `${selection.startLine}-${selection.endLine}`;
+		const quotedLines = selection.quote
+			.split("\n")
+			.map((line) => `> ${line}`)
+			.join("\n");
+		return `**${draft.filePath}:${lineRange}**\n\n${quotedLines}\n\n${draft.body}`;
+	}
+
 	async function sendComment(draftId: string): Promise<Response> {
 		const fail = (message: string, status: number): Response =>
 			commentSseError(message, status);
+
+		const markFailed = async (message: string): Promise<void> => {
+			await mutateDrafts((drafts) =>
+				drafts.map((candidate) =>
+					candidate.id === draftId
+						? { ...candidate, status: "failed", error: message }
+						: candidate,
+				),
+			);
+		};
 
 		try {
 			const state = await currentState();
@@ -963,47 +992,43 @@ export function createReviewRoutes(
 			if (draft.status === "posted")
 				return fail("Comment is already posted", 409);
 
-			const file = diffForDraft(draft);
-			if (!file) {
-				const message = "Draft position does not match the current diff";
-				await mutateDrafts((drafts) =>
-					drafts.map((candidate) =>
-						candidate.id === draftId
-							? { ...candidate, status: "failed", error: message }
-							: candidate,
-					),
-				);
-				return fail(message, 400);
-			}
-
-			let position: GitLabPositionPayload;
-			try {
-				position = buildPosition(
-					draft.selection,
-					file,
-					state.revision.diffRefs,
-				);
-			} catch (error) {
-				const message = errorMessage(error);
-				await mutateDrafts((drafts) =>
-					drafts.map((candidate) =>
-						candidate.id === draftId
-							? { ...candidate, status: "failed", error: message }
-							: candidate,
-					),
-				);
-				return fail(message, 400);
+			let discussionInput: CreateDiscussionInput;
+			if (isMarkdownSelection(draft.selection)) {
+				discussionInput = {
+					ref: reviewRef(state),
+					body: formatMarkdownCommentBody(draft, draft.selection),
+				};
+			} else {
+				const file = diffForDraft(draft);
+				if (!file) {
+					const message = "Draft position does not match the current diff";
+					await markFailed(message);
+					return fail(message, 400);
+				}
+				let position: GitLabPositionPayload;
+				try {
+					position = buildPosition(
+						draft.selection,
+						file,
+						state.revision.diffRefs,
+					);
+				} catch (error) {
+					const message = errorMessage(error);
+					await markFailed(message);
+					return fail(message, 400);
+				}
+				discussionInput = {
+					ref: reviewRef(state),
+					body: draft.body,
+					position,
+					parsedDiff: file,
+					diffRefs: state.revision.diffRefs,
+				};
 			}
 
 			if (!options.gitHost?.createDiscussion) {
 				const message = "GitLab discussion host is unavailable";
-				await mutateDrafts((drafts) =>
-					drafts.map((candidate) =>
-						candidate.id === draftId
-							? { ...candidate, status: "failed", error: message }
-							: candidate,
-					),
-				);
+				await markFailed(message);
 				return fail(message, 503);
 			}
 
@@ -1015,25 +1040,12 @@ export function createReviewRoutes(
 				),
 			);
 
-			const discussionInput: CreateDiscussionInput = {
-				ref: reviewRef(state),
-				body: draft.body,
-				position,
-				parsedDiff: file,
-				diffRefs: state.revision.diffRefs,
-			};
 			let discussion: HostDiscussion;
 			try {
 				discussion = await options.gitHost.createDiscussion(discussionInput);
 			} catch (error) {
 				const message = errorMessage(error);
-				await mutateDrafts((drafts) =>
-					drafts.map((candidate) =>
-						candidate.id === draftId
-							? { ...candidate, status: "failed", error: message }
-							: candidate,
-					),
-				);
+				await markFailed(message);
 				return fail(message, 502);
 			}
 

@@ -3,14 +3,10 @@ import { dirname, join } from "node:path";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import { loadPrompt } from "../../adapters/prompts/loader";
 import type { AgentEvent, ReviewAgent } from "../../ports/review-agent";
+import { type ChatTag, ChatTagSchema } from "./chat-tags";
 import type { ReviewPaths } from "./paths";
 import { ensureChats, type ReviewState, ReviewStateSchema } from "./state";
-import {
-	type ChatEntry,
-	type ChatTag,
-	ChatTagSchema,
-	type ReviewStore,
-} from "./store";
+import type { ChatEntry, ReviewStore } from "./store";
 
 /**
  * Context that is safe to hand to a chat agent. The worktree itself is never
