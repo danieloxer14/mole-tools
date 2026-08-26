@@ -296,7 +296,7 @@ describe("review feature", () => {
 			await setupReview({ vcs, ref, mr, cwd: "/workspace/other", paths });
 			expect(vcs.cloneCalls).toEqual([
 				{
-					remoteUrl: "https://gitlab.example.com/group/api.git",
+					remoteUrl: "git@gitlab.example.com:group/api.git",
 					destination: paths.repoPath,
 				},
 			]);

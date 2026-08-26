@@ -8,6 +8,8 @@ import {
 	type ReviewMergeRequest,
 	type ReviewSetupInput,
 	type ReviewSetupResult,
+	resolveReviewRepo,
+	reviewRemoteUrl,
 	setupReview,
 } from "./setup";
 import { LEGACY_CHAT_ID, type ReviewState, ReviewStateSchema } from "./state";
@@ -248,6 +250,57 @@ describe("setupReview chat state", () => {
 			expect(await Bun.file(paths.chatPath).exists()).toBe(false);
 			expect(await Bun.file(adoptedPath).text()).toBe(adoptedTranscript);
 			expect(second.state.chats[0]?.title).toBe("Explain this review");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("reviewRemoteUrl", () => {
+	test("builds an SSH remote so cloning doesn't require HTTPS git credentials", () => {
+		expect(reviewRemoteUrl(ref)).toBe("git@gitlab.example.com:group/api.git");
+	});
+});
+
+describe("resolveReviewRepo", () => {
+	test("clones via SSH when no cwd or cached remote matches the MR", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-resolve-"));
+		try {
+			const paths = pathsFor(dir);
+			const vcs = new FakeVcs({ remoteUrl: null });
+			const repoPath = await resolveReviewRepo({
+				vcs,
+				ref,
+				cwd: dir,
+				paths,
+			});
+			expect(repoPath).toBe(paths.repoPath);
+			expect(vcs.cloneCalls).toEqual([
+				{
+					remoteUrl: "git@gitlab.example.com:group/api.git",
+					destination: paths.repoPath,
+				},
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reuses cwd when its origin matches the MR over SSH", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-resolve-cwd-"));
+		try {
+			const paths = pathsFor(dir);
+			const vcs = new FakeVcs({
+				remoteUrl: "git@gitlab.example.com:group/api.git",
+			});
+			const repoPath = await resolveReviewRepo({
+				vcs,
+				ref,
+				cwd: dir,
+				paths,
+			});
+			expect(repoPath).toBe(dir);
+			expect(vcs.cloneCalls).toEqual([]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

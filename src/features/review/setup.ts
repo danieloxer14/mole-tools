@@ -131,7 +131,7 @@ export interface ReviewSetupResult {
 }
 
 export function reviewRemoteUrl(ref: MrRef): string {
-	return `https://${ref.host}/${ref.projectPath}.git`;
+	return `git@${ref.host}:${ref.projectPath}.git`;
 }
 
 function normalizeRemote(remote: string): string | null {
