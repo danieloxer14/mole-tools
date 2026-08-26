@@ -12,10 +12,16 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
 fi
 
 DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${ASSET_NAME}"
+RELEASE_API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 TMP_FILE=$(mktemp)
 trap 'rm -f "${TMP_FILE}"' EXIT
 
-echo "Downloading the latest ${ASSET_NAME} release..."
+VERSION=$(curl --fail --location --silent --show-error --retry 3 "${RELEASE_API_URL}" 2>/dev/null | sed -n 's/^ *"tag_name": *"\(.*\)",\{0,1\}$/\1/p' | head -n1) || true
+if [[ -n "${VERSION}" ]]; then
+	echo "Downloading ${ASSET_NAME} ${VERSION}..."
+else
+	echo "Downloading the latest ${ASSET_NAME} release..."
+fi
 if ! curl --fail --location --silent --show-error --retry 3 "${DOWNLOAD_URL}" -o "${TMP_FILE}"; then
 	echo "error: could not download ${ASSET_NAME} from the latest GitHub release." >&2
 	echo "       Publish a release containing an asset named ${ASSET_NAME}." >&2
