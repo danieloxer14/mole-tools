@@ -197,11 +197,12 @@ all changed files.
 
 ## 6. Chat, tagging, and agent safety
 
-Chat uses the configured `ReviewAgent` with a read-only worktree policy. OMP is
-allowlisted to `read,grep,glob`; Claude is allowlisted to `Read,Grep,Glob`.
-The agent can inspect additional files itself but receives no write tool for a
-chat turn. The prompt also explicitly instructs it to refuse edits. The review
-worktree must remain byte-identical after chat.
+Chat uses configured `ReviewAgent` with read-only worktree policy. OMP is
+allowlisted to `read,grep,glob,bash`; Claude is allowlisted to
+`Read,Grep,Glob,Bash`. The agent can inspect additional files itself but
+receives no write tool for chat turn. Bash is limited by prompt policy to
+read-only inspection commands. Prompt also explicitly instructs it to refuse
+edits. Review worktree must remain byte-identical after chat.
 
 Turn construction is intentionally asymmetric:
 

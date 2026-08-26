@@ -176,6 +176,7 @@ describe("chat prompt construction", () => {
 		expect(first).toContain("pinned at the absolute path /tmp/review-worktree");
 		expect(later).toContain("pinned at the absolute path /tmp/review-worktree");
 		expect(later).toContain("even though the tools are not sandboxed");
+		expect(first).toContain("bash");
 	});
 
 	test("rejects malformed line tags", () => {

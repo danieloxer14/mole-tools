@@ -73,13 +73,14 @@ describe("ClaudeAgentAdapter", () => {
 			"--append-system-prompt",
 			await Bun.file(turn.systemPromptFile).text(),
 		]);
-		expect(call?.args.slice(9, 13)).toEqual([
+		expect(call?.args.slice(9, 14)).toEqual([
 			"--allowedTools",
 			"Read",
 			"Grep",
 			"Glob",
+			"Bash",
 		]);
-		expect(call?.args.slice(13)).toEqual([
+		expect(call?.args.slice(14)).toEqual([
 			"--add-dir",
 			turn.cwd,
 			"--",
@@ -116,6 +117,8 @@ describe("ClaudeAgentAdapter", () => {
 					'{"type":"system","subtype":"init","session_id":"session-1"}',
 					'{"type":"assistant","message":{"role":"assistant","content":[]}}',
 					'{"type":"user","message":{"role":"user","content":[]}}',
+					'{"type":"stream_event","event":{"type":"rate_limit_event","status":"allowed"}}',
+					'{"type":"rate_limit_event","status":"allowed"}',
 					'{"type":"future_event","kind":"new_shape"}',
 					'{"type":"future_event","value":true}',
 					'{"type":"error","error":{"message":"provider failed"}}',
@@ -146,7 +149,7 @@ describe("ClaudeAgentAdapter", () => {
 		]);
 	});
 
-	test("passes continuation and permits writes only in the layer output directory", async () => {
+	test("uses resume mode for continuation and permits writes only in the layer output directory", async () => {
 		const calls: Call[] = [];
 		const adapter = new ClaudeAgentAdapter(
 			replay(
@@ -173,7 +176,7 @@ describe("ClaudeAgentAdapter", () => {
 			"stream-json",
 			"--include-partial-messages",
 			"--verbose",
-			"--session-id",
+			"--resume",
 			"resume-session",
 			"--append-system-prompt",
 			await Bun.file(turn.systemPromptFile).text(),
@@ -181,6 +184,7 @@ describe("ClaudeAgentAdapter", () => {
 			"Read",
 			"Grep",
 			"Glob",
+			"Bash",
 			"Write(/tmp/review-output/**)",
 			"--permission-mode",
 			"acceptEdits",
@@ -191,7 +195,7 @@ describe("ClaudeAgentAdapter", () => {
 			"--",
 			turn.message,
 		]);
-		expect(calls[0]?.args).not.toContain("Bash");
+		expect(calls[0]?.args).not.toContain("--session-id");
 		expect(calls[0]?.args).not.toContain("Edit");
 	});
 

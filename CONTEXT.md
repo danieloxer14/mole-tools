@@ -49,9 +49,10 @@ A detached worktree checked out at MR head for safe inspection. Review first
 uses current directory when its `origin` matches MR; otherwise it reuses or
 creates cache clone under `~/.config/mole-tools/repos/` and worktree under
 `~/.config/mole-tools/worktrees/<host>/<project>/mr-<iid>/`. Chat and comment
-agents have read-only tools. Layer output is written outside worktree. CLI
-exit stops server but leaves worktree and review state on disk; cleanup is
-deliberate through `worktree-prune`, not automatic.
+agents have read-only tools, including Bash for read-only inspection commands.
+Layer output is written outside worktree. CLI exit stops server but leaves
+worktree and review state on disk; cleanup is deliberate through
+`worktree-prune`, not automatic.
 
 ### ReviewAgent
 Provider-neutral port for review turns. It exposes `preflight()` and a

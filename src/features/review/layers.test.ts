@@ -246,6 +246,7 @@ describe("review layer generation", () => {
 			expect(result.state.layers[0]?.bdd).toEqual(layerDoc.layers[0]?.bdd);
 			expect((await store.read())?.layers).toEqual(result.state.layers);
 			expect(agent.turns).toHaveLength(1);
+			expect(agent.turns[0]?.message).toContain("bash");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

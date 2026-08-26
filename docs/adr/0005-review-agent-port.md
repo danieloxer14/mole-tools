@@ -62,7 +62,8 @@ propagates Stop/cancel to the provider process.
 Adapters normalize provider NDJSON into this event stream. Successful turns
 emit one `session` event before text, then zero or more text/tool/diagnostic
 events, and finish with `turn_end`. A supplied session id is resumed verbatim.
-Unknown provider events become non-fatal diagnostics; malformed known events and
+Known informational `rate_limit_event` metadata is ignored; other unknown
+provider events become non-fatal diagnostics. Malformed known events and
 provider failures become typed errors. The shared executor uses `Bun.spawn`,
 yields one stdout line at a time, and kills the child when the abort signal is
 cancelled.
@@ -71,8 +72,8 @@ cancelled.
 
 | Adapter | Default binary | Provider invocation | Session handling | Read-only tools |
 |---|---|---|---|---|
-| `OmpAgentAdapter` | `omp` | `-p --mode json --cwd <cwd> --append-system-prompt <file> --tools <allowlist> [--model <model>] [-r <session>] [--add-dir <writeDir>] -- <message>` | Captures the provider `session` event. Resume uses `-r <session>`. | `read,grep,glob`; a layer run adds `write` and its output directory. |
-| `ClaudeAgentAdapter` | `claude` | `-p --output-format stream-json --include-partial-messages --verbose --session-id <uuid> --append-system-prompt <prompt text> --allowedTools Read Grep Glob [--add-dir <writeDir>] --add-dir <cwd> -- <message>` | Mints a UUID for a new turn, emits it after Claude's `system/init`, and reuses it with `--session-id` on resume. | `Read,Grep,Glob`; `writeDir` is added as a bounded directory for layer output, while the adapter's allowed tool list remains read-only. |
+| `OmpAgentAdapter` | `omp` | `-p --mode json --cwd <cwd> --append-system-prompt <file> --tools <allowlist> [--model <model>] [-r <session>] [--add-dir <writeDir>] -- <message>` | Captures the provider `session` event. Resume uses `-r <session>`. | `read,grep,glob,bash`; a layer run adds `write` and its output directory. |
+| `ClaudeAgentAdapter` | `claude` | `-p --output-format stream-json --include-partial-messages --verbose --session-id <uuid> --append-system-prompt <prompt text> --allowedTools Read Grep Glob Bash [--add-dir <writeDir>] --add-dir <cwd> -- <message>` | Mints a UUID for a new turn, emits it after Claude's `system/init`, and reuses it with `--session-id` on resume. | `Read,Grep,Glob,Bash`; `writeDir` adds a bounded directory for layer output. |
 
 The Claude adapter reads `systemPromptFile` and passes its contents because the
 Claude CLI accepts prompt text for `--append-system-prompt`. The OMP adapter
@@ -130,12 +131,14 @@ write directory.
 
 - The server binds to `127.0.0.1` and passes the detached worktree path as
   `cwd`; it is not a remote agent service.
-- Chat and comment adapters receive only read tools. Prompt policy also tells
-  the agent to refuse edits. A review session is expected to leave
+- Chat and comment adapters receive read tools plus Bash, which prompt policy
+  restricts to read-only inspection commands. Prompt policy also tells the
+  agent to refuse edits. A review session is expected to leave
   `git status --porcelain` empty in the worktree.
 - Every provider stream is normalized. Unknown event shapes are diagnostics,
-  not reasons to crash the server. Agent failures, timeouts, and cancellation
-  become UI-visible errors while the diff remains usable.
+  not reasons to crash the server; recognized rate-limit metadata is ignored.
+  Agent failures, timeouts, and cancellation become UI-visible errors while
+  the diff remains usable.
 - The review feature chooses a provider through `ReviewAgent`; existing commit
   and merge-request `Llm` routing remains unchanged.
 

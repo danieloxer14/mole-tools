@@ -15,12 +15,13 @@ type JsonRecord = Record<string, unknown>;
 type ParsedLine =
 	| { tag: "provider"; value: JsonRecord }
 	| { tag: "event"; event: AgentEvent };
-const READ_ONLY_TOOLS = ["read", "grep", "glob"] as const;
+const READ_ONLY_TOOLS = ["read", "grep", "glob", "bash"] as const;
 const IGNORED_EVENTS: Record<string, true> = {
 	agent_start: true,
 	turn_start: true,
 	message_start: true,
 	message_end: true,
+	rate_limit_event: true,
 	// Streams incremental tool-input/output progress; the port's AgentEvent
 	// only distinguishes tool "start"/"end", so intermediate updates carry
 	// nothing we surface today.

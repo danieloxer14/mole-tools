@@ -15,18 +15,19 @@ type JsonRecord = Record<string, unknown>;
 type ParsedLine =
 	| { tag: "provider"; value: JsonRecord }
 	| { tag: "event"; event: AgentEvent };
-const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"] as const;
+const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"] as const;
 const IGNORED_STREAM_EVENTS: Record<string, true> = {
 	message_start: true,
 	content_block_start: true,
 	content_block_stop: true,
 	message_delta: true,
 	message_stop: true,
+	rate_limit_event: true,
 };
-
 const IGNORED_PROVIDER_EVENTS: Record<string, true> = {
 	assistant: true,
 	user: true,
+	rate_limit_event: true,
 };
 
 function errorMessage(error: unknown): string {
@@ -272,8 +273,9 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 			"stream-json",
 			"--include-partial-messages",
 			"--verbose",
-			"--session-id",
-			sessionId,
+			...(turn.sessionId
+				? ["--resume", turn.sessionId]
+				: ["--session-id", sessionId]),
 			"--append-system-prompt",
 			systemPrompt,
 			"--allowedTools",

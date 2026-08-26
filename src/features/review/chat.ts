@@ -98,11 +98,11 @@ export interface ChatTurnResult {
 
 /**
  * Explicit policy included in every chat prompt. The underlying tool runtime
- * does not sandbox read/grep/glob to a directory, so this is enforced by
+ * does not sandbox read/grep/glob/bash to a directory, so this is enforced by
  * instruction only: name the exact boundary and forbid wandering outside it.
  */
 export function readOnlyWorktreeContext(worktreePath: string): string {
-	return `The review worktree is read-only and pinned at the absolute path ${worktreePath}. Use only read, grep, glob, and list inspection tools, scoped to files inside that path. Never invoke write or edit tools and never modify files; if asked to change the worktree, refuse and explain that chat review is read-only. Do not read, grep, or glob anything outside the worktree for any reason, including this application's own configuration, session, or review-data directories, or any other project's files on this machine, even though the tools are not sandboxed and would technically allow it. If the worktree does not contain enough information to answer, say so explicitly instead of guessing or reporting an unrelated file path as the answer.`;
+	return `The review worktree is read-only and pinned at the absolute path ${worktreePath}. Use only read, grep, glob, and bash tools, scoped to files inside that path. Use bash only for read-only inspection commands. Never invoke write or edit tools, never run commands that modify files, and never modify files; if asked to change the worktree, refuse and explain that chat review is read-only. Do not read, grep, or glob anything outside the worktree for any reason, including this application's own configuration, session, or review-data directories, or any other project's files on this machine, even though the tools are not sandboxed and would technically allow it. If the worktree does not contain enough information to answer, say so explicitly instead of guessing or reporting an unrelated file path as the answer.`;
 }
 
 export type LineTag = ChatTag;

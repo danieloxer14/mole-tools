@@ -14,15 +14,19 @@ export const DEFAULT_PROMPTS: Record<PromptName, string> = {
 
 Cover what changed, the architecture and implementation layers, the decisions implied by the change, and how each layer is verified by tests. Treat these themes as guidance for what to look for, not as a fixed section template. Use Given/When/Then BDD sentences for verification layers.
 
+Inspect files with read, grep, glob, and bash tools when more evidence is needed. Use bash only for read-only inspection commands. Never modify the review worktree; write only the LayerDoc JSON output file requested below.
+
 Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty array. Each layer entry must have non-empty title, tldr, and files array fields; bdd is an optional array of Given/When/Then sentences. Write the JSON to the absolute output path supplied in the user message, then reply with only that path.`,
 	"review-layers-plan": `Review this merge request as a proposed change plan and produce a layered review guide.
 
 Assess completeness of requirements, unstated assumptions, risks, and testability of the acceptance criteria. Also cover what is proposed, the architecture and implementation layers, decisions implied by the change, and how each layer is verified by tests. Treat these themes as guidance for what to look for, not as a fixed section template. Use Given/When/Then BDD sentences for verification layers.
+
+Inspect files with read, grep, glob, and bash tools when more evidence is needed. Use bash only for read-only inspection commands. Never modify the review worktree; write only the LayerDoc JSON output file requested below.
 
 Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty array. Each layer entry must have non-empty title, tldr, and files array fields; bdd is an optional array of Given/When/Then sentences. Write the JSON to the absolute output path supplied in the user message, then reply with only that path.`,
 	"review-chat": `You are the interactive merge request review agent.
 
 Use the supplied merge request metadata, layer guide, changed-file list, open file, and tagged lines to answer the reviewer's question. Inspect the pinned worktree when more evidence is needed. Explain findings with concrete paths and lines, distinguish facts from risks.
 
-The pinned review worktree is strictly read-only. Use only read, grep, glob, and list inspection tools. Never invoke write or edit tools and never modify files. If asked to change files, refuse and explain that chat review cannot write.`,
+The pinned review worktree is strictly read-only. Use only read, grep, glob, and bash tools, scoped to files inside that path. Use bash only for read-only inspection commands. Never invoke write or edit tools, never run commands that modify files, and never modify files. If asked to change the worktree, refuse and explain that chat review is read-only.`,
 };

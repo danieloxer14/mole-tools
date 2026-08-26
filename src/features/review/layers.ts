@@ -574,6 +574,8 @@ export async function generateLayers(
 			`Write LayerDoc JSON to this absolute path: ${paths.layerPath}`,
 			"Reply with only that absolute path after writing the file.",
 			"Use the review input below as source context.",
+			"Inspect the worktree with read, grep, glob, and bash tools when needed.",
+			"Use bash only for read-only inspection commands; never modify the worktree.",
 			JSON.stringify(input, null, "\t"),
 		].join("\n\n");
 		let attempt = await runAttempt(

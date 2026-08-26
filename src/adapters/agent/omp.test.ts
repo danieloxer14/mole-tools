@@ -65,7 +65,7 @@ describe("OmpAgentAdapter", () => {
 					"--append-system-prompt",
 					turn.systemPromptFile,
 					"--tools",
-					"read,grep,glob",
+					"read,grep,glob,bash",
 					"--",
 					turn.message,
 				],
@@ -169,6 +169,25 @@ describe("OmpAgentAdapter", () => {
 			{ kind: "turn_end" },
 		]);
 	});
+	test("ignores rate-limit events instead of surfacing diagnostics", async () => {
+		const adapter = new OmpAgentAdapter(
+			replay(
+				[
+					'{"type":"session","id":"session-1"}',
+					'{"type":"rate_limit_event","status":"allowed","resetsAt":123}',
+					'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"still available"}}',
+					'{"type":"agent_end","messages":[],"isTerminal":true}',
+				],
+				[],
+			),
+		);
+
+		expect(await collect(adapter.run(turn))).toEqual([
+			{ kind: "session", sessionId: "session-1" },
+			{ kind: "text", delta: "still available" },
+			{ kind: "turn_end" },
+		]);
+	});
 
 	test("passes continuation and layer arguments while keeping worktree tools read-only", async () => {
 		const calls: Call[] = [];
@@ -199,7 +218,7 @@ describe("OmpAgentAdapter", () => {
 				"--append-system-prompt",
 				turn.systemPromptFile,
 				"--tools",
-				"read,grep,glob,write",
+				"read,grep,glob,bash,write",
 				"--model",
 				"review-model",
 				"-r",

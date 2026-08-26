@@ -113,8 +113,9 @@ agent: mole-tools forwards it as `omp --model <name>` or
 
 The selected model is used for both layer generation and chat. Omit
 `review.model` to retain the selected agent's configured default. Both agents
-are started with read-only inspection tools for chat; prompt edits cannot grant
-write access to code under review.
+are started with read-only inspection tools (`read`, `grep`, `glob`, `bash`) for
+chat; Bash is limited by prompt policy to read-only commands, and prompt edits
+cannot grant write access to code under review.
 
 #### Optional Sections
 
