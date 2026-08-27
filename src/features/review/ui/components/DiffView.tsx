@@ -12,6 +12,15 @@ import {
 } from "react";
 import { codeToHtml } from "shiki";
 import type { HostDiscussion } from "../../../../ports/git-host";
+import {
+	CONTEXT_CHUNK_SIZE,
+	type ContextGap,
+	diffContextGaps,
+	gapLineCount,
+	hiddenContextRange,
+	revealedContextLines,
+	splitSourceLines,
+} from "../../../../shared/diff-context";
 import type {
 	DiffHunk,
 	DiffLine,
@@ -53,6 +62,11 @@ interface DiffViewProps {
 	discussions?: readonly HostDiscussion[];
 	drafts?: readonly Draft[];
 	onModeChange: (mode: DiffMode) => void;
+	wholeFile?: boolean;
+	onWholeFileChange?: (
+		wholeFile: boolean,
+		sourceLineCount: number | null,
+	) => void;
 	onViewModeChange?: (mode: FileViewMode) => void;
 	onExpandDiff?: (file: ParsedFileDiff) => Promise<ParsedFileDiff | null>;
 	onLineSelection?: (selection: DiffLineSelection) => void;
@@ -586,18 +600,6 @@ function lineClass(line: DiffLine, selected = false): string {
 	return `diff-line diff-line-${line.kind}${selected ? " line-selected" : ""}`;
 }
 
-interface ContextLine {
-	line: number;
-	text: string;
-}
-
-interface ContextRange {
-	startLine: number;
-	endLine: number;
-	lines: ContextLine[] | null;
-	side: "new" | "old";
-}
-
 type LineSelectionEvent = {
 	shiftKey: boolean;
 };
@@ -728,51 +730,97 @@ function DiffLineRow({
 }
 
 function ContextRows({
-	range,
+	gap,
+	revealedCount,
+	sourceLines,
+	wholeFile,
 	mode,
 	language,
+	path,
+	hunk,
+	onReveal,
+	onRevealAll,
+	onHide,
+	onTag,
 }: {
-	range: ContextRange;
+	gap: ContextGap;
+	revealedCount: number;
+	sourceLines: readonly string[] | null;
 	mode: DiffMode;
+	wholeFile: boolean;
 	language: string;
+	path: string;
+	hunk: string;
+	onReveal: () => void;
+	onRevealAll: () => void;
+	onHide: () => void;
+	onTag?: (selection: DiffLineSelection) => void;
 }) {
-	const [expanded, setExpanded] = useState(false);
-	const lines = range.lines ?? [];
-	return (
-		<>
+	const lines = revealedContextLines(gap, sourceLines, revealedCount);
+	const hidden = hiddenContextRange(gap, revealedCount);
+	const fullyRevealed = hidden === null;
+	const controls =
+		wholeFile || (hidden === null && gap.position !== "between") ? null : (
 			<tr className="expand-context-row">
 				<td colSpan={mode === "side-by-side" ? 4 : 3}>
-					<button type="button" onClick={() => setExpanded((value) => !value)}>
-						{expanded
-							? `Hide lines ${range.startLine}-${range.endLine}`
-							: `Expand lines ${range.startLine}-${range.endLine}`}
-					</button>
+					{fullyRevealed ? (
+						<button type="button" onClick={onHide}>
+							Hide lines {gap.newStart}-{gap.newEnd}
+						</button>
+					) : (
+						<>
+							<button type="button" onClick={onReveal}>
+								Expand lines {hidden.startLine}-{hidden.endLine}
+							</button>
+							{gap.position !== "between" ? (
+								<button type="button" onClick={onRevealAll}>
+									Expand all
+								</button>
+							) : null}
+						</>
+					)}
 				</td>
 			</tr>
-			{expanded ? (
-				lines.length > 0 ? (
-					lines.map(({ line, text }) => (
-						<DiffLineRow
-							key={`${range.side}-${line}-${text}`}
-							line={{
-								kind: "context",
-								oldLine: range.side === "old" ? line : null,
-								newLine: range.side === "new" ? line : null,
-								text,
-							}}
-							mode={mode}
-							language={language}
-						/>
-					))
-				) : (
-					<tr className="inter-hunk-context">
-						<td colSpan={mode === "side-by-side" ? 4 : 3}>
-							Context source unavailable for lines {range.startLine}-
-							{range.endLine}.
-						</td>
-					</tr>
-				)
-			) : null}
+		);
+	const content =
+		revealedCount === 0 ? null : lines === null ? (
+			<tr className="inter-hunk-context">
+				<td colSpan={mode === "side-by-side" ? 4 : 3}>
+					Context source unavailable for lines {gap.newStart}-{gap.newEnd}.
+				</td>
+			</tr>
+		) : (
+			lines.map((line) => (
+				<DiffLineRow
+					key={`${gap.id}-${line.newLine}-${line.text}`}
+					line={{ kind: "context", ...line }}
+					mode={mode}
+					language={language}
+					commentSide="new"
+					onTag={
+						onTag
+							? () =>
+									onTag({
+										path,
+										side: "new",
+										startLine: line.newLine,
+										endLine: line.newLine,
+										hunk,
+									})
+							: undefined
+					}
+				/>
+			))
+		);
+	return gap.position === "tail" ? (
+		<>
+			{content}
+			{controls}
+		</>
+	) : (
+		<>
+			{controls}
+			{content}
 		</>
 	);
 }
@@ -784,7 +832,6 @@ interface LineSelectionAnchor extends SelectableLine {
 function HunkRows({
 	file,
 	hunk,
-	contextAfter,
 	mode,
 	language,
 	path,
@@ -800,7 +847,6 @@ function HunkRows({
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
-	contextAfter: ContextRange | null;
 	mode: DiffMode;
 	language: string;
 	path: string;
@@ -942,9 +988,6 @@ function HunkRows({
 					</td>
 				</tr>
 			) : null}
-			{contextAfter ? (
-				<ContextRows range={contextAfter} mode={mode} language={language} />
-			) : null}
 		</>
 	);
 }
@@ -953,6 +996,7 @@ function DiffTable({
 	file,
 	mode,
 	fileContents,
+	wholeFile,
 	discussions,
 	drafts,
 	commentDraftProps,
@@ -962,6 +1006,7 @@ function DiffTable({
 	file: ParsedFileDiff;
 	mode: DiffMode;
 	fileContents: string | null;
+	wholeFile: boolean;
 	discussions: readonly HostDiscussion[];
 	drafts: readonly Draft[];
 	commentDraftProps: Pick<
@@ -974,11 +1019,33 @@ function DiffTable({
 	const path = file.newPath ?? file.oldPath ?? "";
 	const language = path.split(".").pop() ?? "text";
 	const defaultSide = file.status === "deleted" ? "old" : "new";
-	const sourceLines = fileContents?.split(/\r?\n/) ?? null;
+	const sourceLines = useMemo(
+		() => (fileContents === null ? null : splitSourceLines(fileContents)),
+		[fileContents],
+	);
+	const gaps = useMemo(
+		() => diffContextGaps(file.hunks, sourceLines?.length ?? null),
+		[file.hunks, sourceLines],
+	);
 	const [anchor, setAnchor] = useState<LineSelectionAnchor | null>(null);
 	const [rangeSelection, setRangeSelection] =
 		useState<DiffLineSelection | null>(null);
+	const [revealedCounts, setRevealedCounts] = useState<Record<string, number>>(
+		{},
+	);
+	const wasWholeFile = useRef(wholeFile);
 	const visibleDrafts = drafts.filter((draft) => draft.status !== "posted");
+
+	useEffect(() => {
+		if (wholeFile) {
+			setRevealedCounts(
+				Object.fromEntries(gaps.map((gap) => [gap.id, gapLineCount(gap)])),
+			);
+		} else if (wasWholeFile.current) {
+			setRevealedCounts({});
+		}
+		wasWholeFile.current = wholeFile;
+	}, [wholeFile, gaps]);
 
 	const selectLine = (
 		line: DiffLine,
@@ -1008,62 +1075,89 @@ function DiffTable({
 		setAnchor({ ...point, hunk: hunkHeader });
 	};
 
-	const tagHunk = onLineSelection
+	const tagLine = onLineSelection
 		? (selection: DiffLineSelection) => {
 				onLineSelection(selection);
 				setAnchor(null);
 				setRangeSelection(null);
 			}
 		: undefined;
+	const updateRevealedCount = (gap: ContextGap, count: number) => {
+		const nextCount = Math.min(Math.max(count, 0), gapLineCount(gap));
+		setRevealedCounts((current) =>
+			current[gap.id] === nextCount
+				? current
+				: { ...current, [gap.id]: nextCount },
+		);
+	};
+	const renderContext = (gap: ContextGap, hunk: string) => (
+		<ContextRows
+			key={gap.id}
+			gap={gap}
+			revealedCount={revealedCounts[gap.id] ?? 0}
+			sourceLines={sourceLines}
+			wholeFile={wholeFile}
+			mode={mode}
+			language={language}
+			path={path}
+			hunk={hunk}
+			onReveal={() => {
+				const currentCount = revealedCounts[gap.id] ?? 0;
+				updateRevealedCount(
+					gap,
+					gap.position === "between"
+						? gapLineCount(gap)
+						: currentCount + CONTEXT_CHUNK_SIZE,
+				);
+			}}
+			onRevealAll={() => updateRevealedCount(gap, gapLineCount(gap))}
+			onHide={() => updateRevealedCount(gap, 0)}
+			onTag={tagLine}
+		/>
+	);
+	const head = gaps.find((gap) => gap.position === "head");
+	const tail = gaps.find((gap) => gap.position === "tail");
 
 	return (
 		<table className={`diff-table ${mode}`}>
 			<tbody>
 				{file.hunks.map((hunk, index) => {
-					const next = file.hunks[index + 1];
-					const currentStart =
-						defaultSide === "old" ? hunk.oldStart : hunk.newStart;
-					const currentLength =
-						defaultSide === "old" ? hunk.oldLines : hunk.newLines;
-					const nextStart =
-						defaultSide === "old" ? next?.oldStart : next?.newStart;
-					const contextStart = currentStart + currentLength;
-					const contextAfter =
-						next && nextStart !== undefined && nextStart > contextStart
-							? {
-									startLine: contextStart,
-									endLine: nextStart - 1,
-									lines:
-										sourceLines
-											?.slice(contextStart - 1, nextStart - 1)
-											.map((text, offset) => ({
-												line: contextStart + offset,
-												text,
-											})) ?? null,
-									side: defaultSide,
-								}
-							: null;
+					const precedingGap =
+						index === 0
+							? head
+							: gaps.find((gap) => gap.id === `between-${index - 1}-${index}`);
+					const anchorHunk =
+						index === 0
+							? hunk.header
+							: (file.hunks[index - 1]?.header ?? hunk.header);
 					return (
-						<HunkRows
-							key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}
-							file={file}
-							hunk={hunk}
-							contextAfter={contextAfter}
-							mode={mode}
-							language={language}
-							path={path}
-							defaultSide={defaultSide}
-							anchor={anchor}
-							rangeSelection={rangeSelection}
-							discussions={discussions}
-							drafts={visibleDrafts}
-							commentDraftProps={commentDraftProps}
-							onLineClick={onLineSelection ? selectLine : undefined}
-							onTagHunk={tagHunk}
-							onCommentSelection={onCommentSelection}
-						/>
+						<Fragment key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}>
+							{precedingGap ? renderContext(precedingGap, anchorHunk) : null}
+							<HunkRows
+								file={file}
+								hunk={hunk}
+								mode={mode}
+								language={language}
+								path={path}
+								defaultSide={defaultSide}
+								anchor={anchor}
+								rangeSelection={rangeSelection}
+								discussions={discussions}
+								drafts={visibleDrafts}
+								commentDraftProps={commentDraftProps}
+								onLineClick={onLineSelection ? selectLine : undefined}
+								onTagHunk={tagLine}
+								onCommentSelection={onCommentSelection}
+							/>
+						</Fragment>
 					);
 				})}
+				{tail && file.hunks.length > 0
+					? renderContext(
+							tail,
+							file.hunks[file.hunks.length - 1]?.header ?? "tail",
+						)
+					: null}
 			</tbody>
 		</table>
 	);
@@ -1079,6 +1173,8 @@ export function DiffView({
 	discussions = [],
 	drafts = [],
 	onModeChange,
+	wholeFile = false,
+	onWholeFileChange,
 	onViewModeChange,
 	onExpandDiff,
 	onLineSelection,
@@ -1112,6 +1208,38 @@ export function DiffView({
 	const collapsed = !file.binary && (noPatch || overThreshold);
 	const displayFile = expandedFile ?? file;
 	const binary = displayFile.binary;
+	const wholeFileEligible =
+		file.status === "modified" && !binary && !noPatch && !showingRendered;
+	const sourceLineCount =
+		fileContents === null ? null : splitSourceLines(fileContents).length;
+	const changeWholeFile = (next: boolean) => {
+		if (!next) {
+			const headers = Array.from(
+				document.querySelectorAll<HTMLElement>(".diff-panel .hunk-header"),
+			);
+			const anchor = headers.reduce<HTMLElement | null>((nearest, header) => {
+				if (
+					nearest === null ||
+					Math.abs(header.getBoundingClientRect().top) <
+						Math.abs(nearest.getBoundingClientRect().top)
+				) {
+					return header;
+				}
+				return nearest;
+			}, null);
+			onWholeFileChange?.(false, sourceLineCount);
+			if (anchor) {
+				requestAnimationFrame(() =>
+					requestAnimationFrame(() =>
+						anchor.scrollIntoView({ block: "nearest" }),
+					),
+				);
+			}
+			return;
+		}
+		if (collapsed) setExpanded(true);
+		onWholeFileChange?.(true, sourceLineCount);
+	};
 	const requestExpansion = () => {
 		setExpanded(true);
 		if (!noPatch || !onExpandDiff || expanding) return;
@@ -1184,6 +1312,26 @@ export function DiffView({
 							</button>
 						</>
 					) : null}
+					{wholeFileEligible ? (
+						<>
+							<button
+								aria-pressed={wholeFile}
+								className={wholeFile ? "active" : ""}
+								type="button"
+								onClick={() => changeWholeFile(true)}
+							>
+								Whole file
+							</button>
+							<button
+								aria-pressed={!wholeFile}
+								className={!wholeFile ? "active" : ""}
+								type="button"
+								onClick={() => changeWholeFile(false)}
+							>
+								Diff only
+							</button>
+						</>
+					) : null}
 				</div>
 			</header>
 			{binary ? (
@@ -1234,6 +1382,7 @@ export function DiffView({
 						<DiffTable
 							file={displayFile}
 							mode={mode}
+							wholeFile={wholeFile}
 							fileContents={fileContents}
 							discussions={discussions}
 							drafts={drafts}

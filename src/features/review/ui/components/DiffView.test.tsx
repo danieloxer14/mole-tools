@@ -42,4 +42,6 @@ test("renders distinct tag and comment actions for a diff line", () => {
 
 	expect(markup).toContain("Tag line");
 	expect(markup).toContain("Comment");
+	expect(markup).toContain("Whole file");
+	expect(markup).toContain("Diff only");
 });
