@@ -17,6 +17,27 @@ describe("merge-request args schema", () => {
 	test("rejects whitespace-only context with Zod error", () => {
 		expect(() => mergeRequest.args.parse({ context: " \n\t " })).toThrow();
 	});
+
+	test("defaults mode to code and accepts explicit code or plan", () => {
+		expect(mergeRequest.args.parse({}).mode).toBe("code");
+		expect(mergeRequest.args.parse({ mode: "code" }).mode).toBe("code");
+		expect(mergeRequest.args.parse({ mode: "plan" }).mode).toBe("plan");
+	});
+
+	test("rejects invalid description modes with valid values", () => {
+		for (const mode of ["planx", "CODE", ""]) {
+			expect(() => mergeRequest.args.parse({ mode })).toThrow(
+				"--mode must be one of: code | plan",
+			);
+		}
+	});
+
+	test("documents the mode flag and default", () => {
+		expect(mergeRequest.help?.usage).toContain("--mode <code|plan>");
+		expect(mergeRequest.help?.notes).toContain(
+			"Use --mode code (default) for code changes or --mode plan for implementation plans.",
+		);
+	});
 });
 
 describe("merge-request flow", () => {

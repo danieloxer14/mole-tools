@@ -170,6 +170,8 @@ Prompt files live beside `config.json`:
 ├── config.json
 └── prompts/
     ├── commit-system.md
+    ├── mr-code.md
+    ├── mr-plan.md
     ├── mr-system.md
     ├── review-layers-code.md
     ├── review-layers-plan.md
@@ -178,14 +180,18 @@ Prompt files live beside `config.json`:
 
 Each prompt is loaded in full. On first use of a missing prompt slot,
 `mole-tools` writes its built-in default to that path without overwriting
-existing content. You may instead create these files before first use. Edit a
-file, then start a new command or review-agent turn; no `config.json` change
-is needed.
+existing content. Code-mode merge requests use `mr-code.md`, then retain
+`mr-system.md` as a legacy fallback; when neither exists, `mr-code.md` is
+seeded. Plan-mode merge requests use and seed only `mr-plan.md`. You may instead
+create these files before first use. Edit a file, then start a new command or
+review-agent turn; no `config.json` change is needed.
 
 | File | Used by | Customise for |
 |---|---|---|
 | `commit-system.md` | `commit` | Commit-message tone and repository conventions. |
-| `mr-system.md` | `merge-request` | MR title/description format and repository conventions. |
+| `mr-code.md` | `merge-request` default `--mode code` | Code-change MR title/description format and repository conventions. |
+| `mr-plan.md` | `merge-request --mode plan` | Implementation-plan purpose, scope, and decisions. |
+| `mr-system.md` | `merge-request` code-mode legacy fallback | Existing code-change prompt customizations. |
 | `review-layers-code.md` | `review` default `--mode code` | Review-layer coverage, priorities, and code-review focus. |
 | `review-layers-plan.md` | `review --mode plan` | Requirements, risks, assumptions, and acceptance-criteria review. |
 | `review-chat.md` | Review UI chat | Chat-review behavior and response format. |
@@ -237,17 +243,19 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 Creates a merge-request candidate from the current branch, commits any staged changes first (reusing `commit` under the hood), then pushes and opens the MR in GitLab.
 
 ```bash
-mole-tools merge-request                              # interactive flow
+mole-tools merge-request                              # code-description flow (default)
+mole-tools merge-request --mode plan                  # implementation-plan description
 mole-tools merge-request --context "migration risk"   # extra inline guidance
 ```
 
 | Option | Description |
 |---|---|
+| `--mode <code|plan>` | Description prompt mode. Defaults to `code`; `plan` frames an implementation plan by purpose, scope, and decisions. |
 | `--context <text>` | Extra guidance for both the commit-phase and MR-description generation. |
 
 **How it works.** Preflight GitLab connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
 
-**Configuration.** Uses the `mergeRequest` model route. Customise the system prompt via `~/.config/mole-tools/prompts/mr-system.md`. Requires a GitLab host to be reachable (configured through the `pi` provider or environment).
+**Configuration.** Uses the `mergeRequest` model route. Customise code descriptions via `~/.config/mole-tools/prompts/mr-code.md`, with `mr-system.md` retained as its legacy fallback. Customise implementation-plan descriptions via `~/.config/mole-tools/prompts/mr-plan.md`. Requires a GitLab host to be reachable (configured through the `pi` provider or environment).
 
 ---
 

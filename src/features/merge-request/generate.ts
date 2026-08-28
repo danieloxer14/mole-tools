@@ -1,5 +1,8 @@
 import { resolveLlmProvider } from "../../adapters/config/schema";
-import { loadPrompt } from "../../adapters/prompts/loader";
+import {
+	loadPrompt,
+	loadPromptWithFallback,
+} from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { AbortError } from "../../core/errors";
 import type { Issue } from "../../ports/issue-tracker";
@@ -13,11 +16,24 @@ import {
 
 const MAX_GENERATE_ATTEMPTS = 3;
 
+export type MergeRequestMode = "code" | "plan";
+
+export async function loadMergeRequestPrompt(
+	mode: MergeRequestMode = "code",
+	dir?: string,
+): Promise<string> {
+	if (mode === "plan") return loadPrompt("mr-plan", dir);
+	return loadPromptWithFallback(["mr-code", "mr-system"], dir);
+}
+
 export interface GenerateMergeRequestInput {
 	issue?: Issue | null;
 	commits: string[];
 	diff: FileDiff[];
 	context?: string;
+	mode?: MergeRequestMode;
+	/** Optional prompt directory for isolated generation tests. */
+	promptSourceDir?: string;
 }
 
 /** Generate an MR candidate, retrying only when the title violates format rules. */
@@ -25,7 +41,10 @@ export async function generateMergeRequest(
 	ctx: Context,
 	input: GenerateMergeRequestInput,
 ): Promise<ParsedMergeRequest> {
-	const system = await loadPrompt("mr-system");
+	const system = await loadMergeRequestPrompt(
+		input.mode,
+		input.promptSourceDir,
+	);
 	const prompt = buildMergeRequestPrompt({ ...input, system });
 	const llm = ctx.getLlmFor("mergeRequest");
 	const { providerKey, model } = resolveLlmProvider(ctx.config, "mergeRequest");
