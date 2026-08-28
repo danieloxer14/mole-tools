@@ -602,6 +602,38 @@ button.active {
 	font-size: 0.72rem;
 	padding: 5px 8px;
 }
+
+.find-bar {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+.find-input {
+	background: #0e1b2a;
+	border: 1px solid #2a4258;
+	border-radius: 5px;
+	color: #e6edf3;
+	font-size: 0.8rem;
+	min-width: 220px;
+	padding: 5px 9px;
+}
+.find-input:focus {
+	border-color: #4a9eff;
+	outline: none;
+}
+.find-count {
+	color: #9eafc1;
+	font-size: 0.72rem;
+	white-space: nowrap;
+}
+.diff-table .find-match {
+	background: rgba(255, 210, 0, 0.16);
+}
+.diff-table .find-match-current {
+	background: rgba(255, 180, 0, 0.34);
+	outline: 1px solid #ffb400;
+}
 .diff-table {
 	border-collapse: collapse;
 	font-family: "SFMono-Regular", Consolas, monospace;

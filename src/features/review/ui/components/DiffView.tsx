@@ -5,6 +5,7 @@ import {
 	Fragment,
 	type KeyboardEvent,
 	type MouseEvent,
+	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
@@ -24,6 +25,15 @@ import {
 } from "../../../../shared/markdown";
 import { type Draft, isMarkdownSelection } from "../../state";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
+import {
+	contextLineId,
+	contextRanges,
+	diffLineId,
+	type FindRender,
+	findMatches,
+	lineTextMatches,
+	stepMatchIndex,
+} from "./find";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
 
@@ -646,6 +656,8 @@ function DiffLineRow({
 	line,
 	mode,
 	language,
+	find,
+	findId,
 	onSelect,
 	onTag,
 	onComment,
@@ -655,12 +667,25 @@ function DiffLineRow({
 	line: DiffLine;
 	mode: DiffMode;
 	language: string;
+	find: FindRender;
+	findId: string;
 	onSelect?: (event: LineSelectionEvent) => void;
 	onTag?: () => void;
 	onComment?: () => void;
 	commentSide?: "new" | "old";
 	selected?: boolean;
 }) {
+	const isMatch = lineTextMatches(line.text, find.query);
+	const isCurrent = find.currentId === findId;
+	const className = [
+		lineClass(line, selected),
+		isMatch ? "find-match" : "",
+		isCurrent ? "find-match-current" : "",
+	].join(" ");
+	const setRef = useCallback(
+		(el: HTMLTableRowElement | null) => find.registerRow(findId, el),
+		[find.registerRow, findId],
+	);
 	const selectableProps = onSelect
 		? {
 				"aria-label": "Select diff line",
@@ -675,11 +700,16 @@ function DiffLineRow({
 				tabIndex: 0,
 			}
 		: {};
+	const trProps = {
+		...selectableProps,
+		"data-find-line": findId,
+	};
 	return mode === "inline" ? (
 		<tr
-			className={lineClass(line, selected)}
+			ref={setRef}
+			className={className}
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
-			{...selectableProps}
+			{...trProps}
 		>
 			<td className="line-number">{line.oldLine ?? ""}</td>
 			<td className="line-number">{line.newLine ?? ""}</td>
@@ -693,9 +723,10 @@ function DiffLineRow({
 		</tr>
 	) : (
 		<tr
-			className={lineClass(line, selected)}
+			ref={setRef}
+			className={className}
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
-			{...selectableProps}
+			{...trProps}
 		>
 			<td className="line-number">{line.oldLine ?? ""}</td>
 			<td className={`side-line ${line.kind === "del" ? "removed" : ""}`}>
@@ -731,25 +762,33 @@ function ContextRows({
 	range,
 	mode,
 	language,
+	find,
 }: {
 	range: ContextRange;
 	mode: DiffMode;
 	language: string;
+	find: FindRender;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const lines = range.lines ?? [];
+	const isExpanded = find.forceContext || expanded;
 	return (
 		<>
-			<tr className="expand-context-row">
-				<td colSpan={mode === "side-by-side" ? 4 : 3}>
-					<button type="button" onClick={() => setExpanded((value) => !value)}>
-						{expanded
-							? `Hide lines ${range.startLine}-${range.endLine}`
-							: `Expand lines ${range.startLine}-${range.endLine}`}
-					</button>
-				</td>
-			</tr>
-			{expanded ? (
+			{find.forceContext ? null : (
+				<tr className="expand-context-row">
+					<td colSpan={mode === "side-by-side" ? 4 : 3}>
+						<button
+							type="button"
+							onClick={() => setExpanded((value) => !value)}
+						>
+							{expanded
+								? `Hide lines ${range.startLine}-${range.endLine}`
+								: `Expand lines ${range.startLine}-${range.endLine}`}
+						</button>
+					</td>
+				</tr>
+			)}
+			{isExpanded ? (
 				lines.length > 0 ? (
 					lines.map(({ line, text }) => (
 						<DiffLineRow
@@ -762,6 +801,8 @@ function ContextRows({
 							}}
 							mode={mode}
 							language={language}
+							find={find}
+							findId={contextLineId(range.side, line)}
 						/>
 					))
 				) : (
@@ -787,6 +828,7 @@ function HunkRows({
 	contextAfter,
 	mode,
 	language,
+	find,
 	path,
 	defaultSide,
 	anchor,
@@ -803,6 +845,7 @@ function HunkRows({
 	contextAfter: ContextRange | null;
 	mode: DiffMode;
 	language: string;
+	find: FindRender;
 	path: string;
 	defaultSide: "new" | "old";
 	anchor: LineSelectionAnchor | null;
@@ -895,6 +938,8 @@ function HunkRows({
 							line={line}
 							mode={mode}
 							language={language}
+							find={find}
+							findId={diffLineId(hunk.header, line)}
 							selected={selected}
 							commentSide={lineSelection?.side}
 							onTag={
@@ -943,7 +988,12 @@ function HunkRows({
 				</tr>
 			) : null}
 			{contextAfter ? (
-				<ContextRows range={contextAfter} mode={mode} language={language} />
+				<ContextRows
+					range={contextAfter}
+					mode={mode}
+					language={language}
+					find={find}
+				/>
 			) : null}
 		</>
 	);
@@ -953,6 +1003,7 @@ function DiffTable({
 	file,
 	mode,
 	fileContents,
+	find,
 	discussions,
 	drafts,
 	commentDraftProps,
@@ -962,6 +1013,7 @@ function DiffTable({
 	file: ParsedFileDiff;
 	mode: DiffMode;
 	fileContents: string | null;
+	find: FindRender;
 	discussions: readonly HostDiscussion[];
 	drafts: readonly Draft[];
 	commentDraftProps: Pick<
@@ -974,7 +1026,7 @@ function DiffTable({
 	const path = file.newPath ?? file.oldPath ?? "";
 	const language = path.split(".").pop() ?? "text";
 	const defaultSide = file.status === "deleted" ? "old" : "new";
-	const sourceLines = fileContents?.split(/\r?\n/) ?? null;
+	const ranges = contextRanges(file, fileContents, defaultSide);
 	const [anchor, setAnchor] = useState<LineSelectionAnchor | null>(null);
 	const [rangeSelection, setRangeSelection] =
 		useState<DiffLineSelection | null>(null);
@@ -1019,51 +1071,27 @@ function DiffTable({
 	return (
 		<table className={`diff-table ${mode}`}>
 			<tbody>
-				{file.hunks.map((hunk, index) => {
-					const next = file.hunks[index + 1];
-					const currentStart =
-						defaultSide === "old" ? hunk.oldStart : hunk.newStart;
-					const currentLength =
-						defaultSide === "old" ? hunk.oldLines : hunk.newLines;
-					const nextStart =
-						defaultSide === "old" ? next?.oldStart : next?.newStart;
-					const contextStart = currentStart + currentLength;
-					const contextAfter =
-						next && nextStart !== undefined && nextStart > contextStart
-							? {
-									startLine: contextStart,
-									endLine: nextStart - 1,
-									lines:
-										sourceLines
-											?.slice(contextStart - 1, nextStart - 1)
-											.map((text, offset) => ({
-												line: contextStart + offset,
-												text,
-											})) ?? null,
-									side: defaultSide,
-								}
-							: null;
-					return (
-						<HunkRows
-							key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}
-							file={file}
-							hunk={hunk}
-							contextAfter={contextAfter}
-							mode={mode}
-							language={language}
-							path={path}
-							defaultSide={defaultSide}
-							anchor={anchor}
-							rangeSelection={rangeSelection}
-							discussions={discussions}
-							drafts={visibleDrafts}
-							commentDraftProps={commentDraftProps}
-							onLineClick={onLineSelection ? selectLine : undefined}
-							onTagHunk={tagHunk}
-							onCommentSelection={onCommentSelection}
-						/>
-					);
-				})}
+				{file.hunks.map((hunk, index) => (
+					<HunkRows
+						key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}
+						file={file}
+						hunk={hunk}
+						contextAfter={ranges[index] ?? null}
+						mode={mode}
+						language={language}
+						path={path}
+						defaultSide={defaultSide}
+						anchor={anchor}
+						rangeSelection={rangeSelection}
+						discussions={discussions}
+						drafts={visibleDrafts}
+						commentDraftProps={commentDraftProps}
+						onLineClick={onLineSelection ? selectLine : undefined}
+						onTagHunk={tagHunk}
+						onCommentSelection={onCommentSelection}
+						find={find}
+					/>
+				))}
 			</tbody>
 		</table>
 	);
@@ -1094,6 +1122,48 @@ export function DiffView({
 	const [expandedFile, setExpandedFile] = useState<ParsedFileDiff | null>(null);
 	const [expanding, setExpanding] = useState(false);
 	const [expansionError, setExpansionError] = useState<string | null>(null);
+	const [findQuery, setFindQuery] = useState("");
+	const [findIndex, setFindIndex] = useState(0);
+	const findRowsRef = useRef<Map<string, HTMLElement>>(new Map());
+	const findInputRef = useRef<HTMLInputElement | null>(null);
+
+	// Find-in-file: computed top-level and null-safe so the scroll effect
+	// obeys the rules of hooks. The early return below guards the render
+	// paths that consume `find`; with no file, matches stay empty.
+	const findActive = findQuery.length > 0;
+	const findDisplayFile = expandedFile ?? file;
+	const matches =
+		findActive && findDisplayFile
+			? findMatches(findDisplayFile, fileContents, findQuery, findActive)
+			: [];
+	const currentId = matches[findIndex]?.id ?? null;
+	const registerRow = useCallback((id: string, el: HTMLElement | null) => {
+		const rows = findRowsRef.current;
+		if (el) rows.set(id, el);
+		else rows.delete(id);
+	}, []);
+	useEffect(() => {
+		if (!findActive || !currentId) return;
+		const row = findRowsRef.current.get(currentId);
+		row?.scrollIntoView({ block: "center", behavior: "smooth" });
+	}, [findActive, currentId]);
+	const find: FindRender = {
+		query: findQuery,
+		currentId,
+		registerRow,
+		forceContext: findActive,
+	};
+	useEffect(() => {
+		const handler = (event: KeyboardEvent) => {
+			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+				event.preventDefault();
+				findInputRef.current?.focus();
+				findInputRef.current?.select();
+			}
+		};
+		document.addEventListener("keydown", handler);
+		return () => document.removeEventListener("keydown", handler);
+	}, []);
 
 	if (!file) {
 		return (
@@ -1186,6 +1256,48 @@ export function DiffView({
 					) : null}
 				</div>
 			</header>
+			{!binary && !showingRendered ? (
+				<div className="find-bar">
+					<input
+						ref={findInputRef}
+						type="text"
+						className="find-input"
+						placeholder="Find in file..."
+						value={findQuery}
+						onChange={(event) => {
+							const value = event.target.value;
+							setFindQuery(value);
+							setFindIndex(0);
+							if (value.length > 0 && collapsed && !expanded) {
+								requestExpansion();
+							}
+						}}
+						onKeyDown={(event) => {
+							if (event.key === "Enter") {
+								event.preventDefault();
+								setFindIndex((current) =>
+									stepMatchIndex(
+										current,
+										matches.length,
+										event.shiftKey ? -1 : 1,
+									),
+								);
+							} else if (event.key === "Escape") {
+								event.preventDefault();
+								setFindQuery("");
+								setFindIndex(0);
+								event.currentTarget.blur();
+							}
+						}}
+						aria-label="Find in file"
+					/>
+					<span className="find-count" aria-live="polite">
+						{findActive
+							? `${Math.min(findIndex + 1, matches.length)}/${matches.length}`
+							: "0/0"}
+					</span>
+				</div>
+			) : null}
 			{binary ? (
 				<p className="stat-line">
 					Binary file; {file.insertions} additions, {file.deletions} deletions.
@@ -1240,6 +1352,7 @@ export function DiffView({
 							commentDraftProps={commentDraftProps}
 							onLineSelection={onLineSelection}
 							onCommentSelection={onCommentSelection}
+							find={find}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (
