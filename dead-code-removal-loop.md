@@ -91,7 +91,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/review-unused-diff-helper.md` — Needs investigation — 2026-08-28 — no code changed; focused route/server tests 34/0 and DiffView test 1/0 had no test failures but exited on enforced 90% coverage (61.97%/68.36% and 6.44%/25.95%); full suite 441/0 exited on 84.91%/88.27% coverage; build and lint passed; exact missing evidence recorded in ticket.
   - Remove `isLargeDiff` and `countLines` from review routes; preserve independent UI collapse and `/api/state` threshold contract.
   - Run routes/server and `DiffView` coverage.
-- [ ] `dead-code/root-cli-scaffold.md`
+- [ ] `dead-code/root-cli-scaffold.md` — Needs investigation — 2026-08-28 — no code changed; baseline blocked by enforced 90% coverage gate (84.91% funcs / 88.27% lines), recorded in ticket.
   - Delete root `index.ts` Bun greeting scaffold. Preserve fake diff-data strings that happen to contain its path.
   - Smoke-test supported CLI `help` and `--version`; prove module/dev/build/release/install paths use `src/index.tsx`.
 - [ ] `dead-code/shared-line-code-export.md`
