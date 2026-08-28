@@ -49,7 +49,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/logger-spec-implementation-drift.md` — 2026-08-28 — committed 9dd5863 — reconciled logger spec and ticket statuses with live logger foundation; preserved focused-test and instrumentation gaps; no runtime changes.
   - Bring logger spec and three ticket statuses current with live logger foundation and instrumentation boundary.
   - Do not add instrumentation or a logger test merely for status drift; preserve existing `logger.warn` behavior.
-- [ ] `dead-code/redundant-coverage-script.md`
+- [x] `dead-code/redundant-coverage-script.md` — 2026-08-28 — committed 52b7f11 — removed redundant `test:cov`; README now documents canonical coverage-enabled `bun test`; coverage behavior unchanged.
   - Remove `test:cov` only after confirming `bunfig.toml` still makes `bun test` collect coverage identically.
   - Coordinate decision with `ineffective-coverage-threshold-config`; search tracked/docs and release paths for script consumers; assess untracked alias risk explicitly.
 - [ ] `dead-code/review-comment-session-doc-drift.md`
