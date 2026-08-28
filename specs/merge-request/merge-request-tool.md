@@ -1,9 +1,11 @@
 # mole-tools — Merge-Request Tool Spec
 
-**Status:** Ideation / product-grilled. No implementation yet.
+**Status:** Historical product proposal (2026-07-08); superseded by shipped implementation. Retained for design history.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
 **Companions:** [commit-tool.md](../commit/commit-tool.md), [architecture/architecture.md](../architecture/architecture.md)
+
+> **Current implementation note:** Shipped configuration uses `providers.*` for connection profiles, `models.commit` and `models.mergeRequest` routes with `{ provider, name }`, and prompt overrides as files under `~/.config/mole-tools/prompts/`. This proposal's later sections are archival and are not the runtime contract.
 
 The **merge-request** tool. Second tool in `mole-tools`. Builds on the shared
 foundation (install, config, Ollama, Jira) specced in

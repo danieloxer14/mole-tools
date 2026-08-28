@@ -1,8 +1,11 @@
 # ADR 0004: Explicit model routing with strict provider validation
 
-- **Status:** Accepted
+- **Status:** Superseded — historical decision. The shipped loader retains tested legacy normalization for supported upgrades; live contract is defined by source.
 - **Date:** 2026-07-14
 - **Supersedes:** Legacy string-key model routing and model-name prefix overrides
+
+
+> **Current implementation note:** New configurations use `providers.*` plus `models.commit` and `models.mergeRequest` routes with `{ provider, name }`. Prompt overrides are file-backed under `~/.config/mole-tools/prompts/`. The decision text below records the earlier strict-break proposal and is archival.
 
 ## Context
 

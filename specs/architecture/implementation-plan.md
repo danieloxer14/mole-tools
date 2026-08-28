@@ -103,9 +103,9 @@ Data in, data out. Colocated `*.test.ts`, no ports, no I/O.
 
 ## Phase 3 — Config adapter + `init`
 
-- `adapters/config/schema.ts` — zod schema mirroring [../commit/commit-tool.md](../commit/commit-tool.md)
-  §3 table + `Config` type. MR-only keys (`ollama.mrModel`, `mrSystemPrompt`,
-  `dynamicEnvRepos`, `autoReviewer`) present but optional.
+- `adapters/config/schema.ts` — live `ConfigSchema` uses `providers.*` profiles and
+  required `models.commit` / `models.mergeRequest` routes with `{ provider, name }`.
+  Prompt overrides are file-backed under `~/.config/mole-tools/prompts/`.
 - `adapters/config/loader.ts` — load `~/.config/mole-tools/config.json`,
   zod-validate (precise errors), **first-run template bootstrap** (default
   Ollama model, Jira disabled; write template, tell user the path, proceed).

@@ -86,7 +86,7 @@ src/
     llm/ollama.ts           # raw fetch → /api/generate, text-generation
     llm/pi.ts               # Pi subprocess, text generation
     issue-tracker/jira.ts
-    git-host/gitlab.ts
+    git-host/glab.ts
     config/
       schema.ts             # zod schema + Config type
       loader.ts             # load + validate + first-run template bootstrap
@@ -94,7 +94,6 @@ src/
   shared/                   # cross-feature PURE functions (no ports, no I/O)
     diff.ts                 # filterDiff (noise globs → patch vs stat-only)
     format.ts               # checkFormat (Conventional Commits + ≤72 + blank line)
-    prompt.ts               # shared prompt-assembly helpers
 
   features/
     commit/
@@ -247,11 +246,11 @@ export function buildContext(input: {
 - **Provider selection** is currently fixed to `new GlabAdapter()` in
   `buildContext`; the composition root is the only place that knows the concrete
   host.
-- **LLM selection is feature-owned:** configuration uses explicit routes such as
-  `commit: { provider, name }` and `mergeRequest: { provider, name }`, with
-  connection details under `providers`. The Context-level LLM router resolves
-  each request purpose to its configured adapter; provider-specific configuration
-  never enters a feature flow.
+- **LLM selection** is feature-owned: configuration uses `models.commit` and
+  `models.mergeRequest` routes, each `{ provider, name }`, with connection
+  details under `providers`. The Context-level LLM router resolves each request
+  purpose to its configured adapter; provider-specific configuration never enters
+  a feature flow.
 
 ---
 
@@ -431,7 +430,8 @@ export const commit: Feature<typeof args, CommitResult> = {
 
     const issue = await maybeFetchIssue(ctx);                 // uses ctx.issues, gated
     const diff  = filterDiff(await ctx.vcs.stagedDiff(), ctx.config.diff.ignore);
-    const prompt = buildCommitPrompt(ctx.config.commitSystemPrompt, issue, diff);
+    const system = await loadPrompt("commit-system");
+    const prompt = buildCommitPrompt(system, issue, diff);
 
     const message = await generateValid(ctx, prompt);         // stream + format-check + retry
     const choice  = await ctx.ui.select("Commit message", ACCEPT_EDIT_REJECT);

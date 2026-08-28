@@ -1,9 +1,11 @@
 # mole-tools — Explicit Model Routing
 
-**Status:** Accepted
+**Status:** Superseded — historical decision. The shipped loader retains tested legacy normalization for supported upgrades; live contract is defined by source.
 **Date:** 2026-07-14
 **Author:** Daniel Oxer
 **Companion:** [architecture/code-design.md](../architecture/code-design.md)
+
+> **Current implementation note:** New configurations use `providers.*` plus `models.commit` and `models.mergeRequest` routes with `{ provider, name }`. Prompt overrides are file-backed under `~/.config/mole-tools/prompts/`. The decision text below records the earlier strict-break proposal and is archival.
 
 Replace string-key model routing (`llm: { commit: "ollama" }`), `@model:` prefix overrides, and fallback chains with explicit `{ provider, name }` objects for each generation flow. This is a breaking configuration change: invalid or incomplete routes fail during validation instead of silently selecting a default.
 

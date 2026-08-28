@@ -1,8 +1,11 @@
 # mole-tools — Spec
 
-**Status:** Ideation / product-grilled. No implementation yet.
+**Status:** Historical product proposal (2026-07-08); superseded by shipped implementation. Retained for design history.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
+
+
+> **Current implementation note:** Shipped configuration uses `providers.*` for connection profiles, `models.commit` and `models.mergeRequest` routes with `{ provider, name }`, and prompt overrides as files under `~/.config/mole-tools/prompts/`. This proposal's later sections are archival and are not the runtime contract.
 
 `mole-tools` is a standalone global CLI holding common repeating git/dev
 workflows. Two tools planned: **commit** and **merge request**. This document
