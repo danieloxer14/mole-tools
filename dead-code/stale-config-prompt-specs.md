@@ -68,4 +68,4 @@ These documents contain current-looking configuration tables, flow steps, and im
 - [x] Retained behavior after temporary-test cleanup: `bun test src/adapters/config src/adapters/prompts` — 22 pass / 0 fail.
 - [x] Final validation: exact obsolete-key scan of `src` found no matches; `bun run src/index.tsx help` and `bun run src/index.tsx --version` exited 0; `bun run build` passed; `bun run lint` passed; `bun test` — 441 pass / 0 fail; documentation diff review confirmed no application-code changes.
 - [x] Compatibility/archive checks preserved: live legacy normalization in `src/adapters/config/loader.ts` and its loader/schema tests were not removed or narrowed; historical proposal/ADR material was labeled rather than erased; no dynamic-loading, release, installer, or external-consumer path changed.
-- [ ] Execution: commit and push `dead-code-removal-loop`, then record final short SHA and outcome here.
+- [x] Execution: 2026-08-28 — committed `5663808` — reconciled configuration, prompt, model-routing, and GitLab documentation with shipped behavior; runtime unchanged.

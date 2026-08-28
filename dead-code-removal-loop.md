@@ -61,7 +61,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/review-http-stream-header-doc-drift.md` — 2026-08-28 — committed aa30e7d — corrected request versus response `Content-Type`/`Accept` documentation; runtime headers and endpoints unchanged.
   - Correct spec distinction: request `Content-Type` versus response `Content-Type` and `Accept` headers.
   - Re-check chat, layer, comment-send, and SSE paths; preserve current runtime headers.
-- [ ] `dead-code/stale-config-prompt-specs.md`
+- [x] `dead-code/stale-config-prompt-specs.md` — 2026-08-28 — committed 5663808 — reconciled configuration, prompt, model-routing, and GitLab documentation with shipped behavior; runtime unchanged.
   - Remove/correct obsolete route, prompt, and Ralph-key documentation; update model/host references.
   - Label ADR material archival where appropriate. Preserve live legacy migration in loader/schema even though older docs contradict it.
 
