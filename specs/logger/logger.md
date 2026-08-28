@@ -1,12 +1,12 @@
 # mole-tools — File Logger Spec
 
-**Status:** Draft
+**Status:** Implemented foundation; focused logger test coverage remains open
 **Date:** 2026-07-13
-**Scope:** Logger infrastructure only; feature and adapter instrumentation follow separately.
+**Scope:** Logger infrastructure is implemented. Existing feature and adapter instrumentation is documented as a separate boundary.
 
 ## 1. Problem
 
-`mole-tools` has temporary diagnostics written through `UiPort` and an unused, console-backed `Context.log`. Console and Ink output are user-facing contracts, so they are unsuitable for durable internal diagnostics. The tool needs one process-wide logger that can safely persist structured debug information without altering CLI or Ink output.
+`mole-tools` now has a process-wide structured logger for durable internal diagnostics. Existing logger calls use the singleton directly; console and Ink output remain user-facing contracts and are not replaced by log output.
 
 ## 2. Goals
 
@@ -25,8 +25,8 @@
 
 ## 3. Non-goals
 
-- No feature, adapter, or reviewer-flow instrumentation in this work.
-- No migration of the existing `Context.log` consumers; it is not a logger integration surface for this feature.
+- No new feature, adapter, or reviewer-flow instrumentation as part of this logger foundation; existing calls are documented as an instrumentation boundary.
+- No migration of a context logger; the current `Context` interface has no logger property or production logging consumer.
 - No logger output in Ink, stdout, or stderr.
 - No command-line logging flags, configuration schema changes, log viewer, retention scheduler, upload, telemetry, or remote service.
 - No spans, correlation trees, `AsyncLocalStorage`, method decorators, proxies, or source transforms.
@@ -87,7 +87,7 @@ If the log directory cannot be created, a file cannot be written, serialization 
 
 ## 5. API and ownership
 
-Create `src/core/logger.ts` as the sole owner of event types, data sanitization, file sink lifecycle, and singleton access.
+`src/core/logger.ts` is the sole owner of event types, data sanitization, file sink lifecycle, and singleton access. This foundation is implemented.
 
 Normal application code imports the singleton directly:
 
@@ -97,9 +97,15 @@ import { logger } from "../../core/logger";
 logger.debug("reviewers.handles-parsed", { handles });
 ```
 
-Initialization is owned by `src/index.tsx`, around the normal feature-command execution path. A test-only initialization/reset seam accepts an in-memory sink or writer; tests must not depend on the developer's home directory.
+Initialization is owned by `src/index.tsx`, around the normal feature-command execution path. The initialization/reset seam accepts an in-memory sink; tests must not depend on the developer's home directory.
 
-The existing `Logger` interface and `log` property in `src/core/context.ts` are outside this feature's migration scope. New instrumentation must target the new singleton rather than that console-backed context property.
+The current `Context` interface has no logger property. Existing instrumentation imports the new singleton directly rather than coupling logging to context.
+
+### 5.1 Current implementation status
+
+`src/core/logger.ts` implements the structured singleton, recursive sanitization, injectable sink, per-run ID, JSONL writer, flush/close lifecycle, and no-op failure fallback. `src/index.tsx` initializes logging before normal-command config loading and closes it in `finally`; the help route bypasses config, Ink, and logger initialization.
+
+Focused logger test coverage remains open: no `src/core/logger.test.ts` exists yet, so event-shape, sanitization, sink-failure, and lifecycle criteria requiring focused assertions remain unverified. Existing logger calls already cross the instrumentation boundary in `src/adapters/git-host/glab.ts`, `src/features/merge-request/reviewers.ts`, `src/features/review/layers.ts`, and `src/features/review/store.ts`; this ticket does not change them.
 
 ## 6. Acceptance criteria
 
@@ -117,11 +123,11 @@ The existing `Logger` interface and `log` property in `src/core/context.ts` are 
 ## 7. Implementation constraints and seams
 
 - `src/index.tsx` owns CLI routing. Its `help` command intentionally bypasses config loading and Ink; preserve that special path.
-- `src/core/context.ts` currently exposes a console-backed `Logger`, but no production code uses `ctx.log`; do not couple the new singleton to it.
+- The current `Context` interface has no logger property; do not couple the singleton to context.
 - Bun is the project runtime; use Bun-supported file APIs and validate with `bun test`.
 - Existing tests use `bun:test`, with fakes under `test/fakes/` and colocated adapter/feature tests. Logger infrastructure tests should be colocated with `src/core/logger.ts`.
 - Logging must be fire-and-forget for callers, but application shutdown needs a deterministic flush seam.
 
 ## 8. Follow-up work
 
-A later feature can add sparse inline `logger.debug` events to workflows such as `selectReviewers` and to adapters where raw API/subprocess responses are available. That work will choose event names and data fields case by case; it is explicitly not part of this logger foundation.
+A later feature can add sparse inline `logger.debug` events to workflows such as `selectReviewers` and to adapters where raw API/subprocess responses are available. Existing logger calls are already present in those areas; future work must choose event names and data fields case by case without treating this foundation ticket as authorization to change instrumentation.

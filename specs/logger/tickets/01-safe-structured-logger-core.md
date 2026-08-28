@@ -1,8 +1,8 @@
 # 01 — Safe structured logger core
 
-## What to build
+## What is implemented
 
-Provide the process-wide logger API that future mole-tools workflows can import directly and use for sparse, structured diagnostics. The API accepts a stable event name and optional diagnostic data, writes to an injectable in-memory sink for now, and never throws because supplied data cannot be serialized.
+The process-wide logger API is implemented for direct imports by mole-tools workflows. It accepts a stable event name and optional diagnostic data, writes to an injectable sink, and does not throw because supplied data cannot be serialized.
 
 ## Blocked by
 
@@ -10,7 +10,7 @@ None — can start immediately
 
 ## Status
 
-ready-for-agent
+implemented in source; focused logger test coverage remains open
 
 ## Acceptance criteria
 
@@ -20,7 +20,7 @@ ready-for-agent
 - [ ] Nested secret-bearing keys, including `apiKey`, `token`, `authorization`, `cookie`, `password`, and `secret`, are redacted case-insensitively.
 - [ ] `Error` values, circular references, unsupported values, deep objects, large collections, and long strings are represented safely and visibly truncated where bounded.
 - [ ] Serializing or writing an event failure does not throw to the caller.
-- [ ] This ticket adds no logger calls to features, adapters, or reviewer selection.
+- [ ] This ticket adds no logger calls to features, adapters, or reviewer selection. Existing calls already cross the instrumentation boundary; this ticket does not add or remove them.
 
 ## Test approach
 
@@ -34,11 +34,15 @@ ready-for-agent
 2. **Green:** Implement the event model, safe data representation, injectable sink, and no-throw logger methods in `src/core/logger.ts`.
 3. **Refactor:** Consolidate recursive sanitization and event construction while all logger tests remain green.
 
+## Verification status
+
+Focused logger test coverage remains open: `src/core/logger.test.ts` does not exist, so event-shape, sanitization, and sink-failure behavior still need dedicated assertions. Source inspection shows the API, safe representation, injectable sink, and no-throw paths in `src/core/logger.ts`. The instrumentation boundary is already crossed by existing calls in adapters and review flows; no instrumentation change belongs in this ticket.
+
 ## Implementation notes
 
 - The source spec is `specs/logger/logger.md`.
 - Use structured event names rather than rendered debug strings.
-- The logger is a direct import, not a new `Context` dependency. `src/core/context.ts` currently has a separate console-backed `Logger` interface/property; leave it unchanged in this ticket.
+- The logger is a direct import, not a new `Context` dependency. The current `Context` interface has no logger property; leave context unchanged in this ticket.
 - Bun is the runtime and `bun:test` is the test runner.
 - Define bounded safe representation in the logger core so all later sinks receive only sanitized data.
 
@@ -46,7 +50,7 @@ ready-for-agent
 
 - Filesystem persistence and CLI lifecycle wiring.
 - Feature or adapter instrumentation.
-- Replacing `Context.log`.
+- Replacing or adding a context logger.
 
 ## Open questions
 
