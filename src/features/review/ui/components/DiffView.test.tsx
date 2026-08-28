@@ -43,3 +43,61 @@ test("renders distinct tag and comment actions for a diff line", () => {
 	expect(markup).toContain("Tag line");
 	expect(markup).toContain("Comment");
 });
+
+test("renders an always-visible find-in-file box in the diff header", () => {
+	const markup = renderToStaticMarkup(
+		<DiffView
+			file={{
+				oldPath: "src/app.ts",
+				newPath: "src/app.ts",
+				status: "modified",
+				binary: false,
+				insertions: 1,
+				deletions: 0,
+				hunks: [
+					{
+						header: "@@ -1 +1 @@",
+						oldStart: 1,
+						oldLines: 1,
+						newStart: 1,
+						newLines: 1,
+						lines: [
+							{ kind: "add", oldLine: null, newLine: 1, text: "findme here" },
+						],
+					},
+				],
+			}}
+			mode="inline"
+			largeFileLineThreshold={800}
+			onModeChange={() => {}}
+			fileContents={null}
+			fileContentsError={null}
+			onLineSelection={() => {}}
+			onCommentSelection={() => {}}
+		/>,
+	);
+	// The find box stays inline with view controls, with navigation inside the
+	// input and a gap before the Inline button.
+	const controlsIndex = markup.indexOf('class="diff-controls"');
+	const statsIndex = markup.indexOf('class="diff-stats"');
+	const findBarIndex = markup.indexOf('class="find-bar"');
+	const findCountIndex = markup.indexOf('class="find-count"');
+	const inlineButtonIndex = markup.indexOf(">Inline<");
+	expect(markup).toContain('class="diff-header"');
+	expect(statsIndex).toBeGreaterThanOrEqual(0);
+	expect(statsIndex).toBeLessThan(findBarIndex);
+	expect(markup).toContain("+1");
+	expect(markup).not.toContain(" additions,");
+	expect(markup).not.toContain(" deletions");
+	expect(controlsIndex).toBeGreaterThanOrEqual(0);
+	expect(findBarIndex).toBeGreaterThan(controlsIndex);
+	expect(markup).toContain('class="find-input-wrap"');
+	expect(markup).toContain('class="find-nav-group"');
+	expect(inlineButtonIndex).toBeGreaterThan(findCountIndex);
+	expect(markup).toContain('aria-label="Find in file"');
+	expect(markup).toContain('class="find-nav" aria-label="Previous match"');
+	expect(markup.match(/class="find-nav"/g)).toHaveLength(2);
+	expect(markup).toContain('title="Previous match (Shift+Enter)"');
+	expect(markup).toContain('title="Next match (Enter)"');
+	expect(markup).toContain("0/0");
+});
