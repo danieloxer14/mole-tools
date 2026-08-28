@@ -628,6 +628,7 @@ button.active {
 }
 .expand-context-row button + button {
 	margin-left: 5px;
+}
 
 .find-bar {
 	align-items: center;
