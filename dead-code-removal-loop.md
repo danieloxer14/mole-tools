@@ -73,7 +73,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/ineffective-coverage-threshold-config.md` — 2026-08-28 — committed e960ec6 — corrected Bun coverage threshold keys to documented plural `lines`/`functions`, updated README enforcement wording, and proved low-coverage runs now fail; full suite remains below newly enforced 90% gate (84.91% funcs / 88.27% lines) as documented follow-up.
   - Replace or remove ignored singular coverage threshold keys only after choosing intended coverage policy with `redundant-coverage-script`.
   - Retain behavioral test proving intended Bun threshold enforcement; prove singular keys are no longer silently accepted.
-- [ ] `dead-code/pi-no-op-generate-test.md`
+- [ ] `dead-code/pi-no-op-generate-test.md` — Needs investigation — 2026-08-28 — no code changed; baseline blocked by enforced 90% coverage failures and unrelated review-route test failure, recorded in ticket.
   - Delete vacuous catch-all Pi generate test. Preserve `PiAdapter` wiring and LLM port contract coverage.
   - Keep/add only observable adapter/contract behavior tests.
 - [ ] `dead-code/redundant-fake-vcs-contract-tests.md`
