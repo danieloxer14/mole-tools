@@ -137,8 +137,14 @@ source lines. Added lines use the new side, deleted lines use the old side, and
 line numbers are retained for both sides. Binary files show a stat line only.
 A file with no patch (including a stat-only ignored file), or with more than
 `largeFileLineThreshold` diff lines (default `800`), starts collapsed with an
-Expand diff control. Expansion requests the unfiltered local diff; inter-hunk
-context has its own Expand lines control and uses file contents when available.
+Expand diff control. Modified text-file diffs also expose `Whole file` and
+`Diff only` controls. The existing single table fills head, inter-hunk, and tail
+gaps from fetched file contents: head/tail rows reveal 20 lines at a time and
+offer `Expand all`; inter-hunk rows keep their Expand/Hide behavior. Revealed
+context has both old/new line numbers, uses the same highlighting as hunk rows,
+and offers local `Tag line` only—never a GitLab `Comment`. `Whole file` is kept
+per file for the browser session, confirms files over the configured total-line
+threshold, and `Diff only` returns the nearest visible hunk to the viewport.
 
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
