@@ -397,6 +397,8 @@ Runs the CLI directly against TypeScript sources without building.
 bun test                             # run all tests with coverage enabled by bunfig.toml
 ```
 
+`bunfig.toml` enforces 90% line and function coverage. Test runs below either threshold exit non-zero.
+
 Tests live alongside source under `src/` (`*.test.ts`) and in a top-level `test/` directory for integration scenarios.
 
 ### Linting
