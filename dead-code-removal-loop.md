@@ -79,7 +79,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/redundant-fake-vcs-contract-tests.md`
   - Delete eight tests that test fake implementation mechanics, including obsolete `forceRemoveWorktreeError` knob if no retained behavior uses it.
   - Preserve compile-time `FakeVcs implements Vcs` and real Git/worktree-prune/review failure-path coverage.
-- [ ] `dead-code/review-agent-generic-parser.md`
+- [ ] `dead-code/review-agent-generic-parser.md` — Needs investigation — 2026-08-28 — no code changed; baseline focused tests passed 26/0 but exited on 90% coverage (74.66% funcs / 84.79% lines), full suite passed 441/0 but exited on 90% coverage (84.91% funcs / 88.27% lines); build and lint passed, recorded in ticket.
   - Remove orphaned `parseAgentEvent` and private parser helpers plus parser-only tests.
   - Re-check all review-agent event consumers/imports; preserve live provider adapter/port behavior.
 - [ ] `dead-code/review-ui-unused-helper-exports.md`
