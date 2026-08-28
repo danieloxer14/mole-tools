@@ -26,7 +26,7 @@ async function defaultExec(
 	input?: string,
 	cwd?: string,
 ): Promise<GitExecResult> {
-	const proc = Bun.spawn(["git", ...args], {
+	const proc = Bun.spawn(["git", "-c", "core.quotePath=false", ...args], {
 		stdin: input !== undefined ? "pipe" : undefined,
 		stdout: "pipe",
 		stderr: "pipe",
