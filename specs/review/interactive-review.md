@@ -114,7 +114,7 @@ Implemented HTTP surface:
 | `POST /api/comments/draft` | Accept `{ selection, filePath }`; persist and return an empty local draft. |
 | `PUT /api/comments/:id` | Edit a local draft body. Posted comments return a conflict and cannot be edited. |
 | `DELETE /api/comments/:id` | Cancel/remove a local draft. |
-| `POST /api/comments/:id/send` | Validate the anchor, post one GitLab discussion, refetch discussions, and replace the draft with the posted thread. |
+| `POST /api/comments/:id/send` | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread. |
 
 ## 4. Three-column UI and diff contract
 
@@ -236,9 +236,12 @@ A reviewer can add a comment from a line, an inclusive same-side selection, a
 whole hunk, or a tagged line. Creating a comment immediately opens an empty
 local draft editor at that position. The user writes its body; no agent turn or
 comment-generation prompt runs. The draft is local until its own Send: there is
-no batch submit. Draft statuses are `draft`, `failed`, and `posted`; Cancel
-removes it, Edit persists body changes, and failed drafts keep their error with
-Retry.
+no batch submit. Draft statuses are `draft`, `sending`, `posted`, and `failed`;
+Cancel removes it, Edit persists body changes, and failed drafts keep their
+error with Retry. While sending, the draft is persisted before
+`GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and Send,
+and keeps Cancel available. A post failure transitions the draft to `failed`
+with its error.
 
 Before Send, mole-tools validates the selection against the parsed diff and
 current `diff_refs`:
@@ -252,9 +255,10 @@ current `diff_refs`:
   that do not match the selected side are rejected before the API call.
 
 A successful Send posts one `GitLabPositionPayload` through `GitHost` using
-`glab api --method POST --input -`, refetches discussions, and replaces the
-local draft with the read-only posted thread. Posted comments are not editable
-in this UI. A post failure keeps the draft and inline error.
+`glab api --method POST --input -`, refetches discussions, and retains the
+local draft as `status: "posted"` with `postedDiscussionId` while the refreshed
+discussion renders in the read-only posted thread. Posted comments are not
+editable in this UI. A post failure keeps the draft and inline error.
 
 ## 8. Plan mode and markdown rendering
 
