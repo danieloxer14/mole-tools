@@ -394,8 +394,7 @@ Runs the CLI directly against TypeScript sources without building.
 ### Testing
 
 ```bash
-bun test                             # run all tests (unit + adapter + e2e)
-bun test --coverage                  # with coverage output
+bun test                             # run all tests with coverage enabled by bunfig.toml
 ```
 
 Tests live alongside source under `src/` (`*.test.ts`) and in a top-level `test/` directory for integration scenarios.
