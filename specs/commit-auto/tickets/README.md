@@ -1,4 +1,5 @@
 # Tickets for commit `--auto` mode
+**Status:** Implemented — ticket records shipped behavior; no implementation work remains.
 
 **Source spec:** `specs/commit-auto/commit-auto.md`
 **Generated:** 2026-07-14
@@ -8,7 +9,7 @@
 
 | # | Title | Blocked by | Purpose |
 |---|-------|------------|---------|
-| 01 | Bare `--auto` commit flow | None | Deliver a valueless, strictly non-interactive local commit path with no push. |
+| 01 | Bare `--auto` commit flow | None | Delivered valueless, strictly non-interactive local commit path with no push. |
 
 ## Cross-ticket risks
 
@@ -18,3 +19,5 @@
   fakes to establish the auto-mode no-input contract before changing behavior.
 - `runCommitFlow` is shared with merge-request; preserve its `askToPush: false`
   behavior while adding auto mode.
+
+The risk notes and dependency record above are historical implementation context.

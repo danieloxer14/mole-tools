@@ -1,6 +1,6 @@
 # worktree-prune — Worktree Prune Spec
 
-Status: Draft
+Status: Implemented
 Date: 2026-07-09
 Author: Pi Agent
 Companions: None
@@ -16,11 +16,14 @@ As developers working with multiple git worktrees, it can become difficult to ke
 ## Invocation / UX Flow
 
 ### 1. Base Directory Resolution
-The command first determines the base directory to scan using the following priority:
-1. `--base-dir <path>` flag (provided at runtime; does not mutate config).
+The command determines the base directory to scan using this priority:
+1. `--baseDir <path>` flag (provided at runtime; does not mutate config).
 2. Stored `worktreePrune.baseDir` in `config.json`.
 3. If neither is present, prompt the user for a directory and persist it to `config.json`.
 
+CAC normalizes option names, so the kebab-case `--base-dir <path>` spelling remains a
+verified compatibility alias for `--baseDir <path>`. The CLI registers one option;
+documentation uses the generated help spelling.
 ### 2. Discovery & Grouped Selection
 The tool scans all git repositories under the resolved base directory.
 - For each repository found:
@@ -43,43 +46,37 @@ The tool scans all git repositories under the resolved base directory.
 | :--- | :--- | :--- |
 | `worktreePrune.baseDir` | `string` | The default directory used for scanning repositories. |
 
-## Resolved Behavior
+## Implemented lifecycle
 
-### CLI Arguments
-- `--base-dir <path>`: Overrides the configured base directory for the current session only.
+### 1. Configuration and command plumbing
+- The `worktreePrune.baseDir` config value is available through the config schema and loader.
+- The `worktree-prune` command is registered.
+- Base-directory resolution uses flag, config, then prompt priority; prompted values persist to config.
 
-### Discovery Logic
-- Scans filesystem for directories containing `.git`.
-- Uses `git rev-parse --show-toplevel` to normalize repository roots.
-- Filters worktrees by checking the presence of the main repo's `.git` entry or matching the primary path.
+### 2. Repository and worktree discovery
+- The command scans the resolved base directory for Git repositories.
+- It normalizes repository roots, reads worktrees, filters out each main worktree, and groups extra worktrees by repository.
 
-### Deletion Failure Handling
-- Failures in a batch do not halt the entire process; the tool attempts to process all selected items.
-- A failure triggers the "Force-Delete" sub-flow for that specific item.
+### 3. Selection and deletion
+- It prompts once per repository with a multi-select list of extra worktrees.
+- Selected worktrees use normal `git worktree remove` first.
+- One removal failure does not stop processing other selected worktrees.
 
-## Implementation Stages
+### 4. Force-removal fallback
+- Failed removals receive a best-effort status/LLM loss summary.
+- Each failed removal gets its own explicit force-delete confirmation.
+- Accepted confirmations use force removal; declined or failed force removals are retained in the final summary.
 
-### Stage 1: Config & Command Plumbing
-- Add `worktreePrune` config section with `baseDir` in schema and loader.
-- Implement base directory resolution logic (flag > config > prompt).
-- Register the `worktree-prune` command in the registry.
-
-### Stage 2: Repository & Worktree Discovery
-- Implement filesystem scanning for git repositories.
-- Implement filtering logic to exclude main worktrees.
-- Normalize results by repository root.
-
-### Stage 3: UI & Deletion Flow
-- Implement grouped multi-select prompting per repository.
-- Implement batch removal logic using `git worktree remove`.
-- Implement the force-delete fallback flow, including the best-effort LLM summary helper.
+### 5. Empty states and reporting
+- No repositories or no extra worktrees exits cleanly with an informational message.
+- The final summary reports normal removals, force removals, declined items, and unresolved failures.
 
 
 | Given | When | Then |
 | :--- | :--- | :--- |
-| No `--base-dir` flag and no saved config | The command starts | It prompts for a base dir and saves it to `config.json`. |
+| No `--baseDir` flag and no saved config | The command starts | It prompts for a base dir and saves it to `config.json`. |
 | A saved config `baseDir` exists | The command starts without a flag | It uses the saved path and does not prompt. |
-| `--base-dir /tmp/x` is provided | Config has a different path | It uses `/tmp/x` for the session and does not update config. |
+| `--baseDir /tmp/x` is provided | Config has a different path | It uses `/tmp/x` for the session and does not update config. |
 | A repository has a main worktree and two extra ones | Discovery runs | Only the two extra worktrees are presented for selection. |
 | Two repositories have pruneable worktrees | The command runs | The tool prompts the user repo-by-repo with grouped lists. |
 | A selected worktree is removed successfully | Deletion runs | It is removed without further confirmation. |

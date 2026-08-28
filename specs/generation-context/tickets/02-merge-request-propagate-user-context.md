@@ -1,30 +1,29 @@
 # 02 — Merge request: propagate user-supplied generation context
 
-## What to build
+## Delivered behavior
 
-Make `mole-tools merge-request --context <text>` guide generated merge-request
-title and body for the current invocation. It must render the labelled context
+`mole-tools merge-request --context <text>` guides generated merge-request
+title and body for the current invocation. It renders the labelled context
 section after the MR feature prompt and before Jira, commits, merge-base diff,
-and the output contract. When staged changes trigger the reusable commit flow,
-forward the exact same context to that generated commit message.
-
+and output contract. When staged changes trigger the reusable commit flow, the
+same context reaches generated commit and MR prompts.
 ## Blocked by
 
 01 — Commit: add user-supplied generation context
 
 ## Status
 
-ready-for-agent
+Implemented — shipped and verified; no implementation work remains.
 
 ## Acceptance criteria
 
-- [ ] `merge-request` accepts the optional non-blank context argument and rejects whitespace-only input through its Zod schema.
-- [ ] The MR LLM prompt renders `Additional user context:` immediately after the loaded MR prompt and before Jira, commit, diff, and output-contract sections.
-- [ ] Omitting context preserves the existing MR prompt structure with no empty section.
-- [ ] Context is retained for every MR title-format retry.
-- [ ] If staged changes invoke `runCommitFlow`, the same supplied context appears in both the commit and later MR LLM prompts.
-- [ ] Existing host preflight, branch/existing-MR guards, Git/Jira collection, reviewer selection, editing, confirmation, and MR creation behavior remain unchanged.
-- [ ] `mole-tools help merge-request` documents `--context`, its purpose, and an example through Zod argument metadata.
+- [x] `merge-request` accepts the optional non-blank context argument and rejects whitespace-only input through its Zod schema.
+- [x] The MR LLM prompt renders `Additional user context:` immediately after the loaded MR prompt and before Jira, commit, diff, and output-contract sections.
+- [x] Omitting context preserves the existing MR prompt structure with no empty section.
+- [x] Context is retained for every MR title-format retry.
+- [x] If staged changes invoke `runCommitFlow`, the same supplied context appears in both the commit and later MR LLM prompts.
+- [x] Existing host preflight, branch/existing-MR guards, Git/Jira collection, reviewer selection, editing, confirmation, and MR creation behavior remain unchanged.
+- [x] `mole-tools help merge-request` documents `--context`, its purpose, and an example through Zod argument metadata.
 
 ## Test approach
 

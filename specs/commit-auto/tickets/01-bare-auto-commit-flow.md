@@ -1,8 +1,8 @@
 # 01 — Bare `--auto` commit flow
 
-## What to build
+## Delivered behavior
 
-Make `mole-tools commit --auto` a complete non-interactive local-commit path.
+`mole-tools commit --auto` is a complete non-interactive local-commit path.
 It accepts the generated, format-valid commit message, prints the existing
 candidate and commit-result information, and creates one local commit without
 opening any input UI or pushing. Omitting the flag retains the current
@@ -15,25 +15,25 @@ None — can start immediately.
 
 ## Status
 
-ready-for-agent
+Implemented — shipped and verified; no implementation work remains.
 
 ## Acceptance criteria
 
-- [ ] `mole-tools commit --auto` parses `auto` as `true`; omitting the flag
+- [x] `mole-tools commit --auto` parses `auto` as `true`; omitting the flag
   parses it as `false` and preserves the interactive flow.
-- [ ] Generic CLI registration and `mole-tools help commit` render `--auto` as
+- [x] Generic CLI registration and `mole-tools help commit` render `--auto` as
   a valueless boolean flag, with no `<auto>` placeholder.
-- [ ] Given staged changes and a format-valid generated message, auto mode
+- [x] Given staged changes and a format-valid generated message, auto mode
   creates exactly one local commit with that message.
-- [ ] Auto mode invokes none of `UiPort.select`, `UiPort.editText`, or
+- [x] Auto mode invokes none of `UiPort.select`, `UiPort.editText`, or
   `UiPort.confirm`, and invokes no `Vcs.push` operation.
-- [ ] Auto mode retains informational output containing the generated message
+- [x] Auto mode retains informational output containing the generated message
   and the resulting commit SHA/summary.
-- [ ] Existing staged-change, Jira, LLM, format-validation, and git-commit
+- [x] Existing staged-change, Jira, LLM, format-validation, and git-commit
   failures still abort without an interactive recovery path.
-- [ ] `runCommitFlow({ askToPush: false })`, used by merge-request flow,
+- [x] `runCommitFlow({ askToPush: false })`, used by merge-request flow,
   remains interactive for commit-message acceptance and never adds a push.
-- [ ] `bun test` passes.
+- [x] `bun test` passes.
 
 ## Test approach
 

@@ -1,145 +1,75 @@
-# Worktree Prune Implementation Plan
+# Worktree Prune Implementation Record
 
-## Proposed files
+**Status:** Implemented
 
-### New feature module
+## Implemented files
+
+### Feature module
 - `src/features/worktree-prune/index.ts`
-  - Orchestrates the full command flow
-  - Resolves base dir
-  - Calls discovery
-  - Prompts per repo with grouped multi-select
-  - Runs delete / force-delete flow
-
+  - Orchestrates base-directory resolution, discovery, grouped selection, normal removal, and force-removal fallback.
 - `src/features/worktree-prune/discovery.ts`
-  - Finds git repos under a base dir
-  - Reads worktree lists for each repo
-  - Filters out main worktrees
-  - Normalizes data into `RepoWorktrees` / `WorktreeInfo` structures
-
+  - Finds Git repositories, reads worktrees, filters main worktrees, and normalizes grouped results.
 - `src/features/worktree-prune/summary.ts`
-  - Best-effort Ollama summary helper for “changes that might be lost”
-  - Takes a worktree path + git diff/status snapshot and returns a short summary
-  - Must never block force-delete if summarization fails
-
-- `src/features/worktree-prune/types.ts` (optional)
-  - Shared types for repo/worktree records
+  - Provides best-effort summaries of changes that might be lost; summary failure never blocks confirmation.
 
 ### Tests
 - `src/features/worktree-prune/index.test.ts`
-  - End-to-end feature behavior with mocked UI/VCS/LLM
+  - Covers end-to-end feature behavior with mocked UI/VCS/LLM.
 - `src/features/worktree-prune/discovery.test.ts`
-  - Repo/worktree parsing and filtering
+  - Covers repository/worktree parsing and filtering.
 - `src/features/worktree-prune/summary.test.ts`
-  - Summary helper best-effort behavior
+  - Covers best-effort summary behavior.
 
-### Existing files likely to change
-- `src/core/registry.ts`
-  - Register `worktree-prune`
-- `src/adapters/config/schema.ts`
-  - Add `worktreePrune.baseDir`
-- `src/adapters/config/loader.ts`
-  - Update template/config defaults
-- `src/ports/vcs.ts`
-  - Add worktree methods if we want to keep git execution behind the VCS port
-- `src/adapters/vcs/git.ts`
-  - Implement worktree listing/removal
-- `src/adapters/vcs/git.test.ts`
-  - Add GitAdapter coverage
-- `src/index.tsx`
-  - Likely no direct change beyond registry/feature args wiring
+### Existing integration points
+- `src/core/registry.ts` registers `worktree-prune`.
+- `src/adapters/config/schema.ts` and `src/adapters/config/loader.ts` provide `worktreePrune.baseDir`.
+- `src/ports/vcs.ts` and `src/adapters/vcs/git.ts` provide worktree listing/removal operations.
+- `src/index.tsx` wires feature arguments through the generic registry path.
+
+The former staged plan is represented below as an implementation record, with
+shipped behavior described in present tense.
 
 ---
 
-## Stage-by-stage plan
+## Historical implementation plan
 
-### Stage 1 — Config + command plumbing
-- Add `worktreePrune` config section with `baseDir`
-- Add `--base-dir <path>` flag to the feature args schema
-- Resolve base dir in priority order:
-  1. CLI flag
-  2. config value
-  3. prompt user and persist
-- Keep CLI flag runtime-only
+### Implemented Stage 1 — Config and command plumbing
+- The `worktreePrune` config section contains `baseDir`.
+- The `--baseDir <path>` flag is available at runtime and remains runtime-only.
+- Base-directory resolution uses flag, config, then prompt priority.
+- Prompted values persist to config.
 
-**Implementation detail**
-- Follow the same feature pattern as `commit` and `init`
-- Use existing `UiPort.editText()` for prompting the base dir
+### Implemented Stage 2 — Repository and worktree discovery
+- The command scans the base directory for Git repositories.
+- Repository roots are normalized and duplicate paths are deduplicated.
+- `git worktree list --porcelain` data is parsed and main worktrees are excluded.
+- Results are sorted and grouped by repository.
 
----
+### Implemented Stage 3 — Grouped selection
+- The command prompts once per repository with a grouped multi-select list.
+- Each list contains only that repository's extra worktrees.
+- Selection acts as confirmation for normal removal.
 
-### Stage 2 — Repo/worktree discovery
-- Scan the base dir for git repos
-- Deduplicate by canonical repo root
-- For each repo, query `git worktree list --porcelain`
-- Remove the main worktree from the selectable list
-- Group results by repo for UI presentation
+### Implemented Stage 4 — Normal deletion
+- Each selected worktree is processed with `git worktree remove`.
+- A failure does not stop processing of other selected worktrees.
+- Each result records removed or failed status for later handling.
 
-**Implementation detail**
-- Detect repos by filesystem scan for `.git`
-- Normalize to repo root with `git rev-parse --show-toplevel`
-- Parse worktrees deterministically and sort them for stable UI
+### Implemented Stage 5 — Force-delete fallback
+- Failed worktrees receive an optional status/LLM summary.
+- Summary failure is best-effort and does not stop the confirmation prompt.
+- Each failed worktree receives a separate force-delete confirmation.
+- Accepted confirmations force-remove that worktree; declined items remain.
 
----
-
-### Stage 3 — Grouped multi-select UX
-- Prompt once per repo, not one giant flat list
-- Each prompt shows only that repo’s extra worktrees
-- Selection itself counts as confirmation for normal delete
-
-**Implementation detail**
-- Existing `UiPort.multiSelect()` is enough
-- No new UI API needed
-- Repo-by-repo prompting keeps the grouped UX clear without redesigning Ink controls
-
----
-
-### Stage 4 — Normal delete flow
-- For each selected worktree:
-  - try `git worktree remove <path>`
-  - record success/failure
-- Continue processing the batch even if one removal fails
-- Summarize partial failures at the end
-
-**Implementation detail**
-- Use a result object per worktree:
-  - `removed`
-  - `failed`
-  - `needsForce`
-- Keep the flow simple and batch-oriented
-
----
-
-### Stage 5 — Force-delete fallback
-- For each failed worktree:
-  - optionally generate “changes that might be lost” summary
-  - show a separate confirm prompt
-  - if user agrees, force-remove that specific worktree
-- Best-effort only: summary failure must not stop deletion
-
-**Implementation detail**
-- Summary should be lightweight:
-  - collect `git status --short`
-  - maybe `git diff --stat` / `git diff --name-only`
-  - feed that into Ollama with a short prompt
-- If Ollama is unavailable, skip straight to prompt
-
----
-
-### Stage 6 — Polish and error handling
-- Handle:
-  - no config + no flag
-  - no repos found
-  - repos found but no prunable worktrees
-  - partial failures
-  - force-delete declines
-- Emit clear UI messages for each state
-
----
+### Implemented Stage 6 — Empty states and error handling
+- No config and no flag prompts for a base directory and persists a non-blank answer.
+- No repositories and no extra worktrees report clean empty states.
+- Partial failures are summarized after all selected worktrees are processed.
 
 ## BDD test coverage
 
 ### 1) Base dir resolution
-**Given** no `--base-dir` flag and no saved config  
+**Given** no `--baseDir` flag and no saved config
 **When** the command starts  
 **Then** it prompts for a base dir and saves it to config
 
@@ -147,9 +77,12 @@
 **When** the command starts without a flag  
 **Then** it uses config and does not prompt
 
-**Given** `--base-dir /tmp/x` and config has another path  
+**Given** `--baseDir /tmp/x` is provided and config has another path
 **When** the command runs  
 **Then** it uses `/tmp/x` and does not update config
+
+The compatibility spelling `--base-dir` is also accepted by CAC and normalizes
+to the registered `baseDir` option.
 
 ---
 

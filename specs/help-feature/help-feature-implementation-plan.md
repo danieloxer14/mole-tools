@@ -1,7 +1,7 @@
 # mole-tools — Help Feature Implementation Plan
 
 ## 1. Status and source documents
-**Status**: Draft
+**Status**: Implemented
 **Source Documents**:
 - `../../CONTEXT.md`
 - `../../docs/adr/0001-registry-backed-plain-help.md`
@@ -14,51 +14,44 @@
 - Command-level documentation is contained within a `help` property on a feature object.
 - Option-level documentation (flags) is extracted from Zod schema definitions via `.describe()` and `.meta()`.
 
-## 3. Phase 1 — Help model + pure formatter
+## 3. Phase 1 — Help model + pure formatter (implemented)
 **Files**:
 - `src/core/feature.ts`
 - `src/features/help/format.ts`
 - `src/features/help/format.test.ts`
 
-**Tasks**:
-- **Type Definition**: Define `FeatureHelp` type consisting of optional `usage` (string), `examples` (string array), and `notes` (string array).
-- **Interface Extension**: Update the `Feature` interface to include an optional `help: FeatureHelp` property.
-- **Formatter Implementation**: Implement pure logic in `src/features/help/format.ts`:
-    - `formatGeneralHelp(features: Feature[])`: Renders a list of all registered features.
-    - `formatCommandHelp(features: Feature[], command: string)`: Renders help specific to the requested command.
-- **Flag Inference Engine**:
-    - Map Zod object keys to flag strings (e.g., `baseDir` becomes `--baseDir <value>`).
-    - Extract descriptions from `schema.description`.
-    - Extract example arrays from `schema.meta()?.examples`.
-    - Handle edge cases for schemas with no arguments.
-- **Error Handling**: Ensure that requests for unknown commands return a non-zero exit code and provide a list of valid command names in the error output.
+**Implemented**:
+- `FeatureHelp` defines optional `usage`, `examples`, and `notes` fields.
+- `Feature` accepts optional command-level help metadata.
+- `formatGeneralHelp(features)` renders registered features in registry order.
+- `formatCommandHelp(features, command)` renders command-specific usage, options, examples, and notes.
+- Zod object keys infer option names; descriptions and examples come from schema metadata.
+- Unknown commands return an error result with valid command names.
 
-## 4. Phase 2 — Command docs and zod option metadata
+## 4. Phase 2 — Command docs and Zod option metadata (implemented)
 **Files**:
 - `src/features/commit/index.ts`
 - `src/features/init/index.ts`
-- `src/features/cost-breakdown/index.ts`
+- `src/features/merge-request/index.ts`
 - `src/features/worktree-prune/index.ts`
+- `src/features/review/index.ts`
 
-**Tasks**:
-- Inject help metadata into all current registered features using the new `FeatureHelp` structure.
-- For the `worktree-prune` feature, implement Zod metadata for the `baseDir` option to include its flag description and usage examples via `.meta()`.
+**Implemented**:
+- All five registered features carry colocated help metadata.
+- `worktree-prune` exposes `baseDir` help metadata through its Zod argument schema.
 
-## 5. Phase 3 — Special CLI wiring
+## 5. Phase 3 — Special CLI wiring (implemented)
 **File**:
 - `src/index.tsx`
 
-**Tasks**:
-- Add a specific command parser: `cli.command("help [command]", "Show help for available tools")`.
-- **Routing Logic**:
-    - If no argument is provided: Output general help to stdout and exit with `0`.
-    - If a known command is provided: Output command-specific help to stdout and exit with `0`.
-    - If an unknown command is provided: Output error message to stderr and exit with non-zero status.
-- **Lifecycle Constraint**: The `help` execution path must explicitly bypass high-level orchestration (no calls to `loadConfig`, `buildContext`, or anything that initializes the Ink runtime).
+**Implemented**:
+- `help [command]` is registered as a special command path.
+- General help, known-command help, and unknown-command errors route to the appropriate output and exit status.
+- Help bypasses config loading, context construction, and Ink initialization.
 
-## 6. Phase 4 — Registry/worktree alignment
-**Tasks**:
-- Ensure any new features added to the registry are automatically included in the general help output without requiring manual updates to a central list.
+## 6. Phase 4 — Registry/worktree alignment (implemented)
+**Implemented**:
+- General help consumes the feature registry, so registered features appear without a second help list.
 
 ## 7. BDD test coverage matrix
 | Scenario | Expected Behavior |
@@ -100,4 +93,4 @@ bun run src/index.tsx help frobnicate
   - **Mitigation**: Standardize help documentation as part of the feature definition process.
 
 ## 10. Next step
-Implement Phase 1.
+No implementation step remains. Keep this record aligned with registry-backed help behavior when command metadata changes.
