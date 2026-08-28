@@ -58,7 +58,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/review-comment-status-spec-drift.md` — 2026-08-28 — committed c91d18b — documented `sending`, failure, and retained posted drafts with `postedDiscussionId` in API/lifecycle spec; runtime unchanged.
   - Document live `sending` status and replace two stale “replace the draft” descriptions.
   - Re-check state/routes/component status transitions; no runtime edit unless documentation evidence disproves assessment.
-- [ ] `dead-code/review-http-stream-header-doc-drift.md`
+- [x] `dead-code/review-http-stream-header-doc-drift.md` — 2026-08-28 — committed aa30e7d — corrected request versus response `Content-Type`/`Accept` documentation; runtime headers and endpoints unchanged.
   - Correct spec distinction: request `Content-Type` versus response `Content-Type` and `Accept` headers.
   - Re-check chat, layer, comment-send, and SSE paths; preserve current runtime headers.
 - [ ] `dead-code/stale-config-prompt-specs.md`
