@@ -82,7 +82,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/review-agent-generic-parser.md` — Needs investigation — 2026-08-28 — no code changed; baseline focused tests passed 26/0 but exited on 90% coverage (74.66% funcs / 84.79% lines), full suite passed 441/0 but exited on 90% coverage (84.91% funcs / 88.27% lines); build and lint passed, recorded in ticket.
   - Remove orphaned `parseAgentEvent` and private parser helpers plus parser-only tests.
   - Re-check all review-agent event consumers/imports; preserve live provider adapter/port behavior.
-- [ ] `dead-code/review-ui-unused-helper-exports.md`
+- [ ] `dead-code/review-ui-unused-helper-exports.md` — Needs investigation — 2026-08-28 — no code changed; baseline focused and full suites had 0 test failures but exited on enforced 90% coverage thresholds (focused 24.13% funcs / 48.64% lines; full 84.91% funcs / 88.27% lines); build and lint passed; exact missing evidence recorded in ticket.
   - Remove only exported `actionLabel` and `stateLabel` names from `ApprovalControls.tsx`; keep internal helper calls.
   - Use LSP references, then run affected UI tests.
 - [ ] `dead-code/review-unused-compatibility-wrappers.md`
