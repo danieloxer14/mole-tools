@@ -87,10 +87,13 @@ The token is not persisted. Every `/api/*` request must carry it either as the
 `401` with an empty body. The bundled HTML page at `/` is not API-authenticated.
 This is a local single-user server, not a remote or background service.
 
-Streams use `fetch` POST requests with `Content-Type: text/event-stream`; the
-UI does not use `EventSource` because chat and draft requests have JSON bodies.
-Each stream emits `event:`/`data:` frames and closes with `done`, including when
-an agent or subprocess fails.
+Stream responses use `Content-Type: text/event-stream; charset=utf-8`. Chat
+requests send JSON bodies with `Content-Type: application/json` and
+`Accept: text/event-stream`; layer and comment stream requests send
+`Accept: text/event-stream` without a request `Content-Type`. The UI does not
+use `EventSource` because chat and draft requests have JSON bodies. Each stream
+emits `event:`/`data:` frames and closes with `done`, including when an agent or
+subprocess fails.
 
 Implemented HTTP surface:
 
