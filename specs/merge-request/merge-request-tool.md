@@ -3,11 +3,11 @@
 **Status:** Ideation / product-grilled. No implementation yet.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
-**Companions:** [commit-tool.md](./commit-tool.md), [architecture/architecture.md](./architecture/architecture.md)
+**Companions:** [commit-tool.md](../commit/commit-tool.md), [architecture/architecture.md](../architecture/architecture.md)
 
 The **merge-request** tool. Second tool in `mole-tools`. Builds on the shared
 foundation (install, config, Ollama, Jira) specced in
-[commit-tool.md](./commit-tool.md) and reuses the `commit` flow as a sub-step.
+*[../commit/commit-tool.md](../commit/commit-tool.md) and reuses the
 
 ---
 
@@ -46,7 +46,7 @@ main value-add of the MR flow. This is a conscious, scoped exception — see §5
 
 ## 3. Configuration (keys used by this tool)
 
-Shared schema lives in [commit-tool.md](./commit-tool.md) §3. Keys this tool
+Shared schema lives in [../commit/commit-tool.md](../commit/commit-tool.md) §3. Keys this tool
 reads:
 
 | Key | Purpose |

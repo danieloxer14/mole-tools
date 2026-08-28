@@ -3,7 +3,7 @@
 **Status:** Draft / grilled
 **Date:** 2026-07-10
 **Author:** Daniel Oxer + AI Assistant
-**Related context:** [../CONTEXT.md](../CONTEXT.md), [../docs/adr/0001-registry-backed-plain-help.md](../docs/adr/0001-registry-backed-plain-help.md), [architecture/code-design.md](architecture/code-design.md)
+**Related context:** [../CONTEXT.md](../../CONTEXT.md), [../docs/adr/0001-registry-backed-plain-help.md](../../docs/adr/0001-registry-backed-plain-help.md), [architecture/code-design.md](../architecture/code-design.md)
 
 ## 1. Problem
 

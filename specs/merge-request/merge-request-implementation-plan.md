@@ -2,7 +2,7 @@
 
 **Status:** Draft implementation plan  
 **Date:** 2026-07-11  
-**Companions:** [merge-request-tool.md](./merge-request-tool.md), [commit-tool.md](./commit-tool.md), [architecture/architecture.md](./architecture/architecture.md)
+**Companions:** [merge-request-tool.md](./merge-request-tool.md), [commit-tool.md](../commit/commit-tool.md), [architecture/architecture.md](../architecture/architecture.md)
 
 This document turns the product spec in `merge-request-tool.md` into a repo-grounded implementation plan for `mole-tools`.
 

@@ -4,12 +4,12 @@
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
 **Companions:** [architecture.md](./architecture.md), [code-design.md](./code-design.md),
-[../commit-tool.md](../commit-tool.md), [spike-ink-bun-compile.md](./spike-ink-bun-compile.md)
+[../commit/commit-tool.md](../commit/commit-tool.md), [spike-ink-bun-compile.md](./spike-ink-bun-compile.md)
 
 Sequenced, bottom-up build of the **commit** tool through a shippable macOS
 arm64 binary. Each layer is testable before the next depends on it. Every phase
 ends with a **gate** — a concrete, checkable outcome. Acceptance-criteria row
-numbers refer to [../commit-tool.md](../commit-tool.md) §7.
+numbers refer to [../commit/commit-tool.md](../commit/commit-tool.md) §7.
 
 Ink under `bun build --compile` is already de-risked (spike PASS,
 `react-devtools-core` mandatory). `init` ships **both** ways: loader
@@ -103,7 +103,7 @@ Data in, data out. Colocated `*.test.ts`, no ports, no I/O.
 
 ## Phase 3 — Config adapter + `init`
 
-- `adapters/config/schema.ts` — zod schema mirroring [../commit-tool.md](../commit-tool.md)
+- `adapters/config/schema.ts` — zod schema mirroring [../commit/commit-tool.md](../commit/commit-tool.md)
   §3 table + `Config` type. MR-only keys (`ollama.mrModel`, `mrSystemPrompt`,
   `dynamicEnvRepos`, `autoReviewer`) present but optional.
 - `adapters/config/loader.ts` — load `~/.config/mole-tools/config.json`,

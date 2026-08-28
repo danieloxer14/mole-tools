@@ -3,7 +3,7 @@
 **Status:** Historical architecture snapshot (2026-07-08); implementation is shipped. Live composition and command registration are defined by `src/core/context.ts`, `src/core/registry.ts`, and `src/index.tsx`.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
-**Companion:** [commit-tool.md](./commit-tool.md)
+**Companion:** [commit-tool.md](../commit/commit-tool.md)
 
 Architecture decisions for the `mole-tools` CLI — tech stack, how it's built,
 and how it's installed globally on PATH.
@@ -75,7 +75,7 @@ and how it's installed globally on PATH.
 ### Config: zod
 - Load `~/.config/mole-tools/config.json`, validate against a zod schema,
   produce precise errors on bad/missing keys.
-- Schema mirrors the config table in [commit-tool.md](./commit-tool.md).
+- Schema mirrors the config table in [commit-tool.md](../commit/commit-tool.md).
 
 ---
 

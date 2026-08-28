@@ -3,7 +3,7 @@
 **Status:** Historical code-design snapshot (2026-07-08); implementation is shipped. Live composition and command registration are defined by `src/core/context.ts`, `src/core/registry.ts`, and `src/index.tsx`.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
-**Companions:** [architecture.md](./architecture.md), [../commit-tool.md](../commit-tool.md), [../merge-request-tool.md](../merge-request-tool.md)
+**Companions:** [architecture.md](./architecture.md), [../commit/commit-tool.md](../commit/commit-tool.md), [../merge-request/merge-request-tool.md](../merge-request/merge-request-tool.md)
 
 The binding design contract for `mole-tools`: how the code is layered, how
 features register and run, how third-party systems are abstracted, how the UI is
@@ -499,7 +499,7 @@ That is the entire surface. No entry-point edits, no router edits, no UI edits.
 - Language/runtime/deps fixed by [architecture.md](./architecture.md): Bun + TS,
   Ink (+ mandatory `react-devtools-core`), `cac`, `zod`, Biome, `bun test`.
 - Config path `~/.config/mole-tools/config.json`, first-run template bootstrap,
-  plaintext secrets — from [../commit-tool.md](../commit-tool.md) §3.
+  plaintext secrets — from [../commit/commit-tool.md](../commit/commit-tool.md) §3.
 - Non-zero exit on every abort/guard — from the specs' acceptance criteria.
 - One active UI request at a time (sequential flow) → controller needs a single
   current-request slot, no queue.

@@ -3,9 +3,9 @@
 ## 1. Status and source documents
 **Status**: Draft
 **Source Documents**:
-- `CONTEXT.md`
-- `docs/adr/0001-registry-backed-plain-help.md`
-- `specs/help-feature.md`
+- `../../CONTEXT.md`
+- `../../docs/adr/0001-registry-backed-plain-help.md`
+- `help-feature.md`
 
 ## 2. Resolved decisions
 - The `help` command is registry-backed but operates outside the standard `Feature` execution lifecycle.
