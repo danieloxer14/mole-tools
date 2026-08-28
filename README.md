@@ -423,6 +423,6 @@ Bumps `package.json`, builds the binary, commits and tags `v<version>`, pushes t
 |---|---|
 | `src/index.tsx` | CLI entry point — command registration, config loading, Ink UI bootstrap |
 | `src/core/` | Context, error handling, feature interface |
-| `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init) |
+| `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
 | `specs/` | Design docs and architecture notes |

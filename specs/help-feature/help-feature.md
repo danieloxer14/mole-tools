@@ -58,10 +58,11 @@ Example shape:
 mole-tools
 
 Available tools:
-  commit            Generate a commit message for staged changes
-  init              Write a default config.json template
-  cost-breakdown    Show a paginated cost breakdown per past session
-  worktree-prune    Scan and prune extra git worktrees
+  commit          Generate a commit message for staged changes
+  init            Write a default config.json template
+  merge-request   Generate and review a GitLab merge request
+  worktree-prune  Scan a base directory for extra Git worktrees and remove them
+  review          Interactive review of a GitLab merge request in a local web UI
 
 Run "mole-tools help <command>" for details.
 ```
@@ -122,16 +123,15 @@ Expected behavior:
 - lists valid command names
 - does not fall back to general help
 
-Example shape:
-
 ```text
 Unknown command "frobnicate".
 
 Available commands:
   commit
   init
-  cost-breakdown
+  merge-request
   worktree-prune
+  review
 ```
 
 ## 5. Domain model and code model
@@ -208,8 +208,9 @@ Implement this feature with full help metadata for all current registered tools:
 
 - `commit`
 - `init`
-- `cost-breakdown`
+- `merge-request`
 - `worktree-prune`
+- `review`
 
 For no-arg commands, command-specific help should say there are no options or omit the Options section consistently.
 
@@ -219,10 +220,9 @@ For no-arg commands, command-specific help should say there are no options or om
 
 ### General help
 
-```gherkin
-Given the feature registry contains commit, init, cost-breakdown, and worktree-prune
+Given the feature registry contains commit, init, merge-request, worktree-prune, and review
 When I run `mole-tools help`
-Then stdout lists all four tools with their descriptions
+Then stdout lists all five tools with their descriptions
 And stdout includes `Run "mole-tools help <command>" for details.`
 And the command exits 0
 And config is not loaded

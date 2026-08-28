@@ -1,6 +1,6 @@
 # mole-tools — Code Design & Patterns
 
-**Status:** Grilled / agreed. No implementation yet.
+**Status:** Historical code-design snapshot (2026-07-08); implementation is shipped. Live composition and command registration are defined by `src/core/context.ts`, `src/core/registry.ts`, and `src/index.tsx`.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
 **Companions:** [architecture.md](./architecture.md), [../commit-tool.md](../commit-tool.md), [../merge-request-tool.md](../merge-request-tool.md)
@@ -136,9 +136,18 @@ export interface Feature<A extends z.ZodTypeAny = z.ZodTypeAny, R = unknown> {
 ```ts
 // core/registry.ts
 import { commit } from "../features/commit";
+import { init } from "../features/init";
 import { mergeRequest } from "../features/merge-request";
+import { reviewFeature } from "../features/review";
+import { worktreePrune } from "../features/worktree-prune";
 
-export const features: Feature[] = [commit, mergeRequest];
+export const features: Feature[] = [
+  commit,
+  init,
+  mergeRequest,
+  worktreePrune,
+  reviewFeature,
+];
 // Add a tool == add it here. Nothing else changes.
 ```
 
@@ -199,21 +208,33 @@ passed down. Optional ports are `null` when disabled.
 export interface Context {
   config: Config;              // plain, zod-validated value (NOT a port)
   ui: UiPort;                  // always present
-  vcs: Vcs;                    // git, always present
-  llm: Llm;                    // purpose-routed provider
-  issues: IssueTracker | null; // null when jira.enabled === false
-  gitHost: GitHost | null;     // null until a feature needs it / provider unset
+  vcs: Vcs;                    // GitAdapter, always present
+  llm: Llm;                    // RoutingLlmProxy, default commit route
+  issues: IssueTracker | null; // null when Jira config is incomplete
+  gitHost: GitHost;            // GlabAdapter, wired for GitLab
 }
 
-export function buildContext(input: { config: Config; ui: UiPort }): Context {
-  const { config, ui } = input;
+export function buildContext(input: {
+  config: Config;
+  ui: UiPort;
+  reviewAgent?: ReviewAgent;
+}): Context {
+  const { config, ui, reviewAgent } = input;
+  validateModelProviders(config);
+  const adapterMap = buildAdapterMap(config);
+  const llmProxy = new RoutingLlmProxy(adapterMap, config);
   return {
     config,
     ui,
     vcs: new GitAdapter(),
-    llm: makeLlmRouter(config), // routes feature purpose to configured adapter
-    issues: config.jira.enabled ? new JiraAdapter(config.jira) : null,
-    gitHost: makeGitHost(config),   // provider switch: "gitlab" → GitLabAdapter
+    llm: llmProxy,
+    reviewAgent: reviewAgent ?? buildReviewAgent(config),
+    getLlmFor: (purpose, providerKey) =>
+      llmProxy.getLlmFor(purpose, providerKey),
+    issues: config.jira.enabled && config.jira.url && config.jira.apiKey
+      ? new JiraAdapter({ url: config.jira.url, apiKey: config.jira.apiKey, email: config.jira.email })
+      : null,
+    gitHost: new GlabAdapter(),
   };
 }
 ```
@@ -223,8 +244,9 @@ export function buildContext(input: { config: Config; ui: UiPort }): Context {
 - **Optional-port contract:** a flow that needs Jira checks `if (ctx.issues)`.
   The commit/MR specs already gate Jira on `jira.enabled` + branch match, so the
   null check is where "no ticket context, proceed" lives.
-- **Provider selection** (`GitLab` now, `GitHub` later) is a switch inside
-  `makeGitHost(config)` — the only place that knows the concrete host.
+- **Provider selection** is currently fixed to `new GlabAdapter()` in
+  `buildContext`; the composition root is the only place that knows the concrete
+  host.
 - **LLM selection is feature-owned:** configuration uses explicit routes such as
   `commit: { provider, name }` and `mergeRequest: { provider, name }`, with
   connection details under `providers`. The Context-level LLM router resolves
@@ -304,15 +326,15 @@ export class PortError extends Error {             // infra failure
 export async function handleError(e: unknown, ui: UiPort): Promise<number> {
   if (e instanceof UserRejectedError) return 1;   // silent-ish, non-zero
   if (e instanceof AbortError)  { await ui.error(e.message); return 1; }
-  if (e instanceof PortError)   { await ui.error(e.stderr ?? e.message); return e.code; }
+  if (e instanceof PortError)   { await ui.error(e.message); return e.code; }
   await ui.error(String(e));
   return 1;
 }
 ```
 
-- Adapters throw `PortError` carrying **verbatim** git/glab stderr (specs demand
-  verbatim surfacing). The flow doesn't catch it — the entry-point handler does,
-  prints it, sets the exit code.
+- Adapters throw `PortError`; its `message` is the user-facing error text and
+  `stderr` remains available on the error for diagnostics. The entry-point
+  handler displays `message`, sets the exit code, and does not alter it.
 - User "reject" throws `UserRejectedError` from the `UiPort` call site, so the
   flow's happy path stays unbranched.
 - **Only two return values a flow reasons about:** its typed success `Result`, or

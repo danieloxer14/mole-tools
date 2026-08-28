@@ -28,8 +28,8 @@ Relevant existing files:
 
 | File | Current role |
 |------|--------------|
-| `src/core/registry.ts` | Registers CLI features. Currently exports `commit`, `init`, `costBreakdown`. |
-| `src/core/context.ts` | Builds shared `Context`; currently sets `gitHost: null`. |
+| `src/core/registry.ts` | Registers CLI features. Current registry contains `commit`, `init`, `mergeRequest`, `worktreePrune`, and `reviewFeature`. |
+| `src/core/context.ts` | Builds shared `Context`; current composition wires `GitAdapter`, routed LLM providers, optional Jira, review agent, and `GlabAdapter`. |
 | `src/core/feature.ts` | Feature interface used by all commands. |
 | `src/features/commit/index.ts` | Best implementation template for staged diff, Jira fetch, Ollama streaming, format retry, accept/edit/reject, and commit creation. |
 | `src/features/commit/prompt.ts` | Pattern for rendering issue + diff context into an LLM prompt. |
@@ -315,7 +315,7 @@ Register in `src/core/registry.ts`:
 ```ts
 import { mergeRequest } from "../features/merge-request";
 
-export const features: Feature[] = [commit, init, costBreakdown, mergeRequest];
+export const features: Feature[] = [commit, init, mergeRequest, worktreePrune, reviewFeature];
 ```
 
 Suggested core structure:

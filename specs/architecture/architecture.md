@@ -1,6 +1,6 @@
 # mole-tools — Architecture
 
-**Status:** Ideation / grilled. No implementation yet.
+**Status:** Historical architecture snapshot (2026-07-08); implementation is shipped. Live composition and command registration are defined by `src/core/context.ts`, `src/core/registry.ts`, and `src/index.tsx`.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
 **Companion:** [commit-tool.md](./commit-tool.md)
@@ -24,7 +24,7 @@ and how it's installed globally on PATH.
 | Arg parsing | **cac** | Clean subcommand routing, hands off to Ink |
 | Lint/format | **Biome** | Single fast dep, fits lean ethos |
 | Tests | **`bun test`** | Native to Bun, no extra runner |
-| CLI shape | **Subcommands** | `mole-tools commit` / `merge-request` / `init` — idiomatic, scales |
+| CLI shape | **Subcommands** | `mole-tools commit` / `merge-request` / `init` / `worktree-prune` / `review` — idiomatic, scales |
 | Distribution | **curl install script + GitHub Releases** | Clean install UX without cloning |
 | Release build | **Manual local build + upload** | Solo/personal; no CI pipeline needed yet |
 | Target platform | **macOS arm64 only** | Personal machine; no cross-compile |
@@ -86,8 +86,10 @@ mole-tools <command> [flags]
 
 commands:
   commit          Generate a commit message for staged changes (see commit-tool.md)
-  merge-request   Create a GitLab/GitHub MR  (next session)
   init            Write a default config.json template
+  merge-request   Create a GitLab merge request
+  worktree-prune  Scan and prune extra Git worktrees
+  review          Review an existing GitLab merge request
 ```
 
 - `cac` parses argv and routes to a command module.
