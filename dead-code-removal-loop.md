@@ -70,7 +70,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/gitlab-unused-schema-types.md` — 2026-08-28 — committed 4e90efd — removed four unconsumed inferred GitLab schema aliases; runtime schemas, shared position type, and GitLabDiscussion retained; focused 58/0, final full 445/0.
   - Remove four unused aliases in `glab-schemas.ts`; preserve live runtime schemas in `glab.ts` and `GitLabDiscussion` diagnostic.
   - Use LSP references before removal; run port/adapter/position tests.
-- [ ] `dead-code/ineffective-coverage-threshold-config.md`
+- [x] `dead-code/ineffective-coverage-threshold-config.md` — 2026-08-28 — committed e960ec6 — corrected Bun coverage threshold keys to documented plural `lines`/`functions`, updated README enforcement wording, and proved low-coverage runs now fail; full suite remains below newly enforced 90% gate (84.91% funcs / 88.27% lines) as documented follow-up.
   - Replace or remove ignored singular coverage threshold keys only after choosing intended coverage policy with `redundant-coverage-script`.
   - Retain behavioral test proving intended Bun threshold enforcement; prove singular keys are no longer silently accepted.
 - [ ] `dead-code/pi-no-op-generate-test.md`
