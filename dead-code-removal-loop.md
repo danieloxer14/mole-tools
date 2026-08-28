@@ -76,7 +76,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/pi-no-op-generate-test.md` — Needs investigation — 2026-08-28 — no code changed; baseline blocked by enforced 90% coverage failures and unrelated review-route test failure, recorded in ticket.
   - Delete vacuous catch-all Pi generate test. Preserve `PiAdapter` wiring and LLM port contract coverage.
   - Keep/add only observable adapter/contract behavior tests.
-- [ ] `dead-code/redundant-fake-vcs-contract-tests.md`
+- [ ] `dead-code/redundant-fake-vcs-contract-tests.md` — Needs investigation — 2026-08-28 — no code changed; baseline blocked by unrelated review-route failure at `src/features/review/routes.test.ts:730` and enforced 90% coverage gate (84.91% funcs / 88.27% lines), recorded in ticket.
   - Delete eight tests that test fake implementation mechanics, including obsolete `forceRemoveWorktreeError` knob if no retained behavior uses it.
   - Preserve compile-time `FakeVcs implements Vcs` and real Git/worktree-prune/review failure-path coverage.
 - [ ] `dead-code/review-agent-generic-parser.md` — Needs investigation — 2026-08-28 — no code changed; baseline focused tests passed 26/0 but exited on 90% coverage (74.66% funcs / 84.79% lines), full suite passed 441/0 but exited on 90% coverage (84.91% funcs / 88.27% lines); build and lint passed, recorded in ticket.
@@ -88,7 +88,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/review-unused-compatibility-wrappers.md` — Needs investigation — 2026-08-28 — no code changed; focused suite 98/0 and full suite 441/0 both exited on enforced 90% coverage gate (63.83%/68.97% focused; 84.91%/88.27% full), recorded in ticket.
   - Remove all 14 declaration-only aliases across setup/paths/store/server/routes/SSE/chat/layers.
   - Migrate every in-repo consumer to canonical targets; use LSP references per exported alias; run review suite.
-- [ ] `dead-code/review-unused-diff-helper.md`
+- [ ] `dead-code/review-unused-diff-helper.md` — Needs investigation — 2026-08-28 — no code changed; focused route/server tests 34/0 and DiffView test 1/0 had no test failures but exited on enforced 90% coverage (61.97%/68.36% and 6.44%/25.95%); full suite 441/0 exited on 84.91%/88.27% coverage; build and lint passed; exact missing evidence recorded in ticket.
   - Remove `isLargeDiff` and `countLines` from review routes; preserve independent UI collapse and `/api/state` threshold contract.
   - Run routes/server and `DiffView` coverage.
 - [ ] `dead-code/root-cli-scaffold.md`
