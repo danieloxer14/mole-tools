@@ -85,7 +85,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/review-ui-unused-helper-exports.md` — Needs investigation — 2026-08-28 — no code changed; baseline focused and full suites had 0 test failures but exited on enforced 90% coverage thresholds (focused 24.13% funcs / 48.64% lines; full 84.91% funcs / 88.27% lines); build and lint passed; exact missing evidence recorded in ticket.
   - Remove only exported `actionLabel` and `stateLabel` names from `ApprovalControls.tsx`; keep internal helper calls.
   - Use LSP references, then run affected UI tests.
-- [ ] `dead-code/review-unused-compatibility-wrappers.md`
+- [ ] `dead-code/review-unused-compatibility-wrappers.md` — Needs investigation — 2026-08-28 — no code changed; focused suite 98/0 and full suite 441/0 both exited on enforced 90% coverage gate (63.83%/68.97% focused; 84.91%/88.27% full), recorded in ticket.
   - Remove all 14 declaration-only aliases across setup/paths/store/server/routes/SSE/chat/layers.
   - Migrate every in-repo consumer to canonical targets; use LSP references per exported alias; run review suite.
 - [ ] `dead-code/review-unused-diff-helper.md`
