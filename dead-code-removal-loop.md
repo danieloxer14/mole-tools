@@ -52,7 +52,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/redundant-coverage-script.md` — 2026-08-28 — committed 52b7f11 — removed redundant `test:cov`; README now documents canonical coverage-enabled `bun test`; coverage behavior unchanged.
   - Remove `test:cov` only after confirming `bunfig.toml` still makes `bun test` collect coverage identically.
   - Coordinate decision with `ineffective-coverage-threshold-config`; search tracked/docs and release paths for script consumers; assess untracked alias risk explicitly.
-- [ ] `dead-code/review-comment-session-doc-drift.md`
+- [x] `dead-code/review-comment-session-doc-drift.md` — 2026-08-28 — committed 4c2c977 — corrected ADR 0005 and `CONTEXT.md` to per-chat persistence, explicit legacy migration, and local user-authored comment drafts; runtime unchanged.
   - Correct ADR 0005 and `CONTEXT.md` to current per-chat state/store/chat and local-draft comment model.
   - Sweep ADR alternatives-considered row identified in assessment; do not change review runtime.
 - [ ] `dead-code/review-comment-status-spec-drift.md`

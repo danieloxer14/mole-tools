@@ -54,4 +54,4 @@ The documents describe superseded single-chat and comment-agent behavior, while 
 - [x] Retained behavior: `bun test src/features/review/setup.test.ts src/features/review/state.test.ts` — 26 pass; `bun test src/features/review/chat.test.ts src/features/review/comments.test.ts src/features/review/routes.test.ts` — 41 pass; `bun test src/features/review` — 98 pass.
 - [x] Final validation: `bun run build` passed; `bun run lint` passed after formatting temporary proof; `bun test` passed with 442 tests; scoped stale-wording search returned no matches; `git diff --check` passed; source diff contained only the two target docs.
 - [x] Compatibility and risk checks: no dynamic loading, registration, external consumer, config, persisted-state, network/API, release, or installer changes; accepted ADR handled by dated amend-in-place correction.
-- [ ] Execution: commit and push `dead-code-removal-loop`, then record the final short SHA and outcome here.
+- [x] Execution: 2026-08-28 — committed `4c2c977` — corrected ADR 0005 and `CONTEXT.md` to per-chat persistence, explicit legacy migration, and local user-authored comment drafts; runtime unchanged.
