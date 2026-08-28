@@ -52,4 +52,4 @@ The candidate is documentation only. Updating the maintained interactive-review 
 - [x] Retained behavior: `bun test src/features/review/layers.test.ts src/features/review/chat.test.ts src/features/review/comments.test.ts` — 17 pass / 0 fail; `bun test src/features/review` — 98 pass / 0 fail.
 - [x] Final validation: scoped search for `sending`, `postedDiscussionId`, and stale replacement wording shows corrected spec plus live runtime references and no stale phrase; `bun run build` passed; `bun run lint` passed; `bun test` passed with 441 tests / 0 failures. No user-facing CLI, installer, release, or UI smoke command applied because documentation-only change has no affected runtime surface.
 - [x] Compatibility/archive checks preserved: `sending` remains persisted observable state; no dynamic loading, external consumer, config field, persisted-state, network/API, release, installer, or archival boundary changed.
-- [ ] Execution: commit and push `dead-code-removal-loop`, then record final short SHA and outcome here.
+- [x] Execution: 2026-08-28 — committed `c91d18b` — corrected positioned-comment status and posted-draft documentation; runtime unchanged.

@@ -55,7 +55,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/review-comment-session-doc-drift.md` — 2026-08-28 — committed 4c2c977 — corrected ADR 0005 and `CONTEXT.md` to per-chat persistence, explicit legacy migration, and local user-authored comment drafts; runtime unchanged.
   - Correct ADR 0005 and `CONTEXT.md` to current per-chat state/store/chat and local-draft comment model.
   - Sweep ADR alternatives-considered row identified in assessment; do not change review runtime.
-- [ ] `dead-code/review-comment-status-spec-drift.md`
+- [x] `dead-code/review-comment-status-spec-drift.md` — 2026-08-28 — committed c91d18b — documented `sending`, failure, and retained posted drafts with `postedDiscussionId` in API/lifecycle spec; runtime unchanged.
   - Document live `sending` status and replace two stale “replace the draft” descriptions.
   - Re-check state/routes/component status transitions; no runtime edit unless documentation evidence disproves assessment.
 - [ ] `dead-code/review-http-stream-header-doc-drift.md`
