@@ -67,7 +67,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 
 ### P3 — internal, test, or fixture code
 
-- [ ] `dead-code/gitlab-unused-schema-types.md`
+- [x] `dead-code/gitlab-unused-schema-types.md` — 2026-08-28 — committed 4e90efd — removed four unconsumed inferred GitLab schema aliases; runtime schemas, shared position type, and GitLabDiscussion retained; focused 58/0, final full 445/0.
   - Remove four unused aliases in `glab-schemas.ts`; preserve live runtime schemas in `glab.ts` and `GitLabDiscussion` diagnostic.
   - Use LSP references before removal; run port/adapter/position tests.
 - [ ] `dead-code/ineffective-coverage-threshold-config.md`
