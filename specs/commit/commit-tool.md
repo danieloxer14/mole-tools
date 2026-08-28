@@ -41,7 +41,7 @@ Consequence: accept lower output quality for everyday commits. Stay lean. Do
 - Global CLI named `mole-tools`.
 - Installed to a location on `PATH` so it runs from any git directory.
 - Primary source control: `git`.
-- Invocation: `mole-tools --commit` (merge-request tool: separate flag/subcommand, TBD next session).
+- Invocation: `mole-tools commit` (merge-request tool: separate subcommand, TBD next session).
 
 ---
 
@@ -82,7 +82,7 @@ synced/committed repo (it lives in `~/.config`, not a project dir).
 
 ## 4. Commit tool — UX flow
 
-1. Run `mole-tools --commit` from within a git directory.
+1. Run `mole-tools commit` from within a git directory.
 2. If Jira configured **and** branch matches the ticket pattern → fetch the
    Jira ticket summary + description.
 3. Grab the diff of **staged** changes (with noise filtering, §5.2).
@@ -158,7 +158,7 @@ print the violations.
 ## 6. Scope
 
 ### In
-- Global CLI on PATH; `--commit` tool.
+- Global CLI on PATH; `commit` tool.
 - Auto-created config template on first run.
 - Staged-diff commit-message generation via local Ollama.
 - Noise filtering with stat fallback.

@@ -44,7 +44,7 @@ confirmed-bug
 
 ## Reproduction steps
 
-1. Run `mole-tools --merge-request` on a branch with a Jira key and ahead-of-base commits.
+1. Run `mole-tools merge-request` on a branch with a Jira key and ahead-of-base commits.
 2. Observe the spinner output during diff collection and MR generation.
 3. Note if multiple spinners are rendered simultaneously.
 

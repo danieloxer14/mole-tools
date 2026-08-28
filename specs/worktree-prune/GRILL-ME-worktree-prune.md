@@ -92,6 +92,8 @@ We are adding a new top-level `mole-tools worktree-prune` subcommand. It scans a
 
 **Notes:** Need per-repo grouped selection UI instead of a flat global list.
 
+> **Archival decision record.** The `--merge-request` flag form referenced in this question was superseded by the `merge-request` subcommand (see `specs/architecture/code-design.md`, §"CLI shape"). Retained for design history — not a current invocation.
+
 ### 9. Invocation pattern: `--merge-request` flag (per spec) or `merge-request` subcommand (matching existing commit/init)?
 
 **Recommended answer:** Subcommand `mole-tools merge-request` — matches existing commit/init pattern and scales cleanly with cac routing.
