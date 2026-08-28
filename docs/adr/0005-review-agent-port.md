@@ -15,8 +15,8 @@ the feature instead of an adapter boundary.
 
 Review has two permission profiles:
 
-- Chat and comment drafting inspect the detached review worktree. They must not
-  edit the worktree.
+- Chat inspects the detached review worktree through the ReviewAgent. It must
+  not edit the worktree. Comment drafts are local user-authored state.
 - Layer generation writes one validated JSON document, but only into a review
   output directory outside the worktree. It must never write code under review.
 
@@ -54,10 +54,10 @@ export interface ReviewAgent {
 }
 ```
 
-`cwd` is the worktree the agent is allowed to inspect. `systemPromptFile` is an
-absolute file supplied by mole-tools. `writeDir`, when present, is the only
-write target granted to a layer run; chat and comment turns omit it. `signal`
-propagates Stop/cancel to the provider process.
+`cwd` is the worktree the chat agent is allowed to inspect.
+`systemPromptFile` is an absolute file supplied by mole-tools. `writeDir`, when
+present, is the only write target granted to a layer run; chat turns omit it.
+`signal` propagates Stop/cancel to the provider process.
 
 Adapters normalize provider NDJSON into this event stream. Successful turns
 emit one `session` event before text, then zero or more text/tool/diagnostic
@@ -97,25 +97,33 @@ is not a `models` route and does not change `RoutingPurpose`:
 ```
 
 ## Session lifecycle
+**Documentation correction — 2026-08-28.** This accepted ADR's session
+description is amended in place to record current per-chat persistence,
+one-time legacy adoption, and local comment drafts.
 
 1. **Preflight.** `ReviewAgent` exposes `preflight()` for provider checks;
    layer generation calls it before running. A binary failure is surfaced in
    the review UI rather than mutating the worktree.
 2. **First chat turn.** The server creates a prompt containing MR metadata, the
    current layer guide, and the changed-file list. It starts `run` without a
-   session id. The first `session` event is persisted as `chatSessionId`.
-3. **Resumed chat turns.** The server passes that id back to `run`. Later prompt
-   files contain only the new message, newly selected line tags, and the open
-   file; the provider session retains the earlier review context.
+   session id. The first `session` event is persisted as the active chat's
+   `sessionId` in per-chat `chats` state. The legacy `chatSessionId` and
+   `chat.ndjson` are read-only one-time migration inputs; current state writes
+   leave `chatSessionId` null.
+3. **Resumed chat turns.** The server passes the active chat's `sessionId` back
+   to `run`. Later prompt files contain only the new message, newly selected
+   line tags, and the open file; the provider session retains the earlier
+   review context.
 4. **Transcript persistence.** Each user and assistant turn is appended to
-   `chat.ndjson`, including tags and the session id. Partial assistant text is
-   retained if a turn errors or is cancelled.
+   `chats/<chatId>.ndjson`, including tags and the session id. The legacy
+   `chat.ndjson` transcript is adopted once into `chats/legacy.ndjson`.
+   Partial assistant text is retained if a turn errors or is cancelled.
 5. **Cancellation.** `POST /api/chat/cancel` aborts the active signal. The
    executor kills the child, the stream closes with a terminal `done` event, and
    the next chat turn may start normally.
-6. **Comment drafts.** A draft generated from the diff or chat starts a fresh
-   agent session. Its session id is deliberately not stored and the draft does
-   not advance the exploratory chat transcript.
+6. **Comment drafts.** Creating a comment opens a local empty comment draft.
+   The user-authored body is sent directly on Send; no agent session is
+   created and comment activity does not change chat session state.
 7. **CLI lifetime.** The Bun review server exists only while the CLI process is
    paused. Stopping the server does not delete the persisted state, transcript,
    output, cached repository, or detached worktree. A later invocation resumes
@@ -131,10 +139,10 @@ write directory.
 
 - The server binds to `127.0.0.1` and passes the detached worktree path as
   `cwd`; it is not a remote agent service.
-- Chat and comment adapters receive read tools plus Bash, which prompt policy
-  restricts to read-only inspection commands. Prompt policy also tells the
-  agent to refuse edits. A review session is expected to leave
-  `git status --porcelain` empty in the worktree.
+- The chat agent receives read tools plus Bash, which prompt policy restricts to
+  read-only inspection commands. Prompt policy also tells the agent to refuse
+  edits. Comment drafts do not invoke the agent. A review session is expected
+  to leave `git status --porcelain` empty in the worktree.
 - Every provider stream is normalized. Unknown event shapes are diagnostics,
   not reasons to crash the server; recognized rate-limit metadata is ignored.
   Agent failures, timeouts, and cancellation become UI-visible errors while
@@ -148,7 +156,7 @@ write directory.
 |---|---|
 | Reuse `Llm` for review chat | It has no sessions, tools, working-directory boundary, or provider event stream. |
 | Put `omp` and `claude` command parsing in routes | Provider NDJSON and permissions would leak into HTTP/UI code and make adapters non-swappable. |
-| Persist a provider session for comment drafting | A comment is an isolated generation request; reusing chat state could leak unrelated turns and change chat continuity. |
+| Historical alternative: persist a provider session for comment drafting | **Superseded:** comment drafts use local user-authored bodies and do not invoke `ReviewAgent`; persisting a provider session would misstate the implemented behavior. |
 | Grant write access to the worktree | Review must not mutate the code being reviewed. Layer output belongs in a separate directory. |
 
 ## Consequences
