@@ -1209,13 +1209,89 @@ export function DiffView({
 	return (
 		<section className="diff-panel">
 			<header className="diff-header">
-				<div>
+				<div className="diff-header-title">
 					<h2>{path}</h2>
-					<p>
-						{file.insertions} additions, {file.deletions} deletions
-					</p>
+					<div className="diff-stats">
+						<span className="file-additions">+{file.insertions}</span>
+						<span className="file-deletions">-{file.deletions}</span>
+					</div>
 				</div>
 				<div className="diff-controls">
+					{!binary && !showingRendered ? (
+						<div className="find-bar">
+							<div className="find-input-wrap">
+								<input
+									ref={findInputRef}
+									type="text"
+									className="find-input"
+									placeholder="Find in file..."
+									value={findQuery}
+									onChange={(event) => {
+										const value = event.target.value;
+										setFindQuery(value);
+										setFindIndex(0);
+										if (value.length > 0 && collapsed && !expanded) {
+											requestExpansion();
+										}
+									}}
+									onKeyDown={(event) => {
+										if (event.key === "Enter" && event.shiftKey) {
+											event.preventDefault();
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, -1),
+											);
+										} else if (event.key === "Enter") {
+											event.preventDefault();
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, 1),
+											);
+										} else if (event.key === "Escape") {
+											event.preventDefault();
+											setFindQuery("");
+											setFindIndex(0);
+											event.currentTarget.blur();
+										}
+									}}
+									aria-label="Find in file"
+								/>
+								<span className="find-nav-group">
+									<button
+										type="button"
+										className="find-nav"
+										aria-label="Previous match"
+										title="Previous match (Shift+Enter)"
+										disabled={!findActive || matches.length === 0}
+										onClick={() =>
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, -1),
+											)
+										}
+									>
+										←
+									</button>
+									<button
+										type="button"
+										className="find-nav"
+										aria-label="Next match"
+										title="Next match (Enter)"
+										disabled={!findActive || matches.length === 0}
+										onClick={() =>
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, 1),
+											)
+										}
+									>
+										→
+									</button>
+								</span>
+							</div>
+							<span className="find-count" aria-live="polite">
+								{findActive
+									? `${Math.min(findIndex + 1, matches.length)}/${matches.length}`
+									: "0/0"}
+							</span>
+						</div>
+					) : null}
 					{markdown ? (
 						<>
 							<button
@@ -1256,48 +1332,6 @@ export function DiffView({
 					) : null}
 				</div>
 			</header>
-			{!binary && !showingRendered ? (
-				<div className="find-bar">
-					<input
-						ref={findInputRef}
-						type="text"
-						className="find-input"
-						placeholder="Find in file..."
-						value={findQuery}
-						onChange={(event) => {
-							const value = event.target.value;
-							setFindQuery(value);
-							setFindIndex(0);
-							if (value.length > 0 && collapsed && !expanded) {
-								requestExpansion();
-							}
-						}}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") {
-								event.preventDefault();
-								setFindIndex((current) =>
-									stepMatchIndex(
-										current,
-										matches.length,
-										event.shiftKey ? -1 : 1,
-									),
-								);
-							} else if (event.key === "Escape") {
-								event.preventDefault();
-								setFindQuery("");
-								setFindIndex(0);
-								event.currentTarget.blur();
-							}
-						}}
-						aria-label="Find in file"
-					/>
-					<span className="find-count" aria-live="polite">
-						{findActive
-							? `${Math.min(findIndex + 1, matches.length)}/${matches.length}`
-							: "0/0"}
-					</span>
-				</div>
-			) : null}
 			{binary ? (
 				<p className="stat-line">
 					Binary file; {file.insertions} additions, {file.deletions} deletions.

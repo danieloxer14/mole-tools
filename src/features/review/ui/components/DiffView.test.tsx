@@ -76,8 +76,28 @@ test("renders an always-visible find-in-file box in the diff header", () => {
 			onCommentSelection={() => {}}
 		/>,
 	);
-	// The find box is always visible in the file header, idle count 0/0.
-	expect(markup).toContain('class="find-input"');
+	// The find box stays inline with view controls, with navigation inside the
+	// input and a gap before the Inline button.
+	const controlsIndex = markup.indexOf('class="diff-controls"');
+	const statsIndex = markup.indexOf('class="diff-stats"');
+	const findBarIndex = markup.indexOf('class="find-bar"');
+	const findCountIndex = markup.indexOf('class="find-count"');
+	const inlineButtonIndex = markup.indexOf(">Inline<");
+	expect(markup).toContain('class="diff-header"');
+	expect(statsIndex).toBeGreaterThanOrEqual(0);
+	expect(statsIndex).toBeLessThan(findBarIndex);
+	expect(markup).toContain("+1");
+	expect(markup).not.toContain(" additions,");
+	expect(markup).not.toContain(" deletions");
+	expect(controlsIndex).toBeGreaterThanOrEqual(0);
+	expect(findBarIndex).toBeGreaterThan(controlsIndex);
+	expect(markup).toContain('class="find-input-wrap"');
+	expect(markup).toContain('class="find-nav-group"');
+	expect(inlineButtonIndex).toBeGreaterThan(findCountIndex);
 	expect(markup).toContain('aria-label="Find in file"');
+	expect(markup).toContain('class="find-nav" aria-label="Previous match"');
+	expect(markup.match(/class="find-nav"/g)).toHaveLength(2);
+	expect(markup).toContain('title="Previous match (Shift+Enter)"');
+	expect(markup).toContain('title="Next match (Enter)"');
 	expect(markup).toContain("0/0");
 });
