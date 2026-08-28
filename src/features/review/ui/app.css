@@ -602,6 +602,9 @@ button.active {
 	font-size: 0.72rem;
 	padding: 5px 8px;
 }
+.expand-context-row button + button {
+	margin-left: 5px;
+}
 .diff-table {
 	border-collapse: collapse;
 	font-family: "SFMono-Regular", Consolas, monospace;
@@ -650,12 +653,6 @@ button.active {
 }
 .diff-table .hunk-header td {
 	padding: 7px;
-}
-.diff-table .hunk-tag {
-	float: right;
-	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-	font-size: 0.68rem;
-	padding: 4px 7px;
 }
 .diff-line[role="button"] {
 	cursor: pointer;
@@ -1063,8 +1060,7 @@ button.active {
 	margin-top: 8px;
 }
 .comment-draft-actions button,
-.selection-comment-row button,
-.hunk-comment {
+.selection-comment-row button {
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 0.68rem;
 	padding: 4px 7px;
@@ -1121,10 +1117,6 @@ button.active {
 .diff-table .diff-line:hover .line-actions,
 .diff-table .line-actions:focus-within {
 	opacity: 1;
-}
-.diff-table .hunk-comment {
-	float: right;
-	margin-right: 5px;
 }
 .chat-composer {
 	border-top: 1px solid #2d3a48;

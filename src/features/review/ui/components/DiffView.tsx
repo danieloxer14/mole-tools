@@ -832,6 +832,7 @@ interface LineSelectionAnchor extends SelectableLine {
 function HunkRows({
 	file,
 	hunk,
+	showHeader,
 	mode,
 	language,
 	path,
@@ -847,6 +848,7 @@ function HunkRows({
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
+	showHeader: boolean;
 	mode: DiffMode;
 	language: string;
 	path: string;
@@ -867,58 +869,17 @@ function HunkRows({
 	onTagHunk?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
 }) {
-	const hunkPoints = hunk.lines
-		.map((line) => selectableLine(line, defaultSide))
-		.filter((point): point is SelectableLine => point !== null);
-	const primaryPoints = hunkPoints.filter(
-		(point) => point.side === defaultSide,
-	);
-	const tagPoints = primaryPoints.length > 0 ? primaryPoints : hunkPoints;
-	const hunkSelection: DiffLineSelection | null =
-		tagPoints.length > 0
-			? {
-					path,
-					side: tagPoints[0]?.side ?? defaultSide,
-					startLine: Math.min(...tagPoints.map((point) => point.line)),
-					endLine: Math.max(...tagPoints.map((point) => point.line)),
-					hunk: hunk.header,
-				}
-			: null;
-	const tagHunk =
-		hunkSelection && onTagHunk ? () => onTagHunk(hunkSelection) : undefined;
-	const commentHunk =
-		hunkSelection && onCommentSelection
-			? () => onCommentSelection(hunkSelection)
-			: undefined;
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
 	return (
 		<>
-			<tr className="hunk-header">
-				<td colSpan={mode === "side-by-side" ? 4 : 3}>
-					<span>{hunk.header}</span>
-					{commentHunk ? (
-						<button
-							type="button"
-							className="hunk-comment"
-							onClick={commentHunk}
-							title="Add a comment to the full hunk"
-						>
-							Add comment
-						</button>
-					) : null}
-					{tagHunk ? (
-						<button
-							type="button"
-							className="hunk-tag"
-							onClick={tagHunk}
-							title="Add the full hunk as chat context"
-						>
-							Tag hunk
-						</button>
-					) : null}
-				</td>
-			</tr>
+			{showHeader ? (
+				<tr className="hunk-header">
+					<td colSpan={mode === "side-by-side" ? 4 : 3}>
+						<span>{hunk.header}</span>
+					</td>
+				</tr>
+			) : null}
 			{hunk.lines.map((line) => {
 				const point = selectableLine(line, defaultSide);
 				const selected =
@@ -1130,12 +1091,21 @@ function DiffTable({
 						index === 0
 							? hunk.header
 							: (file.hunks[index - 1]?.header ?? hunk.header);
+					const showHunkHeader =
+						!wholeFile &&
+						hunk.lines.length > 0 &&
+						(precedingGap === undefined ||
+							hiddenContextRange(
+								precedingGap,
+								revealedCounts[precedingGap.id] ?? 0,
+							) !== null);
 					return (
 						<Fragment key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}>
 							{precedingGap ? renderContext(precedingGap, anchorHunk) : null}
 							<HunkRows
 								file={file}
 								hunk={hunk}
+								showHeader={showHunkHeader}
 								mode={mode}
 								language={language}
 								path={path}
