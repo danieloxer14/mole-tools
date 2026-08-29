@@ -27,6 +27,59 @@ const file = {
 		},
 	],
 } as const;
+const multiHunkFile = {
+	oldPath: "src/app.ts",
+	newPath: "src/app.ts",
+	status: "modified",
+	binary: false,
+	insertions: 2,
+	deletions: 0,
+	hunks: [
+		{
+			header: "@@ -1 +1 @@",
+			oldStart: 1,
+			oldLines: 1,
+			newStart: 1,
+			newLines: 1,
+			lines: [
+				{
+					kind: "add",
+					oldLine: null,
+					newLine: 1,
+					text: "first change",
+				},
+			],
+		},
+		{
+			header: "@@ -4 +4 @@",
+			oldStart: 4,
+			oldLines: 1,
+			newStart: 4,
+			newLines: 1,
+			lines: [
+				{
+					kind: "add",
+					oldLine: null,
+					newLine: 4,
+					text: "second change",
+				},
+				{
+					kind: "context",
+					oldLine: 3,
+					newLine: null,
+					text: "context without new line",
+				},
+			],
+		},
+	],
+} as const;
+
+const multiHunkSource = [
+	"first change",
+	"context one",
+	"context two",
+	"second change",
+].join("\n");
 
 function renderDiff(
 	props: Partial<Parameters<typeof DiffView>[0]> = {},
@@ -62,6 +115,40 @@ test("hides hunk summary in whole-file mode", () => {
 
 	expect(markup).not.toContain('class="hunk-header"');
 	expect(markup).toContain("export const value = 1;");
+});
+
+test("marks diff hunk rows with drag identity attributes", () => {
+	const markup = renderDiff({ file: multiHunkFile });
+
+	expect(markup).toContain('data-drag-hunk="0"');
+	expect(markup).toContain('data-drag-hunk="1"');
+	expect(markup).toContain(
+		'data-drag-hunk="0" data-drag-side="new" data-drag-line="1"',
+	);
+	expect(markup).toContain(
+		'data-drag-hunk="1" data-drag-side="new" data-drag-line="4"',
+	);
+	const unaddressableRow = markup.match(
+		/<tr[^>]*data-find-line="h:@@ -4 \+4 @@:3:-"[^>]*>/,
+	)?.[0];
+	expect(unaddressableRow).toBeDefined();
+	expect(unaddressableRow).not.toContain("data-drag-hunk");
+	expect(unaddressableRow).not.toContain("data-drag-side");
+	expect(unaddressableRow).not.toContain("data-drag-line");
+});
+
+test("keeps revealed inter-hunk context rows out of drag identity", () => {
+	const markup = renderDiff({
+		file: multiHunkFile,
+		fileContents: multiHunkSource,
+		wholeFile: true,
+	});
+	const contextRow = markup.match(
+		/<tr[^>]*data-find-line="c:new:2"[^>]*>/,
+	)?.[0];
+
+	expect(contextRow).toBeDefined();
+	expect(contextRow).not.toContain("data-drag-hunk");
 });
 
 test("renders an always-visible find-in-file box in the diff header", () => {
