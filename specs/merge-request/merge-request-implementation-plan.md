@@ -17,7 +17,7 @@ Implement a GitLab-only `merge-request` feature that opens an MR from the curren
 The implementation should preserve the product spec's stance:
 
 - fail fast;
-- do not auto-recover from rejected pushes or dirty unstaged trees;
+- do not auto-recover from rejected pushes; preserve dirty unstaged trees without committing them;
 - keep content generation owned by the MR prompt;
 - keep structure/flow owned by the tool;
 - implement reviewer suggestions as the one deliberately heavier piece of repo intelligence.
@@ -105,7 +105,6 @@ export interface Vcs {
   currentBranch(): Promise<string>;
   defaultBranch(): Promise<string>;
   hasStagedChanges(): Promise<boolean>;
-  hasUnstagedChanges(): Promise<boolean>;
   stagedDiff(): Promise<FileDiff[]>;
   commit(message: string): Promise<{ sha: string }>;
   push(opts: { setUpstream: boolean; branch: string }): Promise<void>;
@@ -133,7 +132,6 @@ File: `src/adapters/vcs/git.ts`
 
 Implement new methods using Bun-friendly git execution:
 
-- `hasUnstagedChanges`: `git diff --quiet` returns `1` when dirty.
 - `hasUpstream`: `git rev-parse --abbrev-ref <branch>@{upstream}`.
 - `isAheadOfUpstream`: `git rev-list --count @{upstream}..HEAD`.
 - `mergeBaseDiff`: `git diff origin/<base>...HEAD --numstat` and `git diff origin/<base>...HEAD`.
@@ -519,7 +517,7 @@ Cover command construction and parsing for:
 | 2 default branch guard | `merge-request/index.ts` |
 | 3 existing MR guard | `GitHost.findOpenMr` + feature guard |
 | 4 staged changes commit detour | `runCommitFlow(ctx, { askToPush: false })` |
-| 5 unstaged abort | `Vcs.hasUnstagedChanges` + feature guard |
+| 5 unstaged changes proceed | `mergeBaseDiff` over `origin/<base>...HEAD`; no unstaged-change guard |
 | 6 no upstream push | `Vcs.hasUpstream` + `push({ setUpstream: true })` |
 | 7 local ahead push | `Vcs.isAheadOfUpstream` + `push` |
 | 8 rejected push | `GitAdapter.push` preserves stderr in `PortError` |

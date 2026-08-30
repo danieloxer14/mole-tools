@@ -80,10 +80,6 @@ export class FakeVcs implements Vcs {
 		return this.opts.commitsAhead ?? [];
 	}
 
-	async hasUnstagedChanges(): Promise<boolean> {
-		return false;
-	}
-
 	async hasUpstream(_branch: string): Promise<boolean> {
 		return this.opts.upstream ?? true;
 	}

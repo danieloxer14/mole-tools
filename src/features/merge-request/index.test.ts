@@ -120,7 +120,6 @@ describe("merge-request flow", () => {
 				},
 			],
 		});
-		vcs.hasUnstagedChanges = async () => true;
 		const ctx = fakeContext({
 			vcs,
 			llm,

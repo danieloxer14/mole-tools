@@ -47,7 +47,6 @@ export interface Vcs {
 	commitsAhead(base: string): Promise<CommitMeta[]>;
 	rangeDiff(base: string): Promise<FileDiff[]>;
 	mergeBaseDiff(base: string): Promise<FileDiff[]>;
-	hasUnstagedChanges(): Promise<boolean>;
 	hasUpstream(branch: string): Promise<boolean>;
 	isAheadOfUpstream(branch: string): Promise<boolean>;
 	changedFiles(base: string): Promise<string[]>;
