@@ -109,5 +109,3 @@ export function ApprovalControls({
 		</section>
 	);
 }
-
-export { actionLabel, stateLabel };
