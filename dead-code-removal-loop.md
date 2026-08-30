@@ -103,7 +103,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 
 ### P2 — build, release, configuration, or UI contract code
 
-- [ ] `dead-code/review-duplicate-http-token-transport.md`
+- [ ] `dead-code/review-duplicate-http-token-transport.md` — Needs investigation — 2026-08-30 — no code changed; focused route/server/comments tests passed 37/0 but exited on enforced 90% coverage (63.01% funcs / 69.14% lines), full suite passed 440/0 but exited on coverage (84.99% funcs / 88.36% lines); build and lint passed; exact blocker recorded in ticket.
   - Remove client-side query-token transport from all 19 review UI fetch calls, retaining header authentication.
   - Preserve server query-token authorization and startup URL handling because they serve distinct paths. Run route/server/comment tests and authenticated UI smoke path.
 - [ ] `dead-code/review-ui-duplicate-column-constants.md`
