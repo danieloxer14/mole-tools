@@ -124,7 +124,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/vcs-duplicate-repo-root-lookup.md` — 2026-08-30 — committed 26f4110 — cached one Git root lookup for configured dynamic-environment handoff and skipped the dynamic-env lookup when repositories are unconfigured; retained reviewer CODEOWNERS lookup.
   - Cache/reuse one `repoRoot()` result for duplicate calls at merge-request `index.ts` lines 138/144 only; leave reviewers call out of scope.
   - Add call-count capability to FakeVcs only if needed to prove one lookup, then retain a behavior-level guard for dynamic-environment branch.
-- [ ] `dead-code/vcs-duplicate-reviewer-history.md`
+- [x] `dead-code/vcs-duplicate-reviewer-history.md` — 2026-08-30 — committed faf33fa — cached touch/recent author history for no-CODEOWNERS fallback; retained candidate ordering, handle resolution, and exact one-query regression coverage; live MR smoke stopped at unavailable Ollama.
   - Compute `touchAuthorsForFiles(files, 200)` and `recentAuthors(100)` once, reuse in no-CODEOWNERS fallback, and preserve ranking input/order semantics.
   - Add retained call-count/result-equivalence coverage because current FakeVcs returns no authors; smoke-test reviewer selection MR path.
 
