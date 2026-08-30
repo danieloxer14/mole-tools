@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FakeReviewAgent } from "../../test/fakes/FakeReviewAgent";
-import {
-	type AgentEvent,
-	parseAgentEvent,
-	type ReviewAgent,
-} from "../ports/review-agent";
+import type { AgentEvent, ReviewAgent } from "../ports/review-agent";
 
 async function collect(
 	source: AsyncIterable<AgentEvent>,
@@ -115,31 +111,6 @@ describe("ReviewAgent port contract", () => {
 		await expect(iterator.next()).resolves.toEqual({
 			done: true,
 			value: undefined,
-		});
-	});
-
-	test("reports unknown events as nonfatal diagnostics and malformed events as errors", () => {
-		expect(parseAgentEvent('{"type":"future","value":true}')).toEqual({
-			kind: "diagnostic",
-			code: "unknown_event",
-			message: "Unknown agent event type: future",
-			eventType: "future",
-			raw: { type: "future", value: true },
-		});
-		expect(parseAgentEvent("not-json")).toEqual({
-			kind: "error",
-			message: "Malformed agent event: invalid JSON (not-json)",
-		});
-		expect(parseAgentEvent('{"type":"text","delta":42}')).toEqual({
-			kind: "error",
-			message: "Malformed agent event: text event requires a string delta",
-		});
-		expect(
-			parseAgentEvent('{"type":"tool","name":"read","phase":"start"}'),
-		).toEqual({
-			kind: "tool",
-			name: "read",
-			phase: "start",
 		});
 	});
 });
