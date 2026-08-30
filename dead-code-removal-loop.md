@@ -115,7 +115,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 
 ### P1 — live runtime duplicate code
 
-- [ ] `dead-code/review-agent-adapter-duplication.md`
+- [x] `dead-code/review-agent-adapter-duplication.md` — 2026-08-30 — committed 4866986 — consolidated duplicated OMP/Claude adapter plumbing with shared boundary coverage; provider-specific mappings/auth/cancellation retained; live GitLab MR smoke unavailable because branch has no GitLab remote/auth host.
   - Extract the six genuinely identical private adapter helpers shared by `omp.ts` and `claude.ts`; migrate both adapters without changing provider-specific auth recovery, nested `result`, or cancellation handling.
   - Run adapter/port tests and review-agent user path smoke.
 - [ ] `dead-code/vcs-duplicate-commits-ahead-log.md`
