@@ -2,7 +2,7 @@ import { PortError } from "../core/errors";
 import type { DiffRefs } from "../ports/git-host";
 import type { DiffLine, ParsedFileDiff } from "./diff-parse";
 
-export interface LineSelection {
+interface LineSelection {
 	path: string;
 	side: "new" | "old";
 	startLine: number;
@@ -31,7 +31,7 @@ export interface GitLabPositionPayload {
 	};
 }
 
-export function lineCode(
+function lineCode(
 	filePath: string,
 	oldLine: number | null,
 	newLine: number | null,
