@@ -121,7 +121,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/vcs-duplicate-commits-ahead-log.md` — **Needs investigation** — 2026-08-30 — no code changed; baseline focused tests ran 52/0 but exited on enforced 90% coverage (72.17% funcs / 71.60% lines), full suite ran 445/0 but exited on coverage (85.26% funcs / 88.59% lines); build and lint passed; exact blocker recorded in ticket.
   - Replace `commitsAhead` caller with canonical `log({ base })`; remove obsolete port/adapter method and migrate three specs.
   - Add retained coverage for empty-abort and no-count adapter behavior; update Git test argument ordering.
-- [ ] `dead-code/vcs-duplicate-repo-root-lookup.md`
+- [x] `dead-code/vcs-duplicate-repo-root-lookup.md` — 2026-08-30 — committed 26f4110 — cached one Git root lookup for configured dynamic-environment handoff and skipped the dynamic-env lookup when repositories are unconfigured; retained reviewer CODEOWNERS lookup.
   - Cache/reuse one `repoRoot()` result for duplicate calls at merge-request `index.ts` lines 138/144 only; leave reviewers call out of scope.
   - Add call-count capability to FakeVcs only if needed to prove one lookup, then retain a behavior-level guard for dynamic-environment branch.
 - [ ] `dead-code/vcs-duplicate-reviewer-history.md`
