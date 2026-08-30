@@ -135,24 +135,27 @@ export async function runMergeRequestFlow(
 	await ctx.ui.info(`Merge request created: ${created.url}`);
 
 	const configuredRepos = ctx.config.dynamicEnvRepos ?? [];
-	const repoName = basename(await ctx.vcs.repoRoot());
-	if (
-		configuredRepos.includes(repoName) &&
-		(await ctx.ui.confirm("Create a dynamic environment?"))
-	) {
-		const script = join(
-			await ctx.vcs.repoRoot(),
-			ctx.config.dynamicEnvScript ?? "hack/local/dynamic-env.sh",
-		);
-		if (!(await Bun.file(script).exists())) {
-			await ctx.ui.warn(`Dynamic-env script not found: ${script}`);
-		} else {
-			const proc = Bun.spawn([script], {
-				stdin: "inherit",
-				stdout: "inherit",
-				stderr: "inherit",
-			});
-			await proc.exited;
+	if (configuredRepos.length > 0) {
+		const repoRoot = await ctx.vcs.repoRoot();
+		const repoName = basename(repoRoot);
+		if (
+			configuredRepos.includes(repoName) &&
+			(await ctx.ui.confirm("Create a dynamic environment?"))
+		) {
+			const script = join(
+				repoRoot,
+				ctx.config.dynamicEnvScript ?? "hack/local/dynamic-env.sh",
+			);
+			if (!(await Bun.file(script).exists())) {
+				await ctx.ui.warn(`Dynamic-env script not found: ${script}`);
+			} else {
+				const proc = Bun.spawn([script], {
+					stdin: "inherit",
+					stdout: "inherit",
+					stderr: "inherit",
+				});
+				await proc.exited;
+			}
 		}
 	}
 	return {

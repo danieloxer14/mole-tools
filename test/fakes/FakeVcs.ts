@@ -45,6 +45,7 @@ export class FakeVcs implements Vcs {
 	addWorktreeCalls: AddWorktreeInput[] = [];
 	diffRangeCalls: { repoRoot: string; from: string; to: string }[] = [];
 	remoteUrlCalls: { repoRoot: string; remote: string }[] = [];
+	repoRootCalls: string[] = [];
 	logCalls: LogQuery[] = [];
 
 	constructor(private readonly opts: FakeVcsOptions = {}) {}
@@ -105,7 +106,9 @@ export class FakeVcs implements Vcs {
 	}
 
 	async repoRoot(): Promise<string> {
-		return this.opts.repoRoot ?? "/tmp/fake-repo";
+		const root = this.opts.repoRoot ?? "/tmp/fake-repo";
+		this.repoRootCalls.push(root);
+		return root;
 	}
 
 	async cloneRepo(remoteUrl: string, destination: string): Promise<void> {
