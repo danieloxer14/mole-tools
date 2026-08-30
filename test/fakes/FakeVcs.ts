@@ -33,7 +33,6 @@ export interface FakeVcsOptions {
 	mergeBase?: string;
 	worktrees?: WorktreeInfo[];
 	removeWorktreeError?: Error;
-	forceRemoveWorktreeError?: Error;
 	showWorktreeStatusOutput?: string;
 }
 
@@ -177,8 +176,6 @@ export class FakeVcs implements Vcs {
 
 	async forceRemoveWorktree(path: string, repoRoot: string): Promise<void> {
 		this.forceWorktreeCalls.push({ path, repoRoot });
-		if (this.opts.forceRemoveWorktreeError)
-			throw this.opts.forceRemoveWorktreeError;
 	}
 
 	async showWorktreeStatus(
