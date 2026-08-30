@@ -94,7 +94,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [ ] `dead-code/root-cli-scaffold.md` — Needs investigation — 2026-08-28 — no code changed; baseline blocked by enforced 90% coverage gate (84.91% funcs / 88.27% lines), recorded in ticket.
   - Delete root `index.ts` Bun greeting scaffold. Preserve fake diff-data strings that happen to contain its path.
   - Smoke-test supported CLI `help` and `--version`; prove module/dev/build/release/install paths use `src/index.tsx`.
-- [ ] `dead-code/shared-line-code-export.md`
+- [x] `dead-code/shared-line-code-export.md` — 2026-08-30 — committed 1cdc438 — removed five unconsumed shared export modifiers; retained position, diff-parser, and format APIs; focused tests 55/0, 171/0, 31/0; build/lint passed; full 445/0 with existing 84.91% funcs / 88.27% lines coverage-gate exit.
   - Remove five unused exports while retaining their live internal APIs; migrate `lineCode` test to public/needed behavior rather than exported access.
   - Use LSP references and run shared, port, adapter, and feature tests.
 - [ ] `dead-code/vcs-unused-unstaged-check.md`
