@@ -97,7 +97,7 @@ The assessed `dead-code/` reports and `dead-code-assess-loop.md` must be present
 - [x] `dead-code/shared-line-code-export.md` — 2026-08-30 — committed 1cdc438 — removed five unconsumed shared export modifiers; retained position, diff-parser, and format APIs; focused tests 55/0, 171/0, 31/0; build/lint passed; full 445/0 with existing 84.91% funcs / 88.27% lines coverage-gate exit.
   - Remove five unused exports while retaining their live internal APIs; migrate `lineCode` test to public/needed behavior rather than exported access.
   - Use LSP references and run shared, port, adapter, and feature tests.
-- [ ] `dead-code/vcs-unused-unstaged-check.md`
+- [x] `dead-code/vcs-unused-unstaged-check.md` — 2026-08-30 — committed 5fca4e3 — removed unused `hasUnstagedChanges` VCS port/adapter/fake/test hook and stale implementation-plan references; retained merge-base diff behavior and unstaged-change exclusion.
   - Remove dead `hasUnstagedChanges` VCS port slot, Git implementation, FakeVcs implementation, inert test override, and stale dead-spec scenarios.
   - Preserve live behavior documentation references and resolve archival decision for stale spec before editing.
 
