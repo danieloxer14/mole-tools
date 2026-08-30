@@ -3,6 +3,7 @@ import type {
 	CommitMeta,
 	FileDiff,
 	LogQuery,
+	TouchAuthor,
 	Vcs,
 	WorktreeInfo,
 } from "../../src/ports/vcs";
@@ -24,6 +25,8 @@ export interface FakeVcsOptions {
 	rangeDiff?: FileDiff[];
 	diffRange?: FileDiff[];
 	log?: CommitMeta[];
+	touchAuthors?: TouchAuthor[];
+	recentAuthors?: string[];
 	upstream?: boolean;
 	ahead?: boolean;
 	mergeBaseDiff?: FileDiff[];
@@ -47,6 +50,8 @@ export class FakeVcs implements Vcs {
 	remoteUrlCalls: { repoRoot: string; remote: string }[] = [];
 	repoRootCalls: string[] = [];
 	logCalls: LogQuery[] = [];
+	touchAuthorCalls: { files: string[]; maxCount?: number }[] = [];
+	recentAuthorCalls: (number | undefined)[] = [];
 
 	constructor(private readonly opts: FakeVcsOptions = {}) {}
 
@@ -97,12 +102,17 @@ export class FakeVcs implements Vcs {
 		return [];
 	}
 
-	async touchAuthorsForFiles(_files: string[]): Promise<never[]> {
-		return [];
+	async touchAuthorsForFiles(
+		files: string[],
+		maxCount?: number,
+	): Promise<TouchAuthor[]> {
+		this.touchAuthorCalls.push({ files, maxCount });
+		return this.opts.touchAuthors ?? [];
 	}
 
-	async recentAuthors(_maxCount?: number): Promise<string[]> {
-		return [];
+	async recentAuthors(maxCount?: number): Promise<string[]> {
+		this.recentAuthorCalls.push(maxCount);
+		return this.opts.recentAuthors ?? [];
 	}
 
 	async repoRoot(): Promise<string> {

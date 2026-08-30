@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { FakeGitHost } from "../../../test/fakes/FakeGitHost";
+import { FakeUiPort } from "../../../test/fakes/FakeUiPort";
+import { FakeVcs } from "../../../test/fakes/FakeVcs";
+import { fakeContext } from "../../../test/fakes/fakeContext";
 import {
 	buildFallbackReviewerSuggestions,
 	matchAuthorToMember,
 	parseCodeowners,
 	rankReviewerSuggestions,
+	selectReviewers,
 } from "./reviewers";
 
 const member = (handle: string, displayName = handle) => ({
@@ -73,5 +80,44 @@ describe("merge-request reviewers", () => {
 			{ id: "1", handle: "self" },
 		);
 		expect(result.map((item) => item.displayName)).toEqual(["other"]);
+	});
+	test("reuses history queries for no-CODEOWNERS fallback", async () => {
+		const root = await mkdtemp(join("/tmp", "mole-tools-reviewers-"));
+		const vcs = new FakeVcs({
+			repoRoot: root,
+			touchAuthors: [
+				{ author: "Alice Smith", count: 5 },
+				{ author: "Bob Jones", count: 2 },
+			],
+			recentAuthors: ["Charlie Day", "Alice Smith"],
+		});
+		const resolvedHandles: string[] = [];
+		const host = new FakeGitHost({
+			resolveHandle: async (handle) => {
+				resolvedHandles.push(handle);
+				const memberByName = {
+					"Alice Smith": member("alice"),
+					"Bob Jones": member("bob"),
+					"Charlie Day": member("charlie"),
+				};
+				return memberByName[handle as keyof typeof memberByName] ?? null;
+			},
+		});
+		const ui = new FakeUiPort([{ multiSelect: ["alice", "bob"] }]);
+
+		try {
+			await expect(
+				selectReviewers(fakeContext({ gitHost: host, ui, vcs }), "main"),
+			).resolves.toEqual(["alice", "bob"]);
+			expect(vcs.touchAuthorCalls).toEqual([{ files: [], maxCount: 200 }]);
+			expect(vcs.recentAuthorCalls).toEqual([100]);
+			expect(resolvedHandles).toEqual([
+				"Alice Smith",
+				"Bob Jones",
+				"Charlie Day",
+			]);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
 	});
 });

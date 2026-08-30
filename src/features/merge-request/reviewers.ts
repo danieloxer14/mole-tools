@@ -209,19 +209,17 @@ export async function selectReviewers(
 	}
 
 	// Build suggestions from CODEOWNERS members, touch authors, and recent authors.
+	const touchAuthors = await ctx.vcs.touchAuthorsForFiles(files, 200);
+	const recentAuthors = await ctx.vcs.recentAuthors(100);
 	let suggestions = rankReviewerSuggestions(
 		members,
-		await ctx.vcs.touchAuthorsForFiles(files, 200),
-		await ctx.vcs.recentAuthors(100),
+		touchAuthors,
+		recentAuthors,
 		currentUser,
 	);
 
 	// If no candidates ranked from CODEOWNERS pool, fall back to git history only.
 	if (suggestions.length === 0 && members.length === 0) {
-		const [touchAuthors, recentAuthors] = await Promise.all([
-			ctx.vcs.touchAuthorsForFiles(files, 200),
-			ctx.vcs.recentAuthors(100),
-		]);
 		suggestions = buildFallbackReviewerSuggestions(
 			touchAuthors,
 			recentAuthors,
