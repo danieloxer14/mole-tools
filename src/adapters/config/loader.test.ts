@@ -36,6 +36,20 @@ describe("loadConfig", () => {
 			largeFileLineThreshold: 800,
 		});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain('// "reviewBabysitter": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//   "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",',
+		);
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//   "webhookUrlEnv": "SLACK_WEBHOOK_URL",',
+		);
+		expect(CONFIG_TEMPLATE_TEXT).toContain('//   "maxChangedLines": 250,');
+		expect(CONFIG_TEMPLATE_TEXT).toContain('//   "maxChangedFiles": 10,');
+		expect(CONFIG_TEMPLATE_TEXT).toContain('//   "denyPathsByProject": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//     "group/repo": ["src/auth/**", "infra/**"]',
+		);
+		expect(CONFIG_TEMPLATE_TEXT).not.toContain('"webhookUrl":');
 	});
 
 	test("bootstraps a template when no config file exists, then continues", async () => {
@@ -76,6 +90,38 @@ describe("loadConfig", () => {
 			mergeRequest: "ollama",
 		});
 		expect(legacyConfig.ollama?.commitModel).toBe("custom-model");
+	});
+	test("preserves babysitter settings through legacy normalization", async () => {
+		const path = await configPath();
+		const reviewBabysitter = {
+			intervalSeconds: 60,
+			assignees: ["review-owner"],
+			aiReviewerUsername: "ai-reviewer",
+			promptFile: "~/.config/mole-tools/prompts/review-babysitter.md",
+			model: "model-name",
+			webhookUrlEnv: "SLACK_WEBHOOK_URL",
+			maxChangedLines: 0,
+			maxChangedFiles: 0,
+			denyPathsByProject: { "group/repo": [] },
+		};
+		const legacy = {
+			ollama: {
+				commitModel: "custom-model",
+				baseUrl: "http://localhost:11434",
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			reviewBabysitter,
+		};
+		await Bun.write(path, JSON.stringify(legacy));
+
+		const config = await loadConfig(path);
+
+		expect(config.reviewBabysitter).toEqual(reviewBabysitter);
+		expect(config.models).toEqual({
+			commit: { provider: "ollama", name: "custom-model" },
+			mergeRequest: { provider: "ollama", name: "custom-model" },
+		});
 	});
 
 	test("throws a precise error for a bad config key", async () => {

@@ -47,18 +47,18 @@ export interface ReviewFreshnessInput {
 	state: ReviewState;
 	mr: Pick<ReviewMergeRequest, "headSha">;
 }
-interface ReviewRevisionInput {
+export interface ReviewRevisionInput {
 	vcs: Vcs;
 	repoRoot: string;
 	mr: Pick<ReviewMergeRequest, "headSha" | "targetBranch" | "diffRefs">;
 }
 
-interface ReviewRevision {
+export interface ReviewRevision {
 	mergeBaseSha: string;
 	diffRefs: ReviewDiffRefs;
 }
 
-async function prepareReviewRevision(
+export async function prepareReviewRevision(
 	input: ReviewRevisionInput,
 ): Promise<ReviewRevision> {
 	// GitLab's diff base is authoritative; local target branches may be stale.

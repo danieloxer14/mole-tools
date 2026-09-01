@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { Feature } from "../../core/feature";
+import { reviewBabysitter } from "../review-babysitter";
 import {
 	formatCommandHelp,
 	formatGeneralHelp,
@@ -227,6 +228,62 @@ describe("formatCommandHelp", () => {
 			expect(result.text).toContain("simple");
 			expect(result.text).toContain("A simple command");
 		}
+	});
+});
+
+describe("review-babysitter help contract", () => {
+	test("renders exact command metadata", () => {
+		const general = formatGeneralHelp([reviewBabysitter]);
+		expect(general).toContain(
+			"review-babysitter\tPeriodically assess and safely approve configured GitLab merge requests",
+		);
+
+		const result = formatCommandHelp([reviewBabysitter], "review-babysitter");
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.text).toContain("Usage:\n  mole-tools review-babysitter");
+			expect(result.text).toContain(
+				"mole-tools review-babysitter mole-tools review-babysitter",
+			);
+			expect(result.text).toContain(
+				"Requires reviewBabysitter config, authenticated glab, OMP, and its Slack webhook environment variable.",
+			);
+			expect(result.text).toContain(
+				"Configuration: intervalSeconds defaults to 900 seconds and must be at least 60",
+			);
+			expect(result.text).toContain(
+				"Lifecycle: starts one scan immediately, processes merge requests serially, waits after each completed scan, and stops cleanly on SIGINT or SIGTERM without starting another scan.",
+			);
+			expect(result.text).toContain(
+				"Limits and deny-list: change and file limits are strict upper bounds where equality is allowed",
+			);
+			expect(result.text).toContain(
+				"Non-goals: does not post review comments, add a requires-review label, remove labels, change assignees, rerun CI, merge requests, retry prompts or approvals, or replace interactive review.",
+			);
+		}
+	});
+	test("documents the full babysitter report and lifecycle contract", async () => {
+		const readme = await Bun.file("README.md").text();
+		expect(readme).toContain(
+			"Each scan sends one Slack\nmessage with a summary header",
+		);
+		expect(readme).toContain("two-line entry per checked\nmerge request");
+		expect(readme).toContain(
+			"| 1 | Draft | `⏭️ This MR is draft. Mark it ready when work is ready.` |",
+		);
+		expect(readme).toContain(
+			"| 3 | GitLab reports unresolved discussions | `💬 GitLab reports unresolved discussions. Resolve open discussions.` |",
+		);
+		expect(readme).toContain(
+			"| 7 | No configured-AI note and no `ai-review` label | `🏷️ AI review requested.` |",
+		);
+		expect(readme).toContain(
+			"| 20 | GitLab approval succeeds | `✅ Auto-approved after low-risk AI assessment.` If more approvals remain, the line states the count. |",
+		);
+		expect(readme).toContain(
+			"| Error | Exception while obtaining next required input | `❌ Check could not complete: <safe error>.` |",
+		);
+		expect(readme).toContain("The babysitter does not post review comments");
 	});
 });
 

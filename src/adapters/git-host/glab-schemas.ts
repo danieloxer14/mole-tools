@@ -19,6 +19,34 @@ export const GitLabDiffRefsSchema = z
 		head_sha: NonEmptyString,
 	})
 	.passthrough();
+export const GitLabAssigneeSchema = z
+	.object({
+		username: NonEmptyString,
+	})
+	.passthrough();
+
+export const GitLabLabelSchema = z.union([
+	NonEmptyString,
+	z.object({ name: NonEmptyString }).passthrough(),
+]);
+
+export const GitLabPipelineSchema = z
+	.object({
+		sha: NonEmptyString.optional(),
+		status: NonEmptyString.optional(),
+	})
+	.passthrough();
+
+export const GitLabOpenedMergeRequestSchema = z
+	.object({
+		iid: z.number().int().positive(),
+		web_url: z.string().url(),
+		state: z.literal("opened"),
+		assignees: z.array(GitLabAssigneeSchema),
+	})
+	.passthrough();
+
+export const GitLabPipelinePageSchema = z.array(GitLabPipelineSchema);
 
 export const GitLabMergeRequestSchema = z
 	.object({
@@ -32,8 +60,22 @@ export const GitLabMergeRequestSchema = z
 		sha: NonEmptyString.optional(),
 		diff_refs: GitLabDiffRefsSchema,
 		state: NonEmptyString,
+		draft: z.boolean().optional(),
+		labels: z.array(GitLabLabelSchema).optional(),
+		detailed_merge_status: z.string().nullable().optional(),
+		has_conflicts: z.boolean().optional(),
+		head_pipeline: GitLabPipelineSchema.nullable().optional(),
 	})
 	.passthrough();
+export const GitLabAutoApprovalMergeRequestSchema =
+	GitLabMergeRequestSchema.extend({
+		draft: z.boolean(),
+		labels: z.array(GitLabLabelSchema),
+		has_conflicts: z.boolean(),
+	});
+export type GitLabAutoApprovalMergeRequest = z.infer<
+	typeof GitLabAutoApprovalMergeRequestSchema
+>;
 
 const GitLabApprovalIdentitySchema = z.union([
 	z.string().min(1),
@@ -157,7 +199,7 @@ export const GitLabNoteSchema = z
 		body: z.string(),
 		created_at: NonEmptyString,
 		system: z.boolean(),
-		resolved: z.boolean().optional().default(false),
+		resolved: z.boolean().nullable().optional().default(false),
 		position: GitLabPositionSchema.nullable().optional().default(null),
 	})
 	.passthrough();
@@ -166,12 +208,18 @@ export const GitLabDiscussionSchema = z
 	.object({
 		id: z.union([NonEmptyString, z.number().int().nonnegative()]),
 		notes: z.array(GitLabNoteSchema),
-		resolved: z.boolean().optional(),
+		resolved: z.boolean().nullable().optional(),
+		individual_note: z.boolean().optional(),
 	})
 	.passthrough();
 
 export const GitLabDiscussionPageSchema = z.array(GitLabDiscussionSchema);
 
 export type GitLabMergeRequest = z.infer<typeof GitLabMergeRequestSchema>;
+export type GitLabOpenedMergeRequest = z.infer<
+	typeof GitLabOpenedMergeRequestSchema
+>;
+export type GitLabLabel = z.infer<typeof GitLabLabelSchema>;
+export type GitLabPipeline = z.infer<typeof GitLabPipelineSchema>;
 export type GitLabDiscussion = z.infer<typeof GitLabDiscussionSchema>;
 export type GitLabNote = z.infer<typeof GitLabNoteSchema>;

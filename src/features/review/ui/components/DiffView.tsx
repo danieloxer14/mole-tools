@@ -36,7 +36,6 @@ import { type Draft, isMarkdownSelection } from "../../state";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 import {
 	contextLineId,
-	contextRanges,
 	diffLineId,
 	type FindRender,
 	findMatches,
@@ -797,7 +796,9 @@ function ContextRows({
 	const hidden = hiddenContextRange(gap, effectiveRevealedCount);
 	const fullyRevealed = hidden === null;
 	const controls =
-		wholeFile || find.forceContext || (hidden === null && gap.position !== "between") ? null : (
+		wholeFile ||
+		find.forceContext ||
+		(hidden === null && gap.position !== "between") ? null : (
 			<tr className="expand-context-row">
 				<td colSpan={mode === "side-by-side" ? 4 : 3}>
 					{fullyRevealed ? (
@@ -995,7 +996,6 @@ function HunkRows({
 					</td>
 				</tr>
 			) : null}
-
 		</>
 	);
 }

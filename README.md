@@ -143,9 +143,30 @@ cannot grant write access to code under review.
     "model": "review-model",                 // optional OMP model
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800
+  },
+  "reviewBabysitter": {
+    "intervalSeconds": 900,
+    "assignees": ["review-owner"],
+    "aiReviewerUsername": "ai-reviewer",
+    "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",
+    "model": "review-model",
+    "webhookUrlEnv": "SLACK_WEBHOOK_URL",
+    "maxChangedLines": 250,
+    "maxChangedFiles": 10,
+    "denyPathsByProject": {
+      "group/repo": ["src/auth/**", "infra/**"]
+    }
   }
 }
 ```
+
+| `reviewBabysitter.intervalSeconds` | Seconds between completed scans; defaults to `900`, minimum `60`. |
+| `reviewBabysitter.assignees` | Required GitLab handles; every opened MR is retained when any assignee matches case-insensitively. |
+| `reviewBabysitter.aiReviewerUsername` | Non-system note author proving AI review completion after `ai-review` label is absent. |
+| `reviewBabysitter.promptFile` + `model` | Prompt file and required OMP model used for isolated, read-only risk assessment. |
+| `reviewBabysitter.webhookUrlEnv` | Environment-variable name containing one Slack incoming webhook URL; URL never belongs in config. |
+| `reviewBabysitter.maxChangedLines` / `maxChangedFiles` | Strict upper bounds (defaults `250` / `10`); equality is allowed. |
+| `reviewBabysitter.denyPathsByProject` | Exact GitLab project-path map. Every project needs an entry; `[]` explicitly allows no denied paths, while matching any glob blocks approval. |
 
 | Field | Purpose |
 |---|---|
@@ -160,6 +181,10 @@ cannot grant write access to code under review.
 | `review.model` | Optional model name for OMP or Claude, forwarded as `<agent> --model <name>`. |
 | `review.layerTimeoutSeconds` | Maximum seconds for one layer-guide run; default `600`. |
 | `review.largeFileLineThreshold` | Diff-line count above which a file starts collapsed; default `800`. |
+
+`reviewBabysitter` is optional for other commands, but the babysitter command
+rejects startup when its block is absent. Unknown nested keys and invalid limits
+are rejected while loading config.
 
 ### Prompt File Overrides
 
@@ -344,6 +369,95 @@ Layer output and chat state persist per MR below
 agent binary on `PATH`. See
 [the interactive review spec](specs/review/interactive-review.md) and
 [ADR 0005](docs/adr/0005-review-agent-port.md) for contracts.
+
+### `review-babysitter` — Periodic Safe Merge-Request Approval
+
+Runs a serial monitor over every opened GitLab merge request visible to
+authenticated `glab`, retaining requests assigned to one of the configured
+handles. It starts one scan immediately, then waits until that scan finishes
+before sleeping for `reviewBabysitter.intervalSeconds` (default `900` seconds,
+minimum `60`). `SIGINT` or `SIGTERM` finishes the active request and report,
+then stops without starting another scan.
+
+```bash
+export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/…'
+mole-tools review-babysitter
+```
+
+Startup requires `reviewBabysitter`, authenticated `glab`, an available OMP
+binary/model, and the environment variable named by `webhookUrlEnv`. The
+webhook URL is never written to config or reports. Each scan sends one Slack
+message with a summary header plus one readable two-line entry per checked
+merge request; notifier failure is logged and does not stop later scans. No
+matching requests produce a zero-count summary and `ℹ️ No matching open MRs.`.
+
+AI review lifecycle is label-driven: a missing completion note queues exactly
+one additive `ai-review` label; a present label reports that review is in
+progress; completion requires the label to be absent and a non-system note from
+`aiReviewerUsername`. Standalone global MR notes (`individual_note`) do not
+count as open threads; only unresolved threaded discussions with non-system
+notes block approval. Draft requests, conflicts, unsafe mergeability,
+failed/pending/manual/unknown pipelines,
+unreadable diffs, configured change/file limits, missing deny-list entries, or
+denied paths block approval. An MR with no configured pipeline is not treated
+as a failing or pending pipeline. Limits default to `250` changed lines and
+`10` files, and equality is allowed. Every project needs an exact
+`denyPathsByProject` entry; use `[]` to explicitly deny no paths.
+`diff.ignore` does not weaken these checks. If authenticated auto-approver
+approval already exists, or GitLab reports `approvals_left: 0`, diff,
+deny-list, and AI gates are skipped; merge blockers and remaining approval
+requirements are still reported.
+
+Risk assessment runs OMP with the configured prompt/model in a transient
+detached MR-head worktree, without write tools. Only an exact final
+`VERDICT: LOW — <reason>` permits the current authenticated GitLab user to
+approve. Medium/high, malformed, unavailable, timeout, or GitLab approval
+failures never claim approval. When approval succeeds but additional required
+approvals remain, the report states how many remain. Report entries use
+first-match precedence:
+
+```text
+*PR Babysitter — Scan summary*
+Checked: <count> PRs | Approved: <count> | Blocked: <count> | Waiting: <count>
+
+<url|project!iid> — @<assignee>[, @<assignee>...] — <title>
+<emoji> <friendly instruction>
+```
+
+Global rows are mutually exclusive. Per-MR rows are evaluated in numbered
+order; only the first matching row is rendered.
+
+| Priority | First matching input MR state | Result line |
+|---:|---|---|
+| Global | No matching MRs | `ℹ️ No matching open MRs.` |
+| Global | Global GitLab discovery failure | `❌ GitLab scan failed: <safe error>. Check GitLab access.` |
+| 1 | Draft | `⏭️ This MR is draft. Mark it ready when work is ready.` |
+| 2 | Merge conflict | `⛔ GitLab reports merge conflicts. Resolve them.` |
+| 3 | GitLab reports unresolved discussions | `💬 GitLab reports unresolved discussions. Resolve open discussions.` |
+| 4 | Unsafe or unknown merge status | `⛔ GitLab reports unresolved mergeability status.` |
+| 5 | CI failed | `❌ Head pipeline is failing. Fix failing jobs.` |
+| 6 | CI pending, running, manual, or unknown | `⏳ Head pipeline is not successful yet.` |
+| 7 | No configured-AI note and no `ai-review` label | `🏷️ AI review requested.` |
+| 8 | `ai-review` label present | `⏳ AI review is in progress.` |
+| 9 | Unresolved non-system threaded discussion | `💬 Open discussion needs resolution.` |
+| 10 | Author is authenticated approver | `⏭️ Authenticated approver is MR author.` |
+| 11 | Existing approval state | `⏳ <count> required approvals remain before merge.` or `✅ Required approvals are satisfied; no auto-approval needed.` |
+| 12 | Binary/unknown diff stats, malformed path, or unreadable diff | `⚠️ Not eligible for auto-approval: diff cannot be safely evaluated.` |
+| 13 | Total changes exceed limit | `⚠️ Not eligible for auto-approval: total changes exceed <maxChangedLines>.` |
+| 14 | File count exceeds limit | `⚠️ Not eligible for auto-approval: changed files exceed <maxChangedFiles>.` |
+| 15 | No deny-list entry for project | `⚠️ Not eligible for auto-approval: no deny-list config exists for this project.` |
+| 16 | Changed path matches deny glob | `⚠️ Not eligible for auto-approval: changed path <path> matches denied glob <glob>.` |
+| 17 | OMP verdict `MEDIUM` or `HIGH` | `⚠️ Not eligible for auto-approval: AI assessed <risk> risk: <safe reason>.` |
+| 18 | OMP timeout, error, or invalid verdict | `⚠️ Not eligible for auto-approval: AI assessment is inconclusive.` |
+| 19 | GitLab approval rejected or head changed | `❌ Approval was not applied.` |
+| 20 | GitLab approval succeeds | `✅ Auto-approved after low-risk AI assessment.` If more approvals remain, the line states the count. |
+| Error | Exception while obtaining next required input | `❌ Check could not complete: <safe error>.` |
+
+The babysitter does not post review comments, add a “requires review” label,
+remove labels, change assignees, rerun CI, merge requests, retry prompts or
+approvals, or replace the interactive one-MR `review` surface. It does not
+provide project/group filters, Slack Bot OAuth, arbitrary channel routing, or
+literal webhook secrets.
 
 ---
 ### `worktree-prune` — Clean Up Stale Git Worktrees

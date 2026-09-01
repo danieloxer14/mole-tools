@@ -29,6 +29,11 @@ test("GitHost exposes merge-request creation and discovery contract", async () =
 			expect(received).toEqual(input);
 			return { url: "https://example.test/mr/1" };
 		},
+		listOpenedMrsForAssignees: async () => [],
+		fetchAutoApprovalState: async () => {
+			throw new Error("not exercised");
+		},
+		addMrLabel: async () => {},
 		fetchMr: async (ref) => ({
 			iid: ref.iid,
 			projectPath: ref.projectPath,
