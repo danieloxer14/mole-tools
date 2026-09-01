@@ -42,6 +42,18 @@ import {
 	lineTextMatches,
 	stepMatchIndex,
 } from "./find";
+import {
+	type DiffDragRow,
+	type DragAction,
+	diffDragRange,
+	isBlockInMarkdownDrag,
+	isRowInDiffDrag,
+	type MarkdownDragBlock,
+	type MarkdownDragState,
+	markdownDragRange,
+	nextMarkdownDragEnd,
+} from "./line-drag";
+import { useDiffDrag } from "./use-diff-drag";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
 
@@ -184,6 +196,44 @@ function renderMarkdown(source: string): RenderedMarkdown {
 	return { html, mermaidSources, codeSources, blockRanges };
 }
 
+/**
+ * Resolves the nearest `.markdown-block` that recovered a source range from a
+ * raw DOM element. Unmapped blocks carry neither `data-block-id` nor the
+ * `data-source-line-*` attributes, so they never match the `[data-block-id]`
+ * selector and resolve to `null` here — exactly the signal `nextMarkdownDragEnd`
+ * needs to cross over them without ending the drag.
+ */
+function markdownDragBlockFromElement(
+	element: Element | null,
+): MarkdownDragBlock | null {
+	const block = element?.closest?.(".markdown-block[data-block-id]");
+	if (!block) return null;
+	const blockId = block.getAttribute("data-block-id");
+	const startLine = Number.parseInt(
+		block.getAttribute("data-source-line-start") ?? "",
+		10,
+	);
+	const endLine = Number.parseInt(
+		block.getAttribute("data-source-line-end") ?? "",
+		10,
+	);
+	if (blockId === null || Number.isNaN(startLine) || Number.isNaN(endLine)) {
+		return null;
+	}
+	return { blockId, startLine, endLine };
+}
+
+/** Slices the inclusive source-line range into the quote text used by Tag/Comment. */
+function markdownBlockQuote(
+	source: string,
+	range: { startLine: number; endLine: number },
+): string {
+	return source
+		.split("\n")
+		.slice(range.startLine - 1, range.endLine)
+		.join("\n");
+}
+
 function RenderedMarkdown({
 	source,
 	path,
@@ -213,6 +263,8 @@ function RenderedMarkdown({
 		}
 	}, [source]);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const [drag, setDrag] = useState<MarkdownDragState | null>(null);
+	const dragRef = useRef<MarkdownDragState | null>(null);
 
 	useEffect(() => {
 		const rendered = parsed.value;
@@ -368,24 +420,18 @@ function RenderedMarkdown({
 		const rendered = parsed.value;
 		const container = containerRef.current;
 		if (!rendered || !container) return;
-		const handleBlockActionClick = (event: Event) => {
-			const target = event.target as HTMLElement;
-			const button = target.closest<HTMLElement>(
-				".markdown-block-tag, .markdown-block-comment",
-			);
-			if (!button) return;
+		const resolveBlock = (button: HTMLElement): MarkdownDragBlock | null => {
 			const blockId = button.dataset.blockId;
 			const range = blockId ? rendered.blockRanges.get(blockId) : undefined;
-			if (!range) return;
-			const quote = source
-				.split("\n")
-				.slice(range.startLine - 1, range.endLine)
-				.join("\n");
+			if (!blockId || !range) return null;
+			return { blockId, startLine: range.startLine, endLine: range.endLine };
+		};
+		const commitBlock = (button: HTMLElement, block: MarkdownDragBlock) => {
 			const selection: MarkdownBlockSelection = {
 				path,
-				startLine: range.startLine,
-				endLine: range.endLine,
-				quote,
+				startLine: block.startLine,
+				endLine: block.endLine,
+				quote: markdownBlockQuote(source, block),
 			};
 			if (button.classList.contains("markdown-block-tag")) {
 				onTagBlock?.(selection);
@@ -393,9 +439,117 @@ function RenderedMarkdown({
 				onCommentBlock?.(selection);
 			}
 		};
-		container.addEventListener("click", handleBlockActionClick);
-		return () => container.removeEventListener("click", handleBlockActionClick);
+		const handleMouseDown = (event: Event) => {
+			const target = event.target as HTMLElement;
+			const button = target.closest<HTMLElement>(
+				".markdown-block-tag, .markdown-block-comment",
+			);
+			if (!button) return;
+			const block = resolveBlock(button);
+			if (!block) return;
+			event.preventDefault();
+			const nextDrag: MarkdownDragState = {
+				action: button.classList.contains("markdown-block-tag")
+					? "tag"
+					: "comment",
+				origin: block,
+				end: block,
+			};
+			dragRef.current = nextDrag;
+			setDrag(nextDrag);
+		};
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Enter" && event.key !== " ") return;
+			const target = event.target as HTMLElement;
+			const button = target.closest<HTMLElement>(
+				".markdown-block-tag, .markdown-block-comment",
+			);
+			if (!button) return;
+			const block = resolveBlock(button);
+			if (!block) return;
+			event.preventDefault();
+			commitBlock(button, block);
+		};
+		container.addEventListener("mousedown", handleMouseDown);
+		container.addEventListener("keydown", handleKeyDown);
+		return () => {
+			container.removeEventListener("mousedown", handleMouseDown);
+			container.removeEventListener("keydown", handleKeyDown);
+		};
 	}, [parsed.value, path, source, onTagBlock, onCommentBlock]);
+
+	const commitDrag = (current: MarkdownDragState) => {
+		const { startLine, endLine } = markdownDragRange(
+			current.origin,
+			current.end,
+		);
+		const selection: MarkdownBlockSelection = {
+			path,
+			startLine,
+			endLine,
+			quote: markdownBlockQuote(source, { startLine, endLine }),
+		};
+		if (current.action === "tag") onTagBlock?.(selection);
+		else onCommentBlock?.(selection);
+	};
+	const commitDragRef = useRef(commitDrag);
+	commitDragRef.current = commitDrag;
+
+	const isDragging = drag !== null;
+	useEffect(() => {
+		if (!isDragging) return;
+		const handleMouseMove = (event: Event) => {
+			const current = dragRef.current;
+			if (!current) return;
+			const candidate = markdownDragBlockFromElement(
+				event.target as HTMLElement | null,
+			);
+			const nextEnd = nextMarkdownDragEnd(current.end, candidate);
+			if (nextEnd === current.end) return;
+			const nextDrag = { ...current, end: nextEnd };
+			dragRef.current = nextDrag;
+			setDrag(nextDrag);
+		};
+		const handleMouseUp = () => {
+			const current = dragRef.current;
+			if (!current) return;
+			dragRef.current = null;
+			setDrag(null);
+			commitDragRef.current(current);
+		};
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			event.stopPropagation();
+			dragRef.current = null;
+			setDrag(null);
+		};
+		window.addEventListener("mousemove", handleMouseMove);
+		window.addEventListener("mouseup", handleMouseUp);
+		window.addEventListener("keydown", handleKeyDown, { capture: true });
+		return () => {
+			window.removeEventListener("mousemove", handleMouseMove);
+			window.removeEventListener("mouseup", handleMouseUp);
+			window.removeEventListener("keydown", handleKeyDown, {
+				capture: true,
+			});
+		};
+	}, [isDragging]);
+
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		for (const block of container.querySelectorAll<HTMLElement>(
+			".markdown-block[data-block-id]",
+		)) {
+			const candidate = markdownDragBlockFromElement(block);
+			const inDrag =
+				drag !== null &&
+				candidate !== null &&
+				isBlockInMarkdownDrag(candidate, drag);
+			block.classList.toggle("drag-selected", inDrag);
+		}
+	}, [drag]);
 
 	if (parsed.error) {
 		return (
@@ -413,7 +567,7 @@ function RenderedMarkdown({
 			isMarkdownSelection(draft.selection),
 	);
 	return (
-		<div className="markdown-view">
+		<div className={`markdown-view${drag ? " drag-selecting" : ""}`}>
 			<div
 				className="rendered-markdown"
 				ref={containerRef}
@@ -616,9 +770,11 @@ type LineSelectionEvent = {
 function LineActions({
 	onTag,
 	onComment,
+	onDragStart,
 }: {
 	onTag?: () => void;
 	onComment?: () => void;
+	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
 }) {
 	if (!onTag && !onComment) return null;
 	return (
@@ -627,11 +783,24 @@ function LineActions({
 				<button
 					type="button"
 					className="line-tag"
-					onClick={(event) => {
-						event.stopPropagation();
-						onTag();
-					}}
-					onKeyDown={(event) => event.stopPropagation()}
+					{...(onDragStart
+						? {
+								onMouseDown: (event) => onDragStart("tag", event),
+								onKeyDown: (event) => {
+									event.stopPropagation();
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										onTag();
+									}
+								},
+							}
+						: {
+								onClick: (event) => {
+									event.stopPropagation();
+									onTag();
+								},
+								onKeyDown: (event) => event.stopPropagation(),
+							})}
 				>
 					Tag line
 				</button>
@@ -640,11 +809,24 @@ function LineActions({
 				<button
 					type="button"
 					className="line-comment"
-					onClick={(event) => {
-						event.stopPropagation();
-						onComment();
-					}}
-					onKeyDown={(event) => event.stopPropagation()}
+					{...(onDragStart
+						? {
+								onMouseDown: (event) => onDragStart("comment", event),
+								onKeyDown: (event) => {
+									event.stopPropagation();
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										onComment();
+									}
+								},
+							}
+						: {
+								onClick: (event) => {
+									event.stopPropagation();
+									onComment();
+								},
+								onKeyDown: (event) => event.stopPropagation(),
+							})}
 				>
 					Comment
 				</button>
@@ -664,6 +846,8 @@ function DiffLineRow({
 	onComment,
 	commentSide,
 	selected = false,
+	drag,
+	onDragStart,
 }: {
 	line: DiffLine;
 	mode: DiffMode;
@@ -675,6 +859,8 @@ function DiffLineRow({
 	onComment?: () => void;
 	commentSide?: "new" | "old";
 	selected?: boolean;
+	drag?: { hunkIndex: number; side: "new" | "old"; line: number };
+	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
 }) {
 	const isMatch = lineTextMatches(line.text, find.query);
 	const isCurrent = find.currentId === findId;
@@ -690,7 +876,11 @@ function DiffLineRow({
 	const selectableProps = onSelect
 		? {
 				"aria-label": "Select diff line",
-				onClick: (event: MouseEvent<HTMLTableRowElement>) => onSelect(event),
+				onClick: (event: MouseEvent<HTMLTableRowElement>) => {
+					const target = event.target as HTMLElement | null;
+					if (target?.closest?.(".line-actions")) return;
+					onSelect(event);
+				},
 				onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
 					if (event.key === "Enter" || event.key === " ") {
 						event.preventDefault();
@@ -701,9 +891,17 @@ function DiffLineRow({
 				tabIndex: 0,
 			}
 		: {};
+	const dragAttributes = drag
+		? {
+				"data-drag-hunk": String(drag.hunkIndex),
+				"data-drag-side": drag.side,
+				"data-drag-line": String(drag.line),
+			}
+		: {};
 	const trProps = {
 		...selectableProps,
 		"data-find-line": findId,
+		...dragAttributes,
 	};
 	return mode === "inline" ? (
 		<tr
@@ -719,7 +917,11 @@ function DiffLineRow({
 					{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
 				</span>
 				<CodeHighlight text={line.text} language={language} />
-				<LineActions onTag={onTag} onComment={onComment} />
+				<LineActions
+					onTag={onTag}
+					onComment={onComment}
+					onDragStart={onDragStart}
+				/>
 			</td>
 		</tr>
 	) : (
@@ -737,7 +939,11 @@ function DiffLineRow({
 					<>
 						<CodeHighlight text={line.text} language={language} />
 						{commentSide === "old" ? (
-							<LineActions onTag={onTag} onComment={onComment} />
+							<LineActions
+								onTag={onTag}
+								onComment={onComment}
+								onDragStart={onDragStart}
+							/>
 						) : null}
 					</>
 				)}
@@ -750,7 +956,11 @@ function DiffLineRow({
 					<>
 						<CodeHighlight text={line.text} language={language} />
 						{commentSide === "new" ? (
-							<LineActions onTag={onTag} onComment={onComment} />
+							<LineActions
+								onTag={onTag}
+								onComment={onComment}
+								onDragStart={onDragStart}
+							/>
 						) : null}
 					</>
 				)}
@@ -773,6 +983,7 @@ function ContextRows({
 	onHide,
 	onTag,
 	find,
+	findSide,
 }: {
 	gap: ContextGap;
 	revealedCount: number;
@@ -875,6 +1086,7 @@ interface LineSelectionAnchor extends SelectableLine {
 function HunkRows({
 	file,
 	hunk,
+	hunkIndex,
 	showHeader,
 	mode,
 	language,
@@ -889,9 +1101,12 @@ function HunkRows({
 	onLineClick,
 	onTagHunk,
 	onCommentSelection,
+	onDragStart,
+	dragSelected,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
+	hunkIndex: number;
 	showHeader: boolean;
 	mode: DiffMode;
 	language: string;
@@ -913,6 +1128,12 @@ function HunkRows({
 	) => void;
 	onTagHunk?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
+	onDragStart?: (
+		action: DragAction,
+		row: DiffDragRow,
+		event: MouseEvent<HTMLElement>,
+	) => void;
+	dragSelected?: (row: DiffDragRow) => boolean;
 }) {
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
@@ -932,6 +1153,9 @@ function HunkRows({
 					anchor?.hunk === hunk.header &&
 					anchor.side === point.side &&
 					anchor.line === point.line;
+				const dragRow = point
+					? { hunkIndex, side: point.side, line: point.line }
+					: undefined;
 				const lineSelection = point
 					? {
 							path,
@@ -949,7 +1173,15 @@ function HunkRows({
 							language={language}
 							find={find}
 							findId={diffLineId(hunk.header, line)}
-							selected={selected}
+							selected={
+								selected || (dragRow ? dragSelected?.(dragRow) === true : false)
+							}
+							drag={dragRow}
+							onDragStart={
+								dragRow
+									? (action, event) => onDragStart?.(action, dragRow, event)
+									: undefined
+							}
 							commentSide={lineSelection?.side}
 							onTag={
 								lineSelection && onTagHunk
@@ -1041,10 +1273,31 @@ function DiffTable({
 	const [rangeSelection, setRangeSelection] =
 		useState<DiffLineSelection | null>(null);
 	const [revealedCounts, setRevealedCounts] = useState<Record<string, number>>(
-		{},
+		() =>
+			wholeFile
+				? Object.fromEntries(gaps.map((gap) => [gap.id, gapLineCount(gap)]))
+				: {},
 	);
 	const wasWholeFile = useRef(wholeFile);
 	const visibleDrafts = drafts.filter((draft) => draft.status !== "posted");
+	const { drag, start: startDrag } = useDiffDrag({
+		onCommit: (action, origin, end) => {
+			const hunkHeader = file.hunks[origin.hunkIndex]?.header;
+			if (hunkHeader === undefined) return;
+			const { startLine, endLine } = diffDragRange(origin, end);
+			const selection: DiffLineSelection = {
+				path,
+				side: origin.side,
+				startLine,
+				endLine,
+				hunk: hunkHeader,
+			};
+			setAnchor(null);
+			setRangeSelection(null);
+			if (action === "tag") onLineSelection?.(selection);
+			else onCommentSelection?.(selection);
+		},
+	});
 
 	useEffect(() => {
 		if (wholeFile) {
@@ -1131,7 +1384,7 @@ function DiffTable({
 	const tail = gaps.find((gap) => gap.position === "tail");
 
 	return (
-		<table className={`diff-table ${mode}`}>
+		<table className={`diff-table ${mode}${drag ? " drag-selecting" : ""}`}>
 			<tbody>
 				{file.hunks.map((hunk, index) => {
 					const precedingGap =
@@ -1156,6 +1409,7 @@ function DiffTable({
 							<HunkRows
 								file={file}
 								hunk={hunk}
+								hunkIndex={index}
 								showHeader={showHunkHeader}
 								mode={mode}
 								language={language}
@@ -1170,6 +1424,10 @@ function DiffTable({
 								onLineClick={onLineSelection ? selectLine : undefined}
 								onTagHunk={tagLine}
 								onCommentSelection={onCommentSelection}
+								onDragStart={startDrag}
+								dragSelected={(row) =>
+									drag !== null && isRowInDiffDrag(row, drag)
+								}
 							/>
 						</Fragment>
 					);
