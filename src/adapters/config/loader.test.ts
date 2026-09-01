@@ -85,7 +85,7 @@ describe("loadConfig", () => {
 		await expect(loadConfig(path)).rejects.toThrow(/ollama\.commitModel/);
 	});
 
-	test("rejects stale model routes with an Invalid config error", async () => {
+	test("ignores stale model routes", async () => {
 		const path = await configPath();
 		const stale = {
 			providers: {
@@ -101,10 +101,12 @@ describe("loadConfig", () => {
 		};
 		await Bun.write(path, JSON.stringify(stale));
 
-		const error = await loadConfig(path).catch((value: unknown) => value);
-		expect(error).toBeInstanceOf(PortError);
-		expect((error as PortError).message).toContain(`Invalid config at ${path}`);
-		expect((error as PortError).message).toContain(staleReviewKey);
+		const config = await loadConfig(path);
+
+		expect(config.models).toEqual({
+			commit: { provider: "ollama", name: "llama3.1" },
+			mergeRequest: { provider: "ollama", name: "llama3.1" },
+		});
 	});
 
 	test("loads new provider-based config format", async () => {
@@ -147,7 +149,7 @@ describe("loadConfig", () => {
 
 		expect(config.worktreePrune).toEqual(valid.worktreePrune);
 	});
-	test("loads optional review agent settings with strict defaults", async () => {
+	test("loads optional review agent settings with defaults", async () => {
 		const path = await configPath();
 		const valid = {
 			providers: {
@@ -174,7 +176,7 @@ describe("loadConfig", () => {
 		expect(config.review).toEqual(valid.review);
 	});
 
-	test("rejects unknown review settings under strict parsing", async () => {
+	test("ignores unknown review settings", async () => {
 		const path = await configPath();
 		await Bun.write(
 			path,
@@ -195,7 +197,13 @@ describe("loadConfig", () => {
 			}),
 		);
 
-		await expect(loadConfig(path)).rejects.toThrow(/review.*unsupported/);
+		const config = await loadConfig(path);
+
+		expect(config.review).toEqual({
+			agent: "omp",
+			layerTimeoutSeconds: 600,
+			largeFileLineThreshold: 800,
+		});
 	});
 
 	test("migrates provider and legacy llm config without removed routes", async () => {

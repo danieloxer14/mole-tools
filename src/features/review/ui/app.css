@@ -917,6 +917,14 @@ button.active {
 	gap: 8px;
 	margin-top: 12px;
 }
+.markdown-view.drag-selecting {
+	user-select: none;
+}
+.markdown-block.drag-selected {
+	background: rgba(79, 137, 178, 0.48);
+	outline: 1px solid #8ac5eb;
+	outline-offset: -1px;
+}
 .mermaid-error {
 	color: #ffb0a8;
 	font-size: 0.8rem;
@@ -1209,6 +1217,16 @@ button.active {
 .diff-table .diff-line:hover .line-actions,
 .diff-table .line-actions:focus-within {
 	opacity: 1;
+}
+.diff-table.drag-selecting {
+	user-select: none;
+}
+.diff-table.drag-selecting .diff-line[role="button"]:hover {
+	outline: none;
+}
+.diff-table.drag-selecting .diff-line:hover .line-actions,
+.diff-table.drag-selecting .line-actions:focus-within {
+	opacity: 0;
 }
 .chat-composer {
 	border-top: 1px solid #2d3a48;

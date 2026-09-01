@@ -224,12 +224,20 @@ Turn construction is intentionally asymmetric:
   transcript entry.
 
 Tag line adds one line to agent-chat context. Shift-selecting two lines in the
-same hunk creates an inclusive context range; Tag hunk adds the complete hunk.
-Tags can be removed before sending, or cleared all at once. The UI streams
-text and tool start/end activity, keeps partial assistant text on
-failure/cancel, and enables the next turn after Stop. At most one turn runs per
-chat; different chats can run in parallel. Switching chats never interrupts a
-running turn, and chats cannot be deleted.
+same hunk creates an inclusive context range. Dragging from a line's Tag line
+button to another line in the same hunk on the same side adds that inclusive
+range as one tag in a single gesture; the drag is clamped to the origin hunk
+and the origin side, Esc aborts the drag with no tag added, and releasing the
+mouse outside the diff panel commits the last clamped range. Revealed
+inter-hunk context lines have no hunk to clamp to, so they keep tagging one
+line at a time via their own click and are never part of a drag. Dragging
+from a rendered-Markdown block's Tag button across later blocks adds one tag
+spanning those blocks' source lines, snapping to block boundaries. Tags can
+be removed before sending, or cleared all at once. The UI streams text and
+tool start/end activity, keeps partial assistant text on failure/cancel, and
+enables the next turn after Stop. At most one turn runs per chat; different
+chats can run in parallel. Switching chats never interrupts a running turn,
+and chats cannot be deleted.
 
 **Reload limitation:** A page reload drops the browser-side stream readers. The
 server turn keeps running, still appends the assistant entry, and
@@ -239,12 +247,14 @@ is not replayed; it appears once the transcript is refetched.
 ## 7. Positioned comment lifecycle
 
 A reviewer can add a comment from a line, an inclusive same-side selection, a
-whole hunk, or a tagged line. Creating a comment immediately opens an empty
-local draft editor at that position. The user writes its body; no agent turn or
-comment-generation prompt runs. The draft is local until its own Send: there is
-no batch submit. Draft statuses are `draft`, `failed`, and `posted`; Cancel
-removes it, Edit persists body changes, and failed drafts keep their error with
-Retry.
+drag from a line's Comment button to another line in the same hunk on the
+same side, or a tagged line. A comment drag is clamped to one hunk so it can
+always build a valid GitLab position. Creating a comment immediately opens an
+empty local draft editor below the selection's last line. The user writes its
+body; no agent turn or comment-generation prompt runs. The draft is local
+until its own Send: there is no batch submit. Draft statuses are `draft`,
+`failed`, and `posted`; Cancel removes it, Edit persists body changes, and
+failed drafts keep their error with Retry.
 
 Before Send, mole-tools validates the selection against the parsed diff and
 current `diff_refs`:
