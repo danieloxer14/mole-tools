@@ -44,6 +44,19 @@ export const CONFIG_TEMPLATE_TEXT = `{
   //   "layerTimeoutSeconds": 600,
   //   "largeFileLineThreshold": 800
   // }
+  // "reviewBabysitter": {
+  //   "intervalSeconds": 900,
+  //   "assignees": ["review-owner"],
+  //   "aiReviewerUsername": "ai-reviewer",
+  //   "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",
+  //   "model": "model-name",
+  //   "webhookUrlEnv": "SLACK_WEBHOOK_URL",
+  //   "maxChangedLines": 250,
+  //   "maxChangedFiles": 10,
+  //   "denyPathsByProject": {
+  //     "group/repo": ["src/auth/**", "infra/**"]
+  //   }
+  // }
 }
 `;
 
@@ -120,7 +133,6 @@ export async function loadConfig(
 				: {};
 		return { ...directResult.data, ...compatibility } as Config;
 	}
-
 	throw new PortError(
 		`Invalid config at ${path}: ${formatZodIssues(directResult.error.issues)}`,
 	);
@@ -134,6 +146,7 @@ function normalizeConfig(raw: unknown): unknown {
 		diff: input.diff ?? { ignore: [] },
 		worktreePrune: input.worktreePrune,
 		review: input.review,
+		reviewBabysitter: input.reviewBabysitter,
 	};
 	if (input.ollama) {
 		const ollama = input.ollama as Record<string, unknown>;

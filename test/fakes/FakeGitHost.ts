@@ -6,13 +6,20 @@ import type {
 	HostMember,
 	HostUser,
 	MrApprovalState,
+	MrAutoApprovalState,
 	MrDetail,
+	WatchedMrRef,
 } from "../../src/ports/git-host";
 import type { MrRef } from "../../src/shared/mr-url";
 
 export interface FakeGitHostOptions {
 	preflight?: () => Promise<void>;
 	currentUser?: () => Promise<HostUser | null>;
+	listOpenedMrsForAssignees?: (
+		assignees: readonly string[],
+	) => Promise<WatchedMrRef[]>;
+	fetchAutoApprovalState?: (ref: MrRef) => Promise<MrAutoApprovalState>;
+	addMrLabel?: (ref: MrRef, label: string) => Promise<void>;
 	findOpenMr?: (sourceBranch: string) => Promise<{ url: string } | null>;
 	resolveHandle?: (handle: string) => Promise<HostMember | null>;
 	createMr?: (input: CreateMrInput) => Promise<{ url: string }>;
@@ -33,6 +40,28 @@ export class FakeGitHost implements GitHost {
 
 	async currentUser(): Promise<HostUser | null> {
 		return (await this.options.currentUser?.()) ?? null;
+	}
+	async listOpenedMrsForAssignees(
+		assignees: readonly string[],
+	): Promise<WatchedMrRef[]> {
+		return (await this.options.listOpenedMrsForAssignees?.(assignees)) ?? [];
+	}
+
+	async fetchAutoApprovalState(ref: MrRef): Promise<MrAutoApprovalState> {
+		return (
+			(await this.options.fetchAutoApprovalState?.(ref)) ?? {
+				mr: await this.fetchMr(ref),
+				draft: false,
+				labels: [],
+				detailedMergeStatus: null,
+				hasConflicts: false,
+				headPipelineStatus: null,
+			}
+		);
+	}
+
+	async addMrLabel(ref: MrRef, label: string): Promise<void> {
+		await this.options.addMrLabel?.(ref, label);
 	}
 
 	async findOpenMr(sourceBranch: string): Promise<{ url: string } | null> {

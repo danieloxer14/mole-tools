@@ -9,10 +9,12 @@ import { GlabAdapter } from "../adapters/git-host/glab";
 import { JiraAdapter } from "../adapters/issue-tracker/jira";
 import { OllamaAdapter } from "../adapters/llm/ollama";
 import { PiAdapter } from "../adapters/llm/pi";
+import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
 import { GitAdapter } from "../adapters/vcs/git";
 import type { GitHost } from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
 import type { GenerateRequest, Llm } from "../ports/llm";
+import type { Notifier } from "../ports/notifier";
 import type { ReviewAgent } from "../ports/review-agent";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
@@ -24,6 +26,8 @@ export interface Context {
 	llm: Llm; // convenience proxy — routes to the commit provider by default
 	getLlmFor(purpose: RoutingPurpose, providerKey?: string): Llm;
 	reviewAgent: ReviewAgent;
+	createReviewBabysitterAgent(model: string): ReviewAgent;
+	createNotifier(webhookUrlEnv: string): Notifier;
 	issues: IssueTracker | null;
 	gitHost: GitHost | null;
 }
@@ -135,8 +139,16 @@ export function buildContext(input: {
 	config: Config;
 	ui: UiPort;
 	reviewAgent?: ReviewAgent;
+	createReviewBabysitterAgent?: (model: string) => ReviewAgent;
+	createNotifier?: (webhookUrlEnv: string) => Notifier;
 }): Context {
-	const { config, ui, reviewAgent } = input;
+	const {
+		config,
+		ui,
+		reviewAgent,
+		createReviewBabysitterAgent,
+		createNotifier,
+	} = input;
 	validateModelProviders(config);
 	const adapterMap = buildAdapterMap(config);
 
@@ -148,6 +160,12 @@ export function buildContext(input: {
 		vcs: new GitAdapter(),
 		llm: llmProxy, // default routes to commit provider
 		reviewAgent: reviewAgent ?? buildReviewAgent(config),
+		createReviewBabysitterAgent:
+			createReviewBabysitterAgent ??
+			((model: string) => new OmpAgentAdapter({ model })),
+		createNotifier:
+			createNotifier ??
+			((webhookUrlEnv: string) => new SlackWebhookNotifier({ webhookUrlEnv })),
 		getLlmFor: (purpose: RoutingPurpose, providerKey?: string) =>
 			llmProxy.getLlmFor(purpose, providerKey),
 		issues:

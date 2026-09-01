@@ -26,6 +26,22 @@ export const ModelsConfigSchema = z.object({
 	commit: ModelRouteSchema,
 	mergeRequest: ModelRouteSchema,
 });
+export const ReviewBabysitterConfigSchema = z
+	.object({
+		intervalSeconds: z.number().int().min(60).default(900),
+		assignees: z.array(z.string().min(1)).min(1),
+		aiReviewerUsername: z.string().min(1),
+		promptFile: z.string().min(1),
+		model: z.string().min(1),
+		webhookUrlEnv: z.string().min(1),
+		maxChangedLines: z.number().int().nonnegative().default(250),
+		maxChangedFiles: z.number().int().nonnegative().default(10),
+		denyPathsByProject: z.record(z.string().min(1), z.array(z.string().min(1))),
+	})
+	.strict();
+export type ReviewBabysitterConfig = z.infer<
+	typeof ReviewBabysitterConfigSchema
+>;
 
 export const ReviewConfigSchema = z
 	.object({
@@ -58,6 +74,7 @@ export const ConfigSchema = z.object({
 	autoReviewer: z.object({ username: z.string() }).optional(),
 	worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
 	review: ReviewConfigSchema,
+	reviewBabysitter: ReviewBabysitterConfigSchema.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

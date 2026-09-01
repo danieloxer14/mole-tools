@@ -2,7 +2,7 @@ import cac from "cac";
 import packageJson from "../package.json";
 import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
 import { runInInk } from "./app";
-import { applyZodOptions } from "./cli/options";
+import { applyZodOptions, stripEmptyDoubleDash } from "./cli/options";
 import { buildContext } from "./core/context";
 import { handleError } from "./core/errors";
 import { closeLogger, initializeLogger } from "./core/logger";
@@ -69,7 +69,7 @@ for (const feature of features) {
 
 			let args: unknown;
 			try {
-				args = feature.args.parse(options);
+				args = feature.args.parse(stripEmptyDoubleDash(options));
 			} catch (e) {
 				console.error(e instanceof Error ? e.message : String(e));
 				process.exitCode = 1;

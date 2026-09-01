@@ -11,15 +11,21 @@ import type {
 	HostNote,
 	HostUser,
 	MrApprovalState,
+	MrAutoApprovalState,
 	MrDetail,
+	WatchedMrRef,
 } from "../../ports/git-host";
 import { validatePosition } from "../../shared/gitlab-position";
-import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
+import { encodeProjectPath, type MrRef, parseMrUrl } from "../../shared/mr-url";
+import type { GitLabLabel, GitLabMergeRequest } from "./glab-schemas";
 import {
 	GitLabApprovalStateSchema,
+	GitLabAutoApprovalMergeRequestSchema,
 	GitLabDiscussionPageSchema,
 	GitLabDiscussionSchema,
 	GitLabMergeRequestSchema,
+	GitLabOpenedMergeRequestSchema,
+	GitLabPipelinePageSchema,
 	GitLabPositionPayloadSchema,
 } from "./glab-schemas";
 
@@ -171,6 +177,102 @@ function mapApprovalIdentity(value: unknown, operation: string): string {
 	}
 	return identity;
 }
+const DETAILED_MERGE_STATUSES: Record<string, true> = {
+	approvals_syncing: true,
+	blocked_status: true,
+	broken_status: true,
+	can_be_merged: true,
+	cannot_be_merged: true,
+	cannot_be_merged_recheck: true,
+	checking: true,
+	ci_must_pass: true,
+	ci_still_running: true,
+	commits_status: true,
+	conflict: true,
+	discussions_not_resolved: true,
+	draft_status: true,
+	jira_association_missing: true,
+	locked_lfs_files: true,
+	locked_paths: true,
+	merge_request_blocked: true,
+	merge_time: true,
+	mergeable: true,
+	need_rebase: true,
+	not_approved: true,
+	not_open: true,
+	preparing: true,
+	requested_changes: true,
+	security_policy_pipeline_check: true,
+	security_policy_violations: true,
+	status_checks_must_pass: true,
+	title_regex: true,
+	unchecked: true,
+};
+
+const PIPELINE_STATUSES: Record<string, true> = {
+	canceled: true,
+	canceling: true,
+	created: true,
+	failed: true,
+	manual: true,
+	pending: true,
+	preparing: true,
+	running: true,
+	scheduled: true,
+	skipped: true,
+	success: true,
+	waiting_for_resource: true,
+};
+
+function mapKnownStatus(
+	value: string | null | undefined,
+	knownStatuses: Readonly<Record<string, true>>,
+): string | null {
+	return value && knownStatuses[value] === true ? value : null;
+}
+
+function mapLabels(labels: readonly GitLabLabel[] | undefined): string[] {
+	return (
+		labels?.map((label) => (typeof label === "string" ? label : label.name)) ??
+		[]
+	);
+}
+
+function mapMergeRequest(
+	payload: GitLabMergeRequest,
+	ref: MrRef,
+	operation: string,
+): MrDetail {
+	if (payload.iid !== ref.iid) {
+		throw new PortError(
+			`GitLab merge request IID mismatch: requested ${ref.iid}, received ${payload.iid}`,
+		);
+	}
+
+	const author = payload.author.username ?? payload.author.name;
+	if (!author) {
+		throw invalidPayload(operation, "author has no username or name");
+	}
+
+	const diffRefs: DiffRefs = {
+		baseSha: payload.diff_refs.base_sha,
+		startSha: payload.diff_refs.start_sha,
+		headSha: payload.diff_refs.head_sha,
+	};
+	return {
+		iid: payload.iid,
+		projectPath: ref.projectPath,
+		title: payload.title,
+		description: payload.description ?? "",
+		webUrl: payload.web_url,
+		author,
+		sourceBranch: payload.source_branch,
+		targetBranch: payload.target_branch,
+		headSha: payload.sha ?? diffRefs.headSha,
+		diffRefs,
+		state: payload.state,
+	};
+}
 
 export class GlabAdapter implements GitHost {
 	constructor(private readonly execFn: GlabExec = defaultGlabExec) {}
@@ -234,6 +336,76 @@ export class GlabAdapter implements GitHost {
 
 		return null;
 	}
+	async listOpenedMrsForAssignees(
+		assignees: readonly string[],
+	): Promise<WatchedMrRef[]> {
+		const documents: unknown[] = [];
+		const configured = new Set<string>();
+		const requestedAssignees: string[] = [];
+		for (const assignee of assignees) {
+			const normalized = assignee.toLowerCase();
+			if (configured.has(normalized)) continue;
+			configured.add(normalized);
+			requestedAssignees.push(assignee);
+		}
+		for (const assignee of requestedAssignees) {
+			const result = await this.runApi(
+				[
+					"api",
+					"--paginate",
+					`merge_requests?scope=all&state=opened&assignee_username=${encodeURIComponent(assignee)}&per_page=100`,
+				],
+				"merge request discovery",
+			);
+			documents.push(
+				...parseJsonDocuments(result.stdout, "merge request discovery"),
+			);
+		}
+		const watched = new Map<string, WatchedMrRef>();
+		for (const document of documents) {
+			const page = parsePayload(
+				GitLabOpenedMergeRequestSchema.array(),
+				document,
+				"merge request discovery",
+			);
+			for (const entry of page) {
+				const ref = parseMrUrl(entry.web_url);
+				if (ref.iid !== entry.iid) {
+					throw invalidPayload(
+						"merge request discovery",
+						`web_url IID ${ref.iid} does not match payload IID ${entry.iid}`,
+					);
+				}
+				const entryAssignees = entry.assignees.map(
+					(assignee) => assignee.username,
+				);
+				if (
+					!entryAssignees.some((assignee) =>
+						configured.has(assignee.toLowerCase()),
+					)
+				) {
+					continue;
+				}
+
+				const key = `${ref.host}/${ref.projectPath}!${ref.iid}`;
+				const existing = watched.get(key);
+				if (!existing) {
+					watched.set(key, { ref, assignees: entryAssignees });
+					continue;
+				}
+
+				const knownAssignees = new Set(
+					existing.assignees.map((assignee) => assignee.toLowerCase()),
+				);
+				for (const assignee of entryAssignees) {
+					if (knownAssignees.has(assignee.toLowerCase())) continue;
+					knownAssignees.add(assignee.toLowerCase());
+					existing.assignees.push(assignee);
+				}
+			}
+		}
+		return [...watched.values()];
+	}
 
 	async fetchMr(ref: MrRef): Promise<MrDetail> {
 		const result = await this._exec([
@@ -254,35 +426,96 @@ export class GlabAdapter implements GitHost {
 			documents[0],
 			"merge request",
 		);
-		if (payload.iid !== ref.iid) {
-			throw new PortError(
-				`GitLab merge request IID mismatch: requested ${ref.iid}, received ${payload.iid}`,
+		return mapMergeRequest(payload, ref, "merge request");
+	}
+	async fetchAutoApprovalState(ref: MrRef): Promise<MrAutoApprovalState> {
+		const result = await this.runApi(
+			[
+				"api",
+				"--hostname",
+				ref.host,
+				apiPath(ref, "?with_merge_status_recheck=true"),
+			],
+			"auto-approval state fetch",
+		);
+		const documents = parseJsonDocuments(result.stdout, "auto-approval state");
+		if (documents.length !== 1) {
+			throw invalidPayload("auto-approval state", "expected one JSON object");
+		}
+		const payload = parsePayload(
+			GitLabAutoApprovalMergeRequestSchema,
+			documents[0],
+			"auto-approval state",
+		);
+		const mr = mapMergeRequest(payload, ref, "auto-approval state");
+		const inlinePipeline = payload.head_pipeline;
+		const inlinePipelineProven =
+			inlinePipeline !== null &&
+			inlinePipeline !== undefined &&
+			inlinePipeline.status !== undefined;
+		const headPipelineStatus =
+			inlinePipeline === null
+				? "not_configured"
+				: inlinePipelineProven
+					? mapKnownStatus(inlinePipeline.status, PIPELINE_STATUSES)
+					: await this.fetchHeadPipelineStatus(ref, mr.headSha);
+
+		return {
+			mr,
+			draft: payload.draft,
+			labels: mapLabels(payload.labels),
+			detailedMergeStatus: mapKnownStatus(
+				payload.detailed_merge_status,
+				DETAILED_MERGE_STATUSES,
+			),
+			hasConflicts: payload.has_conflicts,
+			headPipelineStatus,
+		};
+	}
+
+	async addMrLabel(ref: MrRef, label: string): Promise<void> {
+		if (!label.trim()) {
+			throw new PortError("Cannot add an empty GitLab merge request label");
+		}
+		const result = await this.runApi(
+			["api", "--hostname", ref.host, apiPath(ref, "")],
+			"merge request label fetch",
+		);
+		const documents = parseJsonDocuments(
+			result.stdout,
+			"merge request label fetch",
+		);
+		if (documents.length !== 1) {
+			throw invalidPayload(
+				"merge request label fetch",
+				"expected one JSON object",
 			);
 		}
-
-		const author = payload.author.username ?? payload.author.name;
-		if (!author) {
-			throw invalidPayload("merge request", "author has no username or name");
+		const payload = parsePayload(
+			GitLabMergeRequestSchema,
+			documents[0],
+			"merge request label fetch",
+		);
+		const labels = mapLabels(payload.labels);
+		if (
+			labels.some((existing) => existing.toLowerCase() === label.toLowerCase())
+		) {
+			return;
 		}
 
-		const diffRefs: DiffRefs = {
-			baseSha: payload.diff_refs.base_sha,
-			startSha: payload.diff_refs.start_sha,
-			headSha: payload.diff_refs.head_sha,
-		};
-		return {
-			iid: payload.iid,
-			projectPath: ref.projectPath,
-			title: payload.title,
-			description: payload.description ?? "",
-			webUrl: payload.web_url,
-			author,
-			sourceBranch: payload.source_branch,
-			targetBranch: payload.target_branch,
-			headSha: payload.sha ?? diffRefs.headSha,
-			diffRefs,
-			state: payload.state,
-		};
+		await this.runApi(
+			[
+				"api",
+				"--hostname",
+				ref.host,
+				"--method",
+				"PUT",
+				"--field",
+				`add_labels=${label}`,
+				apiPath(ref, ""),
+			],
+			"merge request label update",
+		);
 	}
 
 	async fetchApprovalState(ref: MrRef): Promise<MrApprovalState> {
@@ -467,6 +700,7 @@ export class GlabAdapter implements GitHost {
 			id: String(discussion.id),
 			resolved:
 				discussion.resolved ?? discussion.notes.some((note) => note.resolved),
+			individualNote: discussion.individual_note,
 			notes: discussion.notes.map((note): HostNote => {
 				const author = note.author.username ?? note.author.name;
 				if (!author) {
@@ -647,6 +881,50 @@ export class GlabAdapter implements GitHost {
 
 		logger.warn("glab.resolve-user.no-match", { handle });
 		return null;
+	}
+
+	private async fetchHeadPipelineStatus(
+		ref: MrRef,
+		headSha: string,
+	): Promise<string | null> {
+		const result = await this.runApi(
+			["api", "--hostname", ref.host, "--paginate", apiPath(ref, "/pipelines")],
+			"merge request pipeline fetch",
+		);
+		const documents = parseJsonDocuments(
+			result.stdout,
+			"merge request pipeline",
+		);
+		for (const document of documents) {
+			const page = parsePayload(
+				GitLabPipelinePageSchema,
+				document,
+				"merge request pipeline",
+			);
+			for (const pipeline of page) {
+				if (pipeline.sha !== headSha) continue;
+				return mapKnownStatus(pipeline.status, PIPELINE_STATUSES);
+			}
+		}
+		return null;
+	}
+
+	private async runApi(
+		args: string[],
+		operation: string,
+		input?: string,
+	): Promise<GlabExecResult> {
+		let result: GlabExecResult;
+		try {
+			result = await this._exec(args, input);
+		} catch (error) {
+			if (error instanceof PortError) throw error;
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new PortError(`${operation} failed`, detail);
+		}
+		const executionError = glabApiError(result, operation);
+		if (executionError) throw executionError;
+		return result;
 	}
 
 	async _exec(args: string[], input?: string): Promise<GlabExecResult> {

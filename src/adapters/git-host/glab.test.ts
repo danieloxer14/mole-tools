@@ -144,6 +144,323 @@ describe("GlabAdapter", () => {
 			expect(await glab.findOpenMr("dev")).toEqual({ url });
 		});
 	});
+	describe("review babysitter GitLab state", () => {
+		const ref: MrRef = {
+			host: "gitlab.example.com",
+			projectPath: "group/api",
+			iid: 42,
+		};
+		const mrUrl = "https://gitlab.example.com/group/api/-/merge_requests/42";
+		const mrPath = "projects/group%2Fapi/merge_requests/42";
+
+		function autoStatePayload(
+			overrides: Record<string, unknown> = {},
+		): Record<string, unknown> {
+			return {
+				iid: 42,
+				title: "Improve API",
+				description: "Description",
+				web_url: mrUrl,
+				author: { username: "author" },
+				source_branch: "feature/api",
+				target_branch: "main",
+				sha: "head-sha",
+				diff_refs: {
+					base_sha: "base-sha",
+					start_sha: "start-sha",
+					head_sha: "head-sha",
+				},
+				state: "opened",
+				draft: false,
+				labels: ["existing"],
+				detailed_merge_status: "mergeable",
+				has_conflicts: false,
+				head_pipeline: { sha: "head-sha", status: "success" },
+				...overrides,
+			};
+		}
+
+		test("discovers matching assignees across pages and deduplicates MRs", async () => {
+			const pageOne = [
+				{
+					iid: 42,
+					state: "opened",
+					web_url: mrUrl,
+					assignees: [{ username: "Alice" }, { username: "Other" }],
+				},
+				{
+					iid: 43,
+					state: "opened",
+					web_url: "https://gitlab.example.com/group/api/-/merge_requests/43",
+					assignees: [{ username: "unconfigured" }],
+				},
+			];
+			const pageTwo = [
+				{
+					iid: 42,
+					state: "opened",
+					web_url: mrUrl,
+					assignees: [{ username: "alice" }, { username: "Third" }],
+				},
+				{
+					iid: 44,
+					state: "opened",
+					web_url: "https://gitlab.example.com/group/other/-/merge_requests/44",
+					assignees: [{ username: "BOB" }],
+				},
+			];
+			const glab = makeGlab({
+				"api --paginate merge_requests?scope=all&state=opened&assignee_username=alice&per_page=100":
+					ok(`${JSON.stringify(pageOne)}\n${JSON.stringify(pageTwo)}`),
+				"api --paginate merge_requests?scope=all&state=opened&assignee_username=bob&per_page=100":
+					ok("[]"),
+			});
+
+			await expect(
+				glab.listOpenedMrsForAssignees(["alice", "bob"]),
+			).resolves.toEqual([
+				{
+					ref,
+					assignees: ["Alice", "Other", "Third"],
+				},
+				{
+					ref: {
+						host: "gitlab.example.com",
+						projectPath: "group/other",
+						iid: 44,
+					},
+					assignees: ["BOB"],
+				},
+			]);
+		});
+
+		test("deduplicates configured assignee handles before querying", async () => {
+			const glab = makeGlab({
+				"api --paginate merge_requests?scope=all&state=opened&assignee_username=Alice&per_page=100":
+					ok(
+						JSON.stringify([
+							{
+								iid: 42,
+								state: "opened",
+								web_url: mrUrl,
+								assignees: [{ username: "Alice" }],
+							},
+						]),
+					),
+			});
+
+			await glab.listOpenedMrsForAssignees(["Alice", "alice"]);
+			expect(calls).toEqual([
+				[
+					"api",
+					"--paginate",
+					"merge_requests?scope=all&state=opened&assignee_username=Alice&per_page=100",
+				],
+			]);
+		});
+
+		test("rejects malformed discovery entries as PortError", async () => {
+			const glab = makeGlab({
+				"api --paginate merge_requests?scope=all&state=opened&assignee_username=alice&per_page=100":
+					ok(
+						JSON.stringify([
+							{
+								iid: 42,
+								state: "opened",
+								web_url: "https://gitlab.example.com/not-an-mr",
+								assignees: [{ username: "alice" }],
+							},
+						]),
+					),
+			});
+
+			await expect(
+				glab.listOpenedMrsForAssignees(["alice"]),
+			).rejects.toBeInstanceOf(PortError);
+		});
+
+		test("maps MR state and exact-head pipeline status", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
+					ok(
+						JSON.stringify(
+							autoStatePayload({
+								draft: true,
+								labels: ["ai-review", "backend"],
+								detailed_merge_status: "not_approved",
+								has_conflicts: true,
+								head_pipeline: {
+									sha: "head-sha",
+									status: "failed",
+								},
+							}),
+						),
+					),
+			});
+
+			await expect(glab.fetchAutoApprovalState(ref)).resolves.toMatchObject({
+				mr: {
+					iid: 42,
+					projectPath: "group/api",
+					title: "Improve API",
+					headSha: "head-sha",
+				},
+				draft: true,
+				labels: ["ai-review", "backend"],
+				detailedMergeStatus: "not_approved",
+				hasConflicts: true,
+				headPipelineStatus: "failed",
+			});
+		});
+
+		test("maps unknown merge and pipeline statuses to null", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
+					ok(
+						JSON.stringify(
+							autoStatePayload({
+								detailed_merge_status: "future_merge_status",
+								head_pipeline: {
+									sha: "head-sha",
+									status: "future_pipeline_status",
+								},
+							}),
+						),
+					),
+			});
+
+			await expect(glab.fetchAutoApprovalState(ref)).resolves.toMatchObject({
+				detailedMergeStatus: null,
+				headPipelineStatus: null,
+			});
+		});
+
+		test("falls back to merge request pipelines for exact head SHA", async () => {
+			const pipelinePath = `${mrPath}/pipelines`;
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
+					ok(
+						JSON.stringify(
+							autoStatePayload({
+								head_pipeline: { sha: "merge-sha" },
+							}),
+						),
+					),
+				[`api --hostname ${ref.host} --paginate ${pipelinePath}`]: ok(
+					JSON.stringify([
+						{ sha: "other-sha", status: "success" },
+						{ sha: "head-sha", status: "success" },
+					]),
+				),
+			});
+
+			await expect(glab.fetchAutoApprovalState(ref)).resolves.toMatchObject({
+				headPipelineStatus: "success",
+			});
+			expect(calls).toEqual([
+				[
+					"api",
+					"--hostname",
+					ref.host,
+					`${mrPath}?with_merge_status_recheck=true`,
+				],
+				["api", "--hostname", ref.host, "--paginate", pipelinePath],
+			]);
+		});
+
+		test("trusts successful inline merge-ref pipeline status", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
+					ok(
+						JSON.stringify(
+							autoStatePayload({
+								head_pipeline: { sha: "merge-ref-sha", status: "success" },
+							}),
+						),
+					),
+			});
+
+			await expect(glab.fetchAutoApprovalState(ref)).resolves.toMatchObject({
+				headPipelineStatus: "success",
+			});
+			expect(calls).toHaveLength(1);
+		});
+
+		test("distinguishes an MR with no configured pipeline", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
+					ok(JSON.stringify(autoStatePayload({ head_pipeline: null }))),
+			});
+
+			await expect(glab.fetchAutoApprovalState(ref)).resolves.toMatchObject({
+				headPipelineStatus: "not_configured",
+			});
+			expect(calls).toHaveLength(1);
+		});
+
+		test("rejects malformed auto-approval payload as PortError", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
+					ok("{}"),
+			});
+
+			await expect(glab.fetchAutoApprovalState(ref)).rejects.toBeInstanceOf(
+				PortError,
+			);
+		});
+
+		test("does not update when label already exists case-insensitively", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}`]: ok(
+					JSON.stringify(autoStatePayload({ labels: ["AI-Review", "other"] })),
+				),
+			});
+
+			await expect(glab.addMrLabel(ref, "ai-review")).resolves.toBeUndefined();
+			expect(calls).toEqual([["api", "--hostname", ref.host, mrPath]]);
+		});
+
+		test("adds labels with additive GitLab update semantics", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}`]: ok(
+					JSON.stringify(autoStatePayload({ labels: ["other"] })),
+				),
+				[`api --hostname ${ref.host} --method PUT --field add_labels=ai-review ${mrPath}`]:
+					ok("{}"),
+			});
+
+			await expect(glab.addMrLabel(ref, "ai-review")).resolves.toBeUndefined();
+			expect(calls).toEqual([
+				["api", "--hostname", ref.host, mrPath],
+				[
+					"api",
+					"--hostname",
+					ref.host,
+					"--method",
+					"PUT",
+					"--field",
+					"add_labels=ai-review",
+					mrPath,
+				],
+			]);
+		});
+
+		test("preserves glab failures as PortError", async () => {
+			const glab = makeGlab({
+				"api --paginate merge_requests?scope=all&state=opened&assignee_username=alice&per_page=100":
+					fail("forbidden", 17),
+			});
+
+			try {
+				await glab.listOpenedMrsForAssignees(["alice"]);
+				throw new Error("expected discovery to fail");
+			} catch (error) {
+				expect(error).toBeInstanceOf(PortError);
+				expect((error as PortError).stderr).toBe("forbidden");
+				expect((error as PortError).code).toBe(17);
+			}
+		});
+	});
 
 	describe("resolveHandle", () => {
 		test("routes to resolveUser for non-slash handles", async () => {
@@ -445,6 +762,41 @@ describe("GlabAdapter", () => {
 			});
 			expect(calls[0]).toContain("--source-branch");
 			expect(calls[0]).toContain("dev");
+		});
+	});
+
+	describe("listDiscussions", () => {
+		test("preserves GitLab individual_note marker", async () => {
+			const ref: MrRef = {
+				host: "gitlab.example.com",
+				projectPath: "group/sub/project",
+				iid: 42,
+			};
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(
+						JSON.stringify([
+							{
+								id: "global-note",
+								individual_note: true,
+								resolved: null,
+								notes: [
+									{
+										id: 1,
+										author: { username: "reviewer" },
+										body: "global comment",
+										created_at: "2026-08-30T00:00:00Z",
+										system: false,
+									},
+								],
+							},
+						]),
+					),
+			});
+
+			await expect(glab.listDiscussions(ref)).resolves.toMatchObject([
+				{ id: "global-note", individualNote: true, resolved: false },
+			]);
 		});
 	});
 

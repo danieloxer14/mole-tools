@@ -24,3 +24,13 @@ export function applyZodOptions(cmd: Command, schema: z.ZodTypeAny): void {
 		}
 	}
 }
+
+/** CAC adds an empty `--` option even when no separator was supplied. */
+export function stripEmptyDoubleDash(
+	options: Record<string, unknown>,
+): Record<string, unknown> {
+	if (Array.isArray(options["--"]) && options["--"].length === 0) {
+		delete options["--"];
+	}
+	return options;
+}

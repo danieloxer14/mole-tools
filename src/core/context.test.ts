@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test";
+import { FakeNotifier } from "../../test/fakes/FakeNotifier";
 import { FakeReviewAgent } from "../../test/fakes/FakeReviewAgent";
 import { FakeUiPort } from "../../test/fakes/FakeUiPort";
 import { ClaudeAgentAdapter } from "../adapters/agent/claude";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import { ConfigSchema } from "../adapters/config/schema";
+import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
 import type { GenerateRequest, Llm } from "../ports/llm";
 import { buildContext, RoutingLlmProxy } from "./context";
 
@@ -134,4 +136,50 @@ test("selects the configured review agent and accepts an override", () => {
 		reviewAgent: fake,
 	});
 	expect(overriddenContext.reviewAgent).toBe(fake);
+});
+test("creates babysitter services without resolving Slack environment", () => {
+	const envName = "MOLE_TOOLS_CONTEXT_SLACK_WEBHOOK_URL";
+	const original = process.env[envName];
+	delete process.env[envName];
+
+	try {
+		const context = buildContext({
+			config,
+			ui: new FakeUiPort(),
+		});
+
+		expect(
+			context.createReviewBabysitterAgent("babysitter-model"),
+		).toBeInstanceOf(OmpAgentAdapter);
+		expect(context.createNotifier(envName)).toBeInstanceOf(
+			SlackWebhookNotifier,
+		);
+	} finally {
+		if (original === undefined) delete process.env[envName];
+		else process.env[envName] = original;
+	}
+});
+
+test("allows babysitter service factories to be overridden", () => {
+	const agent = new FakeReviewAgent();
+	const notifier = new FakeNotifier();
+	let requestedModel = "";
+	let requestedEnvironment = "";
+	const context = buildContext({
+		config,
+		ui: new FakeUiPort(),
+		createReviewBabysitterAgent: (model) => {
+			requestedModel = model;
+			return agent;
+		},
+		createNotifier: (webhookUrlEnv) => {
+			requestedEnvironment = webhookUrlEnv;
+			return notifier;
+		},
+	});
+
+	expect(context.createReviewBabysitterAgent("model-from-test")).toBe(agent);
+	expect(context.createNotifier("ENV_FROM_TEST")).toBe(notifier);
+	expect(requestedModel).toBe("model-from-test");
+	expect(requestedEnvironment).toBe("ENV_FROM_TEST");
 });

@@ -39,6 +39,7 @@ export class FakeVcs implements Vcs {
 	pushCalls: { setUpstream: boolean; branch: string }[] = [];
 	worktreeCalls: { path: string; repoRoot: string }[] = [];
 	forceWorktreeCalls: { path: string; repoRoot: string }[] = [];
+	removeWorktreeCalls: { path: string; repoRoot: string }[] = [];
 	cloneCalls: { remoteUrl: string; destination: string }[] = [];
 	fetchRefCalls: { repoRoot: string; remote: string; ref: string }[] = [];
 	mergeBaseCalls: { repoRoot: string; a: string; b: string }[] = [];
@@ -162,6 +163,7 @@ export class FakeVcs implements Vcs {
 	}
 
 	async removeWorktree(path: string, repoRoot: string): Promise<void> {
+		this.removeWorktreeCalls.push({ path, repoRoot });
 		this.worktreeCalls.push({ path, repoRoot });
 		if (this.opts.removeWorktreeError) throw this.opts.removeWorktreeError;
 	}
