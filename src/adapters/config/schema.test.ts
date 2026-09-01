@@ -29,34 +29,65 @@ describe("config schema", () => {
 		}
 	});
 
-	test("rejects removed model routes", () => {
-		expect(
-			ConfigSchema.safeParse({
-				...baseConfig,
-				models: {
-					...baseConfig.models,
-					[staleReviewKey]: baseConfig.models.commit,
+	test("ignores unknown model routes", () => {
+		const config = ConfigSchema.parse({
+			...baseConfig,
+			models: {
+				...baseConfig.models,
+				[staleReviewKey]: baseConfig.models.commit,
+				[staleLoopKey]: { init: baseConfig.models.commit },
+			},
+		});
+
+		expect(config.models).toEqual(baseConfig.models);
+	});
+
+	test("ignores unknown keys at every config level", () => {
+		const config = ConfigSchema.parse({
+			...baseConfig,
+			extra: true,
+			providers: {
+				ollama: {
+					...baseConfig.providers.ollama,
+					extra: true,
 				},
-			}).success,
-		).toBe(false);
+			},
+			models: {
+				...baseConfig.models,
+				commit: { ...baseConfig.models.commit, extra: true },
+			},
+			review: { agent: "omp", unsupported: true },
+		});
+
+		expect(config.providers.ollama).toEqual(baseConfig.providers.ollama);
+		expect(config.models.commit).toEqual(baseConfig.models.commit);
+		expect(config.review).toEqual({
+			agent: "omp",
+			layerTimeoutSeconds: 600,
+			largeFileLineThreshold: 800,
+		});
+		expect(config).not.toHaveProperty("extra");
+	});
+
+	test("keeps rejecting invalid known values", () => {
 		expect(
 			ConfigSchema.safeParse({
 				...baseConfig,
 				models: {
 					...baseConfig.models,
-					[staleLoopKey]: { init: baseConfig.models.commit },
+					commit: { provider: "ollama", name: 123 },
 				},
 			}).success,
 		).toBe(false);
 	});
 
-	test("rejects removed top-level review settings", () => {
-		expect(
-			ConfigSchema.safeParse({
-				...baseConfig,
-				[staleReviewKey]: { concurrency: 2 },
-			}).success,
-		).toBe(false);
+	test("ignores removed top-level review settings", () => {
+		const config = ConfigSchema.parse({
+			...baseConfig,
+			[staleReviewKey]: { concurrency: 2 },
+		});
+
+		expect(config).not.toHaveProperty(staleReviewKey);
 	});
 
 	test("validates configured providers for surviving routes", () => {
