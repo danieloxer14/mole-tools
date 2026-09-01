@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import cac from "cac";
 import { z } from "zod";
-import { applyZodOptions } from "./cli/options";
+import { applyZodOptions, stripEmptyDoubleDash } from "./cli/options";
 import { commit } from "./features/commit";
 
 describe("commit CLI option parsing", () => {
@@ -45,4 +45,12 @@ describe("commit CLI option parsing", () => {
 
 		expect(args.auto).toBe(true);
 	});
+});
+
+test("strips CAC empty double-dash metadata before strict parsing", () => {
+	const options: Record<string, unknown> = { "--": [] };
+	expect(stripEmptyDoubleDash(options)).toEqual({});
+
+	const extraArgs: Record<string, unknown> = { "--": ["unexpected"] };
+	expect(stripEmptyDoubleDash(extraArgs)).toBe(extraArgs);
 });

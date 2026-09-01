@@ -1,39 +1,47 @@
 import { z } from "zod";
 
 /** Connection details for a named provider. The map key is the provider identity. */
-export const OllamaProviderSchema = z
-	.object({
-		baseUrl: z.string().min(1),
-		provider: z.literal("ollama").optional(),
-	})
-	.strict();
-export const PiProviderSchema = z
-	.object({
-		binary: z.string().min(1),
-		provider: z.literal("pi").optional(),
-		projectRoot: z.string().optional(),
-	})
-	.strict();
+export const OllamaProviderSchema = z.object({
+	baseUrl: z.string().min(1),
+	provider: z.literal("ollama").optional(),
+});
+export const PiProviderSchema = z.object({
+	binary: z.string().min(1),
+	provider: z.literal("pi").optional(),
+	projectRoot: z.string().optional(),
+});
 export const ProviderProfileSchema = z.union([
 	OllamaProviderSchema,
 	PiProviderSchema,
 ]);
 export type ProviderProfile = z.infer<typeof ProviderProfileSchema>;
 
-export const ModelRouteSchema = z
-	.object({
-		provider: z.string().min(1),
-		name: z.string().min(1),
-	})
-	.strict();
+export const ModelRouteSchema = z.object({
+	provider: z.string().min(1),
+	name: z.string().min(1),
+});
 export type ModelRoute = z.infer<typeof ModelRouteSchema>;
 
-export const ModelsConfigSchema = z
+export const ModelsConfigSchema = z.object({
+	commit: ModelRouteSchema,
+	mergeRequest: ModelRouteSchema,
+});
+export const ReviewBabysitterConfigSchema = z
 	.object({
-		commit: ModelRouteSchema,
-		mergeRequest: ModelRouteSchema,
+		intervalSeconds: z.number().int().min(60).default(900),
+		assignees: z.array(z.string().min(1)).min(1),
+		aiReviewerUsername: z.string().min(1),
+		promptFile: z.string().min(1),
+		model: z.string().min(1),
+		webhookUrlEnv: z.string().min(1),
+		maxChangedLines: z.number().int().nonnegative().default(250),
+		maxChangedFiles: z.number().int().nonnegative().default(10),
+		denyPathsByProject: z.record(z.string().min(1), z.array(z.string().min(1))),
 	})
 	.strict();
+export type ReviewBabysitterConfig = z.infer<
+	typeof ReviewBabysitterConfigSchema
+>;
 
 export const ReviewConfigSchema = z
 	.object({
@@ -43,32 +51,31 @@ export const ReviewConfigSchema = z
 		layerTimeoutSeconds: z.number().int().positive().default(600),
 		largeFileLineThreshold: z.number().int().positive().default(800),
 	})
-	.strict()
 	.default({
 		agent: "omp",
 		layerTimeoutSeconds: 600,
 		largeFileLineThreshold: 800,
 	});
 
-export const ConfigSchema = z
-	.object({
-		providers: z.record(z.string().min(1), ProviderProfileSchema),
-		models: ModelsConfigSchema,
-		jira: z.object({
-			enabled: z.boolean().default(false),
-			url: z.string().optional(),
-			email: z.string().optional(),
-			apiKey: z.string().optional(),
-			branchPattern: z.string().default("[A-Z]+-[0-9]+"),
-		}),
-		diff: z.object({ ignore: z.array(z.string()).default([]) }),
-		dynamicEnvRepos: z.array(z.string()).optional(),
-		dynamicEnvScript: z.string().optional(),
-		autoReviewer: z.object({ username: z.string() }).optional(),
-		worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
-		review: ReviewConfigSchema,
-	})
-	.strict();
+/** Unknown config keys are stripped for forward compatibility across feature branches. */
+export const ConfigSchema = z.object({
+	providers: z.record(z.string().min(1), ProviderProfileSchema),
+	models: ModelsConfigSchema,
+	jira: z.object({
+		enabled: z.boolean().default(false),
+		url: z.string().optional(),
+		email: z.string().optional(),
+		apiKey: z.string().optional(),
+		branchPattern: z.string().default("[A-Z]+-[0-9]+"),
+	}),
+	diff: z.object({ ignore: z.array(z.string()).default([]) }),
+	dynamicEnvRepos: z.array(z.string()).optional(),
+	dynamicEnvScript: z.string().optional(),
+	autoReviewer: z.object({ username: z.string() }).optional(),
+	worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
+	review: ReviewConfigSchema,
+	reviewBabysitter: ReviewBabysitterConfigSchema.optional(),
+});
 export type Config = z.infer<typeof ConfigSchema>;
 
 export type RoutingPurpose = "commit" | "mergeRequest";

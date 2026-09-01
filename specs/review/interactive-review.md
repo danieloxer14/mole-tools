@@ -140,8 +140,14 @@ source lines. Added lines use the new side, deleted lines use the old side, and
 line numbers are retained for both sides. Binary files show a stat line only.
 A file with no patch (including a stat-only ignored file), or with more than
 `largeFileLineThreshold` diff lines (default `800`), starts collapsed with an
-Expand diff control. Expansion requests the unfiltered local diff; inter-hunk
-context has its own Expand lines control and uses file contents when available.
+Expand diff control. Modified text-file diffs also expose `Whole file` and
+`Diff only` controls. The existing single table fills head, inter-hunk, and tail
+gaps from fetched file contents: head/tail rows reveal 20 lines at a time and
+offer `Expand all`; inter-hunk rows keep their Expand/Hide behavior. Revealed
+context has both old/new line numbers, uses the same highlighting as hunk rows,
+and offers local `Tag line` only—never a GitLab `Comment`. `Whole file` is kept
+per file for the browser session, confirms files over the configured total-line
+threshold, and `Diff only` returns the nearest visible hunk to the viewport.
 
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
@@ -221,12 +227,20 @@ Turn construction is intentionally asymmetric:
   transcript entry.
 
 Tag line adds one line to agent-chat context. Shift-selecting two lines in the
-same hunk creates an inclusive context range; Tag hunk adds the complete hunk.
-Tags can be removed before sending, or cleared all at once. The UI streams
-text and tool start/end activity, keeps partial assistant text on
-failure/cancel, and enables the next turn after Stop. At most one turn runs per
-chat; different chats can run in parallel. Switching chats never interrupts a
-running turn, and chats cannot be deleted.
+same hunk creates an inclusive context range. Dragging from a line's Tag line
+button to another line in the same hunk on the same side adds that inclusive
+range as one tag in a single gesture; the drag is clamped to the origin hunk
+and the origin side, Esc aborts the drag with no tag added, and releasing the
+mouse outside the diff panel commits the last clamped range. Revealed
+inter-hunk context lines have no hunk to clamp to, so they keep tagging one
+line at a time via their own click and are never part of a drag. Dragging
+from a rendered-Markdown block's Tag button across later blocks adds one tag
+spanning those blocks' source lines, snapping to block boundaries. Tags can
+be removed before sending, or cleared all at once. The UI streams text and
+tool start/end activity, keeps partial assistant text on failure/cancel, and
+enables the next turn after Stop. At most one turn runs per chat; different
+chats can run in parallel. Switching chats never interrupts a running turn,
+and chats cannot be deleted.
 
 **Reload limitation:** A page reload drops the browser-side stream readers. The
 server turn keeps running, still appends the assistant entry, and
@@ -236,15 +250,17 @@ is not replayed; it appears once the transcript is refetched.
 ## 7. Positioned comment lifecycle
 
 A reviewer can add a comment from a line, an inclusive same-side selection, a
-whole hunk, or a tagged line. Creating a comment immediately opens an empty
-local draft editor at that position. The user writes its body; no agent turn or
-comment-generation prompt runs. The draft is local until its own Send: there is
-no batch submit. Draft statuses are `draft`, `sending`, `posted`, and `failed`;
-Cancel removes it, Edit persists body changes, and failed drafts keep their
-error with Retry. While sending, the draft is persisted before
-`GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and Send,
-and keeps Cancel available. A post failure transitions the draft to `failed`
-with its error.
+drag from a line's Comment button to another line in the same hunk on the
+same side, or a tagged line. A comment drag is clamped to one hunk so it can
+always build a valid GitLab position. Creating a comment immediately opens an
+empty local draft editor below the selection's last line. The user writes its
+body; no agent turn or comment-generation prompt runs. The draft is local until
+its own Send: there is no batch submit. Draft statuses are `draft`, `sending`,
+`posted`, and `failed`; Cancel removes it, Edit persists body changes, and
+failed drafts keep their error with Retry. While sending, the draft is persisted
+before `GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and
+Send, and keeps Cancel available. A post failure transitions the draft to
+`failed` with its error.
 
 Before Send, mole-tools validates the selection against the parsed diff and
 current `diff_refs`:

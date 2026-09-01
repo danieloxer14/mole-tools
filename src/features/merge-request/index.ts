@@ -6,7 +6,7 @@ import type { Feature } from "../../core/feature";
 import type { Issue } from "../../ports/issue-tracker";
 import { filterDiff } from "../../shared/diff";
 import { runCommitFlow } from "../commit";
-import { generateMergeRequest } from "./generate";
+import { generateMergeRequest, type MergeRequestMode } from "./generate";
 import { selectReviewers } from "./reviewers";
 
 const args = z.object({
@@ -17,6 +17,12 @@ const args = z.object({
 		.optional()
 		.describe("Extra guidance for the generated merge request")
 		.meta({ examples: ["Emphasize the migration risk and rollout plan."] }),
+	mode: z
+		.enum(["code", "plan"], {
+			error: "--mode must be one of: code | plan",
+		})
+		.default("code")
+		.describe("Description mode: code or plan (default: code)"),
 });
 
 export interface MergeRequestCandidate {
@@ -50,6 +56,8 @@ async function maybeFetchIssue(ctx: Context): Promise<Issue | null> {
 export interface MergeRequestFlowOptions {
 	/** Optional user-supplied guidance for the merge request and commit generation. */
 	context?: string;
+	/** Prompt mode for the generated merge request description. */
+	mode?: MergeRequestMode;
 }
 
 export async function runMergeRequestFlow(
@@ -100,6 +108,7 @@ export async function runMergeRequestFlow(
 		commits: commits.map((commit) => commit.subject),
 		diff,
 		context: options.context,
+		mode: options.mode,
 	});
 	await ctx.ui.info(`Title: ${candidate.title}\n\n${candidate.body}`);
 
@@ -173,17 +182,22 @@ export const mergeRequest: Feature<typeof args, MergeRequestResult> = {
 	description: "Generate and review a GitLab merge request",
 	args,
 	help: {
-		usage: "mole-tools merge-request [--context <text>]",
+		usage: "mole-tools merge-request [--mode <code|plan>] [--context <text>]",
 		examples: [
-			'mole-tools merge-request --context "Emphasize the migration risk and rollout plan."',
+			'--context "Emphasize the migration risk and rollout plan."',
+			'--mode plan --context "Explain the rollout decision."',
 		],
 		notes: [
 			"Prepares an MR candidate from the current branch and commits.",
 			"If staged changes exist, a commit is generated first using the same --context guidance.",
 			"Use --context to supply invocation-scoped guidance for the LLM without changing configured prompts.",
+			"Use --mode code (default) for code changes or --mode plan for implementation plans.",
 		],
 	},
 	async run(ctx, args) {
-		return runMergeRequestFlow(ctx, { context: args.context });
+		return runMergeRequestFlow(ctx, {
+			context: args.context,
+			mode: args.mode,
+		});
 	},
 };

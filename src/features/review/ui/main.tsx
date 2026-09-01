@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createRoot } from "react-dom/client";
 import type { HostDiscussion, MrApprovalState } from "../../../ports/git-host";
+import { splitSourceLines } from "../../../shared/diff-context";
 import type { ParsedFileDiff } from "../../../shared/diff-parse";
 import { type ChatTag, chatTagsEqual } from "../chat-tags";
 import type { ReviewApiState } from "../routes";
@@ -459,6 +460,15 @@ function ReviewApp() {
 	const [fileViewModes, setFileViewModes] = useState<
 		Record<string, FileViewMode>
 	>({});
+	const [wholeFileModes, setWholeFileModes] = useState<Record<string, boolean>>(
+		{},
+	);
+	const [confirmedWholeFilePaths, setConfirmedWholeFilePaths] = useState<
+		Record<string, true>
+	>({});
+	const [pendingWholeFilePaths, setPendingWholeFilePaths] = useState<
+		Record<string, true>
+	>({});
 	const [fileContents, setFileContents] = useState<string | null>(null);
 	const [fileContentsError, setFileContentsError] = useState<string | null>(
 		null,
@@ -771,6 +781,8 @@ function ReviewApp() {
 		selectedFile && selectedPath && isMarkdownPath(filePath(selectedFile))
 			? (fileViewModes[selectedPath] ?? defaultFileViewMode(selectedFile))
 			: "diff";
+	const selectedWholeFile =
+		selectedPath === null ? false : (wholeFileModes[selectedPath] ?? false);
 
 	// selectedFile is intentionally excluded from this effect's deps below:
 	// `/api/state` refetches (chat polling, layer-stream completion, comment
@@ -813,6 +825,53 @@ function ReviewApp() {
 		selectedFile?.status,
 		selectedViewMode,
 		token,
+	]);
+	useEffect(() => {
+		if (!data || !selectedPath || !pendingWholeFilePaths[selectedPath]) return;
+		if (fileContents === null) {
+			if (fileContentsError === null) return;
+			setPendingWholeFilePaths((current) => {
+				const { [selectedPath]: _, ...remaining } = current;
+				return remaining;
+			});
+			setWholeFileModes((current) => ({
+				...current,
+				[selectedPath]: true,
+			}));
+			return;
+		}
+		const sourceLineCount = splitSourceLines(fileContents).length;
+		setPendingWholeFilePaths((current) => {
+			const { [selectedPath]: _, ...remaining } = current;
+			return remaining;
+		});
+		if (
+			sourceLineCount > data.largeFileLineThreshold &&
+			!confirmedWholeFilePaths[selectedPath]
+		) {
+			if (
+				!window.confirm(
+					`This file has ${sourceLineCount} lines. Show the whole file?`,
+				)
+			) {
+				return;
+			}
+			setConfirmedWholeFilePaths((current) => ({
+				...current,
+				[selectedPath]: true,
+			}));
+		}
+		setWholeFileModes((current) => ({
+			...current,
+			[selectedPath]: true,
+		}));
+	}, [
+		data,
+		selectedPath,
+		pendingWholeFilePaths,
+		fileContents,
+		fileContentsError,
+		confirmedWholeFilePaths,
 	]);
 
 	if (error)
@@ -881,6 +940,48 @@ function ReviewApp() {
 			...current,
 			[selectedPath]: next,
 		}));
+	};
+	const changeWholeFile = (
+		wholeFile: boolean,
+		sourceLineCount: number | null,
+	) => {
+		if (!selectedPath || !selectedFile) return;
+		if (wholeFile && sourceLineCount === null && fileContentsError === null) {
+			setPendingWholeFilePaths((current) => ({
+				...current,
+				[selectedPath]: true,
+			}));
+			return;
+		}
+		if (!wholeFile && pendingWholeFilePaths[selectedPath]) {
+			setPendingWholeFilePaths((current) => {
+				const { [selectedPath]: _, ...remaining } = current;
+				return remaining;
+			});
+		}
+		if (
+			wholeFile &&
+			sourceLineCount !== null &&
+			sourceLineCount > data.largeFileLineThreshold &&
+			!confirmedWholeFilePaths[selectedPath]
+		) {
+			if (
+				!window.confirm(
+					`This file has ${sourceLineCount} lines. Show the whole file?`,
+				)
+			) {
+				return;
+			}
+			setConfirmedWholeFilePaths((current) => ({
+				...current,
+				[selectedPath]: true,
+			}));
+		}
+		setWholeFileModes((current) =>
+			current[selectedPath] === wholeFile
+				? current
+				: { ...current, [selectedPath]: wholeFile },
+		);
 	};
 	const saveProgress = (body: Record<string, unknown>) => {
 		setProgressError(null);
@@ -1569,6 +1670,8 @@ function ReviewApp() {
 					discussions={data.discussions}
 					drafts={data.drafts}
 					onModeChange={setDiffMode}
+					wholeFile={selectedWholeFile}
+					onWholeFileChange={changeWholeFile}
 					onViewModeChange={changeViewMode}
 					onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
 					onLineSelection={handleLineSelection}

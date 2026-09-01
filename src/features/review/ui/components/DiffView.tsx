@@ -5,6 +5,7 @@ import {
 	Fragment,
 	type KeyboardEvent,
 	type MouseEvent,
+	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
@@ -12,6 +13,15 @@ import {
 } from "react";
 import { codeToHtml } from "shiki";
 import type { HostDiscussion } from "../../../../ports/git-host";
+import {
+	CONTEXT_CHUNK_SIZE,
+	type ContextGap,
+	diffContextGaps,
+	gapLineCount,
+	hiddenContextRange,
+	revealedContextLines,
+	splitSourceLines,
+} from "../../../../shared/diff-context";
 import type {
 	DiffHunk,
 	DiffLine,
@@ -24,6 +34,26 @@ import {
 } from "../../../../shared/markdown";
 import { type Draft, isMarkdownSelection } from "../../state";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
+import {
+	contextLineId,
+	diffLineId,
+	type FindRender,
+	findMatches,
+	lineTextMatches,
+	stepMatchIndex,
+} from "./find";
+import {
+	type DiffDragRow,
+	type DragAction,
+	diffDragRange,
+	isBlockInMarkdownDrag,
+	isRowInDiffDrag,
+	type MarkdownDragBlock,
+	type MarkdownDragState,
+	markdownDragRange,
+	nextMarkdownDragEnd,
+} from "./line-drag";
+import { useDiffDrag } from "./use-diff-drag";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
 
@@ -53,6 +83,11 @@ interface DiffViewProps {
 	discussions?: readonly HostDiscussion[];
 	drafts?: readonly Draft[];
 	onModeChange: (mode: DiffMode) => void;
+	wholeFile?: boolean;
+	onWholeFileChange?: (
+		wholeFile: boolean,
+		sourceLineCount: number | null,
+	) => void;
 	onViewModeChange?: (mode: FileViewMode) => void;
 	onExpandDiff?: (file: ParsedFileDiff) => Promise<ParsedFileDiff | null>;
 	onLineSelection?: (selection: DiffLineSelection) => void;
@@ -161,6 +196,44 @@ function renderMarkdown(source: string): RenderedMarkdown {
 	return { html, mermaidSources, codeSources, blockRanges };
 }
 
+/**
+ * Resolves the nearest `.markdown-block` that recovered a source range from a
+ * raw DOM element. Unmapped blocks carry neither `data-block-id` nor the
+ * `data-source-line-*` attributes, so they never match the `[data-block-id]`
+ * selector and resolve to `null` here — exactly the signal `nextMarkdownDragEnd`
+ * needs to cross over them without ending the drag.
+ */
+function markdownDragBlockFromElement(
+	element: Element | null,
+): MarkdownDragBlock | null {
+	const block = element?.closest?.(".markdown-block[data-block-id]");
+	if (!block) return null;
+	const blockId = block.getAttribute("data-block-id");
+	const startLine = Number.parseInt(
+		block.getAttribute("data-source-line-start") ?? "",
+		10,
+	);
+	const endLine = Number.parseInt(
+		block.getAttribute("data-source-line-end") ?? "",
+		10,
+	);
+	if (blockId === null || Number.isNaN(startLine) || Number.isNaN(endLine)) {
+		return null;
+	}
+	return { blockId, startLine, endLine };
+}
+
+/** Slices the inclusive source-line range into the quote text used by Tag/Comment. */
+function markdownBlockQuote(
+	source: string,
+	range: { startLine: number; endLine: number },
+): string {
+	return source
+		.split("\n")
+		.slice(range.startLine - 1, range.endLine)
+		.join("\n");
+}
+
 function RenderedMarkdown({
 	source,
 	path,
@@ -190,6 +263,8 @@ function RenderedMarkdown({
 		}
 	}, [source]);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const [drag, setDrag] = useState<MarkdownDragState | null>(null);
+	const dragRef = useRef<MarkdownDragState | null>(null);
 
 	useEffect(() => {
 		const rendered = parsed.value;
@@ -345,24 +420,18 @@ function RenderedMarkdown({
 		const rendered = parsed.value;
 		const container = containerRef.current;
 		if (!rendered || !container) return;
-		const handleBlockActionClick = (event: Event) => {
-			const target = event.target as HTMLElement;
-			const button = target.closest<HTMLElement>(
-				".markdown-block-tag, .markdown-block-comment",
-			);
-			if (!button) return;
+		const resolveBlock = (button: HTMLElement): MarkdownDragBlock | null => {
 			const blockId = button.dataset.blockId;
 			const range = blockId ? rendered.blockRanges.get(blockId) : undefined;
-			if (!range) return;
-			const quote = source
-				.split("\n")
-				.slice(range.startLine - 1, range.endLine)
-				.join("\n");
+			if (!blockId || !range) return null;
+			return { blockId, startLine: range.startLine, endLine: range.endLine };
+		};
+		const commitBlock = (button: HTMLElement, block: MarkdownDragBlock) => {
 			const selection: MarkdownBlockSelection = {
 				path,
-				startLine: range.startLine,
-				endLine: range.endLine,
-				quote,
+				startLine: block.startLine,
+				endLine: block.endLine,
+				quote: markdownBlockQuote(source, block),
 			};
 			if (button.classList.contains("markdown-block-tag")) {
 				onTagBlock?.(selection);
@@ -370,9 +439,117 @@ function RenderedMarkdown({
 				onCommentBlock?.(selection);
 			}
 		};
-		container.addEventListener("click", handleBlockActionClick);
-		return () => container.removeEventListener("click", handleBlockActionClick);
+		const handleMouseDown = (event: Event) => {
+			const target = event.target as HTMLElement;
+			const button = target.closest<HTMLElement>(
+				".markdown-block-tag, .markdown-block-comment",
+			);
+			if (!button) return;
+			const block = resolveBlock(button);
+			if (!block) return;
+			event.preventDefault();
+			const nextDrag: MarkdownDragState = {
+				action: button.classList.contains("markdown-block-tag")
+					? "tag"
+					: "comment",
+				origin: block,
+				end: block,
+			};
+			dragRef.current = nextDrag;
+			setDrag(nextDrag);
+		};
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Enter" && event.key !== " ") return;
+			const target = event.target as HTMLElement;
+			const button = target.closest<HTMLElement>(
+				".markdown-block-tag, .markdown-block-comment",
+			);
+			if (!button) return;
+			const block = resolveBlock(button);
+			if (!block) return;
+			event.preventDefault();
+			commitBlock(button, block);
+		};
+		container.addEventListener("mousedown", handleMouseDown);
+		container.addEventListener("keydown", handleKeyDown);
+		return () => {
+			container.removeEventListener("mousedown", handleMouseDown);
+			container.removeEventListener("keydown", handleKeyDown);
+		};
 	}, [parsed.value, path, source, onTagBlock, onCommentBlock]);
+
+	const commitDrag = (current: MarkdownDragState) => {
+		const { startLine, endLine } = markdownDragRange(
+			current.origin,
+			current.end,
+		);
+		const selection: MarkdownBlockSelection = {
+			path,
+			startLine,
+			endLine,
+			quote: markdownBlockQuote(source, { startLine, endLine }),
+		};
+		if (current.action === "tag") onTagBlock?.(selection);
+		else onCommentBlock?.(selection);
+	};
+	const commitDragRef = useRef(commitDrag);
+	commitDragRef.current = commitDrag;
+
+	const isDragging = drag !== null;
+	useEffect(() => {
+		if (!isDragging) return;
+		const handleMouseMove = (event: Event) => {
+			const current = dragRef.current;
+			if (!current) return;
+			const candidate = markdownDragBlockFromElement(
+				event.target as HTMLElement | null,
+			);
+			const nextEnd = nextMarkdownDragEnd(current.end, candidate);
+			if (nextEnd === current.end) return;
+			const nextDrag = { ...current, end: nextEnd };
+			dragRef.current = nextDrag;
+			setDrag(nextDrag);
+		};
+		const handleMouseUp = () => {
+			const current = dragRef.current;
+			if (!current) return;
+			dragRef.current = null;
+			setDrag(null);
+			commitDragRef.current(current);
+		};
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			event.stopPropagation();
+			dragRef.current = null;
+			setDrag(null);
+		};
+		window.addEventListener("mousemove", handleMouseMove);
+		window.addEventListener("mouseup", handleMouseUp);
+		window.addEventListener("keydown", handleKeyDown, { capture: true });
+		return () => {
+			window.removeEventListener("mousemove", handleMouseMove);
+			window.removeEventListener("mouseup", handleMouseUp);
+			window.removeEventListener("keydown", handleKeyDown, {
+				capture: true,
+			});
+		};
+	}, [isDragging]);
+
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		for (const block of container.querySelectorAll<HTMLElement>(
+			".markdown-block[data-block-id]",
+		)) {
+			const candidate = markdownDragBlockFromElement(block);
+			const inDrag =
+				drag !== null &&
+				candidate !== null &&
+				isBlockInMarkdownDrag(candidate, drag);
+			block.classList.toggle("drag-selected", inDrag);
+		}
+	}, [drag]);
 
 	if (parsed.error) {
 		return (
@@ -390,7 +567,7 @@ function RenderedMarkdown({
 			isMarkdownSelection(draft.selection),
 	);
 	return (
-		<div className="markdown-view">
+		<div className={`markdown-view${drag ? " drag-selecting" : ""}`}>
 			<div
 				className="rendered-markdown"
 				ref={containerRef}
@@ -586,18 +763,6 @@ function lineClass(line: DiffLine, selected = false): string {
 	return `diff-line diff-line-${line.kind}${selected ? " line-selected" : ""}`;
 }
 
-interface ContextLine {
-	line: number;
-	text: string;
-}
-
-interface ContextRange {
-	startLine: number;
-	endLine: number;
-	lines: ContextLine[] | null;
-	side: "new" | "old";
-}
-
 type LineSelectionEvent = {
 	shiftKey: boolean;
 };
@@ -605,9 +770,11 @@ type LineSelectionEvent = {
 function LineActions({
 	onTag,
 	onComment,
+	onDragStart,
 }: {
 	onTag?: () => void;
 	onComment?: () => void;
+	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
 }) {
 	if (!onTag && !onComment) return null;
 	return (
@@ -616,11 +783,24 @@ function LineActions({
 				<button
 					type="button"
 					className="line-tag"
-					onClick={(event) => {
-						event.stopPropagation();
-						onTag();
-					}}
-					onKeyDown={(event) => event.stopPropagation()}
+					{...(onDragStart
+						? {
+								onMouseDown: (event) => onDragStart("tag", event),
+								onKeyDown: (event) => {
+									event.stopPropagation();
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										onTag();
+									}
+								},
+							}
+						: {
+								onClick: (event) => {
+									event.stopPropagation();
+									onTag();
+								},
+								onKeyDown: (event) => event.stopPropagation(),
+							})}
 				>
 					Tag line
 				</button>
@@ -629,11 +809,24 @@ function LineActions({
 				<button
 					type="button"
 					className="line-comment"
-					onClick={(event) => {
-						event.stopPropagation();
-						onComment();
-					}}
-					onKeyDown={(event) => event.stopPropagation()}
+					{...(onDragStart
+						? {
+								onMouseDown: (event) => onDragStart("comment", event),
+								onKeyDown: (event) => {
+									event.stopPropagation();
+									if (event.key === "Enter" || event.key === " ") {
+										event.preventDefault();
+										onComment();
+									}
+								},
+							}
+						: {
+								onClick: (event) => {
+									event.stopPropagation();
+									onComment();
+								},
+								onKeyDown: (event) => event.stopPropagation(),
+							})}
 				>
 					Comment
 				</button>
@@ -646,25 +839,48 @@ function DiffLineRow({
 	line,
 	mode,
 	language,
+	find,
+	findId,
 	onSelect,
 	onTag,
 	onComment,
 	commentSide,
 	selected = false,
+	drag,
+	onDragStart,
 }: {
 	line: DiffLine;
 	mode: DiffMode;
 	language: string;
+	find: FindRender;
+	findId: string;
 	onSelect?: (event: LineSelectionEvent) => void;
 	onTag?: () => void;
 	onComment?: () => void;
 	commentSide?: "new" | "old";
 	selected?: boolean;
+	drag?: { hunkIndex: number; side: "new" | "old"; line: number };
+	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
 }) {
+	const isMatch = lineTextMatches(line.text, find.query);
+	const isCurrent = find.currentId === findId;
+	const className = [
+		lineClass(line, selected),
+		isMatch ? "find-match" : "",
+		isCurrent ? "find-match-current" : "",
+	].join(" ");
+	const setRef = useCallback(
+		(el: HTMLTableRowElement | null) => find.registerRow(findId, el),
+		[find.registerRow, findId],
+	);
 	const selectableProps = onSelect
 		? {
 				"aria-label": "Select diff line",
-				onClick: (event: MouseEvent<HTMLTableRowElement>) => onSelect(event),
+				onClick: (event: MouseEvent<HTMLTableRowElement>) => {
+					const target = event.target as HTMLElement | null;
+					if (target?.closest?.(".line-actions")) return;
+					onSelect(event);
+				},
 				onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
 					if (event.key === "Enter" || event.key === " ") {
 						event.preventDefault();
@@ -675,11 +891,24 @@ function DiffLineRow({
 				tabIndex: 0,
 			}
 		: {};
+	const dragAttributes = drag
+		? {
+				"data-drag-hunk": String(drag.hunkIndex),
+				"data-drag-side": drag.side,
+				"data-drag-line": String(drag.line),
+			}
+		: {};
+	const trProps = {
+		...selectableProps,
+		"data-find-line": findId,
+		...dragAttributes,
+	};
 	return mode === "inline" ? (
 		<tr
-			className={lineClass(line, selected)}
+			ref={setRef}
+			className={className}
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
-			{...selectableProps}
+			{...trProps}
 		>
 			<td className="line-number">{line.oldLine ?? ""}</td>
 			<td className="line-number">{line.newLine ?? ""}</td>
@@ -688,14 +917,19 @@ function DiffLineRow({
 					{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
 				</span>
 				<CodeHighlight text={line.text} language={language} />
-				<LineActions onTag={onTag} onComment={onComment} />
+				<LineActions
+					onTag={onTag}
+					onComment={onComment}
+					onDragStart={onDragStart}
+				/>
 			</td>
 		</tr>
 	) : (
 		<tr
-			className={lineClass(line, selected)}
+			ref={setRef}
+			className={className}
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
-			{...selectableProps}
+			{...trProps}
 		>
 			<td className="line-number">{line.oldLine ?? ""}</td>
 			<td className={`side-line ${line.kind === "del" ? "removed" : ""}`}>
@@ -705,7 +939,11 @@ function DiffLineRow({
 					<>
 						<CodeHighlight text={line.text} language={language} />
 						{commentSide === "old" ? (
-							<LineActions onTag={onTag} onComment={onComment} />
+							<LineActions
+								onTag={onTag}
+								onComment={onComment}
+								onDragStart={onDragStart}
+							/>
 						) : null}
 					</>
 				)}
@@ -718,7 +956,11 @@ function DiffLineRow({
 					<>
 						<CodeHighlight text={line.text} language={language} />
 						{commentSide === "new" ? (
-							<LineActions onTag={onTag} onComment={onComment} />
+							<LineActions
+								onTag={onTag}
+								onComment={onComment}
+								onDragStart={onDragStart}
+							/>
 						) : null}
 					</>
 				)}
@@ -728,51 +970,111 @@ function DiffLineRow({
 }
 
 function ContextRows({
-	range,
+	gap,
+	revealedCount,
+	sourceLines,
+	wholeFile,
 	mode,
 	language,
+	path,
+	hunk,
+	onReveal,
+	onRevealAll,
+	onHide,
+	onTag,
+	find,
+	findSide,
 }: {
-	range: ContextRange;
+	gap: ContextGap;
+	revealedCount: number;
+	sourceLines: readonly string[] | null;
 	mode: DiffMode;
+	wholeFile: boolean;
 	language: string;
+	path: string;
+	hunk: string;
+	onReveal: () => void;
+	onRevealAll: () => void;
+	onHide: () => void;
+	onTag?: (selection: DiffLineSelection) => void;
+	find: FindRender;
+	findSide: "new" | "old";
 }) {
-	const [expanded, setExpanded] = useState(false);
-	const lines = range.lines ?? [];
-	return (
-		<>
+	const effectiveRevealedCount = find.forceContext
+		? gapLineCount(gap)
+		: revealedCount;
+	const lines = revealedContextLines(gap, sourceLines, effectiveRevealedCount);
+	const hidden = hiddenContextRange(gap, effectiveRevealedCount);
+	const fullyRevealed = hidden === null;
+	const controls =
+		wholeFile ||
+		find.forceContext ||
+		(hidden === null && gap.position !== "between") ? null : (
 			<tr className="expand-context-row">
 				<td colSpan={mode === "side-by-side" ? 4 : 3}>
-					<button type="button" onClick={() => setExpanded((value) => !value)}>
-						{expanded
-							? `Hide lines ${range.startLine}-${range.endLine}`
-							: `Expand lines ${range.startLine}-${range.endLine}`}
-					</button>
+					{fullyRevealed ? (
+						<button type="button" onClick={onHide}>
+							Hide lines {gap.newStart}-{gap.newEnd}
+						</button>
+					) : (
+						<>
+							<button type="button" onClick={onReveal}>
+								Expand lines {hidden.startLine}-{hidden.endLine}
+							</button>
+							{gap.position !== "between" ? (
+								<button type="button" onClick={onRevealAll}>
+									Expand all
+								</button>
+							) : null}
+						</>
+					)}
 				</td>
 			</tr>
-			{expanded ? (
-				lines.length > 0 ? (
-					lines.map(({ line, text }) => (
-						<DiffLineRow
-							key={`${range.side}-${line}-${text}`}
-							line={{
-								kind: "context",
-								oldLine: range.side === "old" ? line : null,
-								newLine: range.side === "new" ? line : null,
-								text,
-							}}
-							mode={mode}
-							language={language}
-						/>
-					))
-				) : (
-					<tr className="inter-hunk-context">
-						<td colSpan={mode === "side-by-side" ? 4 : 3}>
-							Context source unavailable for lines {range.startLine}-
-							{range.endLine}.
-						</td>
-					</tr>
-				)
-			) : null}
+		);
+	const content =
+		effectiveRevealedCount === 0 ? null : lines === null ? (
+			<tr className="inter-hunk-context">
+				<td colSpan={mode === "side-by-side" ? 4 : 3}>
+					Context source unavailable for lines {gap.newStart}-{gap.newEnd}.
+				</td>
+			</tr>
+		) : (
+			lines.map((line) => (
+				<DiffLineRow
+					key={`${gap.id}-${line.newLine}-${line.text}`}
+					line={{ kind: "context", ...line }}
+					mode={mode}
+					language={language}
+					find={find}
+					findId={contextLineId(
+						findSide,
+						findSide === "old" ? line.oldLine : line.newLine,
+					)}
+					commentSide="new"
+					onTag={
+						onTag
+							? () =>
+									onTag({
+										path,
+										side: "new",
+										startLine: line.newLine,
+										endLine: line.newLine,
+										hunk,
+									})
+							: undefined
+					}
+				/>
+			))
+		);
+	return gap.position === "tail" ? (
+		<>
+			{content}
+			{controls}
+		</>
+	) : (
+		<>
+			{controls}
+			{content}
 		</>
 	);
 }
@@ -784,9 +1086,11 @@ interface LineSelectionAnchor extends SelectableLine {
 function HunkRows({
 	file,
 	hunk,
-	contextAfter,
+	hunkIndex,
+	showHeader,
 	mode,
 	language,
+	find,
 	path,
 	defaultSide,
 	anchor,
@@ -797,12 +1101,16 @@ function HunkRows({
 	onLineClick,
 	onTagHunk,
 	onCommentSelection,
+	onDragStart,
+	dragSelected,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
-	contextAfter: ContextRange | null;
+	hunkIndex: number;
+	showHeader: boolean;
 	mode: DiffMode;
 	language: string;
+	find: FindRender;
 	path: string;
 	defaultSide: "new" | "old";
 	anchor: LineSelectionAnchor | null;
@@ -820,59 +1128,24 @@ function HunkRows({
 	) => void;
 	onTagHunk?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
+	onDragStart?: (
+		action: DragAction,
+		row: DiffDragRow,
+		event: MouseEvent<HTMLElement>,
+	) => void;
+	dragSelected?: (row: DiffDragRow) => boolean;
 }) {
-	const hunkPoints = hunk.lines
-		.map((line) => selectableLine(line, defaultSide))
-		.filter((point): point is SelectableLine => point !== null);
-	const primaryPoints = hunkPoints.filter(
-		(point) => point.side === defaultSide,
-	);
-	const tagPoints = primaryPoints.length > 0 ? primaryPoints : hunkPoints;
-	const hunkSelection: DiffLineSelection | null =
-		tagPoints.length > 0
-			? {
-					path,
-					side: tagPoints[0]?.side ?? defaultSide,
-					startLine: Math.min(...tagPoints.map((point) => point.line)),
-					endLine: Math.max(...tagPoints.map((point) => point.line)),
-					hunk: hunk.header,
-				}
-			: null;
-	const tagHunk =
-		hunkSelection && onTagHunk ? () => onTagHunk(hunkSelection) : undefined;
-	const commentHunk =
-		hunkSelection && onCommentSelection
-			? () => onCommentSelection(hunkSelection)
-			: undefined;
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
 	return (
 		<>
-			<tr className="hunk-header">
-				<td colSpan={mode === "side-by-side" ? 4 : 3}>
-					<span>{hunk.header}</span>
-					{commentHunk ? (
-						<button
-							type="button"
-							className="hunk-comment"
-							onClick={commentHunk}
-							title="Add a comment to the full hunk"
-						>
-							Add comment
-						</button>
-					) : null}
-					{tagHunk ? (
-						<button
-							type="button"
-							className="hunk-tag"
-							onClick={tagHunk}
-							title="Add the full hunk as chat context"
-						>
-							Tag hunk
-						</button>
-					) : null}
-				</td>
-			</tr>
+			{showHeader ? (
+				<tr className="hunk-header">
+					<td colSpan={mode === "side-by-side" ? 4 : 3}>
+						<span>{hunk.header}</span>
+					</td>
+				</tr>
+			) : null}
 			{hunk.lines.map((line) => {
 				const point = selectableLine(line, defaultSide);
 				const selected =
@@ -880,6 +1153,9 @@ function HunkRows({
 					anchor?.hunk === hunk.header &&
 					anchor.side === point.side &&
 					anchor.line === point.line;
+				const dragRow = point
+					? { hunkIndex, side: point.side, line: point.line }
+					: undefined;
 				const lineSelection = point
 					? {
 							path,
@@ -895,7 +1171,17 @@ function HunkRows({
 							line={line}
 							mode={mode}
 							language={language}
-							selected={selected}
+							find={find}
+							findId={diffLineId(hunk.header, line)}
+							selected={
+								selected || (dragRow ? dragSelected?.(dragRow) === true : false)
+							}
+							drag={dragRow}
+							onDragStart={
+								dragRow
+									? (action, event) => onDragStart?.(action, dragRow, event)
+									: undefined
+							}
 							commentSide={lineSelection?.side}
 							onTag={
 								lineSelection && onTagHunk
@@ -942,9 +1228,6 @@ function HunkRows({
 					</td>
 				</tr>
 			) : null}
-			{contextAfter ? (
-				<ContextRows range={contextAfter} mode={mode} language={language} />
-			) : null}
 		</>
 	);
 }
@@ -953,6 +1236,8 @@ function DiffTable({
 	file,
 	mode,
 	fileContents,
+	wholeFile,
+	find,
 	discussions,
 	drafts,
 	commentDraftProps,
@@ -962,6 +1247,8 @@ function DiffTable({
 	file: ParsedFileDiff;
 	mode: DiffMode;
 	fileContents: string | null;
+	wholeFile: boolean;
+	find: FindRender;
 	discussions: readonly HostDiscussion[];
 	drafts: readonly Draft[];
 	commentDraftProps: Pick<
@@ -974,11 +1261,54 @@ function DiffTable({
 	const path = file.newPath ?? file.oldPath ?? "";
 	const language = path.split(".").pop() ?? "text";
 	const defaultSide = file.status === "deleted" ? "old" : "new";
-	const sourceLines = fileContents?.split(/\r?\n/) ?? null;
+	const sourceLines = useMemo(
+		() => (fileContents === null ? null : splitSourceLines(fileContents)),
+		[fileContents],
+	);
+	const gaps = useMemo(
+		() => diffContextGaps(file.hunks, sourceLines?.length ?? null),
+		[file.hunks, sourceLines],
+	);
 	const [anchor, setAnchor] = useState<LineSelectionAnchor | null>(null);
 	const [rangeSelection, setRangeSelection] =
 		useState<DiffLineSelection | null>(null);
+	const [revealedCounts, setRevealedCounts] = useState<Record<string, number>>(
+		() =>
+			wholeFile
+				? Object.fromEntries(gaps.map((gap) => [gap.id, gapLineCount(gap)]))
+				: {},
+	);
+	const wasWholeFile = useRef(wholeFile);
 	const visibleDrafts = drafts.filter((draft) => draft.status !== "posted");
+	const { drag, start: startDrag } = useDiffDrag({
+		onCommit: (action, origin, end) => {
+			const hunkHeader = file.hunks[origin.hunkIndex]?.header;
+			if (hunkHeader === undefined) return;
+			const { startLine, endLine } = diffDragRange(origin, end);
+			const selection: DiffLineSelection = {
+				path,
+				side: origin.side,
+				startLine,
+				endLine,
+				hunk: hunkHeader,
+			};
+			setAnchor(null);
+			setRangeSelection(null);
+			if (action === "tag") onLineSelection?.(selection);
+			else onCommentSelection?.(selection);
+		},
+	});
+
+	useEffect(() => {
+		if (wholeFile) {
+			setRevealedCounts(
+				Object.fromEntries(gaps.map((gap) => [gap.id, gapLineCount(gap)])),
+			);
+		} else if (wasWholeFile.current) {
+			setRevealedCounts({});
+		}
+		wasWholeFile.current = wholeFile;
+	}, [wholeFile, gaps]);
 
 	const selectLine = (
 		line: DiffLine,
@@ -1008,62 +1338,106 @@ function DiffTable({
 		setAnchor({ ...point, hunk: hunkHeader });
 	};
 
-	const tagHunk = onLineSelection
+	const tagLine = onLineSelection
 		? (selection: DiffLineSelection) => {
 				onLineSelection(selection);
 				setAnchor(null);
 				setRangeSelection(null);
 			}
 		: undefined;
+	const updateRevealedCount = (gap: ContextGap, count: number) => {
+		const nextCount = Math.min(Math.max(count, 0), gapLineCount(gap));
+		setRevealedCounts((current) =>
+			current[gap.id] === nextCount
+				? current
+				: { ...current, [gap.id]: nextCount },
+		);
+	};
+	const renderContext = (gap: ContextGap, hunk: string) => (
+		<ContextRows
+			key={gap.id}
+			gap={gap}
+			revealedCount={revealedCounts[gap.id] ?? 0}
+			sourceLines={sourceLines}
+			wholeFile={wholeFile}
+			mode={mode}
+			language={language}
+			path={path}
+			hunk={hunk}
+			onReveal={() => {
+				const currentCount = revealedCounts[gap.id] ?? 0;
+				updateRevealedCount(
+					gap,
+					gap.position === "between"
+						? gapLineCount(gap)
+						: currentCount + CONTEXT_CHUNK_SIZE,
+				);
+			}}
+			onRevealAll={() => updateRevealedCount(gap, gapLineCount(gap))}
+			onHide={() => updateRevealedCount(gap, 0)}
+			onTag={tagLine}
+			find={find}
+			findSide={defaultSide}
+		/>
+	);
+	const head = gaps.find((gap) => gap.position === "head");
+	const tail = gaps.find((gap) => gap.position === "tail");
 
 	return (
-		<table className={`diff-table ${mode}`}>
+		<table className={`diff-table ${mode}${drag ? " drag-selecting" : ""}`}>
 			<tbody>
 				{file.hunks.map((hunk, index) => {
-					const next = file.hunks[index + 1];
-					const currentStart =
-						defaultSide === "old" ? hunk.oldStart : hunk.newStart;
-					const currentLength =
-						defaultSide === "old" ? hunk.oldLines : hunk.newLines;
-					const nextStart =
-						defaultSide === "old" ? next?.oldStart : next?.newStart;
-					const contextStart = currentStart + currentLength;
-					const contextAfter =
-						next && nextStart !== undefined && nextStart > contextStart
-							? {
-									startLine: contextStart,
-									endLine: nextStart - 1,
-									lines:
-										sourceLines
-											?.slice(contextStart - 1, nextStart - 1)
-											.map((text, offset) => ({
-												line: contextStart + offset,
-												text,
-											})) ?? null,
-									side: defaultSide,
-								}
-							: null;
+					const precedingGap =
+						index === 0
+							? head
+							: gaps.find((gap) => gap.id === `between-${index - 1}-${index}`);
+					const anchorHunk =
+						index === 0
+							? hunk.header
+							: (file.hunks[index - 1]?.header ?? hunk.header);
+					const showHunkHeader =
+						!wholeFile &&
+						hunk.lines.length > 0 &&
+						(precedingGap === undefined ||
+							hiddenContextRange(
+								precedingGap,
+								revealedCounts[precedingGap.id] ?? 0,
+							) !== null);
 					return (
-						<HunkRows
-							key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}
-							file={file}
-							hunk={hunk}
-							contextAfter={contextAfter}
-							mode={mode}
-							language={language}
-							path={path}
-							defaultSide={defaultSide}
-							anchor={anchor}
-							rangeSelection={rangeSelection}
-							discussions={discussions}
-							drafts={visibleDrafts}
-							commentDraftProps={commentDraftProps}
-							onLineClick={onLineSelection ? selectLine : undefined}
-							onTagHunk={tagHunk}
-							onCommentSelection={onCommentSelection}
-						/>
+						<Fragment key={`${hunk.oldStart}-${hunk.newStart}-${hunk.header}`}>
+							{precedingGap ? renderContext(precedingGap, anchorHunk) : null}
+							<HunkRows
+								file={file}
+								hunk={hunk}
+								hunkIndex={index}
+								showHeader={showHunkHeader}
+								mode={mode}
+								language={language}
+								find={find}
+								path={path}
+								defaultSide={defaultSide}
+								anchor={anchor}
+								rangeSelection={rangeSelection}
+								discussions={discussions}
+								drafts={visibleDrafts}
+								commentDraftProps={commentDraftProps}
+								onLineClick={onLineSelection ? selectLine : undefined}
+								onTagHunk={tagLine}
+								onCommentSelection={onCommentSelection}
+								onDragStart={startDrag}
+								dragSelected={(row) =>
+									drag !== null && isRowInDiffDrag(row, drag)
+								}
+							/>
+						</Fragment>
 					);
 				})}
+				{tail && file.hunks.length > 0
+					? renderContext(
+							tail,
+							file.hunks[file.hunks.length - 1]?.header ?? "tail",
+						)
+					: null}
 			</tbody>
 		</table>
 	);
@@ -1079,6 +1453,8 @@ export function DiffView({
 	discussions = [],
 	drafts = [],
 	onModeChange,
+	wholeFile = false,
+	onWholeFileChange,
 	onViewModeChange,
 	onExpandDiff,
 	onLineSelection,
@@ -1094,6 +1470,48 @@ export function DiffView({
 	const [expandedFile, setExpandedFile] = useState<ParsedFileDiff | null>(null);
 	const [expanding, setExpanding] = useState(false);
 	const [expansionError, setExpansionError] = useState<string | null>(null);
+	const [findQuery, setFindQuery] = useState("");
+	const [findIndex, setFindIndex] = useState(0);
+	const findRowsRef = useRef<Map<string, HTMLElement>>(new Map());
+	const findInputRef = useRef<HTMLInputElement | null>(null);
+
+	// Find-in-file: computed top-level and null-safe so the scroll effect
+	// obeys the rules of hooks. The early return below guards the render
+	// paths that consume `find`; with no file, matches stay empty.
+	const findActive = findQuery.length > 0;
+	const findDisplayFile = expandedFile ?? file;
+	const matches =
+		findActive && findDisplayFile
+			? findMatches(findDisplayFile, fileContents, findQuery, findActive)
+			: [];
+	const currentId = matches[findIndex]?.id ?? null;
+	const registerRow = useCallback((id: string, el: HTMLElement | null) => {
+		const rows = findRowsRef.current;
+		if (el) rows.set(id, el);
+		else rows.delete(id);
+	}, []);
+	useEffect(() => {
+		if (!findActive || !currentId) return;
+		const row = findRowsRef.current.get(currentId);
+		row?.scrollIntoView({ block: "center", behavior: "smooth" });
+	}, [findActive, currentId]);
+	const find: FindRender = {
+		query: findQuery,
+		currentId,
+		registerRow,
+		forceContext: findActive,
+	};
+	useEffect(() => {
+		const handler = (event: KeyboardEvent) => {
+			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+				event.preventDefault();
+				findInputRef.current?.focus();
+				findInputRef.current?.select();
+			}
+		};
+		document.addEventListener("keydown", handler);
+		return () => document.removeEventListener("keydown", handler);
+	}, []);
 
 	if (!file) {
 		return (
@@ -1112,6 +1530,38 @@ export function DiffView({
 	const collapsed = !file.binary && (noPatch || overThreshold);
 	const displayFile = expandedFile ?? file;
 	const binary = displayFile.binary;
+	const wholeFileEligible =
+		file.status === "modified" && !binary && !noPatch && !showingRendered;
+	const sourceLineCount =
+		fileContents === null ? null : splitSourceLines(fileContents).length;
+	const changeWholeFile = (next: boolean) => {
+		if (!next) {
+			const headers = Array.from(
+				document.querySelectorAll<HTMLElement>(".diff-panel .hunk-header"),
+			);
+			const anchor = headers.reduce<HTMLElement | null>((nearest, header) => {
+				if (
+					nearest === null ||
+					Math.abs(header.getBoundingClientRect().top) <
+						Math.abs(nearest.getBoundingClientRect().top)
+				) {
+					return header;
+				}
+				return nearest;
+			}, null);
+			onWholeFileChange?.(false, sourceLineCount);
+			if (anchor) {
+				requestAnimationFrame(() =>
+					requestAnimationFrame(() =>
+						anchor.scrollIntoView({ block: "nearest" }),
+					),
+				);
+			}
+			return;
+		}
+		if (collapsed) setExpanded(true);
+		onWholeFileChange?.(true, sourceLineCount);
+	};
 	const requestExpansion = () => {
 		setExpanded(true);
 		if (!noPatch || !onExpandDiff || expanding) return;
@@ -1139,13 +1589,89 @@ export function DiffView({
 	return (
 		<section className="diff-panel">
 			<header className="diff-header">
-				<div>
+				<div className="diff-header-title">
 					<h2>{path}</h2>
-					<p>
-						{file.insertions} additions, {file.deletions} deletions
-					</p>
+					<div className="diff-stats">
+						<span className="file-additions">+{file.insertions}</span>
+						<span className="file-deletions">-{file.deletions}</span>
+					</div>
 				</div>
 				<div className="diff-controls">
+					{!binary && !showingRendered ? (
+						<div className="find-bar">
+							<div className="find-input-wrap">
+								<input
+									ref={findInputRef}
+									type="text"
+									className="find-input"
+									placeholder="Find in file..."
+									value={findQuery}
+									onChange={(event) => {
+										const value = event.target.value;
+										setFindQuery(value);
+										setFindIndex(0);
+										if (value.length > 0 && collapsed && !expanded) {
+											requestExpansion();
+										}
+									}}
+									onKeyDown={(event) => {
+										if (event.key === "Enter" && event.shiftKey) {
+											event.preventDefault();
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, -1),
+											);
+										} else if (event.key === "Enter") {
+											event.preventDefault();
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, 1),
+											);
+										} else if (event.key === "Escape") {
+											event.preventDefault();
+											setFindQuery("");
+											setFindIndex(0);
+											event.currentTarget.blur();
+										}
+									}}
+									aria-label="Find in file"
+								/>
+								<span className="find-nav-group">
+									<button
+										type="button"
+										className="find-nav"
+										aria-label="Previous match"
+										title="Previous match (Shift+Enter)"
+										disabled={!findActive || matches.length === 0}
+										onClick={() =>
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, -1),
+											)
+										}
+									>
+										←
+									</button>
+									<button
+										type="button"
+										className="find-nav"
+										aria-label="Next match"
+										title="Next match (Enter)"
+										disabled={!findActive || matches.length === 0}
+										onClick={() =>
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, 1),
+											)
+										}
+									>
+										→
+									</button>
+								</span>
+							</div>
+							<span className="find-count" aria-live="polite">
+								{findActive
+									? `${Math.min(findIndex + 1, matches.length)}/${matches.length}`
+									: "0/0"}
+							</span>
+						</div>
+					) : null}
 					{markdown ? (
 						<>
 							<button
@@ -1181,6 +1707,26 @@ export function DiffView({
 								onClick={() => onModeChange("side-by-side")}
 							>
 								Side by side
+							</button>
+						</>
+					) : null}
+					{wholeFileEligible ? (
+						<>
+							<button
+								aria-pressed={wholeFile}
+								className={wholeFile ? "active" : ""}
+								type="button"
+								onClick={() => changeWholeFile(true)}
+							>
+								Whole file
+							</button>
+							<button
+								aria-pressed={!wholeFile}
+								className={!wholeFile ? "active" : ""}
+								type="button"
+								onClick={() => changeWholeFile(false)}
+							>
+								Diff only
 							</button>
 						</>
 					) : null}
@@ -1234,12 +1780,14 @@ export function DiffView({
 						<DiffTable
 							file={displayFile}
 							mode={mode}
+							wholeFile={wholeFile}
 							fileContents={fileContents}
 							discussions={discussions}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
 							onLineSelection={onLineSelection}
 							onCommentSelection={onCommentSelection}
+							find={find}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (

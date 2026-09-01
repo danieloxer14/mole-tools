@@ -10,6 +10,7 @@ import type {
 } from "../../ports/git-host";
 import type { IssueTracker } from "../../ports/issue-tracker";
 import type { AgentEvent, ReviewAgent } from "../../ports/review-agent";
+import type { FileDiff, Vcs } from "../../ports/vcs";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
@@ -62,6 +63,9 @@ export interface ReviewRoutesOptions {
 		"layersDir" | "promptDir" | "layerPath" | "promptPath"
 	>;
 	discussions?: HostDiscussion[];
+	diff?: ParsedFileDiff[];
+	layerDiff?: FileDiff[];
+	expandedDiff?: ParsedFileDiff[];
 	getDiscussions?: () => Promise<HostDiscussion[]>;
 	ref?: MrRef;
 	fetchMr?: (ref: MrRef) => Promise<ReviewMergeRequest>;

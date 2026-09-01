@@ -271,14 +271,32 @@ button.active {
 	font-size: 0.65rem;
 }
 .column-header h1,
-.column-header h2,
-.diff-header h2 {
+.column-header h2 {
 	margin: 0 0 8px;
 	font-size: 1.05rem;
 	overflow-wrap: anywhere;
 }
-.column-header p,
-.diff-header p {
+.diff-header h2 {
+	margin: 0;
+	font-size: 1.05rem;
+	overflow-wrap: anywhere;
+}
+.diff-header-title {
+	align-items: center;
+	display: flex;
+	flex: 1 1 auto;
+	gap: 10px;
+	min-width: 0;
+}
+.diff-stats {
+	display: flex;
+	flex-shrink: 0;
+	font-size: 0.72rem;
+	font-variant-numeric: tabular-nums;
+	gap: 6px;
+	white-space: nowrap;
+}
+.column-header p {
 	color: #9eafc1;
 	font-size: 0.82rem;
 	margin: 4px 0;
@@ -581,18 +599,24 @@ button.active {
 	flex: 1 1 auto;
 	min-height: 0;
 	overflow: auto;
-	padding: 18px;
+	padding: 0 18px 18px;
 }
 .diff-header {
-	align-items: flex-start;
+	align-items: center;
+	background: #0f141a;
 	display: flex;
 	justify-content: space-between;
 	gap: 12px;
-	margin-bottom: 14px;
+	margin: 0 0 6px;
+	padding: 6px 0;
+	position: sticky;
+	top: 0;
+	z-index: 2;
 }
 .diff-controls {
+	align-items: center;
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	justify-content: flex-end;
 	gap: 5px;
 }
@@ -601,6 +625,77 @@ button.active {
 .expand-context-row button {
 	font-size: 0.72rem;
 	padding: 5px 8px;
+}
+.expand-context-row button + button {
+	margin-left: 5px;
+}
+
+.find-bar {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+	margin-bottom: 0;
+	margin-right: 4px;
+}
+.find-input-wrap {
+	min-width: 220px;
+	position: relative;
+}
+.find-input {
+	background: #0e1b2a;
+	border: 1px solid #2a4258;
+	border-radius: 5px;
+	color: #e6edf3;
+	font-size: 0.8rem;
+	min-width: 100%;
+	padding: 5px 54px 5px 9px;
+	width: 100%;
+}
+.find-input:focus {
+	border-color: #4a9eff;
+	outline: none;
+}
+.find-count {
+	color: #9eafc1;
+	font-size: 0.72rem;
+	white-space: nowrap;
+}
+.find-nav-group {
+	align-items: center;
+	display: flex;
+	gap: 1px;
+	position: absolute;
+	right: 4px;
+	top: 50%;
+	transform: translateY(-50%);
+}
+.find-nav {
+	background: transparent;
+	border: 0;
+	border-radius: 3px;
+	font-size: 0.9rem;
+	line-height: 1;
+	min-width: 18px;
+	padding: 2px 3px;
+}
+.find-nav:hover:not(:disabled) {
+	background: #355b80;
+}
+.find-nav:focus-visible {
+	outline: 1px solid #7db8e8;
+	outline-offset: -1px;
+}
+.find-nav:disabled {
+	background: transparent;
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+.diff-table .find-match {
+	background: rgba(255, 210, 0, 0.16);
+}
+.diff-table .find-match-current {
+	background: rgba(255, 180, 0, 0.34);
+	outline: 1px solid #ffb400;
 }
 .diff-table {
 	border-collapse: collapse;
@@ -650,12 +745,6 @@ button.active {
 }
 .diff-table .hunk-header td {
 	padding: 7px;
-}
-.diff-table .hunk-tag {
-	float: right;
-	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-	font-size: 0.68rem;
-	padding: 4px 7px;
 }
 .diff-line[role="button"] {
 	cursor: pointer;
@@ -827,6 +916,14 @@ button.active {
 	flex-direction: column;
 	gap: 8px;
 	margin-top: 12px;
+}
+.markdown-view.drag-selecting {
+	user-select: none;
+}
+.markdown-block.drag-selected {
+	background: rgba(79, 137, 178, 0.48);
+	outline: 1px solid #8ac5eb;
+	outline-offset: -1px;
 }
 .mermaid-error {
 	color: #ffb0a8;
@@ -1063,8 +1160,7 @@ button.active {
 	margin-top: 8px;
 }
 .comment-draft-actions button,
-.selection-comment-row button,
-.hunk-comment {
+.selection-comment-row button {
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 0.68rem;
 	padding: 4px 7px;
@@ -1122,9 +1218,15 @@ button.active {
 .diff-table .line-actions:focus-within {
 	opacity: 1;
 }
-.diff-table .hunk-comment {
-	float: right;
-	margin-right: 5px;
+.diff-table.drag-selecting {
+	user-select: none;
+}
+.diff-table.drag-selecting .diff-line[role="button"]:hover {
+	outline: none;
+}
+.diff-table.drag-selecting .diff-line:hover .line-actions,
+.diff-table.drag-selecting .line-actions:focus-within {
+	opacity: 0;
 }
 .chat-composer {
 	border-top: 1px solid #2d3a48;

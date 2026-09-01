@@ -48,6 +48,20 @@ export interface MrDetail {
 	state: string;
 }
 
+export interface WatchedMrRef {
+	ref: MrRef;
+	assignees: string[];
+}
+
+export interface MrAutoApprovalState {
+	mr: MrDetail;
+	draft: boolean;
+	labels: string[];
+	detailedMergeStatus: string | null;
+	hasConflicts: boolean;
+	headPipelineStatus: string | null;
+}
+
 export interface HostApprovalRule {
 	name: string;
 	approvalsRequired: number;
@@ -81,6 +95,11 @@ export interface DiscussionPosition {
 export interface HostDiscussion {
 	id: string;
 	resolved: boolean;
+	/**
+	 * GitLab marks standalone MR notes as individual_note. They are not
+	 * unresolved discussion threads and must not block approval.
+	 */
+	individualNote?: boolean;
 	notes: HostNote[];
 	position: DiscussionPosition | null;
 }
@@ -112,6 +131,11 @@ export interface GitHost {
 	resolveHandle(handle: string): Promise<HostMember | null>;
 	createMr(input: CreateMrInput): Promise<{ url: string }>;
 	fetchMr(ref: MrRef): Promise<MrDetail>;
+	listOpenedMrsForAssignees(
+		assignees: readonly string[],
+	): Promise<WatchedMrRef[]>;
+	fetchAutoApprovalState(ref: MrRef): Promise<MrAutoApprovalState>;
+	addMrLabel(ref: MrRef, label: string): Promise<void>;
 	listDiscussions(ref: MrRef): Promise<HostDiscussion[]>;
 	createDiscussion(input: CreateDiscussionInput): Promise<HostDiscussion>;
 	fetchApprovalState(ref: MrRef): Promise<MrApprovalState>;

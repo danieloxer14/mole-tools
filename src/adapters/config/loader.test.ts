@@ -36,6 +36,20 @@ describe("loadConfig", () => {
 			largeFileLineThreshold: 800,
 		});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain('// "reviewBabysitter": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//   "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",',
+		);
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//   "webhookUrlEnv": "SLACK_WEBHOOK_URL",',
+		);
+		expect(CONFIG_TEMPLATE_TEXT).toContain('//   "maxChangedLines": 250,');
+		expect(CONFIG_TEMPLATE_TEXT).toContain('//   "maxChangedFiles": 10,');
+		expect(CONFIG_TEMPLATE_TEXT).toContain('//   "denyPathsByProject": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//     "group/repo": ["src/auth/**", "infra/**"]',
+		);
+		expect(CONFIG_TEMPLATE_TEXT).not.toContain('"webhookUrl":');
 	});
 
 	test("bootstraps a template when no config file exists, then continues", async () => {
@@ -77,6 +91,38 @@ describe("loadConfig", () => {
 		});
 		expect(legacyConfig.ollama?.commitModel).toBe("custom-model");
 	});
+	test("preserves babysitter settings through legacy normalization", async () => {
+		const path = await configPath();
+		const reviewBabysitter = {
+			intervalSeconds: 60,
+			assignees: ["review-owner"],
+			aiReviewerUsername: "ai-reviewer",
+			promptFile: "~/.config/mole-tools/prompts/review-babysitter.md",
+			model: "model-name",
+			webhookUrlEnv: "SLACK_WEBHOOK_URL",
+			maxChangedLines: 0,
+			maxChangedFiles: 0,
+			denyPathsByProject: { "group/repo": [] },
+		};
+		const legacy = {
+			ollama: {
+				commitModel: "custom-model",
+				baseUrl: "http://localhost:11434",
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			reviewBabysitter,
+		};
+		await Bun.write(path, JSON.stringify(legacy));
+
+		const config = await loadConfig(path);
+
+		expect(config.reviewBabysitter).toEqual(reviewBabysitter);
+		expect(config.models).toEqual({
+			commit: { provider: "ollama", name: "custom-model" },
+			mergeRequest: { provider: "ollama", name: "custom-model" },
+		});
+	});
 
 	test("throws a precise error for a bad config key", async () => {
 		const path = await configPath();
@@ -85,7 +131,7 @@ describe("loadConfig", () => {
 		await expect(loadConfig(path)).rejects.toThrow(/ollama\.commitModel/);
 	});
 
-	test("rejects stale model routes with an Invalid config error", async () => {
+	test("ignores stale model routes", async () => {
 		const path = await configPath();
 		const stale = {
 			providers: {
@@ -101,10 +147,12 @@ describe("loadConfig", () => {
 		};
 		await Bun.write(path, JSON.stringify(stale));
 
-		const error = await loadConfig(path).catch((value: unknown) => value);
-		expect(error).toBeInstanceOf(PortError);
-		expect((error as PortError).message).toContain(`Invalid config at ${path}`);
-		expect((error as PortError).message).toContain(staleReviewKey);
+		const config = await loadConfig(path);
+
+		expect(config.models).toEqual({
+			commit: { provider: "ollama", name: "llama3.1" },
+			mergeRequest: { provider: "ollama", name: "llama3.1" },
+		});
 	});
 
 	test("loads new provider-based config format", async () => {
@@ -147,7 +195,7 @@ describe("loadConfig", () => {
 
 		expect(config.worktreePrune).toEqual(valid.worktreePrune);
 	});
-	test("loads optional review agent settings with strict defaults", async () => {
+	test("loads optional review agent settings with defaults", async () => {
 		const path = await configPath();
 		const valid = {
 			providers: {
@@ -174,7 +222,7 @@ describe("loadConfig", () => {
 		expect(config.review).toEqual(valid.review);
 	});
 
-	test("rejects unknown review settings under strict parsing", async () => {
+	test("ignores unknown review settings", async () => {
 		const path = await configPath();
 		await Bun.write(
 			path,
@@ -195,7 +243,13 @@ describe("loadConfig", () => {
 			}),
 		);
 
-		await expect(loadConfig(path)).rejects.toThrow(/review.*unsupported/);
+		const config = await loadConfig(path);
+
+		expect(config.review).toEqual({
+			agent: "omp",
+			layerTimeoutSeconds: 600,
+			largeFileLineThreshold: 800,
+		});
 	});
 
 	test("migrates provider and legacy llm config without removed routes", async () => {

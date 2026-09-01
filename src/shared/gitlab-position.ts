@@ -31,14 +31,11 @@ export interface GitLabPositionPayload {
 	};
 }
 
-function lineCode(
-	filePath: string,
-	oldLine: number | null,
-	newLine: number | null,
-): string {
+/** Builds GitLab line code from raw old/new diff cursor positions. */
+function lineCode(filePath: string, oldLine: number, newLine: number): string {
 	const hasher = new Bun.CryptoHasher("sha1");
 	hasher.update(filePath);
-	return `${hasher.digest("hex")}_${oldLine ?? 0}_${newLine ?? 0}`;
+	return `${hasher.digest("hex")}_${oldLine}_${newLine}`;
 }
 
 function invalidSelection(message: string): never {
@@ -205,14 +202,31 @@ function validateSelection(
 	}
 	return selected;
 }
+function rawLinePosition(
+	file: ParsedFileDiff,
+	target: DiffLine,
+): { oldLine: number; newLine: number } {
+	for (const hunk of file.hunks) {
+		let oldLine = hunk.oldStart;
+		let newLine = hunk.newStart;
+		for (const line of hunk.lines) {
+			if (line === target) return { oldLine, newLine };
+			if (line.kind !== "add") oldLine++;
+			if (line.kind !== "del") newLine++;
+		}
+	}
+	return invalidSelection("selected line is not present in parsed diff");
+}
 
 function rangeEntry(
 	filePath: string,
 	side: LineSelection["side"],
 	line: DiffLine,
+	file: ParsedFileDiff,
 ): GitLabLineRangeEntry {
+	const raw = rawLinePosition(file, line);
 	return {
-		line_code: lineCode(filePath, line.oldLine, line.newLine),
+		line_code: lineCode(filePath, raw.oldLine, raw.newLine),
 		type: side,
 		old_line: line.oldLine,
 		new_line: line.newLine,
@@ -249,8 +263,8 @@ export function buildPosition(
 	};
 	if (selection.endLine > selection.startLine) {
 		payload.line_range = {
-			start: rangeEntry(filePath, selection.side, first),
-			end: rangeEntry(filePath, selection.side, last),
+			start: rangeEntry(filePath, selection.side, first, file),
+			end: rangeEntry(filePath, selection.side, last, file),
 		};
 	}
 	return payload;

@@ -39,15 +39,12 @@ const modified = parsed(
 	1,
 );
 
-function expectedHash(
-	path: string,
-	oldLine: number | null,
-	newLine: number | null,
-) {
+function expectedHash(path: string, oldLine: number, newLine: number) {
 	const hasher = new Bun.CryptoHasher("sha1");
 	hasher.update(path);
-	return `${hasher.digest("hex")}_${oldLine ?? 0}_${newLine ?? 0}`;
+	return `${hasher.digest("hex")}_${oldLine}_${newLine}`;
 }
+
 describe("buildPosition", () => {
 	test("maps a single new-side line with refs", () => {
 		expect(
@@ -68,7 +65,7 @@ describe("buildPosition", () => {
 		});
 	});
 
-	test("maps a multi-line range with line_code entries", () => {
+	test("uses raw hunk cursors for multi-line line-code entries", () => {
 		expect(
 			buildPosition(
 				{ path: "src/app.ts", side: "new", startLine: 2, endLine: 3 },
@@ -86,13 +83,13 @@ describe("buildPosition", () => {
 			new_line: 3,
 			line_range: {
 				start: {
-					line_code: expectedHash("src/app.ts", null, 2),
+					line_code: expectedHash("src/app.ts", 3, 2),
 					type: "new",
 					old_line: null,
 					new_line: 2,
 				},
 				end: {
-					line_code: expectedHash("src/app.ts", null, 3),
+					line_code: expectedHash("src/app.ts", 3, 3),
 					type: "new",
 					old_line: null,
 					new_line: 3,
@@ -125,7 +122,7 @@ describe("buildPosition", () => {
 		expect(position.old_line).toBeNull();
 		expect(position.new_line).toBe(2);
 		expect(position.line_range?.start).toEqual({
-			line_code: expectedHash("new.txt", null, 1),
+			line_code: expectedHash("new.txt", 0, 1),
 			type: "new",
 			old_line: null,
 			new_line: 1,
@@ -157,7 +154,7 @@ describe("buildPosition", () => {
 		expect(position.old_line).toBe(2);
 		expect(position.new_line).toBeNull();
 		expect(position.line_range?.end).toEqual({
-			line_code: expectedHash("old.txt", 2, null),
+			line_code: expectedHash("old.txt", 2, 0),
 			type: "old",
 			old_line: 2,
 			new_line: null,
@@ -230,13 +227,13 @@ describe("validatePosition", () => {
 			...valid,
 			line_range: {
 				start: {
-					line_code: expectedHash("src/app.ts", 2, null),
+					line_code: expectedHash("src/app.ts", 2, 2),
 					type: "old" as const,
 					old_line: 2,
 					new_line: null,
 				},
 				end: {
-					line_code: expectedHash("src/app.ts", 3, null),
+					line_code: expectedHash("src/app.ts", 3, 3),
 					type: "old" as const,
 					old_line: 3,
 					new_line: null,
