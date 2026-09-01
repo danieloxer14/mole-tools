@@ -4,7 +4,6 @@ import { parseFileDiff } from "./diff-parse";
 import {
 	buildPosition,
 	type GitLabPositionPayload,
-	lineCode,
 	validatePosition,
 } from "./gitlab-position";
 
@@ -45,17 +44,6 @@ function expectedHash(path: string, oldLine: number, newLine: number) {
 	hasher.update(path);
 	return `${hasher.digest("hex")}_${oldLine}_${newLine}`;
 }
-
-describe("lineCode", () => {
-	test("hashes raw old and new positions", () => {
-		expect(lineCode("src/app.ts", 2, 2)).toBe(
-			"216381173f187cf4c2baf119193855699f4bc616_2_2",
-		);
-		expect(lineCode("src/app.ts", 3, 2)).toBe(
-			"216381173f187cf4c2baf119193855699f4bc616_3_2",
-		);
-	});
-});
 
 describe("buildPosition", () => {
 	test("maps a single new-side line with refs", () => {

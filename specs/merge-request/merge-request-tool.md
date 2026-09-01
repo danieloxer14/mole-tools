@@ -1,13 +1,15 @@
 # mole-tools — Merge-Request Tool Spec
 
-**Status:** Ideation / product-grilled. No implementation yet.
+**Status:** Historical product proposal (2026-07-08); superseded by shipped implementation. Retained for design history.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
-**Companions:** [commit-tool.md](./commit-tool.md), [architecture/architecture.md](./architecture/architecture.md)
+**Companions:** [commit-tool.md](../commit/commit-tool.md), [architecture/architecture.md](../architecture/architecture.md)
+
+> **Current implementation note:** Shipped configuration uses `providers.*` for connection profiles, `models.commit` and `models.mergeRequest` routes with `{ provider, name }`, and prompt overrides as files under `~/.config/mole-tools/prompts/`. This proposal's later sections are archival and are not the runtime contract.
 
 The **merge-request** tool. Second tool in `mole-tools`. Builds on the shared
 foundation (install, config, Ollama, Jira) specced in
-[commit-tool.md](./commit-tool.md) and reuses the `--commit` flow as a sub-step.
+*[../commit/commit-tool.md](../commit/commit-tool.md) and reuses the
 
 ---
 
@@ -38,7 +40,7 @@ main value-add of the MR flow. This is a conscious, scoped exception — see §5
 
 ## 2. Invocation
 
-- `mole-tools --merge-request`, run from within a git directory.
+- `mole-tools merge-request`, run from within a git directory.
 - GitLab only for v1 (`glab`). GitHub (`gh`) is **out of scope** — the provider
   config slot is reserved but no `gh` path is built (see §6).
 
@@ -46,7 +48,7 @@ main value-add of the MR flow. This is a conscious, scoped exception — see §5
 
 ## 3. Configuration (keys used by this tool)
 
-Shared schema lives in [commit-tool.md](./commit-tool.md) §3. Keys this tool
+Shared schema lives in [../commit/commit-tool.md](../commit/commit-tool.md) §3. Keys this tool
 reads:
 
 | Key | Purpose |
@@ -71,7 +73,7 @@ reads:
 3. **Existing-MR guard.** `glab mr list --source-branch <branch>` — if an open
    MR exists, print its URL and exit 0 (don't invoke the LLM or re-create).
 4. **Pending changes.** If the working tree has **staged** changes → run the
-   `--commit` flow, then return here. Unstaged changes do not block the flow;
+    `commit` flow, then return here. Unstaged changes do not block the flow;
    the merge-request diff is collected from committed changes only (no auto
    `git add`).
 5. **Push.** If the branch has no upstream → `git push -u origin <branch>`. If
@@ -117,7 +119,7 @@ reads:
   before any Ollama or git work.
 
 ### 5.3 Pending changes → commit detour
-- Staged changes present → invoke the `--commit` flow (staged-only, per commit
+- Staged changes present → invoke the `commit` flow (staged-only, per commit
   spec), return on completion, continue the MR flow.
 - Unstaged changes do not block the flow and are never included in the MR diff.
   No `git add -A`.
@@ -197,7 +199,7 @@ Ported from the `create-merge-request` skill's `suggest_reviewers.py`:
 ## 6. Scope
 
 ### In
-- `mole-tools --merge-request`, GitLab-only, from a git directory.
+- `mole-tools merge-request`, GitLab-only, from a git directory.
 - glab preflight (installed + authenticated).
 - On-default-branch, existing-MR, and nothing-to-merge guards.
 - Commit detour (staged-only) + push (upstream setup) before creating.
@@ -233,7 +235,7 @@ Ported from the `create-merge-request` skill's `suggest_reviewers.py`:
 | 1 | `glab` missing or unauthenticated | Clear abort message up front, exit non-zero, no Ollama/git work |
 | 2 | Run while on the default branch | `Cannot open MR from <default>`, exit non-zero |
 | 3 | An open MR already exists for the branch | Its URL printed, exit 0, no generation |
-| 4 | Working tree has staged changes | `--commit` flow runs, then MR flow resumes |
+| 4 | Working tree has staged changes | `commit` flow runs, then MR flow resumes |
 | 5 | Tree has unstaged changes | MR flow proceeds; unstaged changes are excluded from the diff, no `git add` |
 | 6 | Branch has no upstream | `git push -u origin <branch>` sets upstream before creating |
 | 7 | Local ahead of remote | `git push` before creating |

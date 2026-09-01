@@ -101,8 +101,6 @@ export const GitLabApprovalStateSchema = z
 	})
 	.passthrough();
 
-export type GitLabApprovalState = z.infer<typeof GitLabApprovalStateSchema>;
-
 export const GitLabPositionSchema = z
 	.object({
 		old_path: z.string().nullable(),
@@ -190,8 +188,6 @@ export const GitLabPositionPayloadSchema = z
 		},
 	);
 
-export type GitLabPositionPayload = z.infer<typeof GitLabPositionPayloadSchema>;
-
 export const GitLabNoteSchema = z
 	.object({
 		id: z.union([NonEmptyString, z.number().int().nonnegative()]),
@@ -222,4 +218,3 @@ export type GitLabOpenedMergeRequest = z.infer<
 export type GitLabLabel = z.infer<typeof GitLabLabelSchema>;
 export type GitLabPipeline = z.infer<typeof GitLabPipelineSchema>;
 export type GitLabDiscussion = z.infer<typeof GitLabDiscussionSchema>;
-export type GitLabNote = z.infer<typeof GitLabNoteSchema>;

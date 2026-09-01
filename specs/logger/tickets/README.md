@@ -16,4 +16,4 @@
 
 - `src/index.tsx` has top-level CLI registration and parsing, so CLI lifecycle testing may require extracting a testable runner/registration seam without changing command behavior.
 - Logger writes must never leak secrets or replace the primary command error; sink failure remains best-effort.
-- Do not instrument features or adapters in this ticket set. The existing console-backed `Context.log` is not part of this migration.
+- The logger foundation is implemented in `src/core/logger.ts` and `src/index.tsx`; focused logger test coverage remains open. Existing feature and adapter calls already cross the instrumentation boundary, so this ticket set does not add or remove instrumentation.

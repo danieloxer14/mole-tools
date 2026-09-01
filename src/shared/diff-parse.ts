@@ -1,6 +1,6 @@
 import type { FileDiff } from "../ports/vcs";
 
-export type DiffLineKind = "context" | "add" | "del";
+type DiffLineKind = "context" | "add" | "del";
 
 export interface DiffLine {
 	kind: DiffLineKind;
@@ -18,7 +18,7 @@ export interface DiffHunk {
 	lines: DiffLine[];
 }
 
-export type FileStatus = "added" | "deleted" | "modified" | "renamed";
+type FileStatus = "added" | "deleted" | "modified" | "renamed";
 
 export interface ParsedFileDiff {
 	oldPath: string | null;

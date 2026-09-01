@@ -1,6 +1,6 @@
 # Tickets for Explicit Model Routing
 
-**Source spec:** `specs/explicit-model-routing.md`
+**Source spec:** `../explicit-model-routing.md`
 **Generated:** 2026-07-13
 **Output format:** local files
 

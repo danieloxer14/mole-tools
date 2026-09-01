@@ -52,7 +52,7 @@ This prevented the reviewer selection UI from appearing at all, even though `ran
 ## Reproduction steps
 
 1. Ensure the repo has a CODEOWNERS file with resolves handles.
-2. Run `mole-tools --merge-request` on a branch with commits and push access.
+2. Run `mole-tools merge-request` on a branch with commits and push access.
 3. Accept the generated MR content.
 4. Note that no reviewer selection UI appears.
 5. Check final summary — reviewers field is empty or missing.

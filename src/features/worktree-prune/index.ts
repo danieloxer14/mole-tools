@@ -174,7 +174,8 @@ export async function runWorktreePrune(
 }
 
 // ---------------------------------------------------------------------------
-// Feature registration (discoveries/removal wired in later tickets)
+// Feature registration; discovery, normal removal, force removal, and summary
+// lifecycle are implemented in this module.
 // ---------------------------------------------------------------------------
 export const worktreePrune: Feature<
 	typeof worktreePruneArgs,

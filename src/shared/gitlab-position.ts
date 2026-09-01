@@ -2,7 +2,7 @@ import { PortError } from "../core/errors";
 import type { DiffRefs } from "../ports/git-host";
 import type { DiffLine, ParsedFileDiff } from "./diff-parse";
 
-export interface LineSelection {
+interface LineSelection {
 	path: string;
 	side: "new" | "old";
 	startLine: number;
@@ -32,11 +32,7 @@ export interface GitLabPositionPayload {
 }
 
 /** Builds GitLab line code from raw old/new diff cursor positions. */
-export function lineCode(
-	filePath: string,
-	oldLine: number,
-	newLine: number,
-): string {
+function lineCode(filePath: string, oldLine: number, newLine: number): string {
 	const hasher = new Bun.CryptoHasher("sha1");
 	hasher.update(filePath);
 	return `${hasher.digest("hex")}_${oldLine}_${newLine}`;

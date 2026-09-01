@@ -4,6 +4,16 @@ import type {
 	ReviewAgent,
 } from "../../ports/review-agent";
 import { type AgentExec, defaultAgentExec } from "./exec";
+import {
+	diagnostic,
+	errorMessage,
+	type JsonRecord,
+	malformed,
+	nestedMessage,
+	parseJson,
+	preflight,
+	resolveAgentConfig,
+} from "./shared";
 
 export interface ClaudeAgentOptions {
 	binary?: string;
@@ -11,10 +21,6 @@ export interface ClaudeAgentOptions {
 	exec?: AgentExec;
 }
 
-type JsonRecord = Record<string, unknown>;
-type ParsedLine =
-	| { tag: "provider"; value: JsonRecord }
-	| { tag: "event"; event: AgentEvent };
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"] as const;
 const IGNORED_STREAM_EVENTS: Record<string, true> = {
 	message_start: true,
@@ -30,10 +36,6 @@ const IGNORED_PROVIDER_EVENTS: Record<string, true> = {
 	rate_limit_event: true,
 };
 
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
-
 function withAuthRecovery(message: string): string {
 	if (!/(?:oauth.*(?:expired|refresh)|failed to authenticate)/i.test(message))
 		return message;
@@ -42,60 +44,6 @@ function withAuthRecovery(message: string): string {
 
 function providerError(message: string): AgentEvent {
 	return { kind: "error", message: withAuthRecovery(message) };
-}
-
-function diagnostic(eventType: string | null, raw: unknown): AgentEvent {
-	return {
-		kind: "diagnostic",
-		code: "unknown_event",
-		message: eventType
-			? `Unknown agent event type: ${eventType}`
-			: "Unknown agent event type",
-		eventType,
-		raw,
-	};
-}
-
-function malformed(message: string): AgentEvent {
-	return { kind: "error", message: `Malformed Claude agent event: ${message}` };
-}
-
-function nestedMessage(value: unknown): string | null {
-	if (typeof value === "string" && value.trim()) return value;
-	if (value === null || typeof value !== "object" || Array.isArray(value))
-		return null;
-	const record = value as JsonRecord;
-	for (const key of ["message", "error", "detail", "reason", "result"]) {
-		const candidate = record[key];
-		if (typeof candidate === "string" && candidate.trim()) return candidate;
-		if (
-			candidate !== null &&
-			typeof candidate === "object" &&
-			!Array.isArray(candidate)
-		) {
-			const nested = nestedMessage(candidate);
-			if (nested) return nested;
-		}
-	}
-	return null;
-}
-
-function parseJson(line: string): ParsedLine {
-	let value: unknown;
-	try {
-		value = JSON.parse(line) as unknown;
-	} catch {
-		return {
-			tag: "event",
-			event: {
-				kind: "error",
-				message: `Malformed Claude agent event: invalid JSON (${line})`,
-			},
-		};
-	}
-	if (value === null || typeof value !== "object" || Array.isArray(value))
-		return { tag: "event", event: malformed("expected an object") };
-	return { tag: "provider", value: value as JsonRecord };
 }
 
 function indexKey(value: unknown): string | null {
@@ -117,13 +65,19 @@ function mapClaudeEvent(
 				return typeof value.session_id === "string" &&
 					value.session_id.length > 0
 					? { kind: "session", sessionId: value.session_id }
-					: malformed("system init requires a string session_id");
+					: malformed("Claude", "system init requires a string session_id");
 			}
 			if (value.subtype === "error") {
-				const message = nestedMessage(value.error ?? value.message ?? value);
+				const message = nestedMessage(value.error ?? value.message ?? value, [
+					"message",
+					"error",
+					"detail",
+					"reason",
+					"result",
+				]);
 				return message
 					? providerError(message)
-					: malformed("system error requires a message");
+					: malformed("Claude", "system error requires a message");
 			}
 			return null;
 		}
@@ -136,7 +90,7 @@ function mapClaudeEvent(
 					? (eventValue as JsonRecord)
 					: null;
 			if (!streamEvent)
-				return malformed("stream_event requires an event object");
+				return malformed("Claude", "stream_event requires an event object");
 			const eventType = streamEvent.type;
 			if (typeof eventType !== "string") return diagnostic(type, value);
 
@@ -151,7 +105,7 @@ function mapClaudeEvent(
 				if (delta?.type !== "text_delta") return null;
 				return typeof delta.text === "string"
 					? { kind: "text", delta: delta.text }
-					: malformed("text delta requires a string text");
+					: malformed("Claude", "text delta requires a string text");
 			}
 
 			if (eventType === "content_block_start") {
@@ -164,7 +118,7 @@ function mapClaudeEvent(
 						: null;
 				if (block?.type !== "tool_use") return null;
 				if (typeof block.name !== "string" || block.name.length === 0)
-					return malformed("tool start requires a string name");
+					return malformed("Claude", "tool start requires a string name");
 				const key = indexKey(streamEvent.index);
 				if (key !== null) tools.set(key, block.name);
 				return { kind: "tool", name: block.name, phase: "start" };
@@ -190,10 +144,16 @@ function mapClaudeEvent(
 				const stopReason = delta?.stop_reason;
 				if (stopReason === "end_turn") return { kind: "turn_end" };
 				if (stopReason === "error") {
-					const message = nestedMessage(delta?.error ?? streamEvent);
+					const message = nestedMessage(delta?.error ?? streamEvent, [
+						"message",
+						"error",
+						"detail",
+						"reason",
+						"result",
+					]);
 					return message
 						? providerError(message)
-						: malformed("message delta error requires a message");
+						: malformed("Claude", "message delta error requires a message");
 				}
 				return null;
 			}
@@ -204,18 +164,30 @@ function mapClaudeEvent(
 		case "result": {
 			const failed = value.is_error === true || value.subtype !== "success";
 			if (failed) {
-				const message = nestedMessage(value.error ?? value.result ?? value);
+				const message = nestedMessage(value.error ?? value.result ?? value, [
+					"message",
+					"error",
+					"detail",
+					"reason",
+					"result",
+				]);
 				return message
 					? providerError(message)
-					: malformed("error result requires a message");
+					: malformed("Claude", "error result requires a message");
 			}
 			return { kind: "turn_end" };
 		}
 		case "error": {
-			const message = nestedMessage(value.error ?? value.message ?? value);
+			const message = nestedMessage(value.error ?? value.message ?? value, [
+				"message",
+				"error",
+				"detail",
+				"reason",
+				"result",
+			]);
 			return message
 				? providerError(message)
-				: malformed("error event requires a message");
+				: malformed("Claude", "error event requires a message");
 		}
 		default:
 			return diagnostic(type, value);
@@ -231,23 +203,14 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 		execOrOptions: AgentExec | ClaudeAgentOptions = defaultAgentExec,
 		options: ClaudeAgentOptions = {},
 	) {
-		if (typeof execOrOptions === "function") {
-			this.execFn = execOrOptions;
-			this.binary = options.binary ?? "claude";
-			this.model = options.model;
-			return;
-		}
-		this.execFn = execOrOptions.exec ?? defaultAgentExec;
-		this.binary = execOrOptions.binary ?? "claude";
-		this.model = execOrOptions.model;
+		const config = resolveAgentConfig(execOrOptions, options, "claude");
+		this.execFn = config.execFn;
+		this.binary = config.binary;
+		this.model = config.model;
 	}
 
 	async preflight(): Promise<void> {
-		for await (const _line of this.execFn(this.binary, ["--version"], {
-			cwd: process.cwd(),
-		})) {
-			// Consuming stream waits for process and surfaces its exit status.
-		}
+		return preflight(this.execFn, this.binary);
 	}
 
 	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
@@ -300,7 +263,7 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 				if (turn.signal?.aborted) return;
 				if (turnEnded) continue;
 
-				const parsed = parseJson(line);
+				const parsed = parseJson(line, "Claude");
 				const event =
 					parsed.tag === "event"
 						? parsed.event

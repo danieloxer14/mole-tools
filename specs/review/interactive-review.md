@@ -87,10 +87,13 @@ The token is not persisted. Every `/api/*` request must carry it either as the
 `401` with an empty body. The bundled HTML page at `/` is not API-authenticated.
 This is a local single-user server, not a remote or background service.
 
-Streams use `fetch` POST requests with `Content-Type: text/event-stream`; the
-UI does not use `EventSource` because chat and draft requests have JSON bodies.
-Each stream emits `event:`/`data:` frames and closes with `done`, including when
-an agent or subprocess fails.
+Stream responses use `Content-Type: text/event-stream; charset=utf-8`. Chat
+requests send JSON bodies with `Content-Type: application/json` and
+`Accept: text/event-stream`; layer and comment stream requests send
+`Accept: text/event-stream` without a request `Content-Type`. The UI does not
+use `EventSource` because chat and draft requests have JSON bodies. Each stream
+emits `event:`/`data:` frames and closes with `done`, including when an agent or
+subprocess fails.
 
 Implemented HTTP surface:
 
@@ -114,7 +117,7 @@ Implemented HTTP surface:
 | `POST /api/comments/draft` | Accept `{ selection, filePath }`; persist and return an empty local draft. |
 | `PUT /api/comments/:id` | Edit a local draft body. Posted comments return a conflict and cannot be edited. |
 | `DELETE /api/comments/:id` | Cancel/remove a local draft. |
-| `POST /api/comments/:id/send` | Validate the anchor, post one GitLab discussion, refetch discussions, and replace the draft with the posted thread. |
+| `POST /api/comments/:id/send` | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread. |
 
 ## 4. Three-column UI and diff contract
 
@@ -251,10 +254,13 @@ drag from a line's Comment button to another line in the same hunk on the
 same side, or a tagged line. A comment drag is clamped to one hunk so it can
 always build a valid GitLab position. Creating a comment immediately opens an
 empty local draft editor below the selection's last line. The user writes its
-body; no agent turn or comment-generation prompt runs. The draft is local
-until its own Send: there is no batch submit. Draft statuses are `draft`,
-`failed`, and `posted`; Cancel removes it, Edit persists body changes, and
-failed drafts keep their error with Retry.
+body; no agent turn or comment-generation prompt runs. The draft is local until
+its own Send: there is no batch submit. Draft statuses are `draft`, `sending`,
+`posted`, and `failed`; Cancel removes it, Edit persists body changes, and
+failed drafts keep their error with Retry. While sending, the draft is persisted
+before `GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and
+Send, and keeps Cancel available. A post failure transitions the draft to
+`failed` with its error.
 
 Before Send, mole-tools validates the selection against the parsed diff and
 current `diff_refs`:
@@ -268,9 +274,10 @@ current `diff_refs`:
   that do not match the selected side are rejected before the API call.
 
 A successful Send posts one `GitLabPositionPayload` through `GitHost` using
-`glab api --method POST --input -`, refetches discussions, and replaces the
-local draft with the read-only posted thread. Posted comments are not editable
-in this UI. A post failure keeps the draft and inline error.
+`glab api --method POST --input -`, refetches discussions, and retains the
+local draft as `status: "posted"` with `postedDiscussionId` while the refreshed
+discussion renders in the read-only posted thread. Posted comments are not
+editable in this UI. A post failure keeps the draft and inline error.
 
 ## 8. Plan mode and markdown rendering
 

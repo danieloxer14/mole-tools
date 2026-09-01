@@ -36,7 +36,7 @@ OMP or Claude review agent; see [Review-agent setup](#review-agent-setup).
 mole-tools init
 ```
 
-Writes a default config template to `~/.config/mole-tools/config.json`. If a config already exists you are prompted before overwriting. This command does not require any prior configuration — it is the entry point for first-time setup. On first run of any other feature, a default template is also created automatically if one is missing.
+Writes a default config template to `~/.config/mole-tools/config.json`. If a config already exists you are prompted before overwriting. This command does not require any prior configuration — it is the entry point for first-time setup. A configuration-backed feature also creates the default template automatically when no config exists; `help` and `--version` bypass config loading.
 
 ### Configuration Reference
 
@@ -59,15 +59,15 @@ JSONC (JSON with `//` comments) is supported natively.
 }
 ```
 
-Each provider is given a key (e.g. `ollama`, `pi`) referenced later by model routes. Unknown or legacy fields are rejected at load time.
+Each provider is given a key (e.g. `ollama`, `pi`) referenced later by model routes. Unknown fields are rejected at load time. The loader also normalizes supported legacy configurations during upgrade; see [Upgrading](#upgrading).
 
 #### Models — What Each Feature Uses
 
 ```jsonc
 {
   "models": {
-    "commit":       { "provider": "ollama", "name": "gemma3:12b" },
-    "mergeRequest": { "provider": "ollama", "name": "gemma3:12b" }
+    "commit":       { "provider": "ollama", "name": "gemma4:12b" },
+    "mergeRequest": { "provider": "ollama", "name": "gemma4:12b" }
   }
 }
 ```
@@ -229,7 +229,7 @@ relax those constraints.
 
 #### Upgrading
 
-Configs written by earlier versions must remove `models.mrReview`, `models.ralph`, and the top-level `mrReview` block. Otherwise startup fails with `Invalid config at <path>`.
+Configs written by earlier versions that contain unsupported fields must be migrated to the current `providers`/`models` shape before startup; otherwise startup fails with `Invalid config at <path>`.
 
 ---
 
@@ -280,7 +280,7 @@ mole-tools merge-request --context "migration risk"   # extra inline guidance
 
 **How it works.** Preflight GitLab connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
 
-**Configuration.** Uses the `mergeRequest` model route. Customise code descriptions via `~/.config/mole-tools/prompts/mr-code.md`, with `mr-system.md` retained as its legacy fallback. Customise implementation-plan descriptions via `~/.config/mole-tools/prompts/mr-plan.md`. Requires a GitLab host to be reachable (configured through the `pi` provider or environment).
+**Configuration.** Uses the `mergeRequest` model route. Customise code descriptions via `~/.config/mole-tools/prompts/mr-code.md`, with `mr-system.md` retained as its legacy fallback. Customise implementation-plan descriptions via `~/.config/mole-tools/prompts/mr-plan.md`. Requires `glab` to be installed and authenticated for the GitLab host in the MR URL.
 
 ---
 
@@ -363,7 +363,7 @@ exits. Worktree persists for restart and can be cleaned deliberately with
 `mole-tools worktree-prune` after checking path and any local work.
 
 **Configuration.** `review.agent` selects `omp` (default) or `claude`; set
-`review.binary` for a non-default executable and `review.model` for OMP.
+`review.binary` for a non-default executable and `review.model` for either OMP or Claude.
 Layer output and chat state persist per MR below
 `~/.config/mole-tools/reviews/`. Requires authenticated `glab` and selected
 agent binary on `PATH`. See
@@ -516,9 +516,10 @@ Runs the CLI directly against TypeScript sources without building.
 ### Testing
 
 ```bash
-bun test                             # run all tests (unit + adapter + e2e)
-bun test --coverage                  # with coverage output
+bun test                             # run all tests with coverage enabled by bunfig.toml
 ```
+
+`bunfig.toml` enforces 90% line and function coverage. Test runs below either threshold exit non-zero.
 
 Tests live alongside source under `src/` (`*.test.ts`) and in a top-level `test/` directory for integration scenarios.
 
@@ -545,6 +546,6 @@ Bumps `package.json`, builds the binary, commits and tags `v<version>`, pushes t
 |---|---|
 | `src/index.tsx` | CLI entry point — command registration, config loading, Ink UI bootstrap |
 | `src/core/` | Context, error handling, feature interface |
-| `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init) |
+| `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
 | `specs/` | Design docs and architecture notes |

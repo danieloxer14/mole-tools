@@ -1,6 +1,6 @@
 # Commit `--auto` mode
 
-**Status:** Planned
+**Status:** Implemented
 **Date:** 2026-07-14
 **Scope:** `mole-tools commit`
 
@@ -77,21 +77,16 @@ error behavior; auto mode must not recover by prompting.
 
 ## Acceptance criteria
 
-- [ ] `mole-tools commit --auto` parses as `{ auto: true }`.
-- [ ] `mole-tools commit` parses as `{ auto: false }` and preserves existing
-  interactive behavior.
-- [ ] CLI and generated help show `--auto` without a value placeholder.
-- [ ] With valid staged changes, `--auto` generates a valid message, creates
-  exactly one local commit, and does not invoke `select`, `editText`, or
-  `confirm`.
-- [ ] `--auto` does not invoke `vcs.push`.
-- [ ] The generated message and committed SHA/summary remain in informational
-  output.
-- [ ] All existing pre-commit failures still abort without creating a commit.
-- [ ] Existing merge-request behavior using `runCommitFlow({ askToPush: false
-  })` remains unchanged.
-- [ ] A test double that fails on UI input requests proves the auto path cannot
-  block on current prompts.
+- [x] `mole-tools commit --auto` parses as `{ auto: true }`.
+- [x] `mole-tools commit` parses as `{ auto: false }` and preserves existing interactive behavior.
+- [x] CLI and generated help show `--auto` without a value placeholder.
+- [x] With valid staged changes, `--auto` generates a valid message, creates exactly one local commit, and does not invoke `select`, `editText`, or `confirm`.
+- [x] `--auto` does not invoke `vcs.push`.
+- [x] The generated message and committed SHA/summary remain in informational output.
+- [x] All existing pre-commit failures still abort without creating a commit.
+- [x] Existing merge-request behavior using `runCommitFlow({ askToPush: false })` remains unchanged.
+- [x] A test double that fails on UI input requests proves the auto path cannot block on current prompts.
+
 
 ## Test plan
 

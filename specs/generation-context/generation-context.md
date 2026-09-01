@@ -1,6 +1,6 @@
 # User-Supplied Generation Context
 
-**Status:** Grilled / agreed. Not implemented.
+**Status:** Implemented
 **Date:** 2026-07-14
 **Companions:** [../../CONTEXT.md](../../CONTEXT.md), [../commit/commit-tool.md](../commit/commit-tool.md), [../merge-request/merge-request-tool.md](../merge-request/merge-request-tool.md)
 
@@ -157,25 +157,16 @@ for every attempt.
 
 ## Acceptance criteria
 
-1. `mole-tools commit --context "Explain the compatibility reason"` includes a
-   labelled `Additional user context` section before Jira and diff evidence in
-   the commit LLM prompt.
-2. `mole-tools merge-request --context "Focus on operational impact"` includes
-   that section before Jira, commits, diff, and the output contract in the MR
-   LLM prompt.
-3. Calling either command without `--context` produces the existing prompt
-   structure with no empty context section.
-4. A whitespace-only `--context` fails schema validation and does not enter the
-   feature flow.
-5. Context with internal newlines or repeated spaces is accepted and rendered
-   without a tool-imposed size limit.
-6. An MR invocation with staged changes forwards its context to both the
-   generated commit message and the MR generation.
-7. Invalid generated commit/MR titles retain context on all existing retry
-   attempts.
-8. Context affects no persistence or non-LLM behavior.
-9. `mole-tools help commit` and `mole-tools help merge-request` document the
-   option and show an example.
+1. [x] `mole-tools commit --context "Explain the compatibility reason"` includes a labelled `Additional user context` section before Jira and diff evidence in the commit LLM prompt.
+2. [x] `mole-tools merge-request --context "Focus on operational impact"` includes that section before Jira, commits, diff, and the output contract in the MR LLM prompt.
+3. [x] Calling either command without `--context` produces the existing prompt structure with no empty context section.
+4. [x] A whitespace-only `--context` fails schema validation and does not enter the feature flow.
+5. [x] Context with internal newlines or repeated spaces is accepted and rendered without a tool-imposed size limit.
+6. [x] An MR invocation with staged changes forwards its context to both the generated commit message and the MR generation.
+7. [x] Invalid generated commit/MR titles retain context on all existing retry attempts.
+8. [x] Context affects no persistence or non-LLM behavior.
+9. [x] `mole-tools help commit` and `mole-tools help merge-request` document the option and show an example.
+
 
 ## Validation
 

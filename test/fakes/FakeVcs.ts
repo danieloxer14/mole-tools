@@ -3,6 +3,7 @@ import type {
 	CommitMeta,
 	FileDiff,
 	LogQuery,
+	TouchAuthor,
 	Vcs,
 	WorktreeInfo,
 } from "../../src/ports/vcs";
@@ -24,13 +25,14 @@ export interface FakeVcsOptions {
 	rangeDiff?: FileDiff[];
 	diffRange?: FileDiff[];
 	log?: CommitMeta[];
+	touchAuthors?: TouchAuthor[];
+	recentAuthors?: string[];
 	upstream?: boolean;
 	ahead?: boolean;
 	mergeBaseDiff?: FileDiff[];
 	mergeBase?: string;
 	worktrees?: WorktreeInfo[];
 	removeWorktreeError?: Error;
-	forceRemoveWorktreeError?: Error;
 	showWorktreeStatusOutput?: string;
 }
 
@@ -46,7 +48,10 @@ export class FakeVcs implements Vcs {
 	addWorktreeCalls: AddWorktreeInput[] = [];
 	diffRangeCalls: { repoRoot: string; from: string; to: string }[] = [];
 	remoteUrlCalls: { repoRoot: string; remote: string }[] = [];
+	repoRootCalls: string[] = [];
 	logCalls: LogQuery[] = [];
+	touchAuthorCalls: { files: string[]; maxCount?: number }[] = [];
+	recentAuthorCalls: (number | undefined)[] = [];
 
 	constructor(private readonly opts: FakeVcsOptions = {}) {}
 
@@ -81,10 +86,6 @@ export class FakeVcs implements Vcs {
 		return this.opts.commitsAhead ?? [];
 	}
 
-	async hasUnstagedChanges(): Promise<boolean> {
-		return false;
-	}
-
 	async hasUpstream(_branch: string): Promise<boolean> {
 		return this.opts.upstream ?? true;
 	}
@@ -101,16 +102,23 @@ export class FakeVcs implements Vcs {
 		return [];
 	}
 
-	async touchAuthorsForFiles(_files: string[]): Promise<never[]> {
-		return [];
+	async touchAuthorsForFiles(
+		files: string[],
+		maxCount?: number,
+	): Promise<TouchAuthor[]> {
+		this.touchAuthorCalls.push({ files, maxCount });
+		return this.opts.touchAuthors ?? [];
 	}
 
-	async recentAuthors(_maxCount?: number): Promise<string[]> {
-		return [];
+	async recentAuthors(maxCount?: number): Promise<string[]> {
+		this.recentAuthorCalls.push(maxCount);
+		return this.opts.recentAuthors ?? [];
 	}
 
 	async repoRoot(): Promise<string> {
-		return this.opts.repoRoot ?? "/tmp/fake-repo";
+		const root = this.opts.repoRoot ?? "/tmp/fake-repo";
+		this.repoRootCalls.push(root);
+		return root;
 	}
 
 	async cloneRepo(remoteUrl: string, destination: string): Promise<void> {
@@ -170,8 +178,6 @@ export class FakeVcs implements Vcs {
 
 	async forceRemoveWorktree(path: string, repoRoot: string): Promise<void> {
 		this.forceWorktreeCalls.push({ path, repoRoot });
-		if (this.opts.forceRemoveWorktreeError)
-			throw this.opts.forceRemoveWorktreeError;
 	}
 
 	async showWorktreeStatus(

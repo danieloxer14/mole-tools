@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { FakeGitHost } from "../../../test/fakes/FakeGitHost";
 import { FakeLlm } from "../../../test/fakes/FakeLlm";
 import { FakeUiPort } from "../../../test/fakes/FakeUiPort";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
 import { fakeContext } from "../../../test/fakes/fakeContext";
+import { CONFIG_TEMPLATE } from "../../adapters/config/loader";
 import { mergeRequest, runMergeRequestFlow } from "./index";
 
 const commit = {
@@ -141,7 +144,6 @@ describe("merge-request flow", () => {
 				},
 			],
 		});
-		vcs.hasUnstagedChanges = async () => true;
 		const ctx = fakeContext({
 			vcs,
 			llm,
@@ -156,5 +158,77 @@ describe("merge-request flow", () => {
 		});
 		expect(llm.requests[0]?.prompt).toContain("committed.ts");
 		expect(llm.requests[0]?.prompt).not.toContain("unstaged");
+	});
+
+	test("uses one additional repository-root lookup for dynamic environment handoff", async () => {
+		const root = await mkdtemp(join("/tmp", "mole-tools-merge-request-"));
+		const script = join(root, "dynamic-env.sh");
+		const marker = join(root, "executed");
+		await Bun.write(script, `#!/bin/sh\nprintf executed > "${marker}"\n`);
+		await chmod(script, 0o755);
+
+		try {
+			const vcs = new FakeVcs({
+				staged: false,
+				repoRoot: root,
+				commitsAhead: [commit],
+				mergeBaseDiff: [],
+			});
+			const ctx = fakeContext({
+				config: {
+					...CONFIG_TEMPLATE,
+					dynamicEnvRepos: [basename(root)],
+					dynamicEnvScript: "dynamic-env.sh",
+				},
+				ui: new FakeUiPort([
+					{ confirm: false }, // draft
+					{ confirm: true }, // create
+					{ confirm: true }, // dynamic environment
+				]),
+				vcs,
+				llm: new FakeLlm([["Title: feat: add feature\n\nDescription"]]),
+			});
+
+			await expect(runMergeRequestFlow(ctx)).resolves.toMatchObject({
+				url: "https://example.com/mr/1",
+			});
+			// First call belongs to reviewer discovery; second is dynamic-env lookup.
+			expect(vcs.repoRootCalls).toEqual([root, root]);
+			expect(await Bun.file(marker).text()).toBe("executed");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test("does not look up dynamic-environment root without configured repositories", async () => {
+		const root = "/tmp/mole-tools-no-dynamic-environment";
+		const vcs = new FakeVcs({
+			staged: false,
+			repoRoot: root,
+			commitsAhead: [commit],
+			mergeBaseDiff: [],
+		});
+		const ui = new FakeUiPort([
+			{ confirm: false }, // draft
+			{ confirm: true }, // create
+		]);
+		const ctx = fakeContext({
+			ui,
+			vcs,
+			llm: new FakeLlm([["Title: feat: add feature\n\nDescription"]]),
+		});
+
+		await expect(runMergeRequestFlow(ctx)).resolves.toMatchObject({
+			url: "https://example.com/mr/1",
+		});
+		// Reviewer discovery still performs its independent root lookup.
+		expect(vcs.repoRootCalls).toEqual([root]);
+		expect(
+			ui.transcript.some(
+				(entry) =>
+					entry.kind === "confirm" &&
+					entry.q === "Create a dynamic environment?",
+			),
+		).toBe(false);
 	});
 });

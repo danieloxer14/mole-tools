@@ -1,10 +1,12 @@
 # mole-tools — Merge-Request Implementation Spec
 
-**Status:** Draft implementation plan  
+**Status:** Historical implementation plan (2026-07-11); implementation is shipped. Retained phase details are archival; live contracts are defined by source.
 **Date:** 2026-07-11  
-**Companions:** [merge-request-tool.md](./merge-request-tool.md), [commit-tool.md](./commit-tool.md), [architecture/architecture.md](./architecture/architecture.md)
+**Companions:** [merge-request-tool.md](./merge-request-tool.md), [commit-tool.md](../commit/commit-tool.md), [architecture/architecture.md](../architecture/architecture.md)
 
 This document turns the product spec in `merge-request-tool.md` into a repo-grounded implementation plan for `mole-tools`.
+
+> **Current implementation note:** The shipped configuration uses `providers.*`, `models.commit`, and `models.mergeRequest` routes with `{ provider, name }`. Commit and merge-request prompts load from files under `~/.config/mole-tools/prompts/`; no prompt-string schema decision remains open in this plan.
 
 ---
 
@@ -15,7 +17,7 @@ Implement a GitLab-only `merge-request` feature that opens an MR from the curren
 The implementation should preserve the product spec's stance:
 
 - fail fast;
-- do not auto-recover from rejected pushes or dirty unstaged trees;
+- do not auto-recover from rejected pushes; preserve dirty unstaged trees without committing them;
 - keep content generation owned by the MR prompt;
 - keep structure/flow owned by the tool;
 - implement reviewer suggestions as the one deliberately heavier piece of repo intelligence.
@@ -28,15 +30,15 @@ Relevant existing files:
 
 | File | Current role |
 |------|--------------|
-| `src/core/registry.ts` | Registers CLI features. Currently exports `commit`, `init`, `costBreakdown`. |
-| `src/core/context.ts` | Builds shared `Context`; currently sets `gitHost: null`. |
+| `src/core/registry.ts` | Registers CLI features. Current registry contains `commit`, `init`, `mergeRequest`, `worktreePrune`, and `reviewFeature`. |
+| `src/core/context.ts` | Builds shared `Context`; current composition wires `GitAdapter`, routed LLM providers, optional Jira, review agent, and `GlabAdapter`. |
 | `src/core/feature.ts` | Feature interface used by all commands. |
 | `src/features/commit/index.ts` | Best implementation template for staged diff, Jira fetch, Ollama streaming, format retry, accept/edit/reject, and commit creation. |
 | `src/features/commit/prompt.ts` | Pattern for rendering issue + diff context into an LLM prompt. |
 | `src/adapters/vcs/git.ts` | Existing Git adapter. Has branch, default branch, staged diff, commit, push, commits-ahead, range diff, log. |
 | `src/ports/vcs.ts` | Current VCS interface. Needs expansion for MR-specific state. |
 | `src/ports/git-host.ts` | Existing Git host port. Needs either expansion or a `glab` adapter matching current shape plus preflight support. |
-| `src/adapters/config/schema.ts` | Config schema already includes `ollama.mrModel?`, `dynamicEnvRepos?`, `autoReviewer?`; missing `mrSystemPrompt`/prompt decision and `dynamicEnvScript`. |
+| `src/adapters/config/schema.ts` | Live schema uses `providers.*` profiles and required `models.commit` / `models.mergeRequest` routes with `{ provider, name }`; prompt overrides are file-backed under `~/.config/mole-tools/prompts/`. |
 | `src/shared/diff.ts` | Existing noise filtering. Reuse for MR diff. |
 | `src/shared/format.ts` | Existing conventional-commit title validation. Reuse for generated MR title. |
 | `src/ports/ui.ts` | Has `select`, `multiSelect`, `editText`, `editMultiline`, `confirm`, and stream support. |
@@ -71,7 +73,7 @@ The implemented feature should follow the product spec order:
 8. Abort if no commits ahead of base.
 9. Optionally fetch Jira context when enabled and branch matches configured pattern.
 10. Collect commits and `origin/<base>...HEAD` diff, applying `diff.ignore` as stat-only filtering.
-11. Generate title/body with Ollama `ollama.mrModel`.
+11. Generate title/body with the `models.mergeRequest` route and the file-backed `mr-system.md` prompt.
 12. Validate generated title only; retry up to 3 times; body is free-form.
 13. Present candidate title/body: accept, edit, reject.
 14. Suggest reviewers from CODEOWNERS + touch-score analysis.
@@ -103,7 +105,6 @@ export interface Vcs {
   currentBranch(): Promise<string>;
   defaultBranch(): Promise<string>;
   hasStagedChanges(): Promise<boolean>;
-  hasUnstagedChanges(): Promise<boolean>;
   stagedDiff(): Promise<FileDiff[]>;
   commit(message: string): Promise<{ sha: string }>;
   push(opts: { setUpstream: boolean; branch: string }): Promise<void>;
@@ -131,7 +132,6 @@ File: `src/adapters/vcs/git.ts`
 
 Implement new methods using Bun-friendly git execution:
 
-- `hasUnstagedChanges`: `git diff --quiet` returns `1` when dirty.
 - `hasUpstream`: `git rev-parse --abbrev-ref <branch>@{upstream}`.
 - `isAheadOfUpstream`: `git rev-list --count @{upstream}..HEAD`.
 - `mergeBaseDiff`: `git diff origin/<base>...HEAD --numstat` and `git diff origin/<base>...HEAD`.
@@ -202,28 +202,16 @@ or use a small provider check if future config introduces GitHub.
 
 File: `src/adapters/config/schema.ts`
 
-Needed keys:
+- The live schema already defines `providers.*`, `models.commit`, and `models.mergeRequest` routes.
+- `dynamicEnvScript` is an optional string, defaulting to `hack/local/dynamic-env.sh`.
 
-- `ollama.mrModel`: required for MR feature or validated at feature runtime.
-- `mrSystemPrompt`: decide whether this is config-backed per product spec.
-- `dynamicEnvScript`: optional string, defaulting to `hack/local/dynamic-env.sh`.
-
-Suggested minimal schema addition:
-
-```ts
-mrSystemPrompt: z.string().optional(),
-dynamicEnvScript: z.string().optional(),
-```
-
-If `mrSystemPrompt` remains file-backed to match `commit`, create a default prompt file and document that decision.
+Prompt overrides are loaded from `~/.config/mole-tools/prompts/`; `mr-system.md` is seeded on first use and preserves user edits.
 
 #### 2.2 Update config template
 
 File: `src/adapters/config/loader.ts`
 
-Ensure generated config includes MR defaults:
-
-- `ollama.mrModel`;
+- `models.mergeRequest` route;
 - `dynamicEnvRepos: []`;
 - `dynamicEnvScript: "hack/local/dynamic-env.sh"`;
 - commented or empty `autoReviewer.username` pattern if appropriate.
@@ -315,7 +303,7 @@ Register in `src/core/registry.ts`:
 ```ts
 import { mergeRequest } from "../features/merge-request";
 
-export const features: Feature[] = [commit, init, costBreakdown, mergeRequest];
+export const features: Feature[] = [commit, init, mergeRequest, worktreePrune, reviewFeature];
 ```
 
 Suggested core structure:
@@ -529,7 +517,7 @@ Cover command construction and parsing for:
 | 2 default branch guard | `merge-request/index.ts` |
 | 3 existing MR guard | `GitHost.findOpenMr` + feature guard |
 | 4 staged changes commit detour | `runCommitFlow(ctx, { askToPush: false })` |
-| 5 unstaged abort | `Vcs.hasUnstagedChanges` + feature guard |
+| 5 unstaged changes proceed | `mergeBaseDiff` over `origin/<base>...HEAD`; no unstaged-change guard |
 | 6 no upstream push | `Vcs.hasUpstream` + `push({ setUpstream: true })` |
 | 7 local ahead push | `Vcs.isAheadOfUpstream` + `push` |
 | 8 rejected push | `GitAdapter.push` preserves stderr in `PortError` |
@@ -556,11 +544,11 @@ Cover command construction and parsing for:
 - Current `UiPort` lacks a combined multi-select/free-text control. Use a follow-up manual-entry prompt.
 - `rangeDiff(base)` currently uses a double-dot range. Avoid semantic breakage by adding a new triple-dot method.
 - Existing commit flow prompts for push. Refactor before using it as an MR sub-step.
-- `mrSystemPrompt` conflicts slightly with current prompt-loader architecture. Decide before implementation.
+- Prompt storage is settled: `src/adapters/prompts/loader.ts` loads the file-backed `mr-system.md` slot.
 
-### Open decisions
+### Historical open decisions
 
-1. Should `mrSystemPrompt` live in config, prompt files, or both?
+1. The original proposal asked whether `mrSystemPrompt` should live in config, prompt files, or both. The shipped implementation uses the file-backed prompt slot described above.
 2. Should `GitHost.resolveHandle` return group members or a group reviewer handle? Product spec says groups resolve through members; implement that unless GitLab reviewer behavior requires otherwise.
 3. How should repo membership in `dynamicEnvRepos` be matched: repo root basename, remote URL slug, or configured exact path? Prefer remote slug if available; basename as fallback.
 

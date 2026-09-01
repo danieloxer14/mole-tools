@@ -1,8 +1,8 @@
 # 02 — Durable per-run JSONL log sink
 
-## What to build
+## What is implemented
 
-Make initialized logger runs durable: create one collision-safe JSONL file under the mole-tools log directory, append safe structured events in order, and expose a deterministic flush/close operation. File-system failures must degrade to a no-op logger rather than changing command behavior.
+Initialized logger runs are durable: they create one collision-safe JSONL file under the mole-tools log directory, append safe structured events in order, and expose deterministic flush/close operations. File-system failures degrade to a no-op logger rather than changing command behavior.
 
 ## Blocked by
 
@@ -10,7 +10,7 @@ Make initialized logger runs durable: create one collision-safe JSONL file under
 
 ## Status
 
-ready-for-agent
+implemented in source; focused logger test coverage remains open
 
 ## Acceptance criteria
 
@@ -21,7 +21,7 @@ ready-for-agent
 - [ ] Shutdown/flush waits for already accepted writes to settle without throwing to application callers.
 - [ ] Directory creation, open/write failure, serialization failure, and flush failure leave the logger usable as a no-op and do not write to stdout or stderr.
 - [ ] Tests use a temporary directory or injected writer, never the developer's actual home directory.
-- [ ] This ticket adds no feature, adapter, or reviewer-flow logging calls.
+- [ ] This ticket adds no feature, adapter, or reviewer-flow logging calls. Existing calls already cross the instrumentation boundary; this ticket does not add or remove them.
 
 ## Test approach
 
@@ -34,6 +34,10 @@ ready-for-agent
 1. **Red:** Add failing tests that initialize a temporary log directory, emit multiple events, flush, and assert one ordered JSONL file; add injected filesystem/writer failures.
 2. **Green:** Add the Bun-backed file sink, collision-safe run file naming, queued append/flush behavior, and no-op fallbacks.
 3. **Refactor:** Isolate filesystem concerns behind the logger initialization/sink seam while retaining the core event tests from ticket 01.
+
+## Verification status
+
+Focused logger test coverage remains open: `src/core/logger.test.ts` does not exist, so ordered JSONL, filesystem failure, and flush behavior still need dedicated assertions. Source inspection shows the file sink, collision-safe naming, queued writes, and no-op fallback in `src/core/logger.ts`. The instrumentation boundary is already crossed by existing calls in adapters and review flows; no instrumentation change belongs in this ticket.
 
 ## Implementation notes
 

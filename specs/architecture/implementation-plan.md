@@ -1,15 +1,15 @@
 # mole-tools — Implementation Plan (commit tool → binary)
 
-**Status:** Planned. No implementation yet.
+**Status:** Historical implementation plan (2026-07-08); implementation is shipped. Retained phase gates describe intended build order; live contracts are defined by source.
 **Date:** 2026-07-08
 **Author:** Daniel Oxer
 **Companions:** [architecture.md](./architecture.md), [code-design.md](./code-design.md),
-[../commit-tool.md](../commit-tool.md), [spike-ink-bun-compile.md](./spike-ink-bun-compile.md)
+[../commit/commit-tool.md](../commit/commit-tool.md), [spike-ink-bun-compile.md](./spike-ink-bun-compile.md)
 
 Sequenced, bottom-up build of the **commit** tool through a shippable macOS
 arm64 binary. Each layer is testable before the next depends on it. Every phase
 ends with a **gate** — a concrete, checkable outcome. Acceptance-criteria row
-numbers refer to [../commit-tool.md](../commit-tool.md) §7.
+numbers refer to [../commit/commit-tool.md](../commit/commit-tool.md) §7.
 
 Ink under `bun build --compile` is already de-risked (spike PASS,
 `react-devtools-core` mandatory). `init` ships **both** ways: loader
@@ -33,7 +33,7 @@ auto-bootstrap on first run *and* a standalone `init` subcommand.
 
 ---
 
-## Phase 0 — Scaffold
+## Phase 0 — Scaffold (historical record)
 
 - `git init`; `.gitignore` (`node_modules`, the `mole-tools` binary, `*.log`).
 - `bun init`. `package.json` dependencies **pinned from the spike**:
@@ -56,30 +56,33 @@ auto-bootstrap on first run *and* a standalone `init` subcommand.
   `adapters/ui/UiHost.tsx` (Ink render, covered by Phase 5 manual smoke).
 - Directory skeleton per [code-design.md](./code-design.md) §3:
   `core/ ports/ adapters/ shared/ features/ test/fakes/`.
-- `src/index.tsx` stub that prints help.
+- Initial scaffold included a stub `src/index.tsx` that printed help; later
+  phases replaced it with the shipped registry-backed CLI.
 
-**Gate:** `bun run src/index.tsx` prints stub help; `bun test` runs clean;
-`bun test --coverage` reports (threshold trivially met with no source yet);
-`biome check` passes.
+**Historical gate (completed):** At scaffold time, `bun run src/index.tsx`
+printed stub help, `bun test` ran clean, coverage passed with no source yet, and
+`biome check` passed.
 
 ---
 
-## Phase 1 — Contracts (interfaces + types only, no logic)
+## Phase 1 — Contracts (interfaces + types)
 
-Pure type layer. Nothing here imports an adapter.
+The contracts below were implemented and later extended by the shipped feature
+set. Ports/core remain independent from adapters.
 
 - `ports/ui.ts` — `UiPort` (fixed primitive vocabulary, code-design §8) + `Choice<T>`.
 - `ports/vcs.ts` — `Vcs` + `FileDiff`, `CommitMeta`, `LogQuery`.
 - `ports/llm.ts` — `Llm` (streaming `AsyncIterable<string>`) + `LlmRequest`.
 - `ports/issue-tracker.ts` — `IssueTracker` + `Issue`.
-- `ports/git-host.ts` — `GitHost` + host types (reserved for MR; interface only).
+- `ports/git-host.ts` — `GitHost` + host types.
 - `core/feature.ts` — `Feature<A, R>` interface.
 - `core/errors.ts` — `AbortError`, `UserRejectedError`, `PortError`, `handleError`.
-- `core/context.ts` — `Context` type + `buildContext` **signature** (body stubbed / throws).
-- `core/registry.ts` — `features: Feature[] = []`.
+- `core/context.ts` — `Context` type + adapter-backed `buildContext`.
+- `core/registry.ts` — static five-feature registry: `commit`, `init`, `mergeRequest`, `worktreePrune`, `reviewFeature`.
 
-**Gate:** `tsc`/`bun` typecheck clean; dependency rule holds (ports/core import
+**Gate (completed):** typecheck clean; dependency rule holds (ports/core import
 nothing from adapters).
+
 
 ---
 
@@ -100,9 +103,9 @@ Data in, data out. Colocated `*.test.ts`, no ports, no I/O.
 
 ## Phase 3 — Config adapter + `init`
 
-- `adapters/config/schema.ts` — zod schema mirroring [../commit-tool.md](../commit-tool.md)
-  §3 table + `Config` type. MR-only keys (`ollama.mrModel`, `mrSystemPrompt`,
-  `dynamicEnvRepos`, `autoReviewer`) present but optional.
+- `adapters/config/schema.ts` — live `ConfigSchema` uses `providers.*` profiles and
+  required `models.commit` / `models.mergeRequest` routes with `{ provider, name }`.
+  Prompt overrides are file-backed under `~/.config/mole-tools/prompts/`.
 - `adapters/config/loader.ts` — load `~/.config/mole-tools/config.json`,
   zod-validate (precise errors), **first-run template bootstrap** (default
   Ollama model, Jira disabled; write template, tell user the path, proceed).
@@ -259,6 +262,7 @@ add real-integration and standalone-binary smoke checks.
 
 ## Out of scope (this plan)
 
-Merge-request feature internals, GitHub/GitLab host logic, cross-platform builds,
-CI release pipeline, Homebrew/npm publish, auto-update. Subcommand slot, cac
-routing, and MR config keys are reserved but not implemented.
+The original plan did not cover merge-request feature internals, GitHub/GitLab
+host logic, cross-platform builds, CI release pipeline, Homebrew/npm publish, or
+auto-update. Those boundaries describe plan scope, not current implementation
+status.

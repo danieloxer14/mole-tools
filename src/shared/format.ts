@@ -18,7 +18,7 @@ const SUBJECT_PATTERN = new RegExp(
 	`^(${CONVENTIONAL_TYPES.join("|")})(\\([^)]+\\))?!?: .+$`,
 );
 
-export type FormatCheck = { ok: true } | { ok: false; violations: string[] };
+type FormatCheck = { ok: true } | { ok: false; violations: string[] };
 
 export function checkFormat(message: string): FormatCheck {
 	const violations: string[] = [];

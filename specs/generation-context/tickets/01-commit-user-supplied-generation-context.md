@@ -1,14 +1,12 @@
 # 01 — Commit: add user-supplied generation context
 
-## What to build
+## Delivered behavior
 
-Make `mole-tools commit --context <text>` guide the generated commit message for
-this invocation. The command must validate non-blank text, show the option in
-help, render it as an `Additional user context` guiding-instruction section
-before Jira and staged-diff evidence, and retain it across format retries.
-
-Expose the same optional context on `runCommitFlow` so the merge-request flow
-can later reuse it for its staged-change commit detour.
+`mole-tools commit --context <text>` guides generated commit messages for the
+current invocation. It validates non-blank text, shows the option in help,
+renders it as an `Additional user context` section before Jira and staged-diff
+evidence, and retains it across format retries. `runCommitFlow` exposes the
+optional context for the merge-request staged-change detour.
 
 ## Blocked by
 
@@ -16,17 +14,17 @@ None — can start immediately
 
 ## Status
 
-ready-for-agent
+Implemented — shipped and verified; no implementation work remains.
 
 ## Acceptance criteria
 
-- [ ] `commit` accepts optional non-blank `context`; whitespace-only input fails Zod validation before the feature flow runs.
-- [ ] The commit prompt includes `Additional user context:` immediately after the loaded commit prompt and before optional Jira details and the changelog.
-- [ ] Omitting context leaves the existing prompt sections unchanged and adds no empty context label.
-- [ ] Internal newlines and repeated spaces in valid context reach the prompt; no tool-level length cap or persistence is introduced.
-- [ ] All commit-message format retry requests retain the same context section.
-- [ ] `runCommitFlow` accepts and forwards optional context without changing existing callers' push behavior.
-- [ ] `mole-tools help commit` documents `--context`, its purpose, and an example through Zod argument metadata.
+- [x] `commit` accepts optional non-blank `context`; whitespace-only input fails Zod validation before the feature flow runs.
+- [x] The commit prompt includes `Additional user context:` immediately after the loaded commit prompt and before optional Jira details and the changelog.
+- [x] Omitting context leaves the existing prompt sections unchanged and adds no empty context label.
+- [x] Internal newlines and repeated spaces in valid context reach the prompt; no tool-level length cap or persistence is introduced.
+- [x] All commit-message format retry requests retain the same context section.
+- [x] `runCommitFlow` accepts and forwards optional context without changing existing callers' push behavior.
+- [x] `mole-tools help commit` documents `--context`, its purpose, and an example through Zod argument metadata.
 
 ## Test approach
 

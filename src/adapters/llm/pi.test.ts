@@ -7,25 +7,6 @@ describe("PiAdapter", () => {
 		expect(withCustom).toBeDefined();
 	});
 
-	test("generate returns an AsyncIterable (integration stub)", async () => {
-		const adapter = new PiAdapter({ binary: "echo" });
-		try {
-			async function consume() {
-				let output = "";
-				for await (const chunk of adapter.generate({
-					model: "claude",
-					system: "",
-					prompt: "hello",
-				})) {
-					output += chunk;
-				}
-				return output;
-			}
-			await consume();
-		} catch {
-			// subprocess may fail in test env — that's expected
-		}
-	});
 	test("surfaces a non-zero Pi process exit", async () => {
 		const adapter = new PiAdapter({ binary: "sh" });
 		const consume = async () => {

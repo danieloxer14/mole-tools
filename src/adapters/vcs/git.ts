@@ -378,11 +378,6 @@ export class GitAdapter implements Vcs {
 		return this.diffBetween([`origin/${base}...HEAD`]);
 	}
 
-	async hasUnstagedChanges(): Promise<boolean> {
-		const result = await this.exec(["diff", "--quiet"]);
-		return result.exitCode === 1;
-	}
-
 	async hasUpstream(branch: string): Promise<boolean> {
 		const result = await this.exec([
 			"rev-parse",
