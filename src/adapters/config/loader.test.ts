@@ -34,9 +34,13 @@ describe("loadConfig", () => {
 			agent: "omp",
 			layerTimeoutSeconds: 600,
 			largeFileLineThreshold: 800,
+			maxLayerPromptBytes: 100_000,
 		});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "reviewBabysitter": {');
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'//   // "scheduleTimes": ["09:00", "12:00", "15:00"], // exact 24-hour local times instead of intervalSeconds',
+		);
 		expect(CONFIG_TEMPLATE_TEXT).toContain(
 			'//   "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",',
 		);
@@ -121,6 +125,39 @@ describe("loadConfig", () => {
 		expect(config.models).toEqual({
 			commit: { provider: "ollama", name: "custom-model" },
 			mergeRequest: { provider: "ollama", name: "custom-model" },
+		});
+	});
+	test("preserves scheduleTimes through legacy normalization", async () => {
+		const path = await configPath();
+		const reviewBabysitter = {
+			scheduleTimes: ["09:00", "12:00", "15:00"],
+			assignees: ["review-owner"],
+			aiReviewerUsername: "ai-reviewer",
+			promptFile: "~/.config/mole-tools/prompts/review-babysitter.md",
+			model: "model-name",
+			webhookUrlEnv: "SLACK_WEBHOOK_URL",
+			maxChangedLines: 0,
+			maxChangedFiles: 0,
+			denyPathsByProject: { "group/repo": [] },
+		};
+		await Bun.write(
+			path,
+			JSON.stringify({
+				ollama: {
+					commitModel: "custom-model",
+					baseUrl: "http://localhost:11434",
+				},
+				jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+				diff: { ignore: [] },
+				reviewBabysitter,
+			}),
+		);
+
+		const config = await loadConfig(path);
+
+		expect(config.reviewBabysitter).toMatchObject({
+			scheduleTimes: ["09:00", "12:00", "15:00"],
+			intervalSeconds: 900,
 		});
 	});
 
@@ -213,6 +250,7 @@ describe("loadConfig", () => {
 				model: "review-model",
 				layerTimeoutSeconds: 30,
 				largeFileLineThreshold: 200,
+				maxLayerPromptBytes: 80_000,
 			},
 		} as const;
 		await Bun.write(path, JSON.stringify(valid));
@@ -249,6 +287,7 @@ describe("loadConfig", () => {
 			agent: "omp",
 			layerTimeoutSeconds: 600,
 			largeFileLineThreshold: 800,
+			maxLayerPromptBytes: 100_000,
 		});
 	});
 

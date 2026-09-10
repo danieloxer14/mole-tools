@@ -39,25 +39,25 @@ function safeText(value: unknown): string {
 }
 
 function envelope(mr: ReportMr): {
-	display: string;
 	title: string;
 	assignees: string;
 } {
-	const project = escapeSlackText(safeText(mr.projectPath));
-	const title = escapeSlackText(safeText(mr.title));
+	const safeTitle = safeText(mr.title);
+	const title = escapeSlackText(
+		safeTitle || `${safeText(mr.projectPath)}!${mr.iid}`,
+	);
 	const assignees = mr.assignees
 		.map((assignee) => `@${escapeSlackText(safeText(assignee))}`)
 		.join(", ");
 	return {
-		display: `<${mr.webUrl}|${project}!${mr.iid}>`,
-		title,
+		title: `<${mr.webUrl}|${title}>`,
 		assignees,
 	};
 }
 
 function reportEnvelope(mr: ReportMr, text: string, emoji: string): string {
 	const copy = envelope(mr);
-	return `${copy.display} — ${copy.assignees} — ${copy.title}\n${emoji} ${text}`;
+	return `${copy.title} — ${copy.assignees}\n${emoji} ${text}`;
 }
 
 function instruction(result: ReportResult): { emoji: string; text: string } {
@@ -76,6 +76,11 @@ function instruction(result: ReportResult): { emoji: string; text: string } {
 			return {
 				emoji: "💬",
 				text: "GitLab reports unresolved discussions. Resolve open discussions.",
+			};
+		case "skip_merge_dependency":
+			return {
+				emoji: "⛔",
+				text: "Blocked by a merge dependency.",
 			};
 		case "skip_merge_status":
 			return {

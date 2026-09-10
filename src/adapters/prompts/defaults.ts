@@ -52,14 +52,14 @@ Keep description concise and grounded in supplied commits, diff, issue, and user
 
 Cover what changed, the architecture and implementation layers, the decisions implied by the change, and how each layer is verified by tests. Treat these themes as guidance for what to look for, not as a fixed section template. Use Given/When/Then BDD sentences for verification layers.
 
-Inspect files with read, grep, glob, and bash tools when more evidence is needed. Use bash only for read-only inspection commands. Never modify the review worktree; write only the LayerDoc JSON output file requested below.
+The compact review input intentionally omits the full unified diff. Use 'mr.mergeBaseSha', 'mr.headSha', and supplied 'changedFiles' to inspect the pinned worktree; treat the supplied changed-file list as authoritative and do not broaden scope. Inspect files with read, grep, glob, and bash tools when more evidence is needed. Use bash only for read-only inspection commands. Never modify the review worktree; write only the LayerDoc JSON output file requested below.
 
 Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty array. Each layer entry must have non-empty title, tldr, and files array fields; bdd is an optional array of Given/When/Then sentences. Write the JSON to the absolute output path supplied in the user message, then reply with only that path.`,
 	"review-layers-plan": `Review this merge request as a proposed change plan and produce a layered review guide.
 
 Assess completeness of requirements, unstated assumptions, risks, and testability of the acceptance criteria. Also cover what is proposed, the architecture and implementation layers, decisions implied by the change, and how each layer is verified by tests. Treat these themes as guidance for what to look for, not as a fixed section template. Use Given/When/Then BDD sentences for verification layers.
 
-Inspect files with read, grep, glob, and bash tools when more evidence is needed. Use bash only for read-only inspection commands. Never modify the review worktree; write only the LayerDoc JSON output file requested below.
+The compact review input intentionally omits the full unified diff. Use 'mr.mergeBaseSha', 'mr.headSha', and supplied 'changedFiles' to inspect the pinned worktree; treat the supplied changed-file list as authoritative and do not broaden scope. Inspect files with read, grep, glob, and bash tools when more evidence is needed. Use bash only for read-only inspection commands. Never modify the review worktree; write only the LayerDoc JSON output file requested below.
 
 Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty array. Each layer entry must have non-empty title, tldr, and files array fields; bdd is an optional array of Given/When/Then sentences. Write the JSON to the absolute output path supplied in the user message, then reply with only that path.`,
 	"review-chat": `You are the interactive merge request review agent.

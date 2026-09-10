@@ -29,6 +29,21 @@ export const ModelsConfigSchema = z.object({
 export const ReviewBabysitterConfigSchema = z
 	.object({
 		intervalSeconds: z.number().int().min(60).default(900),
+		scheduleTimes: z
+			.array(
+				z
+					.string()
+					.regex(
+						/^([01]\d|2[0-3]):[0-5]\d$/,
+						'scheduleTimes entries must be 24-hour "HH:MM" local times',
+					),
+			)
+			.min(1)
+			.refine(
+				(times) => new Set(times).size === times.length,
+				"scheduleTimes must not repeat a time",
+			)
+			.optional(),
 		assignees: z.array(z.string().min(1)).min(1),
 		aiReviewerUsername: z.string().min(1),
 		promptFile: z.string().min(1),
@@ -50,11 +65,13 @@ export const ReviewConfigSchema = z
 		model: z.string().min(1).optional(),
 		layerTimeoutSeconds: z.number().int().positive().default(600),
 		largeFileLineThreshold: z.number().int().positive().default(800),
+		maxLayerPromptBytes: z.number().int().positive().default(100_000),
 	})
 	.default({
 		agent: "omp",
 		layerTimeoutSeconds: 600,
 		largeFileLineThreshold: 800,
+		maxLayerPromptBytes: 100_000,
 	});
 
 /** Unknown config keys are stripped for forward compatibility across feature branches. */

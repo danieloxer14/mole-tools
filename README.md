@@ -101,7 +101,8 @@ default model.
     "binary": "claude",
     "model": "sonnet",
     "layerTimeoutSeconds": 600,
-    "largeFileLineThreshold": 800
+    "largeFileLineThreshold": 800,
+    "maxLayerPromptBytes": 100000
   }
 }
 ```
@@ -129,7 +130,7 @@ cannot grant write access to code under review.
     "apiKey": "your-api-token"                      // API token
   },
   "diff": {
-    "ignore": ["*.lock", "bun.lockb", "package-lock.json", "*.snap"]
+    "ignore": ["*.lock", "pnpm-lock.yaml", "bun.lockb", "package-lock.json", "*.snap"]
   },
   "autoReviewer": { "username": "your-handle" },
   "dynamicEnvRepos": ["org/repo"],
@@ -142,10 +143,12 @@ cannot grant write access to code under review.
     "binary": "omp",                         // optional binary override
     "model": "review-model",                 // optional OMP model
     "layerTimeoutSeconds": 600,
-    "largeFileLineThreshold": 800
+    "largeFileLineThreshold": 800,
+    "maxLayerPromptBytes": 100000
   },
   "reviewBabysitter": {
     "intervalSeconds": 900,
+    "scheduleTimes": ["09:00", "12:00", "15:00"],
     "assignees": ["review-owner"],
     "aiReviewerUsername": "ai-reviewer",
     "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",
@@ -160,7 +163,10 @@ cannot grant write access to code under review.
 }
 ```
 
-| `reviewBabysitter.intervalSeconds` | Seconds between completed scans; defaults to `900`, minimum `60`. |
+| Field | Purpose |
+|---|---|
+| `reviewBabysitter.intervalSeconds` | Seconds between completed scans; defaults to `900`, minimum `60`. Ignored when `scheduleTimes` is set. |
+| `reviewBabysitter.scheduleTimes` | Optional list of 24-hour `HH:MM` local times (e.g. `["09:00", "12:00", "15:00"]`); scans run only at these times instead of every `intervalSeconds`, and the first scan waits for the next one. |
 | `reviewBabysitter.assignees` | Required GitLab handles; every opened MR is retained when any assignee matches case-insensitively. |
 | `reviewBabysitter.aiReviewerUsername` | Non-system note author proving AI review completion after `ai-review` label is absent. |
 | `reviewBabysitter.promptFile` + `model` | Prompt file and required OMP model used for isolated, read-only risk assessment. |
@@ -181,6 +187,7 @@ cannot grant write access to code under review.
 | `review.model` | Optional model name for OMP or Claude, forwarded as `<agent> --model <name>`. |
 | `review.layerTimeoutSeconds` | Maximum seconds for one layer-guide run; default `600`. |
 | `review.largeFileLineThreshold` | Diff-line count above which a file starts collapsed; default `800`. |
+| `review.maxLayerPromptBytes` | Maximum UTF-8 bytes sent to one layer-guide run; default `100000`. |
 
 `reviewBabysitter` is optional for other commands, but the babysitter command
 rejects startup when its block is absent. Unknown nested keys and invalid limits
@@ -376,8 +383,11 @@ Runs a serial monitor over every opened GitLab merge request visible to
 authenticated `glab`, retaining requests assigned to one of the configured
 handles. It starts one scan immediately, then waits until that scan finishes
 before sleeping for `reviewBabysitter.intervalSeconds` (default `900` seconds,
-minimum `60`). `SIGINT` or `SIGTERM` finishes the active request and report,
-then stops without starting another scan.
+minimum `60`). When `reviewBabysitter.scheduleTimes` lists 24-hour `HH:MM`
+local times instead, scans run only at those times: the first scan waits for
+the next configured time rather than starting immediately, and
+`intervalSeconds` is ignored. `SIGINT` or `SIGTERM` finishes the active
+request and report, then stops without starting another scan.
 
 ```bash
 export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/…'
@@ -394,9 +404,11 @@ matching requests produce a zero-count summary and `ℹ️ No matching open MRs.
 AI review lifecycle is label-driven: a missing completion note queues exactly
 one additive `ai-review` label; a present label reports that review is in
 progress; completion requires the label to be absent and a non-system note from
-`aiReviewerUsername`. Standalone global MR notes (`individual_note`) do not
-count as open threads; only unresolved threaded discussions with non-system
-notes block approval. Draft requests, conflicts, unsafe mergeability,
+`aiReviewerUsername`. A healthy MR blocked only by a merge dependency also
+queues this review before the dependency merges; it never gets assessed or
+approved while dependency-blocked. Standalone global MR notes (`individual_note`)
+do not count as open threads; only unresolved threaded discussions with
+non-system notes block approval. Draft requests, conflicts, unsafe mergeability,
 failed/pending/manual/unknown pipelines,
 unreadable diffs, configured change/file limits, missing deny-list entries, or
 denied paths block approval. An MR with no configured pipeline is not treated
@@ -420,7 +432,7 @@ first-match precedence:
 *PR Babysitter — Scan summary*
 Checked: <count> PRs | Approved: <count> | Blocked: <count> | Waiting: <count>
 
-<url|project!iid> — @<assignee>[, @<assignee>...] — <title>
+<url|title> — @<assignee>[, @<assignee>...]
 <emoji> <friendly instruction>
 ```
 
@@ -434,7 +446,8 @@ order; only the first matching row is rendered.
 | 1 | Draft | `⏭️ This MR is draft. Mark it ready when work is ready.` |
 | 2 | Merge conflict | `⛔ GitLab reports merge conflicts. Resolve them.` |
 | 3 | GitLab reports unresolved discussions | `💬 GitLab reports unresolved discussions. Resolve open discussions.` |
-| 4 | Unsafe or unknown merge status | `⛔ GitLab reports unresolved mergeability status.` |
+| 4a | `merge_request_blocked` with successful or unconfigured pipeline | `🏷️ AI review requested.`, `⏳ AI review is in progress.`, or `⛔ Blocked by a merge dependency.` depending on label and completion note |
+| 4b | Unsafe or unknown merge status, or dependency block with non-healthy pipeline | `⛔ GitLab reports unresolved mergeability status.` |
 | 5 | CI failed | `❌ Head pipeline is failing. Fix failing jobs.` |
 | 6 | CI pending, running, manual, or unknown | `⏳ Head pipeline is not successful yet.` |
 | 7 | No configured-AI note and no `ai-review` label | `🏷️ AI review requested.` |

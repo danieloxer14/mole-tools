@@ -6,7 +6,7 @@ import type {
 	MrAutoApprovalState,
 } from "../../ports/git-host";
 import type { FileDiff } from "../../ports/vcs";
-import { evaluatePolicy } from "./policy";
+import { evaluateMergeGates, evaluatePolicy, type PolicyInput } from "./policy";
 
 const config = ReviewBabysitterConfigSchema.parse({
 	assignees: ["owner"],
@@ -174,6 +174,66 @@ describe("evaluatePolicy", () => {
 				}),
 			),
 		).toEqual({ kind: "skip_discussions_not_resolved" });
+	});
+
+	test.each([
+		[
+			"queues review for a healthy dependency block",
+			state({ detailedMergeStatus: "merge_request_blocked" }),
+			[],
+			"queue_ai_review",
+		],
+		[
+			"waits when dependency-blocked review is active",
+			state({
+				detailedMergeStatus: "merge_request_blocked",
+				labels: ["ai-review"],
+			}),
+			[],
+			"wait_ai_review",
+		],
+		[
+			"keeps dependency block after review completion",
+			state({ detailedMergeStatus: "merge_request_blocked" }),
+			[aiNoteDiscussion()],
+			"skip_merge_dependency",
+		],
+		[
+			"does not queue review for dependency block with failed CI",
+			state({
+				detailedMergeStatus: "merge_request_blocked",
+				headPipelineStatus: "failed",
+			}),
+			[],
+			"skip_merge_status",
+		],
+	] as const)("handles %s", (_name, candidate, discussions, expected) => {
+		expect(evaluatePolicy(base({ state: candidate, discussions }))).toEqual({
+			kind: expected,
+		});
+	});
+
+	test("keeps dependency block when approval checks are already satisfied", () => {
+		expect(
+			evaluatePolicy(
+				base({
+					state: state({ detailedMergeStatus: "merge_request_blocked" }),
+					approval: { ...approval, approved: true, approvalsLeft: 0 },
+					skipAutoApprovalChecks: true,
+				}),
+			),
+		).toEqual({ kind: "skip_merge_dependency" });
+	});
+
+	test("allows dependency review with no configured pipeline", () => {
+		expect(
+			evaluateMergeGates(
+				state({
+					detailedMergeStatus: "merge_request_blocked",
+					headPipelineStatus: "not_configured",
+				}),
+			),
+		).toEqual({ kind: "skip_merge_dependency" });
 	});
 
 	test.each([

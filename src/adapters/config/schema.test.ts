@@ -78,6 +78,22 @@ describe("config schema", () => {
 		});
 	});
 
+	test("accepts scheduleTimes as 24-hour HH:MM local times", () => {
+		const config = ConfigSchema.parse({
+			...baseConfig,
+			reviewBabysitter: {
+				...validReviewBabysitter,
+				scheduleTimes: ["09:00", "12:00", "23:59"],
+			},
+		});
+
+		expect(config.reviewBabysitter?.scheduleTimes).toEqual([
+			"09:00",
+			"12:00",
+			"23:59",
+		]);
+	});
+
 	test("rejects invalid babysitter settings", () => {
 		const invalidSettings: Record<string, unknown>[] = [
 			{ intervalSeconds: 59 },
@@ -96,6 +112,11 @@ describe("config schema", () => {
 			{ denyPathsByProject: { "group/repo": "src/**" } },
 			{ denyPathsByProject: { "group/repo": [123] } },
 			{ unsupported: true },
+			{ scheduleTimes: [] },
+			{ scheduleTimes: ["9:00"] },
+			{ scheduleTimes: ["09:60"] },
+			{ scheduleTimes: ["24:00"] },
+			{ scheduleTimes: ["09:00", "09:00"] },
 		];
 
 		for (const settings of invalidSettings) {
@@ -144,6 +165,7 @@ describe("config schema", () => {
 			agent: "omp",
 			layerTimeoutSeconds: 600,
 			largeFileLineThreshold: 800,
+			maxLayerPromptBytes: 100_000,
 		});
 		expect(config).not.toHaveProperty("extra");
 	});

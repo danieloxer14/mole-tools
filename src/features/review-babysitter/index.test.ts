@@ -136,6 +136,7 @@ describe("review-babysitter descriptor", () => {
 				"Requires reviewBabysitter config, authenticated glab, OMP, and its Slack webhook environment variable.",
 				"Configuration: intervalSeconds defaults to 900 seconds and must be at least 60; configure assignees, aiReviewerUsername, promptFile, model, webhookUrlEnv, maxChangedLines (default 250), maxChangedFiles (default 10), and denyPathsByProject.",
 				"Lifecycle: starts one scan immediately, processes merge requests serially, waits after each completed scan, and stops cleanly on SIGINT or SIGTERM without starting another scan.",
+				'Scheduling: when reviewBabysitter.scheduleTimes lists 24-hour "HH:MM" local times, scans run only at those times instead of every intervalSeconds; the first scan waits for the next configured time, and intervalSeconds is ignored while scheduleTimes is set.',
 				"Limits and deny-list: change and file limits are strict upper bounds where equality is allowed; every project needs an exact denyPathsByProject entry, [] explicitly denies no paths, and matching changed paths block approval.",
 				"Existing auto-approval or satisfied approval requirements skip diff, deny-list, and AI gates; merge blockers and remaining required approvals are still reported.",
 				"Non-goals: does not post review comments, add a requires-review label, remove labels, change assignees, rerun CI, merge requests, retry prompts or approvals, or replace interactive review.",
@@ -151,108 +152,108 @@ describe("report formatter", () => {
 		[
 			"draft",
 			{ kind: "skip_draft" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⏭️ This MR is draft. Mark it ready when work is ready.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⏭️ This MR is draft. Mark it ready when work is ready.",
 		],
 		[
 			"conflict",
 			{ kind: "skip_conflict" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⛔ GitLab reports merge conflicts. Resolve them.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⛔ GitLab reports merge conflicts. Resolve them.",
 		],
 
 		[
 			"unresolved discussions",
 			{ kind: "skip_discussions_not_resolved" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n💬 GitLab reports unresolved discussions. Resolve open discussions.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n💬 GitLab reports unresolved discussions. Resolve open discussions.",
 		],
 		[
 			"merge status",
 			{ kind: "skip_merge_status" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⛔ GitLab reports unresolved mergeability status.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⛔ GitLab reports unresolved mergeability status.",
 		],
 		[
 			"failed CI",
 			{ kind: "skip_ci_failed" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n❌ Head pipeline is failing. Fix failing jobs.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n❌ Head pipeline is failing. Fix failing jobs.",
 		],
 		[
 			"pending CI",
 			{ kind: "skip_ci_not_ready" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⏳ Head pipeline is not successful yet.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⏳ Head pipeline is not successful yet.",
 		],
 		[
 			"queue",
 			{ kind: "queue_ai_review" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n🏷️ AI review requested.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n🏷️ AI review requested.",
 		],
 		[
 			"waiting",
 			{ kind: "wait_ai_review" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⏳ AI review is in progress.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⏳ AI review is in progress.",
 		],
 		[
 			"discussion",
 			{ kind: "block_discussion" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n💬 Open discussion needs resolution.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n💬 Open discussion needs resolution.",
 		],
 		[
 			"self",
 			{ kind: "skip_self_approval" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⏭️ Authenticated approver is MR author.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⏭️ Authenticated approver is MR author.",
 		],
 		[
 			"already approved",
 			{ kind: "skip_already_approved" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⏭️ Authenticated approver already approved this MR.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⏭️ Authenticated approver already approved this MR.",
 		],
 		[
 			"unreadable",
 			{ kind: "block_diff_unreadable" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: diff cannot be safely evaluated.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: diff cannot be safely evaluated.",
 		],
 		[
 			"line limit",
 			{ kind: "block_change_limit", changedLines: 251, maxChangedLines: 250 },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: total changes exceed 250.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: total changes exceed 250.",
 		],
 		[
 			"file limit",
 			{ kind: "block_file_limit", changedFiles: 11, maxChangedFiles: 10 },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: changed files exceed 10.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: changed files exceed 10.",
 		],
 		[
 			"missing deny list",
 			{ kind: "block_missing_denylist" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: no deny-list config exists for this project.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: no deny-list config exists for this project.",
 		],
 		[
 			"denied path",
 			{ kind: "block_deny_path", path: "src/auth.ts", glob: "src/auth/**" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: changed path src/auth.ts matches denied glob src/auth/**.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: changed path src/auth.ts matches denied glob src/auth/**.",
 		],
 		[
 			"risk",
 			{ kind: "assessment_risk", risk: "HIGH", reason: "unsafe" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: AI assessed HIGH risk: unsafe.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: AI assessed HIGH risk: unsafe.",
 		],
 		[
 			"inconclusive",
 			{ kind: "assessment_inconclusive" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n⚠️ Not eligible for auto-approval: AI assessment is inconclusive.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n⚠️ Not eligible for auto-approval: AI assessment is inconclusive.",
 		],
 		[
 			"approval rejected",
 			{ kind: "approval_rejected" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n❌ Approval was not applied.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n❌ Approval was not applied.",
 		],
 		[
 			"approved",
 			{ kind: "approved" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n✅ Auto-approved after low-risk AI assessment.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n✅ Auto-approved after low-risk AI assessment.",
 		],
 		[
 			"error",
 			{ kind: "error", error: "temporary failure" },
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice, @bob — Improve API\n❌ Check could not complete: temporary failure.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice, @bob\n❌ Check could not complete: temporary failure.",
 		],
 	];
 
@@ -260,6 +261,16 @@ describe("report formatter", () => {
 		cases,
 	)("renders %s with exact envelope and friendly fact", (_name, result, expected) => {
 		expect(reportCase(result)).toBe(expected);
+	});
+
+	test("falls back to project and IID when title is empty", () => {
+		const line = formatReportLine(
+			{ kind: "skip_draft" },
+			{ ...metadata, title: " \n" },
+		);
+		expect(line).toContain(
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42>",
+		);
 	});
 
 	test("escapes dynamic display values but preserves link target", () => {
@@ -273,7 +284,7 @@ describe("report formatter", () => {
 			},
 		);
 		expect(line).toContain(
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/&lt;api&gt;!42>",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|A &lt;title&gt; &amp; change> — @a&amp;b",
 		);
 		expect(line).toContain("A &lt;title&gt; &amp; change");
 		expect(line).toContain("@a&amp;b");
@@ -330,7 +341,7 @@ describe("runOneLoop", () => {
 		expect(approvalCalls).toBe(1);
 		expect(discussionCalls).toBe(1);
 		expect(result.lines).toEqual([
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice — Improve API\n⏳ AI review is in progress.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice\n⏳ AI review is in progress.",
 		]);
 	});
 
@@ -418,6 +429,77 @@ describe("runOneLoop", () => {
 		expect(notifier.messages).toHaveLength(1);
 	});
 
+	test("queues AI review while a healthy merge dependency blocks merge", async () => {
+		const calls: string[] = [];
+		const labels: string[] = [];
+		const host = new FakeGitHost({
+			listOpenedMrsForAssignees: async () => {
+				calls.push("list");
+				return [{ ref, assignees: ["alice"] }];
+			},
+			fetchAutoApprovalState: async () => {
+				calls.push("state");
+				return state({ detailedMergeStatus: "merge_request_blocked" });
+			},
+			fetchApprovalState: async () => {
+				calls.push("approval");
+				return approval;
+			},
+			listDiscussions: async () => {
+				calls.push("discussions");
+				return [];
+			},
+			addMrLabel: async (_ref, label) => {
+				calls.push("label");
+				labels.push(label);
+			},
+		});
+		const result = await runOneLoop(fakeContext({ gitHost: host }), {
+			config,
+			notifier: new FakeNotifier(),
+			loadDiff: async () => {
+				calls.push("diff");
+				throw new Error("dependency-blocked MR must not load diff");
+			},
+			assessRisk: async () => {
+				calls.push("assess");
+				throw new Error("dependency-blocked MR must not assess");
+			},
+		});
+
+		expect(calls).toEqual([
+			"list",
+			"state",
+			"approval",
+			"discussions",
+			"label",
+		]);
+		expect(labels).toEqual(["ai-review"]);
+		expect(result.text).toContain("AI review requested.");
+	});
+
+	test("does not requeue completed AI review while dependency remains", async () => {
+		const labels: string[] = [];
+		const host = new FakeGitHost({
+			listOpenedMrsForAssignees: async () => [{ ref, assignees: ["alice"] }],
+			fetchAutoApprovalState: async () =>
+				state({ detailedMergeStatus: "merge_request_blocked" }),
+			fetchApprovalState: async () => approval,
+			listDiscussions: async () => [completeDiscussion],
+			addMrLabel: async (_ref, label) => labels.push(label),
+		});
+		const result = await runOneLoop(fakeContext({ gitHost: host }), {
+			config,
+			notifier: new FakeNotifier(),
+			loadDiff: async () => {
+				throw new Error("dependency-blocked MR must not load diff");
+			},
+		});
+
+		expect(labels).toEqual([]);
+		expect(result.text).toContain("Blocked by a merge dependency.");
+	});
+
 	test("approves only after assess returns low", async () => {
 		let approvalCalls = 0;
 		let assessCalls = 0;
@@ -467,7 +549,7 @@ describe("runOneLoop", () => {
 		});
 		expect(approvalCalls).toBe(1);
 		expect(result.lines).toEqual([
-			"<https://gitlab.example.com/group/api/-/merge_requests/42|group/api!42> — @alice — Improve API\n❌ Approval was not applied.",
+			"<https://gitlab.example.com/group/api/-/merge_requests/42|Improve API> — @alice\n❌ Approval was not applied.",
 		]);
 	});
 
@@ -906,5 +988,102 @@ describe("runScheduler", () => {
 		expect(runs).toBe(1);
 		expect(maxActive).toBe(1);
 		expect(waits).toEqual([60_000]);
+	});
+
+	test("stops during initial scheduled wait without scanning", async () => {
+		const signals = new TestSignals();
+		let runs = 0;
+		const waits: number[] = [];
+		await runScheduler({
+			scheduleTimes: ["09:00"],
+			signals,
+			now: () => new Date(2024, 0, 1, 8, 0, 0),
+			runLoop: async () => {
+				runs++;
+			},
+			sleep: async (milliseconds) => {
+				waits.push(milliseconds);
+				signals.emit("SIGTERM");
+			},
+		});
+		expect(runs).toBe(0);
+		expect(waits).toEqual([60 * 60_000]);
+	});
+
+	test("scheduleTimes mode waits for the next configured time before and after each run", async () => {
+		const signals = new TestSignals();
+		const nowSequence = [
+			new Date(2024, 0, 1, 8, 0, 0),
+			new Date(2024, 0, 1, 9, 0, 0),
+		];
+		let nowCalls = 0;
+		let runs = 0;
+		const waits: number[] = [];
+		await runScheduler({
+			scheduleTimes: ["09:00", "12:00", "15:00"],
+			signals,
+			now: () => {
+				const value = nowSequence[nowCalls++];
+				if (!value) throw new Error("Missing test time");
+				return value;
+			},
+			runLoop: async () => {
+				runs++;
+				if (runs === 2) signals.emit("SIGTERM");
+			},
+			sleep: async (milliseconds) => {
+				waits.push(milliseconds);
+			},
+		});
+		expect(runs).toBe(2);
+		expect(waits).toEqual([60 * 60_000, 3 * 60 * 60_000]);
+		expect(nowCalls).toBe(2);
+	});
+
+	test("scheduleTimes mode wraps to the earliest time tomorrow once every time has passed", async () => {
+		const signals = new TestSignals();
+		const waits: number[] = [];
+		await runScheduler({
+			scheduleTimes: ["09:00", "12:00", "15:00"],
+			signals,
+			now: () => new Date(2024, 0, 1, 16, 0, 0),
+			runLoop: async () => {
+				signals.emit("SIGTERM");
+			},
+			sleep: async (milliseconds) => {
+				waits.push(milliseconds);
+			},
+		});
+		expect(waits).toEqual([17 * 60 * 60_000]);
+	});
+
+	test("scheduleTimes takes priority over intervalSeconds when both are configured", async () => {
+		const signals = new TestSignals();
+		const waits: number[] = [];
+		let runs = 0;
+		await runScheduler({
+			intervalSeconds: 60,
+			scheduleTimes: ["09:00"],
+			signals,
+			now: () => new Date(2024, 0, 1, 8, 0, 0),
+			runLoop: async () => {
+				runs++;
+				signals.emit("SIGTERM");
+			},
+			sleep: async (milliseconds) => {
+				waits.push(milliseconds);
+			},
+		});
+		expect(runs).toBe(1);
+		expect(waits).toEqual([60 * 60_000]);
+	});
+
+	test("rejects malformed scheduleTimes entries", async () => {
+		await expect(
+			runScheduler({
+				scheduleTimes: ["9:00"],
+				runLoop: async () => {},
+			}),
+		).rejects.toThrow(/24-hour "HH:MM"/);
 	});
 });
