@@ -142,6 +142,7 @@ function isBeforeApproval(result: PolicyResult): boolean {
 	return (
 		result.kind === "queue_ai_review" ||
 		result.kind === "wait_ai_review" ||
+		result.kind === "skip_merge_dependency" ||
 		result.kind === "block_discussion"
 	);
 }
@@ -263,7 +264,7 @@ export async function runOneLoop(
 		}
 		try {
 			const preflightResult = evaluateMergeGates(state);
-			if (preflightResult) {
+			if (preflightResult && preflightResult.kind !== "skip_merge_dependency") {
 				lines.push(render(preflightResult, ref, watchedMr, state));
 				continue;
 			}
@@ -413,9 +414,45 @@ export type SchedulerSleep = (
 
 export interface SchedulerInput {
 	runLoop: () => Promise<unknown>;
-	intervalSeconds: number;
+	intervalSeconds?: number;
+	scheduleTimes?: string[];
 	sleep?: SchedulerSleep;
 	signals?: SignalSource;
+	now?: () => Date;
+}
+
+const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Milliseconds until the next configured "HH:MM" local time strictly after `now`, wrapping to tomorrow. */
+function msUntilNextScheduledTime(times: readonly string[], now: Date): number {
+	const minutesOfDay = [...times]
+		.map((time) => {
+			const [hoursText, minutesText] = time.split(":");
+			if (hoursText === undefined || minutesText === undefined)
+				throw new Error(`Invalid schedule time "${time}"`);
+			return Number(hoursText) * 60 + Number(minutesText);
+		})
+		.sort((a, b) => a - b);
+	const nowMs = now.getTime();
+	const today = new Date(now);
+	today.setHours(0, 0, 0, 0);
+	for (const minutes of minutesOfDay) {
+		const target = new Date(today);
+		target.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+		if (target.getTime() > nowMs) return target.getTime() - nowMs;
+	}
+	const firstScheduledMinute = minutesOfDay[0];
+	if (firstScheduledMinute === undefined)
+		throw new Error("At least one schedule time is required");
+	const tomorrow = new Date(today);
+	tomorrow.setDate(tomorrow.getDate() + 1);
+	tomorrow.setHours(
+		Math.floor(firstScheduledMinute / 60),
+		firstScheduledMinute % 60,
+		0,
+		0,
+	);
+	return tomorrow.getTime() - nowMs;
 }
 
 function defaultSleep(
@@ -448,14 +485,41 @@ function removeSignalListener(
 	else signals.removeListener?.(event, listener);
 }
 
-/** Run loops immediately and serially, waiting only after each loop resolves. */
+/**
+ * Run loops serially. In interval mode, runs immediately, then waits
+ * `intervalSeconds` after each completed scan. In scheduleTimes mode, waits
+ * for the next configured "HH:MM" local time before the first and every
+ * later scan; `intervalSeconds` is ignored while `scheduleTimes` is set.
+ */
 export async function runScheduler(input: SchedulerInput): Promise<void> {
-	if (!Number.isFinite(input.intervalSeconds) || input.intervalSeconds < 60)
-		throw new Error(
-			"reviewBabysitter.intervalSeconds must be at least 60 seconds",
-		);
+	const scheduleTimes = input.scheduleTimes?.length
+		? input.scheduleTimes
+		: null;
+	if (scheduleTimes) {
+		for (const time of scheduleTimes)
+			if (!SCHEDULE_TIME_PATTERN.test(time))
+				throw new Error(
+					`reviewBabysitter.scheduleTimes entries must be 24-hour "HH:MM" local times, got "${time}"`,
+				);
+	} else {
+		const intervalSeconds = input.intervalSeconds;
+		if (
+			typeof intervalSeconds !== "number" ||
+			!Number.isFinite(intervalSeconds) ||
+			intervalSeconds < 60
+		) {
+			throw new Error(
+				"reviewBabysitter.intervalSeconds must be at least 60 seconds",
+			);
+		}
+	}
+	const intervalMilliseconds =
+		typeof input.intervalSeconds === "number"
+			? input.intervalSeconds * 1000
+			: 0;
 	const sleep = input.sleep ?? defaultSleep;
 	const signals = input.signals ?? process;
+	const now = input.now ?? (() => new Date());
 	let stopped = false;
 	let wake: (() => void) | undefined;
 	const onSignal = () => {
@@ -464,7 +528,25 @@ export async function runScheduler(input: SchedulerInput): Promise<void> {
 	};
 	signals.on("SIGINT", onSignal);
 	signals.on("SIGTERM", onSignal);
+	const wait = async (milliseconds: number): Promise<void> => {
+		const controller = new AbortController();
+		let waitResolve: (() => void) | undefined;
+		const stoppedPromise = new Promise<void>((resolve) => {
+			waitResolve = resolve;
+		});
+		wake = () => {
+			controller.abort();
+			waitResolve?.();
+		};
+		const sleeping = Promise.resolve()
+			.then(() => sleep(milliseconds, controller.signal))
+			.catch(() => undefined);
+		await Promise.race([sleeping, stoppedPromise]);
+		wake = undefined;
+	};
 	try {
+		if (scheduleTimes)
+			await wait(msUntilNextScheduledTime(scheduleTimes, now()));
 		while (!stopped) {
 			try {
 				await input.runLoop();
@@ -474,20 +556,11 @@ export async function runScheduler(input: SchedulerInput): Promise<void> {
 				});
 			}
 			if (stopped) break;
-			const controller = new AbortController();
-			let waitResolve: (() => void) | undefined;
-			const stoppedPromise = new Promise<void>((resolve) => {
-				waitResolve = resolve;
-			});
-			wake = () => {
-				controller.abort();
-				waitResolve?.();
-			};
-			const wait = Promise.resolve()
-				.then(() => sleep(input.intervalSeconds * 1000, controller.signal))
-				.catch(() => undefined);
-			await Promise.race([wait, stoppedPromise]);
-			wake = undefined;
+			await wait(
+				scheduleTimes
+					? msUntilNextScheduledTime(scheduleTimes, now())
+					: intervalMilliseconds,
+			);
 		}
 	} finally {
 		removeSignalListener(signals, "SIGINT", onSignal);
@@ -524,6 +597,7 @@ export async function runReviewBabysitter(ctx: Context): Promise<void> {
 	});
 	await runScheduler({
 		intervalSeconds: config.intervalSeconds,
+		scheduleTimes: config.scheduleTimes,
 		runLoop: () => runOneLoop(ctx, { config, gitHost, notifier, agent }),
 	});
 }
@@ -539,6 +613,7 @@ export const reviewBabysitter: Feature<typeof reviewBabysitterArgs, void> = {
 			"Requires reviewBabysitter config, authenticated glab, OMP, and its Slack webhook environment variable.",
 			"Configuration: intervalSeconds defaults to 900 seconds and must be at least 60; configure assignees, aiReviewerUsername, promptFile, model, webhookUrlEnv, maxChangedLines (default 250), maxChangedFiles (default 10), and denyPathsByProject.",
 			"Lifecycle: starts one scan immediately, processes merge requests serially, waits after each completed scan, and stops cleanly on SIGINT or SIGTERM without starting another scan.",
+			'Scheduling: when reviewBabysitter.scheduleTimes lists 24-hour "HH:MM" local times, scans run only at those times instead of every intervalSeconds; the first scan waits for the next configured time, and intervalSeconds is ignored while scheduleTimes is set.',
 			"Limits and deny-list: change and file limits are strict upper bounds where equality is allowed; every project needs an exact denyPathsByProject entry, [] explicitly denies no paths, and matching changed paths block approval.",
 			"Existing auto-approval or satisfied approval requirements skip diff, deny-list, and AI gates; merge blockers and remaining required approvals are still reported.",
 			"Non-goals: does not post review comments, add a requires-review label, remove labels, change assignees, rerun CI, merge requests, retry prompts or approvals, or replace interactive review.",

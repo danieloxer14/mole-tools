@@ -60,7 +60,6 @@ export interface LayerInput {
 	commits: CommitMeta[];
 	files: LayerFileStat[];
 	changedFiles: string[];
-	unifiedDiff: string;
 	discussions: HostDiscussion[];
 	jira: Issue | null;
 	outputPath: string;
@@ -73,8 +72,20 @@ export interface ReviewJiraConfig {
 
 export interface ReviewLayerConfig {
 	layerTimeoutSeconds?: number;
+	maxLayerPromptBytes?: number;
 }
 
+const DEFAULT_MAX_LAYER_PROMPT_BYTES = 100_000;
+const MAX_LAYER_DESCRIPTION_CHARS = 12_000;
+const MAX_LAYER_COMMIT_SUBJECT_CHARS = 1_000;
+const MAX_LAYER_NOTE_CHARS = 2_000;
+const MAX_LAYER_DISCUSSIONS = 20;
+const MAX_LAYER_COMMITS = 200;
+const MAX_LAYER_FILES = 500;
+const MAX_LAYER_CHANGED_FILES = 500;
+
+const COMPACT_CONTEXT_NOTE =
+	"Context compacted to fit prompt budget; inspect the pinned worktree for complete details.";
 export interface BuildLayerInputOptions {
 	state: ReviewState;
 	outputPath?: string;
@@ -188,29 +199,147 @@ function fileStats(
 	});
 }
 
-function unifiedDiff(
-	diff: FileDiff[] | undefined,
-	parsedDiff: ParsedFileDiff[] | undefined,
-): string {
-	if (diff && diff.length > 0) {
-		return diff
-			.map((file) => file.patch)
-			.filter((patch): patch is string => patch !== null && patch.length > 0)
-			.join("\n");
+function truncateText(value: string, maxChars: number): string {
+	if (value.length <= maxChars) return value;
+	return `${value.slice(0, maxChars)}\n[truncated]`;
+}
+
+interface CompactDiscussion {
+	id: string;
+	position: HostDiscussion["position"];
+	notes: Array<
+		Pick<
+			HostDiscussion["notes"][number],
+			"id" | "author" | "body" | "createdAt"
+		>
+	>;
+}
+
+interface CompactLayerInput {
+	mr: LayerInput["mr"];
+	commits: CommitMeta[];
+	files: LayerFileStat[];
+	changedFiles: string[];
+	discussions: CompactDiscussion[];
+	jira: Issue | null;
+}
+
+interface CompactLayerResult {
+	value: CompactLayerInput;
+	compacted: boolean;
+}
+
+function compactLayerInput(input: LayerInput): CompactLayerResult {
+	const discussions = input.discussions
+		.filter((discussion) => !discussion.resolved && !discussion.individualNote)
+		.map((discussion) => ({
+			id: discussion.id,
+			position: discussion.position,
+			notes: discussion.notes
+				.filter((note) => !note.system)
+				.map((note) => ({
+					id: note.id,
+					author: note.author,
+					body: truncateText(note.body, MAX_LAYER_NOTE_CHARS),
+					createdAt: note.createdAt,
+				})),
+		}))
+		.filter((discussion) => discussion.notes.length > 0);
+	const value: CompactLayerInput = {
+		mr: {
+			...input.mr,
+			description: truncateText(
+				input.mr.description,
+				MAX_LAYER_DESCRIPTION_CHARS,
+			),
+		},
+		commits: input.commits.slice(0, MAX_LAYER_COMMITS).map((commit) => ({
+			...commit,
+			subject: truncateText(commit.subject, MAX_LAYER_COMMIT_SUBJECT_CHARS),
+		})),
+		files: input.files.slice(0, MAX_LAYER_FILES),
+		changedFiles: input.changedFiles.slice(0, MAX_LAYER_CHANGED_FILES),
+		discussions: discussions.slice(0, MAX_LAYER_DISCUSSIONS),
+		jira: input.jira
+			? {
+					...input.jira,
+					description: truncateText(
+						input.jira.description,
+						MAX_LAYER_DESCRIPTION_CHARS,
+					),
+				}
+			: null,
+	};
+	return {
+		value,
+		compacted:
+			input.commits.length > value.commits.length ||
+			input.files.length > value.files.length ||
+			input.changedFiles.length > value.changedFiles.length ||
+			discussions.length > value.discussions.length,
+	};
+}
+
+function trimCompactLayerInput(value: CompactLayerInput): boolean {
+	if (value.commits.length > 0) {
+		value.commits = value.commits.slice(
+			0,
+			Math.floor(value.commits.length / 2),
+		);
+		return true;
 	}
-	return (parsedDiff ?? [])
-		.map((file) =>
-			JSON.stringify({
-				oldPath: file.oldPath,
-				newPath: file.newPath,
-				status: file.status,
-				binary: file.binary,
-				insertions: file.insertions,
-				deletions: file.deletions,
-				hunks: file.hunks,
-			}),
-		)
-		.join("\n");
+	if (value.discussions.length > 0) {
+		value.discussions = value.discussions.slice(
+			0,
+			Math.floor(value.discussions.length / 2),
+		);
+		return true;
+	}
+	if (value.jira !== null) {
+		value.jira = null;
+		return true;
+	}
+	if (value.files.length > 0) {
+		value.files = value.files.slice(0, Math.floor(value.files.length / 2));
+		return true;
+	}
+	if (value.changedFiles.length > 0) {
+		value.changedFiles = value.changedFiles.slice(
+			0,
+			Math.floor(value.changedFiles.length / 2),
+		);
+		return true;
+	}
+	if (value.mr.description.length > 0) {
+		value.mr.description = truncateText(
+			value.mr.description,
+			Math.floor(value.mr.description.length / 2),
+		);
+		return true;
+	}
+	return false;
+}
+
+function maxLayerPromptBytes(config: LayerGenerationOptions["config"]): number {
+	const configured = config?.review?.maxLayerPromptBytes;
+	return typeof configured === "number" &&
+		Number.isInteger(configured) &&
+		configured > 0
+		? configured
+		: DEFAULT_MAX_LAYER_PROMPT_BYTES;
+}
+
+function layerPromptSizeError(
+	basePrompt: string,
+	message: string,
+	maxBytes: number,
+): string | null {
+	const promptBytes = new TextEncoder().encode(
+		`${basePrompt}\n${message}`,
+	).byteLength;
+	return promptBytes > maxBytes
+		? `Layer prompt is ${promptBytes} UTF-8 bytes; configured limit is ${maxBytes} bytes`
+		: null;
 }
 
 function metadata(
@@ -233,7 +362,6 @@ function metadata(
 			mr && "diffRefs" in mr && mr.diffRefs
 				? mr.diffRefs
 				: state.revision.diffRefs,
-		state: mr && "state" in mr ? (mr.state ?? "") : "",
 	};
 }
 
@@ -310,7 +438,6 @@ export async function buildLayerInput(
 		commits,
 		files,
 		changedFiles,
-		unifiedDiff: unifiedDiff(options.diff, options.parsedDiff),
 		discussions: await fetchDiscussions(options),
 		jira: await fetchJiraIssue(options, options.state),
 		outputPath: options.outputPath ?? "",
@@ -565,19 +692,35 @@ export async function generateLayers(
 		const basePrompt =
 			options.promptText ??
 			(await loadPrompt(promptName, options.promptSourceDir));
-		await Bun.write(
-			paths.promptPath,
-			`${basePrompt}\n\nReview input:\n${JSON.stringify(input, null, "\t")}\n`,
+		const maxPromptBytes = maxLayerPromptBytes(options.config);
+		const compactedInput = compactLayerInput(input);
+		let compacted = compactedInput.compacted;
+		let serializedInput = JSON.stringify(compactedInput.value, null, "\t");
+		const buildMessage = () =>
+			[
+				`Write LayerDoc JSON to this absolute path: ${paths.layerPath}`,
+				"Reply with only that absolute path after writing the file.",
+				"Use the compact review input below as source context.",
+				"The full unified diff is not inlined. Use mr.mergeBaseSha and mr.headSha to inspect supplied changedFiles; treat the supplied changed-file list as authoritative and do not broaden scope.",
+				"Inspect the worktree and changed files with read, grep, glob, and bash tools when needed.",
+				"Use bash only for read-only inspection commands; never modify the worktree.",
+				...(compacted ? [COMPACT_CONTEXT_NOTE] : []),
+				serializedInput,
+			].join("\n\n");
+		let firstMessage = buildMessage();
+		while (layerPromptSizeError(basePrompt, firstMessage, maxPromptBytes)) {
+			if (!trimCompactLayerInput(compactedInput.value)) break;
+			compacted = true;
+			serializedInput = JSON.stringify(compactedInput.value, null, "\t");
+			firstMessage = buildMessage();
+		}
+		await Bun.write(paths.promptPath, `${basePrompt}\n`);
+		const promptSizeError = layerPromptSizeError(
+			basePrompt,
+			firstMessage,
+			maxPromptBytes,
 		);
-
-		const firstMessage = [
-			`Write LayerDoc JSON to this absolute path: ${paths.layerPath}`,
-			"Reply with only that absolute path after writing the file.",
-			"Use the review input below as source context.",
-			"Inspect the worktree with read, grep, glob, and bash tools when needed.",
-			"Use bash only for read-only inspection commands; never modify the worktree.",
-			JSON.stringify(input, null, "\t"),
-		].join("\n\n");
+		if (promptSizeError) throw new Error(promptSizeError);
 		let attempt = await runAttempt(
 			{ ...options, state, runId },
 			firstMessage,
@@ -588,6 +731,20 @@ export async function generateLayers(
 		attempts = 1;
 		if (!attempt.ok && attempt.kind === "output") {
 			const retryMessage = `${firstMessage}\n\nPrevious output validation failed. Correct it and write a complete replacement file.\n${attempt.error}`;
+			const retryPromptSizeError = layerPromptSizeError(
+				basePrompt,
+				retryMessage,
+				maxPromptBytes,
+			);
+			if (retryPromptSizeError) {
+				return await failedResult(
+					options,
+					state,
+					runId,
+					attempts,
+					retryPromptSizeError,
+				);
+			}
 			attempt = await runAttempt(
 				{ ...options, state, runId },
 				retryMessage,
@@ -626,6 +783,8 @@ export async function generateLayers(
 			attempts,
 			errorMessage(error),
 		);
+	} finally {
+		await rm(paths.promptPath, { force: true });
 	}
 }
 

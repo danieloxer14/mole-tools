@@ -189,7 +189,6 @@ describe("review layer generation", () => {
 		expect(input.files).toEqual([
 			{ path: "src/app.ts", insertions: 1, deletions: 0, statOnly: false },
 		]);
-		expect(input.unifiedDiff).toContain("diff --git");
 		expect(input.jira?.key).toBe("REV-42");
 	});
 
@@ -247,6 +246,74 @@ describe("review layer generation", () => {
 			expect((await store.read())?.layers).toEqual(result.state.layers);
 			expect(agent.turns).toHaveLength(1);
 			expect(agent.turns[0]?.message).toContain("bash");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("sends compact layer context once and removes generated prompt files", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-layers-compact-"));
+		try {
+			const paths = getReviewPaths(ref, join(dir, "config.json"));
+			const store = new ReviewStore(paths);
+			const agent = new WritingAgent([layerDoc]);
+			const options = await generationOptions(dir, agent, store);
+			options.runId = "compact";
+			const appDiff = diff[0];
+			if (!appDiff) throw new Error("Missing app diff fixture");
+			options.diff = [
+				{
+					...appDiff,
+					patch: `diff --git a/src/app.ts b/src/app.ts\n${"+x".repeat(200_000)}`,
+				},
+				...Array.from({ length: 800 }, (_, index) => ({
+					path: `src/generated-${index}.ts`,
+					statOnly: false,
+					patch: "",
+					insertions: 1,
+					deletions: 1,
+				})),
+			];
+			options.vcs = new FakeVcs({
+				log: Array.from({ length: 400 }, (_, index) => ({
+					sha: `commit-${index}`,
+					subject: `commit ${index}`,
+					author: "dev",
+					date: "2026-01-01",
+				})),
+			});
+
+			const result = await generateLayers(options);
+
+			expect(result.state.layerStatus).toBe("ready");
+			expect(agent.prompts[0]).toBe("Write a layer document.\n");
+			expect(agent.turns[0]?.message).not.toContain("diff --git");
+			expect(agent.turns[0]?.message.length).toBeLessThan(100_000);
+			expect(await Bun.file(paths.promptPath("compact-layers")).exists()).toBe(
+				false,
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("fails before agent invocation when layer prompt exceeds configured budget", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-layers-budget-"));
+		try {
+			const paths = getReviewPaths(ref, join(dir, "config.json"));
+			const store = new ReviewStore(paths);
+			const agent = new WritingAgent([layerDoc]);
+			const options = await generationOptions(dir, agent, store);
+			options.config = { review: { maxLayerPromptBytes: 100 } };
+
+			const result = await generateLayers(options);
+
+			expect(result.state.layerStatus).toBe("failed");
+			expect(result.state.layerError).toContain(
+				"configured limit is 100 bytes",
+			);
+			expect(result.attempts).toBe(0);
+			expect(agent.turns).toHaveLength(0);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

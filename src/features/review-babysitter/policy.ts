@@ -31,11 +31,14 @@ export type PolicyResult =
 	| { kind: "skip_draft" }
 	| { kind: "skip_conflict" }
 	| { kind: "skip_discussions_not_resolved" }
+	| { kind: "skip_ci_failed" }
+	| { kind: "skip_ci_not_ready" }
 	| { kind: "skip_merge_status" }
 	| { kind: "skip_self_approval" }
 	| { kind: "skip_already_approved"; approvalsLeft?: number | null }
 	| { kind: "queue_ai_review" }
 	| { kind: "wait_ai_review" }
+	| { kind: "skip_merge_dependency" }
 	| { kind: "block_discussion" }
 	| { kind: "block_diff_unreadable" }
 	| {
@@ -183,6 +186,13 @@ export function evaluateMergeGates(
 		return { kind: "skip_discussions_not_resolved" };
 	}
 	if (
+		state.detailedMergeStatus === "merge_request_blocked" &&
+		(state.headPipelineStatus === "success" ||
+			state.headPipelineStatus === "not_configured")
+	) {
+		return { kind: "skip_merge_dependency" };
+	}
+	if (
 		state.detailedMergeStatus !== "mergeable" &&
 		state.detailedMergeStatus !== "not_approved"
 	) {
@@ -206,22 +216,28 @@ export function evaluateMergeGates(
  * No result from this function approves an MR or mutates a label. `assess` is
  * the sole result that permits the caller to invoke the risk assessor.
  */
+function aiReviewGate(input: PolicyInput): PolicyResult | null {
+	if (input.skipAutoApprovalChecks) return null;
+	if (hasAiReviewLabel(input.state.labels)) return { kind: "wait_ai_review" };
+	if (!hasConfiguredAiNote(input.discussions, input.config.aiReviewerUsername))
+		return { kind: "queue_ai_review" };
+	return null;
+}
+
 export function evaluatePolicy(input: PolicyInput): PolicyResult {
 	const { state, config } = input;
-
 	const mergeGate = evaluateMergeGates(state);
+
+	if (mergeGate?.kind === "skip_merge_dependency") {
+		const aiGate = aiReviewGate(input);
+		if (aiGate) return aiGate;
+	}
 	if (mergeGate) return mergeGate;
 
 	// 6–7: the ai-review label and configured AI note only gate new
 	// auto-approval. Existing approval may have satisfied that requirement.
-	if (!input.skipAutoApprovalChecks) {
-		if (hasAiReviewLabel(state.labels)) {
-			return { kind: "wait_ai_review" };
-		}
-		if (!hasConfiguredAiNote(input.discussions, config.aiReviewerUsername)) {
-			return { kind: "queue_ai_review" };
-		}
-	}
+	const aiGate = aiReviewGate(input);
+	if (aiGate) return aiGate;
 
 	// 8: only unresolved discussions containing a human/non-system note block.
 	if (hasUnresolvedNonSystemDiscussion(input.discussions)) {

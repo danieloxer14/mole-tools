@@ -29,7 +29,7 @@ export const CONFIG_TEMPLATE_TEXT = `{
     // "apiKey": "your-api-token"                    // Jira API token
   },
   "diff": {
-    "ignore": ["*.lock", "bun.lockb", "package-lock.json", "*.snap"]
+    "ignore": ["*.lock", "pnpm-lock.yaml", "bun.lockb", "package-lock.json", "*.snap"]
   }
   // "dynamicEnvRepos": ["org/repo"]                  // repos offered the "create dynamic env" option
   // "dynamicEnvScript": "hack/local/dynamic-env.sh"  // handoff script for configured repositories
@@ -42,10 +42,12 @@ export const CONFIG_TEMPLATE_TEXT = `{
   //   // "binary": "omp",                         // optional executable override
   //   // "model": "model-name",                   // optional OMP model
   //   "layerTimeoutSeconds": 600,
-  //   "largeFileLineThreshold": 800
+  //   "largeFileLineThreshold": 800,
+  //   "maxLayerPromptBytes": 100000                 // UTF-8 input budget for one layer run
   // }
   // "reviewBabysitter": {
   //   "intervalSeconds": 900,
+  //   // "scheduleTimes": ["09:00", "12:00", "15:00"], // exact 24-hour local times instead of intervalSeconds
   //   "assignees": ["review-owner"],
   //   "aiReviewerUsername": "ai-reviewer",
   //   "promptFile": "~/.config/mole-tools/prompts/review-babysitter.md",
