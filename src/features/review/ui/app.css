@@ -443,6 +443,54 @@ button.active {
 	flex: 0 0 auto;
 	margin-right: 2px;
 }
+.layer-collapse {
+	align-items: center;
+	background: transparent;
+	border: 0;
+	color: #8395a8;
+	display: inline-flex;
+	flex: 0 0 auto;
+	height: 22px;
+	justify-content: center;
+	padding: 3px;
+	width: 22px;
+}
+.layer-collapse-icon {
+	display: block;
+	height: 14px;
+	transition: transform 180ms ease;
+	width: 14px;
+}
+.layer-collapse[aria-expanded="false"] .layer-collapse-icon {
+	transform: rotate(-90deg);
+}
+.layer-collapse:hover,
+.layer-collapse:focus-visible {
+	background: #355b80;
+	color: #d9ecfb;
+}
+.layer-details {
+	display: grid;
+	grid-template-rows: 1fr;
+	opacity: 1;
+	transition:
+		grid-template-rows 180ms ease,
+		opacity 120ms ease;
+}
+.layer-details.is-collapsed {
+	grid-template-rows: 0fr;
+	opacity: 0;
+}
+.layer-details-content {
+	min-height: 0;
+	overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+	.layer-collapse-icon,
+	.layer-details {
+		transition-duration: 0ms;
+	}
+}
 .layer-select {
 	background: transparent;
 	border: 0;
