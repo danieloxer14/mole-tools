@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../ports/git-host";
 import type { ReviewState } from "../../state";
 import { type ApprovalAction, ApprovalControls } from "./ApprovalControls";
@@ -61,6 +62,41 @@ export function splitBddScenario(scenario: string): string[] {
 		.map((step) => step.trim().replace(/,$/, ""))
 		.filter(Boolean);
 }
+
+export function toggleLayerCollapsed(
+	collapsedLayerIds: ReadonlySet<string>,
+	layerId: string,
+): Set<string> {
+	const next = new Set(collapsedLayerIds);
+	if (next.has(layerId)) {
+		next.delete(layerId);
+	} else {
+		next.add(layerId);
+	}
+	return next;
+}
+
+export function collapseLayerOnDoneTransition(
+	collapsedLayerIds: ReadonlySet<string>,
+	layerId: string,
+	previousDone: boolean | undefined,
+	done: boolean,
+): Set<string> {
+	const next = new Set(collapsedLayerIds);
+	if (previousDone === false && done) next.add(layerId);
+	return next;
+}
+
+export function collapseLayerWhenDone(
+	collapsedLayerIds: ReadonlySet<string>,
+	layerId: string,
+	done: boolean,
+): Set<string> {
+	const next = new Set(collapsedLayerIds);
+	if (done) next.add(layerId);
+	return next;
+}
+
 export function LayerPane({
 	state,
 	files,
@@ -78,6 +114,38 @@ export function LayerPane({
 	approvalError,
 	onApprovalAction,
 }: LayerPaneProps) {
+	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
+		() =>
+			new Set(
+				state.layers.filter((layer) => layer.done).map((layer) => layer.id),
+			),
+	);
+	const previousDone = useRef(
+		new Map(state.layers.map((layer) => [layer.id, layer.done])),
+	);
+	useEffect(() => {
+		const previousDoneById = previousDone.current;
+		const nextDone = new Map(
+			state.layers.map((layer) => [layer.id, layer.done]),
+		);
+		const newlyDone = state.layers.filter(
+			(layer) => previousDoneById.get(layer.id) === false && layer.done,
+		);
+		previousDone.current = nextDone;
+		if (newlyDone.length === 0) return;
+		setCollapsedLayerIds((current) =>
+			newlyDone.reduce(
+				(collapsed, layer) =>
+					collapseLayerOnDoneTransition(
+						collapsed,
+						layer.id,
+						previousDoneById.get(layer.id),
+						layer.done,
+					),
+				current,
+			),
+		);
+	}, [state.layers]);
 	const changedFiles = new Set(files);
 	const changedFilePaths = [...new Set(files)];
 	const viewed = new Set(state.viewedFiles);
@@ -184,14 +252,48 @@ export function LayerPane({
 								key={layer.id}
 							>
 								<div className="layer-title-row">
+									<button
+										type="button"
+										className="layer-collapse"
+										aria-label={`${
+											collapsedLayerIds.has(layer.id) ? "Expand" : "Collapse"
+										} ${layer.title}`}
+										aria-expanded={!collapsedLayerIds.has(layer.id)}
+										aria-controls={`layer-details-${layer.id}`}
+										onClick={() =>
+											setCollapsedLayerIds((current) =>
+												toggleLayerCollapsed(current, layer.id),
+											)
+										}
+									>
+										<svg
+											className="layer-collapse-icon"
+											viewBox="0 0 16 16"
+											aria-hidden="true"
+											focusable="false"
+										>
+											<path
+												d="M3 6l5 5 5-5"
+												fill="none"
+												stroke="currentColor"
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												strokeWidth="2"
+											/>
+										</svg>
+									</button>
 									<input
 										id={`layer-done-${layer.id}`}
 										type="checkbox"
 										checked={layer.done}
 										aria-label={`Mark ${layer.title} done`}
-										onChange={(event) =>
-											onToggleDone(layer.id, event.target.checked)
-										}
+										onChange={(event) => {
+											const done = event.target.checked;
+											setCollapsedLayerIds((current) =>
+												collapseLayerWhenDone(current, layer.id, done),
+											);
+											onToggleDone(layer.id, done);
+										}}
 									/>
 									<button
 										type="button"
@@ -206,55 +308,68 @@ export function LayerPane({
 										{layer.stale ? "Stale" : layer.done ? "Done" : "Open"}
 									</span>
 								</div>
-								<p>{layer.tldr}</p>
-								{layer.bdd.length > 0 ? (
-									<details className="layer-bdd">
-										<summary>BDD scenarios ({layer.bdd.length})</summary>
-										<ul>
-											{layer.bdd.map((scenario) => (
-												<li key={scenario}>
-													{splitBddScenario(scenario).map((step) => (
-														<span className="layer-bdd-step" key={step}>
-															{step}
-														</span>
+								<div
+									id={`layer-details-${layer.id}`}
+									className={`layer-details ${
+										collapsedLayerIds.has(layer.id) ? "is-collapsed" : ""
+									}`.trim()}
+									aria-hidden={collapsedLayerIds.has(layer.id)}
+									inert={collapsedLayerIds.has(layer.id)}
+								>
+									<div className="layer-details-content">
+										<p>{layer.tldr}</p>
+										{layer.bdd.length > 0 ? (
+											<details className="layer-bdd">
+												<summary>BDD scenarios ({layer.bdd.length})</summary>
+												<ul>
+													{layer.bdd.map((scenario) => (
+														<li key={scenario}>
+															{splitBddScenario(scenario).map((step) => (
+																<span className="layer-bdd-step" key={step}>
+																	{step}
+																</span>
+															))}
+														</li>
 													))}
-												</li>
+												</ul>
+											</details>
+										) : null}
+										<div className="layer-coverage">
+											<div className="layer-coverage-label">
+												<span>File coverage</span>
+												<span>
+													{layerViewedCount}/{layerFiles.length}
+												</span>
+											</div>
+											<div
+												className="layer-coverage-bar"
+												role="progressbar"
+												aria-label={`${layer.title} file coverage`}
+												aria-valuemin={0}
+												aria-valuemax={layerFiles.length}
+												aria-valuenow={layerViewedCount}
+											>
+												<span style={{ width: `${layerCoverage}%` }} />
+											</div>
+										</div>
+										<div className="file-chips">
+											{layerFiles.map((path) => (
+												<button
+													type="button"
+													className={path === selectedPath ? "active" : ""}
+													key={path}
+													onClick={() => onSelectFile(path)}
+												>
+													{path}
+												</button>
 											))}
-										</ul>
-									</details>
-								) : null}
-								<div className="layer-coverage">
-									<div className="layer-coverage-label">
-										<span>File coverage</span>
-										<span>
-											{layerViewedCount}/{layerFiles.length}
-										</span>
+											{layerFiles.length === 0 ? (
+												<span className="file-chip-empty">
+													No changed files
+												</span>
+											) : null}
+										</div>
 									</div>
-									<div
-										className="layer-coverage-bar"
-										role="progressbar"
-										aria-label={`${layer.title} file coverage`}
-										aria-valuemin={0}
-										aria-valuemax={layerFiles.length}
-										aria-valuenow={layerViewedCount}
-									>
-										<span style={{ width: `${layerCoverage}%` }} />
-									</div>
-								</div>
-								<div className="file-chips">
-									{layerFiles.map((path) => (
-										<button
-											type="button"
-											className={path === selectedPath ? "active" : ""}
-											key={path}
-											onClick={() => onSelectFile(path)}
-										>
-											{path}
-										</button>
-									))}
-									{layerFiles.length === 0 ? (
-										<span className="file-chip-empty">No changed files</span>
-									) : null}
 								</div>
 							</li>
 						);
