@@ -47,6 +47,7 @@ edits:
 - `review-layers-code.md`
 - `review-layers-plan.md`
 - `review-chat.md`
+- `review-explain-comment.md`
 
 ## 2. Repository and worktree lifecycle
 
@@ -115,6 +116,7 @@ Implemented HTTP surface:
 | `POST /api/chats` | Create and activate a chat; return `201` with `{ chats, activeChatId }`. |
 | `POST /api/chats/active` | Accept `{ chatId }`, persist the selection, and return `204` (`404` for an unknown chat). |
 | `POST /api/comments/draft` | Accept `{ selection, filePath }`; persist and return an empty local draft. |
+| `POST /api/comments/explain` | Accept `{ discussionId }`; create and activate a chat titled after that published discussion and return `201` with `{ chatId, chats, activeChatId, message }`, where `message` is the first-turn text the browser then sends through `POST /api/chat`. `400` for a missing id, `404` for an unknown discussion; neither creates a chat. |
 | `PUT /api/comments/:id` | Edit a local draft body. Posted comments return a conflict and cannot be edited. |
 | `DELETE /api/comments/:id` | Cancel/remove a local draft. |
 | `POST /api/comments/:id/send` | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread. |
@@ -131,9 +133,9 @@ The page has three working columns:
   available even when a layer does not mention a file. Each row shows insertion
   and deletion counts plus a persisted Viewed checkbox. Selecting a file opens
   its diff.
-- **Right — Agent chat.** General discussions, restored transcript, streaming
-  response/tool activity, line-context tags, composer, New chat button, chat
-  switcher, and Stop.
+- **Right — Agent chat.** General discussions, Explain per discussion,
+  restored transcript, streaming response/tool activity, line-context tags,
+  composer, New chat button, chat switcher, and Stop.
 
 The centre column supports Inline and Side by side layouts. Shiki highlights
 source lines. Added lines use the new side, deleted lines use the old side, and
@@ -149,9 +151,12 @@ and offers local `Tag line` only—never a GitLab `Comment`. `Whole file` is kep
 per file for the browser session, confirms files over the configured total-line
 threshold, and `Diff only` returns the nearest visible hunk to the viewport.
 
-Existing GitLab discussions are read-only. Positioned discussions appear below
-their matching diff lines with resolved/unresolved styling and all notes;
-unpositioned discussions appear in the chat column as General discussions.
+Existing GitLab discussions are read-only except for **Explain**, which opens a
+new chat titled after the discussion and asks the agent to explain it (§6).
+Positioned discussions appear below their matching diff lines with
+resolved/unresolved styling, all notes, and an Explain button; unpositioned
+discussions appear in the chat column as General discussions, each with its
+own Explain button. Local drafts have no Explain.
 
 ## 5. Layered review guide
 
@@ -241,6 +246,23 @@ tool start/end activity, keeps partial assistant text on failure/cancel, and
 enables the next turn after Stop. At most one turn runs per chat; different
 chats can run in parallel. Switching chats never interrupts a running turn,
 and chats cannot be deleted.
+
+**Explain** on a published discussion (`POST /api/comments/explain`) appends
+one ordinary chat titled `Explain: <first non-system note excerpt>` (falling
+back to `Explain: <path>:<line>`, then `Explain comment`), makes it active,
+and the browser immediately starts its first turn through `POST /api/chat`
+with no tags. That user message is the `review-explain-comment.md` prefix
+prompt, then a `## Comment` block (resolved/unresolved status with the anchor
+position, followed by every non-system note as `<author> (<createdAt>):` and
+its verbatim body), then a `## Diff excerpt` block listing every diff line
+within 10 lines of the anchored line on its side as `<old>\t<new>\t<+|-| ><text>`,
+with the anchor row prefixed `> `. The expanded diff is preferred over the
+compact one; an unpositioned or unmatched discussion gets the single line
+`No diff excerpt available for this comment.`. The turn is a normal first turn
+with the `review-chat` system prompt, so busy tracking, Stop, follow-ups, and
+resume behave like any chat. Explain and New chat are disabled while either
+creation request is in flight; a failed creation reports its error in the
+active chat (or as the page error when no chat is active) and selects nothing.
 
 **Reload limitation:** A page reload drops the browser-side stream readers. The
 server turn keeps running, still appends the assistant entry, and

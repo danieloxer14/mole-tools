@@ -1529,3 +1529,173 @@ describe("review routes", () => {
 		}
 	});
 });
+
+describe("comment explain", () => {
+	const positioned: HostDiscussion = {
+		id: "discussion-explain",
+		resolved: false,
+		position: {
+			newPath: "src/app.ts",
+			oldPath: "src/app.ts",
+			newLine: 2,
+			oldLine: null,
+		},
+		notes: [
+			{
+				id: "note-1",
+				author: "reviewer",
+				body: "Please rename this helper",
+				createdAt: "2026-01-01T00:00:00.000Z",
+				system: false,
+			},
+		],
+	};
+
+	const file: ParsedFileDiff = {
+		oldPath: "src/app.ts",
+		newPath: "src/app.ts",
+		status: "modified",
+		binary: false,
+		insertions: 1,
+		deletions: 0,
+		hunks: [
+			{
+				header: "@@ -1 +1,2 @@",
+				oldStart: 1,
+				oldLines: 1,
+				newStart: 1,
+				newLines: 2,
+				lines: [
+					{
+						kind: "context",
+						oldLine: 1,
+						newLine: 1,
+						text: "const a = 1;",
+					},
+					{
+						kind: "add",
+						oldLine: null,
+						newLine: 2,
+						text: "const helper = 2;",
+					},
+				],
+			},
+		],
+	};
+
+	function explainRequest(body: unknown): Request {
+		return request(`/api/comments/explain?t=${token}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	}
+
+	async function setup(dir: string) {
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		});
+		await store.write(state());
+		const agent = new StreamChatAgent();
+		const routes = createReviewRoutes({
+			token,
+			store,
+			paths: chatPaths(dir),
+			promptText: "Test chat prompt.",
+			explainPromptText: "Explain prefix.",
+			reviewAgent: agent,
+			discussions: [positioned],
+			expandedDiff: [file],
+		});
+		return { store, agent, routes };
+	}
+
+	test("creates an active chat titled after the comment and returns the first message", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-explain-"));
+		try {
+			const { store, routes } = await setup(dir);
+
+			const response = await routes(
+				explainRequest({ discussionId: "discussion-explain" }),
+			);
+			expect(response.status).toBe(201);
+			const body = (await response.json()) as {
+				chatId: string;
+				chats: ReviewState["chats"];
+				activeChatId: string;
+				message: string;
+			};
+
+			expect(body.chatId).toBe(body.activeChatId);
+			const chats = (await store.read())?.chats ?? [];
+			expect(chats).toHaveLength(2);
+			expect(chats[1]).toMatchObject({
+				id: body.chatId,
+				title: "Explain: Please rename this helper",
+			});
+			expect(body.chats).toEqual(chats);
+			expect(body.message.startsWith("Explain prefix.")).toBe(true);
+			expect(body.message).toContain("Please rename this helper");
+			expect(
+				body.message.split("\n").some((line) => line.startsWith("> ")),
+			).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("runs the returned message as an ordinary first chat turn without retitling", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-explain-turn-"));
+		try {
+			const { store, agent, routes } = await setup(dir);
+			const { chatId, message } = (await (
+				await routes(explainRequest({ discussionId: "discussion-explain" }))
+			).json()) as { chatId: string; message: string };
+
+			await (await routes(chatRequest({ chatId, message }))).text();
+
+			expect(agent.turns[0]?.message).toContain("Explain prefix.");
+			expect(agent.turns[0]?.message).toContain("Please rename this helper");
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === chatId)?.title,
+			).toBe("Explain: Please rename this helper");
+			expect(await store.readChat(chatId)).toEqual([
+				expect.objectContaining({ role: "user", text: message }),
+				expect.objectContaining({ role: "assistant", text: "Hello world" }),
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects unknown discussions without creating a chat", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-explain-unknown-"));
+		try {
+			const { store, routes } = await setup(dir);
+
+			const response = await routes(explainRequest({ discussionId: "nope" }));
+
+			expect(response.status).toBe(404);
+			expect((await store.read())?.chats).toHaveLength(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects a missing discussion id", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-explain-invalid-"));
+		try {
+			const { store, routes } = await setup(dir);
+
+			expect((await routes(explainRequest({}))).status).toBe(400);
+			expect((await routes(explainRequest({ discussionId: 7 }))).status).toBe(
+				400,
+			);
+			expect((await store.read())?.chats).toHaveLength(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});

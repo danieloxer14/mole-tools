@@ -1384,10 +1384,7 @@ function ReviewApp() {
 			if (typeof message === "string") patchChat(chatId, { error: message });
 		}
 	};
-	const handleChatSend = (message: string) => {
-		const chatId = activeChatId;
-		if (!chatId || activeChat.sending || activeChatBusy) return;
-		const tags = [...activeChat.tags];
+	const startChatTurn = (chatId: string, message: string, tags: ChatTag[]) => {
 		const controller = new AbortController();
 		chatControllers.current.set(chatId, controller);
 		const sessionId =
@@ -1442,6 +1439,11 @@ function ReviewApp() {
 					chatControllers.current.delete(chatId);
 				patchChat(chatId, { sending: false, stopping: false });
 			});
+	};
+	const handleChatSend = (message: string) => {
+		const chatId = activeChatId;
+		if (!chatId || activeChat.sending || activeChatBusy) return;
+		startChatTurn(chatId, message, [...activeChat.tags]);
 	};
 	const handleChatStop = () => {
 		const chatId = activeChatId;
@@ -1503,6 +1505,59 @@ function ReviewApp() {
 				);
 				patchChat(newChatId, { ...EMPTY_CHAT_RUNTIME, loaded: true });
 				setSelectedChatId(newChatId);
+			})
+			.catch((reason: unknown) => {
+				const message =
+					reason instanceof Error ? reason.message : String(reason);
+				if (activeChatId) patchChat(activeChatId, { error: message });
+				else setError(message);
+			})
+			.finally(() => setCreatingChat(false));
+	};
+	const explainDiscussion = (discussionId: string) => {
+		if (creatingChat) return;
+		setCreatingChat(true);
+		void fetch(apiUrl("/api/comments/explain", token), {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"X-Mole-Token": token,
+			},
+			body: JSON.stringify({ discussionId }),
+		})
+			.then(async (response) => {
+				const value: unknown = await response.json().catch(() => null);
+				if (!response.ok) {
+					const serverError =
+						typeof value === "object" &&
+						value !== null &&
+						typeof (value as Record<string, unknown>).error === "string"
+							? ((value as Record<string, unknown>).error as string)
+							: null;
+					throw new Error(
+						serverError ?? `Explain request failed (${response.status})`,
+					);
+				}
+				return value as {
+					chatId: string;
+					chats: ReviewStateResponse["chats"];
+					activeChatId: string | null;
+					message: string;
+				};
+			})
+			.then((next) => {
+				setData((current) =>
+					current
+						? {
+								...current,
+								chats: next.chats,
+								activeChatId: next.activeChatId,
+							}
+						: current,
+				);
+				patchChat(next.chatId, { ...EMPTY_CHAT_RUNTIME, loaded: true });
+				setSelectedChatId(next.chatId);
+				startChatTurn(next.chatId, next.message, []);
 			})
 			.catch((reason: unknown) => {
 				const message =
@@ -1668,6 +1723,8 @@ function ReviewApp() {
 					fileContents={fileContents}
 					fileContentsError={fileContentsError}
 					discussions={data.discussions}
+					onExplainDiscussion={explainDiscussion}
+					explainDisabled={creatingChat}
 					drafts={data.drafts}
 					onModeChange={setDiffMode}
 					wholeFile={selectedWholeFile}
@@ -1704,6 +1761,8 @@ function ReviewApp() {
 				discussions={data.discussions.filter(
 					(discussion) => discussion.position === null,
 				)}
+				onExplainDiscussion={explainDiscussion}
+				explainDisabled={creatingChat}
 				streamingText={activeChat.streamingText}
 				tools={activeChat.tools}
 				error={activeChat.error ?? commentError}

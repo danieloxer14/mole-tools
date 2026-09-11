@@ -39,6 +39,32 @@ describe("loadPrompt", () => {
 		const prompt = await loadPrompt("commit-system", dir);
 		expect(prompt).toBe("Custom system prompt.");
 	});
+
+	test("seeds the explain-comment prompt when missing", async () => {
+		const dir = await promptsDir();
+		const prompt = await loadPrompt("review-explain-comment", dir);
+		expect(prompt).toContain("Explain the following merge request comment");
+		expect(
+			await Bun.file(join(dir, "review-explain-comment.md")).exists(),
+		).toBe(true);
+	});
+
+	test("defines a default for every prompt name", () => {
+		expect(Object.keys(DEFAULT_PROMPTS).sort()).toEqual([
+			"commit-system",
+			"mr-code",
+			"mr-plan",
+			"mr-system",
+			"review-chat",
+			"review-explain-comment",
+			"review-layers-code",
+			"review-layers-plan",
+		]);
+		for (const value of Object.values(DEFAULT_PROMPTS)) {
+			expect(typeof value).toBe("string");
+			expect(value.trim().length).toBeGreaterThan(0);
+		}
+	});
 });
 
 describe("loadPromptWithFallback", () => {
