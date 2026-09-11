@@ -117,6 +117,60 @@ test("hides hunk summary in whole-file mode", () => {
 	expect(markup).toContain("export const value = 1;");
 });
 
+const positionedDiscussion = {
+	id: "disc-1",
+	resolved: false,
+	position: {
+		newPath: "src/app.ts",
+		oldPath: "src/app.ts",
+		newLine: 1,
+		oldLine: 1,
+	},
+	notes: [
+		{
+			id: "note-1",
+			author: "reviewer",
+			body: "Please rename this.",
+			createdAt: "2026-01-01T00:00:00.000Z",
+			system: false,
+		},
+	],
+};
+
+test("renders an Explain button on inline discussions when a handler is supplied", () => {
+	const markup = renderDiff({
+		discussions: [positionedDiscussion],
+		onExplainDiscussion: () => {},
+	});
+
+	const card = markup.match(
+		/<article[^>]*data-discussion-id="disc-1"[^>]*>[\s\S]*?<\/article>/,
+	)?.[0];
+	expect(card).toBeDefined();
+	expect(card).toContain('data-action="explain"');
+	expect(card).toContain(">Explain</button>");
+	expect(card).not.toContain("disabled");
+});
+
+test("disables the inline Explain button when explainDisabled is set", () => {
+	const markup = renderDiff({
+		discussions: [positionedDiscussion],
+		onExplainDiscussion: () => {},
+		explainDisabled: true,
+	});
+
+	const button = markup.match(/<button[^>]*data-action="explain"[^>]*>/)?.[0];
+	expect(button).toBeDefined();
+	expect(button).toMatch(/\sdisabled(?:=""|[\s>])/);
+});
+
+test("omits Explain when no handler is supplied", () => {
+	const markup = renderDiff({ discussions: [positionedDiscussion] });
+
+	expect(markup).toContain('data-discussion-id="disc-1"');
+	expect(markup).not.toContain('data-action="explain"');
+});
+
 test("marks diff hunk rows with drag identity attributes", () => {
 	const markup = renderDiff({ file: multiHunkFile });
 

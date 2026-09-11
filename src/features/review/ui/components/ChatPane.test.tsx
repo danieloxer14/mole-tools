@@ -129,3 +129,108 @@ test("renders parent-owned composer draft", () => {
 
 	expect(markup).toContain(">unsent question</textarea>");
 });
+
+const generalDiscussions = [
+	{
+		id: "discussion-1",
+		resolved: false,
+		position: null,
+		notes: [
+			{
+				id: "note-1",
+				author: "reviewer",
+				body: "Please rename this.",
+				createdAt: "2026-08-24T00:00:00Z",
+				system: false,
+			},
+		],
+	},
+	{
+		id: "discussion-2",
+		resolved: true,
+		position: null,
+		notes: [
+			{
+				id: "note-2",
+				author: "reviewer",
+				body: "Looks good now.",
+				createdAt: "2026-08-24T00:00:00Z",
+				system: false,
+			},
+		],
+	},
+];
+
+function renderGeneralDiscussions(
+	props: Partial<Parameters<typeof ChatPane>[0]> = {},
+): string {
+	return renderToStaticMarkup(
+		<ChatPane
+			transcript={[]}
+			tags={[]}
+			chats={[
+				{
+					id: "chat-1",
+					title: "First chat",
+					createdAt: "2026-08-24T00:00:00Z",
+					busy: false,
+				},
+			]}
+			activeChatId="chat-1"
+			onSelectChat={() => {}}
+			onNewChat={() => {}}
+			draft=""
+			onDraftChange={() => {}}
+			discussions={generalDiscussions}
+			streamingText=""
+			tools={[]}
+			error={null}
+			sending={false}
+			stopping={false}
+			onSend={() => {}}
+			onStop={() => {}}
+			onRemoveTag={() => {}}
+			{...props}
+		/>,
+	);
+}
+
+test("renders an Explain button on general discussions when a handler is supplied", () => {
+	const markup = renderGeneralDiscussions({ onExplainDiscussion: () => {} });
+
+	expect(markup.match(/data-action="explain"/g)).toHaveLength(2);
+	for (const id of ["discussion-1", "discussion-2"]) {
+		const card = markup.match(
+			new RegExp(
+				`<article[^>]*data-discussion-id="${id}"[^>]*>[\\s\\S]*?</article>`,
+			),
+		)?.[0];
+		expect(card).toBeDefined();
+		expect(card).toContain('data-action="explain"');
+		expect(card).toContain(">Explain</button>");
+	}
+	expect(markup).not.toMatch(
+		/<button[^>]*data-action="explain"[^>]*\sdisabled/,
+	);
+});
+
+test("disables general Explain buttons when explainDisabled is set", () => {
+	const markup = renderGeneralDiscussions({
+		onExplainDiscussion: () => {},
+		explainDisabled: true,
+	});
+
+	const buttons =
+		markup.match(/<button[^>]*data-action="explain"[^>]*>/g) ?? [];
+	expect(buttons).toHaveLength(2);
+	for (const button of buttons) {
+		expect(button).toMatch(/\sdisabled(?:=""|[\s>])/);
+	}
+});
+
+test("omits Explain on general discussions when no handler is supplied", () => {
+	const markup = renderGeneralDiscussions();
+
+	expect(markup).toContain('data-discussion-id="discussion-1"');
+	expect(markup).not.toContain('data-action="explain"');
+});

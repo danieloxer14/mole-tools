@@ -82,6 +82,8 @@ interface DiffViewProps {
 	fileContentsError: string | null;
 	discussions?: readonly HostDiscussion[];
 	drafts?: readonly Draft[];
+	onExplainDiscussion?: (discussionId: string) => void;
+	explainDisabled?: boolean;
 	onModeChange: (mode: DiffMode) => void;
 	wholeFile?: boolean;
 	onWholeFileChange?: (
@@ -633,7 +635,15 @@ function discussionPositionLabel(position: HostDiscussion["position"]): string {
 	return `${path}:${side}:${line ?? "unknown"}`;
 }
 
-function DiscussionCard({ discussion }: { discussion: HostDiscussion }) {
+function DiscussionCard({
+	discussion,
+	onExplainDiscussion,
+	explainDisabled,
+}: {
+	discussion: HostDiscussion;
+	onExplainDiscussion?: (discussionId: string) => void;
+	explainDisabled?: boolean;
+}) {
 	return (
 		<article
 			className={`inline-discussion ${
@@ -648,6 +658,17 @@ function DiscussionCard({ discussion }: { discussion: HostDiscussion }) {
 						: "Unresolved discussion"}
 				</strong>
 				<span>{discussionPositionLabel(discussion.position)}</span>
+				{onExplainDiscussion ? (
+					<button
+						type="button"
+						className="inline-discussion-explain"
+						data-action="explain"
+						disabled={explainDisabled}
+						onClick={() => onExplainDiscussion(discussion.id)}
+					>
+						Explain
+					</button>
+				) : null}
 			</header>
 			{discussion.notes.length > 0 ? (
 				discussion.notes.map((note) => (
@@ -711,6 +732,8 @@ function InlineCommentRows({
 	line,
 	mode,
 	discussions,
+	onExplainDiscussion,
+	explainDisabled,
 	drafts,
 	commentDraftProps,
 }: {
@@ -718,6 +741,8 @@ function InlineCommentRows({
 	line: DiffLine;
 	mode: DiffMode;
 	discussions: readonly HostDiscussion[];
+	onExplainDiscussion?: (discussionId: string) => void;
+	explainDisabled?: boolean;
 	drafts: readonly Draft[];
 	commentDraftProps: Pick<
 		CommentDraftProps,
@@ -735,7 +760,12 @@ function InlineCommentRows({
 		<tr className="inline-comment-row">
 			<td colSpan={mode === "side-by-side" ? 4 : 3}>
 				{lineDiscussions.map((discussion) => (
-					<DiscussionCard key={discussion.id} discussion={discussion} />
+					<DiscussionCard
+						key={discussion.id}
+						discussion={discussion}
+						onExplainDiscussion={onExplainDiscussion}
+						explainDisabled={explainDisabled}
+					/>
 				))}
 				{lineDrafts.map((draft) => (
 					<CommentDraft key={draft.id} draft={draft} {...commentDraftProps} />
@@ -1096,6 +1126,8 @@ function HunkRows({
 	anchor,
 	rangeSelection,
 	discussions,
+	onExplainDiscussion,
+	explainDisabled,
 	drafts,
 	commentDraftProps,
 	onLineClick,
@@ -1116,6 +1148,8 @@ function HunkRows({
 	anchor: LineSelectionAnchor | null;
 	rangeSelection: DiffLineSelection | null;
 	discussions: readonly HostDiscussion[];
+	onExplainDiscussion?: (discussionId: string) => void;
+	explainDisabled?: boolean;
 	drafts: readonly Draft[];
 	commentDraftProps: Pick<
 		CommentDraftProps,
@@ -1204,6 +1238,8 @@ function HunkRows({
 							line={line}
 							mode={mode}
 							discussions={discussions}
+							onExplainDiscussion={onExplainDiscussion}
+							explainDisabled={explainDisabled}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
 						/>
@@ -1239,6 +1275,8 @@ function DiffTable({
 	wholeFile,
 	find,
 	discussions,
+	onExplainDiscussion,
+	explainDisabled,
 	drafts,
 	commentDraftProps,
 	onLineSelection,
@@ -1250,6 +1288,8 @@ function DiffTable({
 	wholeFile: boolean;
 	find: FindRender;
 	discussions: readonly HostDiscussion[];
+	onExplainDiscussion?: (discussionId: string) => void;
+	explainDisabled?: boolean;
 	drafts: readonly Draft[];
 	commentDraftProps: Pick<
 		CommentDraftProps,
@@ -1419,6 +1459,8 @@ function DiffTable({
 								anchor={anchor}
 								rangeSelection={rangeSelection}
 								discussions={discussions}
+								onExplainDiscussion={onExplainDiscussion}
+								explainDisabled={explainDisabled}
 								drafts={visibleDrafts}
 								commentDraftProps={commentDraftProps}
 								onLineClick={onLineSelection ? selectLine : undefined}
@@ -1452,6 +1494,8 @@ export function DiffView({
 	fileContentsError,
 	discussions = [],
 	drafts = [],
+	onExplainDiscussion,
+	explainDisabled,
 	onModeChange,
 	wholeFile = false,
 	onWholeFileChange,
@@ -1783,6 +1827,8 @@ export function DiffView({
 							wholeFile={wholeFile}
 							fileContents={fileContents}
 							discussions={discussions}
+							onExplainDiscussion={onExplainDiscussion}
+							explainDisabled={explainDisabled}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
 							onLineSelection={onLineSelection}

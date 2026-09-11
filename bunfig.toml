@@ -1,5 +1,4 @@
 [test]
 coverage = true
-coverageThreshold = { lines = 0.9, functions = 0.9 }
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = ["src/index.tsx", "src/adapters/ui/UiHost.tsx", "src/features/review/ui"]

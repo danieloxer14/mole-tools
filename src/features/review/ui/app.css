@@ -1189,6 +1189,21 @@ button.active {
 .inline-discussion-note.system {
 	opacity: 0.72;
 }
+.inline-discussion-header .inline-discussion-explain,
+.discussion .discussion-explain {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-size: 0.68rem;
+	margin-left: auto;
+	padding: 4px 7px;
+}
+.discussion .discussion-explain {
+	margin-left: 8px;
+}
+.inline-discussion-header .inline-discussion-explain:disabled,
+.discussion .discussion-explain:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
 .comment-draft {
 	border-left-color: #5e9ccc;
 }

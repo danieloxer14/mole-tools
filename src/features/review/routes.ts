@@ -1,6 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { Config } from "../../adapters/config/schema";
+import { loadPrompt } from "../../adapters/prompts/loader";
 import type {
 	CreateDiscussionInput,
 	GitHost,
@@ -16,6 +17,7 @@ import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
 import { runChatTurn, validateChatTags } from "./chat";
 import type { ChatTag } from "./chat-tags";
+import { buildExplainMessage, explainChatTitle } from "./explain";
 import {
 	generateLayers,
 	type LayerGenerationResult,
@@ -98,6 +100,7 @@ export interface ReviewRoutesOptions {
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
 	promptText?: string;
+	explainPromptText?: string;
 }
 
 export interface ReviewApiState extends ReviewState {
@@ -271,6 +274,23 @@ function validateChatRequest(
 	}
 
 	return { chatId: body.chatId, message: body.message, tags, openFile };
+}
+
+interface ExplainRequestPayload {
+	discussionId: string;
+}
+
+function validateExplainRequest(
+	body: Record<string, unknown> | null,
+): ExplainRequestPayload | string {
+	if (!body) return "Expected a JSON object";
+	if (
+		typeof body.discussionId !== "string" ||
+		body.discussionId.trim().length === 0
+	) {
+		return "Discussion id is invalid";
+	}
+	return { discussionId: body.discussionId };
 }
 
 function chatEventFrame(event: AgentEvent): SseFrame | null {
@@ -888,6 +908,47 @@ export function createReviewRoutes(
 		);
 	}
 
+	async function explainComment(request: Request): Promise<Response> {
+		const input = validateExplainRequest(await parseBody(request));
+		if (typeof input === "string") return jsonResponse({ error: input }, 400);
+		const discussion = fallbackDiscussions.find(
+			(entry) => entry.id === input.discussionId,
+		);
+		if (!discussion) {
+			return jsonResponse(
+				{ error: `Unknown discussion: ${input.discussionId}` },
+				404,
+			);
+		}
+		try {
+			const prefix =
+				options.explainPromptText ??
+				(await loadPrompt("review-explain-comment", options.promptSourceDir));
+			const diffs = [currentExpandedDiff ?? [], currentDiff];
+			const message = buildExplainMessage({ prefix, discussion, diffs });
+			const chat: ChatMeta = {
+				...createChatMeta(),
+				title: explainChatTitle(discussion),
+			};
+			const next = await mutateState((base) => ({
+				...base,
+				chats: [...base.chats, chat],
+				activeChatId: chat.id,
+			}));
+			return jsonResponse(
+				{
+					chatId: chat.id,
+					chats: next.chats,
+					activeChatId: next.activeChatId,
+					message,
+				},
+				201,
+			);
+		} catch (error) {
+			return jsonResponse({ error: errorMessage(error) }, 500);
+		}
+	}
+
 	async function selectChat(request: Request): Promise<Response> {
 		const body = await parseBody(request);
 		const chatId = body?.chatId;
@@ -1283,6 +1344,12 @@ export function createReviewRoutes(
 			}
 			if (request.method === "POST" && url.pathname === "/api/comments/draft") {
 				return commentDraft(request);
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/comments/explain"
+			) {
+				return explainComment(request);
 			}
 			if (url.pathname.startsWith("/api/comments/")) {
 				const suffix = url.pathname.slice("/api/comments/".length);

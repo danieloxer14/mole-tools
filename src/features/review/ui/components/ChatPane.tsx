@@ -28,6 +28,8 @@ export interface ChatPaneProps {
 	transcript: readonly ChatEntry[];
 	tags: readonly ChatTag[];
 	discussions?: readonly HostDiscussion[];
+	onExplainDiscussion?: (discussionId: string) => void;
+	explainDisabled?: boolean;
 	streamingText: string;
 	tools: readonly ChatToolActivity[];
 	error: string | null;
@@ -161,6 +163,8 @@ export function ChatPane({
 	transcript,
 	tags,
 	discussions = [],
+	onExplainDiscussion,
+	explainDisabled = false,
 	streamingText,
 	tools,
 	error,
@@ -251,6 +255,17 @@ export function ChatPane({
 							<strong>
 								{discussion.resolved ? "Resolved" : "Unresolved"} discussion
 							</strong>
+							{onExplainDiscussion ? (
+								<button
+									type="button"
+									className="discussion-explain"
+									data-action="explain"
+									disabled={explainDisabled}
+									onClick={() => onExplainDiscussion(discussion.id)}
+								>
+									Explain
+								</button>
+							) : null}
 							{discussion.notes.map((note) => (
 								<p key={note.id}>
 									<strong>{note.author}</strong>: {note.body}

@@ -207,6 +207,7 @@ Prompt files live beside `config.json`:
     ├── mr-system.md
     ├── review-layers-code.md
     ├── review-layers-plan.md
+    ├── review-explain-comment.md
     └── review-chat.md
 ```
 
@@ -227,6 +228,7 @@ review-agent turn; no `config.json` change is needed.
 | `review-layers-code.md` | `review` default `--mode code` | Review-layer coverage, priorities, and code-review focus. |
 | `review-layers-plan.md` | `review --mode plan` | Requirements, risks, assumptions, and acceptance-criteria review. |
 | `review-chat.md` | Review UI chat | Chat-review behavior and response format. |
+| `review-explain-comment.md` | Review UI **Explain** on a GitLab discussion | Prefix instruction placed before the comment text and diff excerpt in the new chat's first message. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -297,7 +299,13 @@ Opens a local, three-column review surface for one GitLab merge request. The
 left column tracks generated review layers and coverage, the centre column
 shows the changed-file diff, and the right column provides persistent,
 read-only agent chat. Comments stay local drafts until you explicitly send
-each one as a positioned GitLab discussion.
+each one as a positioned GitLab discussion. Each published discussion has an
+**Explain** button that opens a new chat pre-loaded with the comment and its
+surrounding diff: the chat is titled `Explain: …` after the comment, and its
+first turn sends the `review-explain-comment.md` prompt, the comment's notes,
+and a diff excerpt around the anchored line (marked `>`) — or
+`No diff excerpt available for this comment.` for a general discussion — so
+the agent replies with a plain-language explanation you can follow up on.
 
 ```bash
 mole-tools review https://gitlab.com/acme/api/-/merge_requests/42
@@ -532,7 +540,7 @@ Runs the CLI directly against TypeScript sources without building.
 bun test                             # run all tests with coverage enabled by bunfig.toml
 ```
 
-`bunfig.toml` enforces 90% line and function coverage. Test runs below either threshold exit non-zero.
+`bunfig.toml` enables coverage reporting but enforces no threshold; review the per-file table for gaps.
 
 Tests live alongside source under `src/` (`*.test.ts`) and in a top-level `test/` directory for integration scenarios.
 

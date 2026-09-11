@@ -5,7 +5,8 @@ export type PromptName =
 	| "mr-plan"
 	| "review-layers-code"
 	| "review-layers-plan"
-	| "review-chat";
+	| "review-chat"
+	| "review-explain-comment";
 
 const defaultPrompts: Omit<Record<PromptName, string>, "mr-code"> = {
 	"commit-system":
@@ -67,6 +68,9 @@ Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty
 Use the supplied merge request metadata, layer guide, changed-file list, open file, and tagged lines to answer the reviewer's question. Inspect the pinned worktree when more evidence is needed. Explain findings with concrete paths and lines, distinguish facts from risks.
 
 The pinned review worktree is strictly read-only. Use only read, grep, glob, and bash tools, scoped to files inside that path. Use bash only for read-only inspection commands. Never invoke write or edit tools, never run commands that modify files, and never modify files. If asked to change the worktree, refuse and explain that chat review is read-only.`,
+	"review-explain-comment": `Explain the following merge request comment in plain language for the reviewer reading it.
+
+State what the comment is asking for or pointing out, why it matters for this change, and what a satisfying response or code change would look like. Quote the relevant lines from the diff excerpt when useful. If the comment is ambiguous, say what is unclear and offer the most likely reading. Inspect the pinned worktree read-only only when the excerpt is insufficient.`,
 };
 
 export const DEFAULT_PROMPTS: Record<PromptName, string> = {
