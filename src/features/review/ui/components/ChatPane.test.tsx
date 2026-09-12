@@ -130,6 +130,57 @@ test("renders parent-owned composer draft", () => {
 	expect(markup).toContain(">unsent question</textarea>");
 });
 
+function renderComposer(
+	props: Partial<Parameters<typeof ChatPane>[0]> = {},
+): string {
+	return renderToStaticMarkup(
+		<ChatPane
+			transcript={[]}
+			tags={[]}
+			chats={[
+				{
+					id: "chat-1",
+					title: "First chat",
+					createdAt: "2026-08-24T00:00:00Z",
+					busy: false,
+				},
+			]}
+			activeChatId="chat-1"
+			onSelectChat={() => {}}
+			onNewChat={() => {}}
+			draft=""
+			onDraftChange={() => {}}
+			streamingText=""
+			tools={[]}
+			error={null}
+			sending={false}
+			stopping={false}
+			onSend={() => {}}
+			onStop={() => {}}
+			onRemoveTag={() => {}}
+			{...props}
+		/>,
+	);
+}
+
+test("hints that Enter submits and Shift+Enter adds a new line", () => {
+	const markup = renderComposer();
+
+	expect(markup).toContain("Enter to send, Shift+Enter for a new line.");
+	expect(markup).not.toContain("Ctrl");
+	expect(markup).not.toContain("⌘");
+	expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled/);
+});
+
+test("disables the composer and shows the busy hint while a turn runs", () => {
+	const markup = renderComposer({ sending: true });
+
+	expect(markup).toMatch(/<textarea[^>]*disabled/);
+	expect(markup).not.toContain("Enter to send, Shift+Enter for a new line.");
+	expect(markup).toContain("Agent is reading the review worktree…");
+	expect(markup).toContain(">Stop</button>");
+});
+
 const generalDiscussions = [
 	{
 		id: "discussion-1",

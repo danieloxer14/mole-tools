@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MrApprovalState } from "../../../ports/git-host";
+import type { MrApprovalState } from "../../../../ports/git-host";
 import type { ReviewState } from "../../state";
 import { type ApprovalAction, ApprovalControls } from "./ApprovalControls";
 
@@ -97,6 +97,29 @@ export function collapseLayerWhenDone(
 	return next;
 }
 
+/** Shortens a changed-file path to the shortest suffix of whole path
+ * segments that is still unique among the given paths, so layer file chips
+ * display compact relative names. Falls back to the full path when no
+ * shorter suffix is unique. */
+export function shortFilePath(
+	path: string,
+	allPaths: readonly string[],
+): string {
+	const segments = path.split("/");
+	for (let start = segments.length - 1; start >= 0; start -= 1) {
+		const suffix = segments.slice(start);
+		const collides = allPaths.some((other) => {
+			if (other === path) return false;
+			const otherSuffix = other.split("/").slice(-suffix.length);
+			return (
+				otherSuffix.length === suffix.length &&
+				otherSuffix.join("/") === suffix.join("/")
+			);
+		});
+		if (!collides) return suffix.join("/");
+	}
+	return path;
+}
 export function LayerPane({
 	state,
 	files,
@@ -358,9 +381,11 @@ export function LayerPane({
 													type="button"
 													className={path === selectedPath ? "active" : ""}
 													key={path}
+													title={path}
+													aria-label={path}
 													onClick={() => onSelectFile(path)}
 												>
-													{path}
+													{shortFilePath(path, changedFilePaths)}
 												</button>
 											))}
 											{layerFiles.length === 0 ? (

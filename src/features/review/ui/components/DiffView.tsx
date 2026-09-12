@@ -38,6 +38,7 @@ import {
 	contextLineId,
 	diffLineId,
 	type FindRender,
+	findCountText,
 	findMatches,
 	lineTextMatches,
 	stepMatchIndex,
@@ -91,6 +92,8 @@ interface DiffViewProps {
 		sourceLineCount: number | null,
 	) => void;
 	onViewModeChange?: (mode: FileViewMode) => void;
+	viewed?: boolean;
+	onViewedChange?: (viewed: boolean) => void;
 	onExpandDiff?: (file: ParsedFileDiff) => Promise<ParsedFileDiff | null>;
 	onLineSelection?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
@@ -100,6 +103,10 @@ interface DiffViewProps {
 	onEditDraft?: CommentDraftProps["onEdit"];
 	onSendDraft?: CommentDraftProps["onSend"];
 	onRetryDraft?: CommentDraftProps["onRetry"];
+	commentsCollapsed?: boolean;
+	onCommentsCollapsedChange?: (collapsed: boolean) => void;
+	findQuery?: string;
+	onFindQueryChange?: (query: string) => void;
 }
 
 export function isMarkdownPath(path: string): boolean {
@@ -705,6 +712,15 @@ function discussionMatchesLine(
 	);
 }
 
+function discussionMatchesDiff(
+	discussion: HostDiscussion,
+	file: ParsedFileDiff,
+): boolean {
+	return file.hunks.some((hunk) =>
+		hunk.lines.some((line) => discussionMatchesLine(discussion, file, line)),
+	);
+}
+
 function draftMatchesLine(
 	draft: Draft,
 	file: ParsedFileDiff,
@@ -736,6 +752,7 @@ function InlineCommentRows({
 	explainDisabled,
 	drafts,
 	commentDraftProps,
+	commentsCollapsed = false,
 }: {
 	file: ParsedFileDiff;
 	line: DiffLine;
@@ -748,10 +765,13 @@ function InlineCommentRows({
 		CommentDraftProps,
 		"onCancel" | "onEdit" | "onSend" | "onRetry"
 	>;
+	commentsCollapsed?: boolean;
 }) {
-	const lineDiscussions = discussions.filter((discussion) =>
-		discussionMatchesLine(discussion, file, line),
-	);
+	const lineDiscussions = commentsCollapsed
+		? []
+		: discussions.filter((discussion) =>
+				discussionMatchesLine(discussion, file, line),
+			);
 	const lineDrafts = drafts.filter((draft) =>
 		draftMatchesLine(draft, file, line, true),
 	);
@@ -1135,6 +1155,7 @@ function HunkRows({
 	onCommentSelection,
 	onDragStart,
 	dragSelected,
+	commentsCollapsed,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
@@ -1168,6 +1189,7 @@ function HunkRows({
 		event: MouseEvent<HTMLElement>,
 	) => void;
 	dragSelected?: (row: DiffDragRow) => boolean;
+	commentsCollapsed?: boolean;
 }) {
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
@@ -1242,6 +1264,7 @@ function HunkRows({
 							explainDisabled={explainDisabled}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
+							commentsCollapsed={commentsCollapsed}
 						/>
 					</Fragment>
 				);
@@ -1281,6 +1304,7 @@ function DiffTable({
 	commentDraftProps,
 	onLineSelection,
 	onCommentSelection,
+	commentsCollapsed,
 }: {
 	file: ParsedFileDiff;
 	mode: DiffMode;
@@ -1297,6 +1321,7 @@ function DiffTable({
 	>;
 	onLineSelection?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
+	commentsCollapsed?: boolean;
 }) {
 	const path = file.newPath ?? file.oldPath ?? "";
 	const language = path.split(".").pop() ?? "text";
@@ -1470,6 +1495,7 @@ function DiffTable({
 								dragSelected={(row) =>
 									drag !== null && isRowInDiffDrag(row, drag)
 								}
+								commentsCollapsed={commentsCollapsed}
 							/>
 						</Fragment>
 					);
@@ -1500,6 +1526,8 @@ export function DiffView({
 	wholeFile = false,
 	onWholeFileChange,
 	onViewModeChange,
+	viewed,
+	onViewedChange,
 	onExpandDiff,
 	onLineSelection,
 	onCommentSelection,
@@ -1509,19 +1537,27 @@ export function DiffView({
 	onEditDraft,
 	onSendDraft,
 	onRetryDraft,
+	commentsCollapsed,
+	onCommentsCollapsedChange,
+	findQuery: findQueryProp,
+	onFindQueryChange,
 }: DiffViewProps) {
 	const [expanded, setExpanded] = useState(false);
 	const [expandedFile, setExpandedFile] = useState<ParsedFileDiff | null>(null);
 	const [expanding, setExpanding] = useState(false);
 	const [expansionError, setExpansionError] = useState<string | null>(null);
-	const [findQuery, setFindQuery] = useState("");
+	const [internalFindQuery, setInternalFindQuery] = useState("");
 	const [findIndex, setFindIndex] = useState(0);
+	const [internalCommentsCollapsed, setInternalCommentsCollapsed] =
+		useState(false);
 	const findRowsRef = useRef<Map<string, HTMLElement>>(new Map());
 	const findInputRef = useRef<HTMLInputElement | null>(null);
 
 	// Find-in-file: computed top-level and null-safe so the scroll effect
 	// obeys the rules of hooks. The early return below guards the render
 	// paths that consume `find`; with no file, matches stay empty.
+	const findQueryControlled = findQueryProp !== undefined;
+	const findQuery = findQueryControlled ? findQueryProp : internalFindQuery;
 	const findActive = findQuery.length > 0;
 	const findDisplayFile = expandedFile ?? file;
 	const matches =
@@ -1529,6 +1565,7 @@ export function DiffView({
 			? findMatches(findDisplayFile, fileContents, findQuery, findActive)
 			: [];
 	const currentId = matches[findIndex]?.id ?? null;
+	const findCount = findCountText(findQuery, findIndex, matches.length);
 	const registerRow = useCallback((id: string, el: HTMLElement | null) => {
 		const rows = findRowsRef.current;
 		if (el) rows.set(id, el);
@@ -1576,6 +1613,21 @@ export function DiffView({
 	const binary = displayFile.binary;
 	const wholeFileEligible =
 		file.status === "modified" && !binary && !noPatch && !showingRendered;
+	const commentsControlled = commentsCollapsed !== undefined;
+	const commentsCollapsedActive = commentsControlled
+		? commentsCollapsed
+		: internalCommentsCollapsed;
+	const fileDiscussions = discussions.filter((discussion) =>
+		discussionMatchesDiff(discussion, displayFile),
+	);
+	const toggleComments = () => {
+		const next = !commentsCollapsedActive;
+		if (!commentsControlled) setInternalCommentsCollapsed(next);
+		onCommentsCollapsedChange?.(next);
+	};
+	const commentsLabel = commentsCollapsedActive
+		? `Show comments (${fileDiscussions.length})`
+		: `Collapse comments (${fileDiscussions.length})`;
 	const sourceLineCount =
 		fileContents === null ? null : splitSourceLines(fileContents).length;
 	const changeWholeFile = (next: boolean) => {
@@ -1605,6 +1657,10 @@ export function DiffView({
 		}
 		if (collapsed) setExpanded(true);
 		onWholeFileChange?.(true, sourceLineCount);
+	};
+	const applyFindQuery = (value: string) => {
+		if (!findQueryControlled) setInternalFindQuery(value);
+		onFindQueryChange?.(value);
 	};
 	const requestExpansion = () => {
 		setExpanded(true);
@@ -1652,7 +1708,7 @@ export function DiffView({
 									value={findQuery}
 									onChange={(event) => {
 										const value = event.target.value;
-										setFindQuery(value);
+										applyFindQuery(value);
 										setFindIndex(0);
 										if (value.length > 0 && collapsed && !expanded) {
 											requestExpansion();
@@ -1671,109 +1727,145 @@ export function DiffView({
 											);
 										} else if (event.key === "Escape") {
 											event.preventDefault();
-											setFindQuery("");
+											applyFindQuery("");
 											setFindIndex(0);
 											event.currentTarget.blur();
 										}
 									}}
 									aria-label="Find in file"
 								/>
-								<span className="find-nav-group">
-									<button
-										type="button"
-										className="find-nav"
-										aria-label="Previous match"
-										title="Previous match (Shift+Enter)"
-										disabled={!findActive || matches.length === 0}
-										onClick={() =>
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, -1),
-											)
-										}
-									>
-										←
-									</button>
-									<button
-										type="button"
-										className="find-nav"
-										aria-label="Next match"
-										title="Next match (Enter)"
-										disabled={!findActive || matches.length === 0}
-										onClick={() =>
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, 1),
-											)
-										}
-									>
-										→
-									</button>
-								</span>
+								{findActive ? (
+									<span className="find-nav-group">
+										<span className="find-count" aria-live="polite">
+											{findCount}
+										</span>
+										<button
+											type="button"
+											className="find-nav"
+											aria-label="Previous match"
+											title="Previous match (Shift+Enter)"
+											disabled={matches.length === 0}
+											onClick={() =>
+												setFindIndex((current) =>
+													stepMatchIndex(current, matches.length, -1),
+												)
+											}
+										>
+											←
+										</button>
+										<button
+											type="button"
+											className="find-nav"
+											aria-label="Next match"
+											title="Next match (Enter)"
+											disabled={matches.length === 0}
+											onClick={() =>
+												setFindIndex((current) =>
+													stepMatchIndex(current, matches.length, 1),
+												)
+											}
+										>
+											→
+										</button>
+									</span>
+								) : null}
 							</div>
-							<span className="find-count" aria-live="polite">
-								{findActive
-									? `${Math.min(findIndex + 1, matches.length)}/${matches.length}`
-									: "0/0"}
-							</span>
 						</div>
 					) : null}
 					{markdown ? (
-						<>
+						<fieldset className="seg-group" aria-label="Markdown view">
 							<button
-								aria-pressed={showingRendered}
-								className={showingRendered ? "active" : ""}
 								type="button"
+								className={`seg${showingRendered ? " active" : ""}`}
+								aria-pressed={showingRendered}
+								aria-label="Rendered"
+								title="Rendered"
 								onClick={() => onViewModeChange?.("rendered")}
 							>
-								Rendered
+								¶
 							</button>
 							<button
-								aria-pressed={!showingRendered}
-								className={!showingRendered ? "active" : ""}
 								type="button"
+								className={`seg${!showingRendered ? " active" : ""}`}
+								aria-pressed={!showingRendered}
+								aria-label="Diff"
+								title="Diff"
 								onClick={() => onViewModeChange?.("diff")}
 							>
-								Diff
+								±
 							</button>
-						</>
+						</fieldset>
 					) : null}
 					{!showingRendered ? (
-						<>
+						<fieldset className="seg-group" aria-label="Diff layout">
 							<button
-								className={mode === "inline" ? "active" : ""}
 								type="button"
+								className={`seg${mode === "inline" ? " active" : ""}`}
+								aria-pressed={mode === "inline"}
+								aria-label="Inline"
+								title="Inline"
 								onClick={() => onModeChange("inline")}
 							>
-								Inline
+								≡
 							</button>
 							<button
-								className={mode === "side-by-side" ? "active" : ""}
 								type="button"
+								className={`seg${mode === "side-by-side" ? " active" : ""}`}
+								aria-pressed={mode === "side-by-side"}
+								aria-label="Side by side"
+								title="Side by side"
 								onClick={() => onModeChange("side-by-side")}
 							>
-								Side by side
+								⇆
 							</button>
-						</>
+						</fieldset>
 					) : null}
 					{wholeFileEligible ? (
-						<>
+						<fieldset className="seg-group" aria-label="File scope">
 							<button
-								aria-pressed={wholeFile}
-								className={wholeFile ? "active" : ""}
 								type="button"
+								className={`seg${wholeFile ? " active" : ""}`}
+								aria-pressed={wholeFile}
+								aria-label="Whole file"
+								title="Whole file"
 								onClick={() => changeWholeFile(true)}
 							>
-								Whole file
+								⤢
 							</button>
 							<button
-								aria-pressed={!wholeFile}
-								className={!wholeFile ? "active" : ""}
 								type="button"
+								className={`seg${!wholeFile ? " active" : ""}`}
+								aria-pressed={!wholeFile}
+								aria-label="Diff only"
+								title="Diff only"
 								onClick={() => changeWholeFile(false)}
 							>
-								Diff only
+								✂
 							</button>
-						</>
+						</fieldset>
 					) : null}
+					{!showingRendered &&
+					fileDiscussions.length > 0 &&
+					(!collapsed || expanded) ? (
+						<button
+							type="button"
+							className={`seg${commentsCollapsedActive ? " active" : ""}`}
+							aria-pressed={commentsCollapsedActive}
+							aria-label={commentsLabel}
+							title={commentsLabel}
+							onClick={toggleComments}
+						>
+							❝
+						</button>
+					) : null}
+					<label className="diff-viewed" title="Mark file viewed">
+						<input
+							type="checkbox"
+							checked={viewed ?? false}
+							onChange={(event) => onViewedChange?.(event.target.checked)}
+						/>
+						Viewed
+					</label>
 				</div>
 			</header>
 			{binary ? (
@@ -1834,6 +1926,7 @@ export function DiffView({
 							onLineSelection={onLineSelection}
 							onCommentSelection={onCommentSelection}
 							find={find}
+							commentsCollapsed={commentsCollapsedActive}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (

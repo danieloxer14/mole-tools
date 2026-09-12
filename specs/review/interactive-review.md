@@ -127,12 +127,14 @@ The page has three working columns:
 
 - **Left — Review layers.** MR title, an Open in GitLab link, live approval
   status with Approve/Remove approval actions, layer status, Regenerate/Retry,
-  manual Done checkboxes, per-layer file chips, per-layer file coverage, and a
-  global Viewed-files progress bar.
+  manual Done checkboxes, per-layer file chips showing the shortest unique path
+  suffix (usually the basename) with the full path in the accessible label and
+  hover tooltip, per-layer file coverage, and a global Viewed-files progress bar.
 - **Centre — Changed files and diff.** The complete changed-file tree remains
   available even when a layer does not mention a file. Each row shows insertion
   and deletion counts plus a persisted Viewed checkbox. Selecting a file opens
-  its diff.
+  its diff and scrolls its row into view; the scroll uses `nearest`, so an
+  already-visible row does not move.
 - **Right — Agent chat.** General discussions, Explain per discussion,
   restored transcript, streaming response/tool activity, line-context tags,
   composer, New chat button, chat switcher, and Stop.
@@ -150,6 +152,12 @@ context has both old/new line numbers, uses the same highlighting as hunk rows,
 and offers local `Tag line` only—never a GitLab `Comment`. `Whole file` is kept
 per file for the browser session, confirms files over the configured total-line
 threshold, and `Diff only` returns the nearest visible hunk to the viewport.
+The diff header renders its controls as compact icon buttons with tooltips:
+segmented `Inline`/`Side by side` and `Whole file`/`Diff only` groups, and a
+`Rendered`/`Diff` group for markdown files. The find box shows its result count
+and previous/next arrows only after a search is made.
+The header also offers a `Viewed` checkbox for the selected file, mirroring the
+`Changed files` row checkbox and persisting through the same progress save.
 
 Existing GitLab discussions are read-only except for **Explain**, which opens a
 new chat titled after the discussion and asks the agent to explain it (§6).
@@ -157,6 +165,15 @@ Positioned discussions appear below their matching diff lines with
 resolved/unresolved styling, all notes, and an Explain button; unpositioned
 discussions appear in the chat column as General discussions, each with its
 own Explain button. Local drafts have no Explain.
+
+Existing GitLab discussions are read-only. Positioned discussions appear below
+their matching diff lines with resolved/unresolved styling and all notes;
+unpositioned discussions appear in the chat column as General discussions.
+Files with discussions rendered in the diff expose a `Collapse comments` /
+`Show comments` toggle in the diff header; the label counts those discussions
+and collapsing hides discussion rows while keeping diff lines. The toggle resets
+when the selected file changes. While the diff is hidden behind the large-diff
+placeholder, the toggle stays hidden until the table expands.
 
 ## 5. Layered review guide
 
@@ -245,7 +262,8 @@ be removed before sending, or cleared all at once. The UI streams text and
 tool start/end activity, keeps partial assistant text on failure/cancel, and
 enables the next turn after Stop. At most one turn runs per chat; different
 chats can run in parallel. Switching chats never interrupts a running turn,
-and chats cannot be deleted.
+and chats cannot be deleted. Enter in the composer submits the message,
+Shift+Enter inserts a newline, and Ctrl/⌘+Enter does nothing.
 
 **Explain** on a published discussion (`POST /api/comments/explain`) appends
 one ordinary chat titled `Explain: <first non-system note excerpt>` (falling
@@ -345,7 +363,7 @@ Freshness is detected, never silently applied:
 1. Refresh asks GitLab for current MR metadata, fetches the head ref, compares it
    with persisted `revision.headSha`, and reports whether it is stale plus the
    number of new commits when locally comparable.
-2. The UI shows a banner and offers Sync. It does not mutate the worktree during
+2. The UI shows a banner presenting the review's commit (`Merge request at: <sha>`) and offers Sync. It does not mutate the worktree during
    this check.
 3. Explicit Sync fetches the new head, computes a new merge base, removes and
    recreates the detached worktree at that SHA, recomputes local filtered and
