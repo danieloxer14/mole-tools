@@ -486,7 +486,7 @@ export function createReviewRoutes(
 					options.config as
 						| { review?: { agent?: "omp" | "claude" } }
 						| undefined
-				)?.review?.agent ?? "omp",
+				)?.review?.agent ?? "claude",
 			model: (options.config as { review?: { model?: string } } | undefined)
 				?.review?.model,
 		},

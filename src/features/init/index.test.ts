@@ -44,6 +44,14 @@ describe("runInit", () => {
 		expect(await Bun.file(path).exists()).toBe(true);
 	});
 
+	test("creates the config parent directory when it is absent", async () => {
+		dir = await mkdtemp(join(tmpdir(), "mole-tools-init-"));
+		const path = join(dir, "nested", "mole-tools", "config.json");
+		const result = await runInit(fakeContext(stubUi()), path);
+		expect(result).toEqual({ wrote: true, path });
+		expect(await Bun.file(path).exists()).toBe(true);
+	});
+
 	test("overwrites an existing config when the user confirms", async () => {
 		dir = await mkdtemp(join(tmpdir(), "mole-tools-init-"));
 		const path = join(dir, "config.json");

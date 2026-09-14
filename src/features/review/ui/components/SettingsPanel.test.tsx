@@ -180,6 +180,30 @@ test("quickpick and text input both reflect a listed model value", () => {
 	);
 });
 
+test("falls back to Claude when the settings snapshot omits the review agent", () => {
+	// The API can omit the agent field; drop it to verify the panel's own
+	// fallback without changing the typed snapshot contract.
+	const settings = {
+		...initialSettings,
+		review: {
+			model: initialSettings.review.model,
+			agents: initialSettings.review.agents,
+		},
+	} as SettingsSnapshot;
+	const markup = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings: settings,
+			initialPrompt,
+		}),
+	);
+	expect(markup).toContain(
+		'<option value="claude" selected="">claude</option>',
+	);
+	expect(markup).toContain('<option value="omp">omp</option>');
+});
+
 test("only renders rollback for a non-latest version", () => {
 	expect(render()).not.toContain("Roll back to this version");
 	expect(render({ ...initialPrompt, version: 2 })).toContain(

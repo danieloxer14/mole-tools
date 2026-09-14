@@ -34,11 +34,12 @@ describe("loadConfig", () => {
 			mergeRequest: { provider: "ollama", name: "gemma4:12b" },
 		});
 		expect(CONFIG_TEMPLATE.review).toEqual({
-			agent: "omp",
+			agent: "claude",
 			layerTimeoutSeconds: 600,
 			largeFileLineThreshold: 800,
 			maxLayerPromptBytes: 100_000,
 		});
+		expect(CONFIG_TEMPLATE_TEXT).toContain('"agent": "claude",');
 		expect(CONFIG_TEMPLATE.prompts).toEqual({});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "reviewBabysitter": {');
@@ -62,6 +63,14 @@ describe("loadConfig", () => {
 
 	test("bootstraps a template when no config file exists, then continues", async () => {
 		const path = await configPath();
+		const config = await loadConfig(path);
+		expect(config).toEqual(CONFIG_TEMPLATE);
+		expect(await Bun.file(path).exists()).toBe(true);
+	});
+
+	test("creates missing parent directories when bootstrapping", async () => {
+		dir = await mkdtemp(join(tmpdir(), "mole-tools-config-"));
+		const path = join(dir, "nested", "mole-tools", "config.json");
 		const config = await loadConfig(path);
 		expect(config).toEqual(CONFIG_TEMPLATE);
 		expect(await Bun.file(path).exists()).toBe(true);

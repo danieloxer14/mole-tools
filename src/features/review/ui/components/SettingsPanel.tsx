@@ -189,7 +189,7 @@ export function SettingsPanel({
 	const [loadedText, setLoadedText] = useState(initialPrompt?.text ?? "");
 	const [newPreset, setNewPreset] = useState("");
 	const [reviewAgent, setReviewAgent] = useState<ReviewAgent>(
-		initialSettings?.review.agent ?? "omp",
+		initialSettings?.review.agent ?? "claude",
 	);
 	const [reviewModel, setReviewModel] = useState(
 		initialSettings?.review.model ?? "",

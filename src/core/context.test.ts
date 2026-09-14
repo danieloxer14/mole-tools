@@ -121,7 +121,20 @@ test("selects the configured review agent and accepts an override", () => {
 		config,
 		ui: new FakeUiPort(),
 	});
-	expect(defaultContext.createReviewAgent()).toBeInstanceOf(OmpAgentAdapter);
+	expect(defaultContext.createReviewAgent()).toBeInstanceOf(ClaudeAgentAdapter);
+
+	const ompConfig = ConfigSchema.parse({
+		...config,
+		review: { agent: "omp" },
+	});
+	const ompContext = buildContext({
+		config: ompConfig,
+		ui: new FakeUiPort(),
+	});
+	expect(ompContext.createReviewAgent()).toBeInstanceOf(OmpAgentAdapter);
+	expect(defaultContext.createReviewAgent({ agent: "omp" })).toBeInstanceOf(
+		OmpAgentAdapter,
+	);
 
 	const claudeConfig = ConfigSchema.parse({
 		...config,
@@ -132,9 +145,6 @@ test("selects the configured review agent and accepts an override", () => {
 		ui: new FakeUiPort(),
 	});
 	expect(claudeContext.createReviewAgent()).toBeInstanceOf(ClaudeAgentAdapter);
-	expect(defaultContext.createReviewAgent({ agent: "claude" })).toBeInstanceOf(
-		ClaudeAgentAdapter,
-	);
 
 	const fake = new FakeReviewAgent();
 	const overriddenContext = buildContext({
@@ -143,7 +153,7 @@ test("selects the configured review agent and accepts an override", () => {
 		reviewAgent: fake,
 	});
 	expect(overriddenContext.createReviewAgent()).toBe(fake);
-	expect(overriddenContext.createReviewAgent({ agent: "claude" })).toBe(fake);
+	expect(overriddenContext.createReviewAgent({ agent: "omp" })).toBe(fake);
 });
 test("resolves review agent config with override precedence", () => {
 	const configuredConfig = ConfigSchema.parse({
@@ -153,6 +163,12 @@ test("resolves review agent config with override precedence", () => {
 			binary: "custom-omp",
 			model: "configured-model",
 		},
+	});
+
+	expect(resolveReviewAgentConfig(config)).toEqual({
+		agent: "claude",
+		binary: "claude",
+		model: undefined,
 	});
 
 	expect(resolveReviewAgentConfig(configuredConfig)).toEqual({

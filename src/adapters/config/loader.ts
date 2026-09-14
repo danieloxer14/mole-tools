@@ -1,5 +1,6 @@
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PortError } from "../../core/errors";
 import { stripJsonComments } from "../../shared/jsonc";
 import { type Config, ConfigSchema, validateModelProviders } from "./schema";
@@ -39,9 +40,9 @@ export const CONFIG_TEMPLATE_TEXT = `{
   //   "baseDir": "~/repos"                          // scanned for Git repos and extra worktrees
   // }
   // "review": {
-  //   "agent": "omp",                            // "omp" or "claude"
-  //   // "binary": "omp",                         // optional executable override
-  //   // "model": "model-name",                   // optional OMP model
+  //   "agent": "claude",                         // "omp" or "claude"; default "claude"
+  //   // "binary": "claude",                      // optional executable override
+  //   // "model": "model-name",                   // optional model for the selected agent
   //   "layerTimeoutSeconds": 600,
   //   "largeFileLineThreshold": 800,
   //   "maxLayerPromptBytes": 100000                 // UTF-8 input budget for one layer run
@@ -68,6 +69,7 @@ export const CONFIG_TEMPLATE: Config = ConfigSchema.parse(
 );
 
 export async function writeTemplate(path: string): Promise<void> {
+	await mkdir(dirname(path), { recursive: true });
 	await Bun.write(path, CONFIG_TEMPLATE_TEXT);
 }
 

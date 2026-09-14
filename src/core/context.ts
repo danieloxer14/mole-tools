@@ -132,7 +132,7 @@ export function resolveReviewAgentConfig(
 	config: Config,
 	override?: ReviewAgentOverride,
 ): { agent: "omp" | "claude"; binary: string; model?: string } {
-	const configured = config.review?.agent ?? "omp";
+	const configured = config.review?.agent ?? "claude";
 	const agent = override?.agent ?? configured;
 	const binary =
 		agent === configured ? (config.review?.binary ?? agent) : agent;

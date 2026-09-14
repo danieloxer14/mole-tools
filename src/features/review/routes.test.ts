@@ -1949,6 +1949,28 @@ describe("prompt settings read API", () => {
 		}
 	});
 
+	test("defaults review settings to Claude without a configured model", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-settings-default-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const response = await routes(request(`/api/settings?t=${token}`));
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(body.review).toEqual({
+				agent: "claude",
+				model: undefined,
+				agents: ["omp", "claude"],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("reads and seeds the active default prompt", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-default-"));
 		try {

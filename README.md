@@ -78,8 +78,8 @@ Every route is **required** and must reference an existing provider key. If a ro
 
 Review-agent selection is independent of `models`. `review.model` is passed to
 the selected review agent as `<agent> --model <name>`; it does not configure
-Ollama. Omit `review` to use OMP, its default `omp` binary, and OMP's own
-default model.
+Ollama. Omit `review` to use the default Claude agent, its default `claude`
+binary, and Claude's own current default model.
 
 ```jsonc
 // OMP: choose an OMP-visible model name.
@@ -144,9 +144,9 @@ Models** panel. Changes apply to the next layer run or chat turn; use
     "baseDir": "~/repos"
   },
   "review": {
-    "agent": "omp",                          // "omp" or "claude"
-    "binary": "omp",                         // optional binary override
-    "model": "review-model",                 // optional OMP model
+    "agent": "claude",                       // "omp" or "claude"; default "claude"
+    "binary": "claude",                     // optional binary override
+    "model": "review-model",                // optional model for the selected agent
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800,
     "maxLayerPromptBytes": 100000
@@ -187,7 +187,7 @@ Models** panel. Changes apply to the next layer run or chat turn; use
 | `autoReviewer.username` | Enables the "add auto-reviewer?" prompt during merge-request generation. |
 | `dynamicEnvRepos` + `dynamicEnvScript` | After creating an MR, repos listed here get an optional dynamic-environment handoff. |
 | `worktreePrune.baseDir` | Persisted default base directory scanned by `worktree-prune`. |
-| `review.agent` | Selects the independent review adapter (`omp` or `claude`); defaults to `omp`. |
+| `review.agent` | Selects the independent review adapter (`omp` or `claude`); defaults to `claude`. |
 | `review.binary` | Optional executable name/path. Defaults to selected agent name. |
 | `review.model` | Optional model name for OMP or Claude, forwarded as `<agent> --model <name>`. |
 | `review.layerTimeoutSeconds` | Maximum seconds for one layer-guide run; default `600`. |
@@ -384,9 +384,9 @@ claude auth login
 claude auth status
 ```
 
-Set `"agent": "claude"` in `review`. Set `review.model` to any model name
+Claude is the default review agent. Set `review.model` to any model name
 accepted by `claude --model`; mole-tools forwards it for both layer generation
-and chat. Omit it to use Claude Code's normal default model.
+and chat. Omit it to use Claude Code's normal current default model.
 
 **Local URL and token.** The CLI binds the server to `127.0.0.1` on an
 ephemeral port and prints a URL like
@@ -405,7 +405,7 @@ Review never edits code under review and never auto-removes worktree when CLI
 exits. Worktree persists for restart and can be cleaned deliberately with
 `mole-tools worktree-prune` after checking path and any local work.
 
-**Configuration.** `review.agent` selects `omp` (default) or `claude`; set
+**Configuration.** `review.agent` selects `claude` (default) or `omp`; set
 `review.binary` for a non-default executable and `review.model` for either OMP or Claude.
 Layer output and chat state persist per MR below
 `~/.config/mole-tools/reviews/`. Requires authenticated `glab` and selected
