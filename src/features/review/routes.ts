@@ -1242,6 +1242,7 @@ export function createReviewRoutes(
 			const prefix =
 				options.explainPromptText ??
 				(await loadPrompt("review-explain-comment", {
+					preset: presetFor("review-explain-comment"),
 					dir: options.promptSourceDir,
 				}));
 			const diffs = [currentExpandedDiff ?? [], currentDiff];

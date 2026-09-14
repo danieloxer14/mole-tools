@@ -1692,6 +1692,44 @@ describe("comment explain", () => {
 		});
 		return { store, agent, routes };
 	}
+	test("uses the active Explain prompt preset", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-explain-preset-"));
+		try {
+			const presetDir = join(dir, "review-explain-comment", "terse");
+			await mkdir(presetDir, { recursive: true });
+			await writeFile(
+				join(presetDir, "001.md"),
+				"Activated explain prefix",
+				"utf8",
+			);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				config: {
+					prompts: { "review-explain-comment": "terse" },
+				},
+				promptSourceDir: dir,
+				discussions: [positioned],
+				expandedDiff: [file],
+			});
+
+			const response = await routes(
+				explainRequest({ discussionId: "discussion-explain" }),
+			);
+			expect(response.status).toBe(201);
+			const body = (await response.json()) as { message: string };
+			expect(body.message.startsWith("Activated explain prefix")).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 
 	test("creates an active chat titled after the comment and returns the first message", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-explain-"));
