@@ -25,7 +25,7 @@ const validReviewBabysitter = {
 	model: "model-name",
 	webhookUrlEnv: "SLACK_WEBHOOK_URL",
 	denyPathsByProject: { "group/repo": ["src/auth/**"] },
-} as const;
+};
 
 describe("config schema", () => {
 	test("accepts only commit and mergeRequest model routes", () => {
@@ -34,6 +34,30 @@ describe("config schema", () => {
 		expect(result.success).toBe(true);
 		if (result.success) {
 			expect(result.data.models).toEqual(baseConfig.models);
+		}
+	});
+	test("defaults prompt presets to an empty map and round-trips entries", () => {
+		const defaults = ConfigSchema.parse(baseConfig);
+		expect(defaults.prompts).toEqual({});
+
+		const configured = ConfigSchema.parse({
+			...baseConfig,
+			prompts: { "commit-system": "terse" },
+		});
+		expect(configured.prompts).toEqual({ "commit-system": "terse" });
+	});
+
+	test("rejects unknown prompt slots with a prompts path", () => {
+		const result = ConfigSchema.safeParse({
+			...baseConfig,
+			prompts: { "mr-system": "default" },
+		});
+
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(
+				result.error.issues.some((issue) => issue.path[0] === "prompts"),
+			).toBe(true);
 		}
 	});
 	test("accepts babysitter settings with defaults and boundaries", () => {

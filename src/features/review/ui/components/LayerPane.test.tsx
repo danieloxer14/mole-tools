@@ -122,10 +122,23 @@ function renderLayerPane(
 			approvalAction={null}
 			approvalError={null}
 			onApprovalAction={() => {}}
+			onOpenSettings={() => {}}
 			{...props}
 		/>,
 	);
 }
+
+test("renders Prompts & Models action and wires its callback", () => {
+	let opened = false;
+	const onOpenSettings = () => {
+		opened = true;
+	};
+	const markup = renderLayerPane({ onOpenSettings });
+
+	expect(markup).toContain(">Prompts &amp; Models</button>");
+	onOpenSettings();
+	expect(opened).toBe(true);
+});
 
 test("renders layer file chips with shortened labels and full-path accessible labels", () => {
 	const markup = renderLayerPane();

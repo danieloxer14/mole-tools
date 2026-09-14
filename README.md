@@ -118,6 +118,11 @@ are started with read-only inspection tools (`read`, `grep`, `glob`, `bash`) for
 chat; Bash is limited by prompt policy to read-only commands, and prompt edits
 cannot grant write access to code under review.
 
+Review agent and model can also be selected from the review UI's **Prompts &
+Models** panel. Changes apply to the next layer run or chat turn; use
+**Regenerate** to rebuild cached layers.
+
+
 #### Optional Sections
 
 ```jsonc
@@ -193,42 +198,52 @@ cannot grant write access to code under review.
 rejects startup when its block is absent. Unknown nested keys and invalid limits
 are rejected while loading config.
 
-### Prompt File Overrides
+### Prompts — Presets and Versions
 
-Prompt files live beside `config.json`:
+Prompt presets and their version history live beside `config.json`:
 
 ```text
 ~/.config/mole-tools/
 ├── config.json
 └── prompts/
-    ├── commit-system.md
-    ├── mr-code.md
-    ├── mr-plan.md
-    ├── mr-system.md
-    ├── review-layers-code.md
-    ├── review-layers-plan.md
-    ├── review-explain-comment.md
-    └── review-chat.md
+    └── <slot>/
+        └── <preset>/
+            └── NNN.md
 ```
 
-Each prompt is loaded in full. On first use of a missing prompt slot,
-`mole-tools` writes its built-in default to that path without overwriting
-existing content. Code-mode merge requests use `mr-code.md`, then retain
-`mr-system.md` as a legacy fallback; when neither exists, `mr-code.md` is
-seeded. Plan-mode merge requests use and seed only `mr-plan.md`. You may instead
-create these files before first use. Edit a file, then start a new command or
-review-agent turn; no `config.json` change is needed.
+The seven prompt slots are `commit-system`, `mr-code`, `mr-plan`,
+`review-layers-code`, `review-layers-plan`, `review-chat`, and `review-explain-comment`. Each slot can
+have multiple named presets. The active text is the highest-numbered version
+of the active preset. The shipped default seeds `default/001.md` on first
+access, and `config.prompts` records the active preset per slot (a missing
+entry means `default`).
+The four review prompt slots are managed from the review UI's **Prompts &
+Models** overlay. Saving creates a new version, **Roll back** copies an older
+version forward as a new latest version, and **Reset** writes the shipped
+default as a new version. This history is append-only: mole-tools never
+deletes prompt versions. The `commit-system`, `mr-code`, and `mr-plan`
+presets are selected in `config.json`'s `prompts` map; their text edits still
+live under `~/.config/mole-tools/prompts/`.
 
-| File | Used by | Customise for |
+Existing flat prompt files migrate lazily, once on first access of their slot:
+`prompts/<slot>.md` becomes `<slot>/default/001.md`. The former
+`prompts/mr-system.md` migrates to `mr-code/default/001.md` only when
+`mr-code.md` is absent. Do not move these files manually; the first read
+preserves their text in the new layout. `mr-system` is no longer a prompt slot.
+
+Activating a preset or changing review-agent settings in the overlay persists
+the choice with `updateConfig`. That helper rewrites `config.json` and does
+not preserve comments, so keep important notes outside the generated config.
+
+| Slot | Used by | Customise for |
 |---|---|---|
-| `commit-system.md` | `commit` | Commit-message tone and repository conventions. |
-| `mr-code.md` | `merge-request` default `--mode code` | Code-change MR title/description format and repository conventions. |
-| `mr-plan.md` | `merge-request --mode plan` | Implementation-plan purpose, scope, and decisions. |
-| `mr-system.md` | `merge-request` code-mode legacy fallback | Existing code-change prompt customizations. |
-| `review-layers-code.md` | `review` default `--mode code` | Review-layer coverage, priorities, and code-review focus. |
-| `review-layers-plan.md` | `review --mode plan` | Requirements, risks, assumptions, and acceptance-criteria review. |
-| `review-chat.md` | Review UI chat | Chat-review behavior and response format. |
-| `review-explain-comment.md` | Review UI **Explain** on a GitLab discussion | Prefix instruction placed before the comment text and diff excerpt in the new chat's first message. |
+| `commit-system` | `commit` | Commit-message tone and repository conventions. |
+| `mr-code` | `merge-request` default `--mode code` | Code-change MR title, description format, and repository conventions. |
+| `mr-plan` | `merge-request --mode plan` | Implementation-plan purpose, scope, and decisions. |
+| `review-layers-code` | `review` default `--mode code` | Review-layer coverage, priorities, and code-review focus. |
+| `review-layers-plan` | `review` default `--mode plan` | Requirements, risks, assumptions, and acceptance-criteria review. |
+| `review-chat` | Review UI chat | Chat-review behavior and response format. |
+| `review-explain-comment` | Review UI **Explain** on a GitLab discussion | Prompt for explaining a review comment in a new chat. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -238,7 +253,11 @@ relax those constraints.
 
 #### Upgrading
 
-Configs written by earlier versions that contain unsupported fields must be migrated to the current `providers`/`models` shape before startup; otherwise startup fails with `Invalid config at <path>`.
+Legacy flat prompt files migrate automatically on first access as described
+above. Configs written by earlier versions that contain unsupported fields
+must still be migrated to the current `providers`/`models` shape before
+startup; otherwise startup fails with `Invalid config at <path>`.
+
 
 ---
 
@@ -266,9 +285,10 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 | `--context <text>` | Invocation-scoped guidance sent to the LLM alongside the diff. Does not change your stored prompts. |
 | `--auto` | Skips all interactive prompts and never pushes. Useful in scripts or CI. |
 
-**How it works.** Fetches staged diff → optionally fetches Jira issue details from branch name → sends everything (diff + context + prompt override) to the configured model → formats the message → you accept / edit / reject → committed locally → optional push. If your branch name matches the configured Jira pattern, issue title and description are included in the generation prompt automatically.
+**How it works.** Fetches staged diff → optionally fetches Jira issue details from branch name → sends everything (diff + context + active prompt preset) to the configured model → formats the message → you accept / edit / reject → committed locally → optional push. If your branch name matches the configured Jira pattern, issue title and description are included in the generation prompt automatically.
 
-**Configuration.** Uses the `commit` model route from config.json. Customise the system prompt via `~/.config/mole-tools/prompts/commit-system.md`.
+**Configuration.** Uses the `commit` model route from config.json. The active `commit-system` prompt preset supplies the system prompt; set it in `config.json`'s `prompts` map, since the review UI's **Prompts & Models** overlay only manages the four review slots.
+
 
 ---
 
@@ -289,7 +309,8 @@ mole-tools merge-request --context "migration risk"   # extra inline guidance
 
 **How it works.** Preflight GitLab connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
 
-**Configuration.** Uses the `mergeRequest` model route. Customise code descriptions via `~/.config/mole-tools/prompts/mr-code.md`, with `mr-system.md` retained as its legacy fallback. Customise implementation-plan descriptions via `~/.config/mole-tools/prompts/mr-plan.md`. Requires `glab` to be installed and authenticated for the GitLab host in the MR URL.
+**Configuration.** Uses the `mergeRequest` model route. The active `mr-code` or `mr-plan` prompt preset supplies the description prompt; set it in `config.json`'s `prompts` map, since the overlay only manages the four review slots. Requires `glab` to be installed and authenticated for the GitLab host in the MR URL.
+
 
 ---
 
@@ -302,10 +323,17 @@ read-only agent chat. Comments stay local drafts until you explicitly send
 each one as a positioned GitLab discussion. Each published discussion has an
 **Explain** button that opens a new chat pre-loaded with the comment and its
 surrounding diff: the chat is titled `Explain: …` after the comment, and its
-first turn sends the `review-explain-comment.md` prompt, the comment's notes,
+first turn uses the active `review-explain-comment` prompt preset, the comment's notes,
 and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
+
+The **Prompts & Models** overlay manages the four review prompt slots
+(`review-layers-code`, `review-layers-plan`, `review-chat`,
+`review-explain-comment`), their presets and
+versions, plus the review agent and model. Changes apply to the next layer run
+or chat turn; use **Regenerate** to rebuild cached layers.
+
 
 ```bash
 mole-tools review https://gitlab.com/acme/api/-/merge_requests/42
@@ -569,4 +597,5 @@ Bumps `package.json`, builds the binary, commits and tags `v<version>`, pushes t
 | `src/core/` | Context, error handling, feature interface |
 | `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
+| `src/features/review/ui/components/SettingsPanel.tsx` | Review UI Prompts & Models overlay for prompt presets, versions, and review-agent settings |
 | `specs/` | Design docs and architecture notes |

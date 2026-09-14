@@ -26,6 +26,9 @@ describe("loadConfig", () => {
 		);
 		expect(CONFIG_TEMPLATE_TEXT).not.toContain(`"${staleReviewKey}"`);
 		expect(CONFIG_TEMPLATE_TEXT).not.toContain(`"${staleLoopKey}"`);
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'// "prompts": { "commit-system": "default" }  // active prompt preset per slot (managed from the review UI)',
+		);
 		expect(CONFIG_TEMPLATE.models).toEqual({
 			commit: { provider: "ollama", name: "gemma4:12b" },
 			mergeRequest: { provider: "ollama", name: "gemma4:12b" },
@@ -36,6 +39,7 @@ describe("loadConfig", () => {
 			largeFileLineThreshold: 800,
 			maxLayerPromptBytes: 100_000,
 		});
+		expect(CONFIG_TEMPLATE.prompts).toEqual({});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "reviewBabysitter": {');
 		expect(CONFIG_TEMPLATE_TEXT).toContain(
@@ -94,6 +98,23 @@ describe("loadConfig", () => {
 			mergeRequest: "ollama",
 		});
 		expect(legacyConfig.ollama?.commitModel).toBe("custom-model");
+	});
+	test("preserves prompt presets through legacy normalization", async () => {
+		const path = await configPath();
+		const legacy = {
+			ollama: {
+				commitModel: "custom-model",
+				baseUrl: "http://localhost:11434",
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			prompts: { "commit-system": "terse" },
+		};
+		await Bun.write(path, JSON.stringify(legacy));
+
+		const config = await loadConfig(path);
+
+		expect(config.prompts).toEqual({ "commit-system": "terse" });
 	});
 	test("preserves babysitter settings through legacy normalization", async () => {
 		const path = await configPath();
@@ -373,8 +394,14 @@ describe("resolveLlmProvider", () => {
 			} as const,
 			diff: { ignore: [] },
 			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" } as const,
+			review: {
+				agent: "omp" as const,
+				layerTimeoutSeconds: 600,
+				largeFileLineThreshold: 800,
+				maxLayerPromptBytes: 100_000,
+			},
+			prompts: {},
 		};
-
 		const commit = resolveLlmProvider(config, "commit");
 		expect(commit.providerProfile.provider).toBe("ollama");
 		expect(commit.model).toBe("commit-model");

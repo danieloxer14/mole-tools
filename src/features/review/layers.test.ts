@@ -318,18 +318,38 @@ describe("review layer generation", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
-	test("selects mode-specific layer prompts", async () => {
+	test("selects mode- and preset-specific layer prompts", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-layers-prompts-"));
 		try {
 			const promptDir = join(dir, "prompts");
 			await mkdir(promptDir, { recursive: true });
+			await mkdir(join(promptDir, "review-layers-code", "default"), {
+				recursive: true,
+			});
 			await Bun.write(
-				join(promptDir, "review-layers-code.md"),
-				"CODE LAYERS PROMPT",
+				join(promptDir, "review-layers-code", "default", "001.md"),
+				"DEFAULT CODE LAYERS PROMPT",
 			);
+			await mkdir(join(promptDir, "review-layers-plan", "default"), {
+				recursive: true,
+			});
 			await Bun.write(
-				join(promptDir, "review-layers-plan.md"),
-				"PLAN LAYERS PROMPT",
+				join(promptDir, "review-layers-plan", "default", "001.md"),
+				"DEFAULT PLAN LAYERS PROMPT",
+			);
+			await mkdir(join(promptDir, "review-layers-code", "terse"), {
+				recursive: true,
+			});
+			await Bun.write(
+				join(promptDir, "review-layers-code", "terse", "001.md"),
+				"TERSE CODE LAYERS PROMPT",
+			);
+			await mkdir(join(promptDir, "review-layers-plan", "terse"), {
+				recursive: true,
+			});
+			await Bun.write(
+				join(promptDir, "review-layers-plan", "terse", "001.md"),
+				"TERSE PLAN LAYERS PROMPT",
 			);
 
 			const planAgent = new WritingAgent([layerDoc]);
@@ -344,6 +364,23 @@ describe("review layer generation", () => {
 			await generateLayers(planOptions);
 			expect(planAgent.prompts[0]).toContain("PLAN LAYERS PROMPT");
 			expect(planAgent.prompts[0]).not.toContain("CODE LAYERS PROMPT");
+			const tersePlanAgent = new WritingAgent([layerDoc]);
+			const tersePlanOptions = await generationOptions(
+				dir,
+				tersePlanAgent,
+				new ReviewStore(
+					getReviewPaths(ref, join(dir, "plan-terse", "config.json")),
+				),
+			);
+			tersePlanOptions.state = state(join(dir, "plan-terse-worktree"), "plan");
+			tersePlanOptions.promptText = undefined;
+			tersePlanOptions.promptSourceDir = promptDir;
+			tersePlanOptions.promptPreset = "terse";
+			await generateLayers(tersePlanOptions);
+			expect(tersePlanAgent.prompts[0]).toContain("TERSE PLAN LAYERS PROMPT");
+			expect(tersePlanAgent.prompts[0]).not.toContain(
+				"DEFAULT PLAN LAYERS PROMPT",
+			);
 
 			const codeAgent = new WritingAgent([layerDoc]);
 			const codeOptions = await generationOptions(
@@ -357,6 +394,23 @@ describe("review layer generation", () => {
 			await generateLayers(codeOptions);
 			expect(codeAgent.prompts[0]).toContain("CODE LAYERS PROMPT");
 			expect(codeAgent.prompts[0]).not.toContain("PLAN LAYERS PROMPT");
+			const terseCodeAgent = new WritingAgent([layerDoc]);
+			const terseCodeOptions = await generationOptions(
+				dir,
+				terseCodeAgent,
+				new ReviewStore(
+					getReviewPaths(ref, join(dir, "code-terse", "config.json")),
+				),
+			);
+			terseCodeOptions.state = state(join(dir, "code-terse-worktree"), "code");
+			terseCodeOptions.promptText = undefined;
+			terseCodeOptions.promptSourceDir = promptDir;
+			terseCodeOptions.promptPreset = "terse";
+			await generateLayers(terseCodeOptions);
+			expect(terseCodeAgent.prompts[0]).toContain("TERSE CODE LAYERS PROMPT");
+			expect(terseCodeAgent.prompts[0]).not.toContain(
+				"DEFAULT CODE LAYERS PROMPT",
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

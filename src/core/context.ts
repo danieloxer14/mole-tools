@@ -18,6 +18,10 @@ import type { Notifier } from "../ports/notifier";
 import type { ReviewAgent } from "../ports/review-agent";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
+export interface ReviewAgentOverride {
+	agent?: "omp" | "claude";
+	model?: string;
+}
 
 export interface Context {
 	config: Config;
@@ -25,7 +29,7 @@ export interface Context {
 	vcs: Vcs;
 	llm: Llm; // convenience proxy — routes to the commit provider by default
 	getLlmFor(purpose: RoutingPurpose, providerKey?: string): Llm;
-	reviewAgent: ReviewAgent;
+	createReviewAgent(override?: ReviewAgentOverride): ReviewAgent;
 	createReviewBabysitterAgent(model: string): ReviewAgent;
 	createNotifier(webhookUrlEnv: string): Notifier;
 	issues: IssueTracker | null;
@@ -124,15 +128,28 @@ function buildAdapterMap(config: Config): Map<string, Llm> {
 	return adapters;
 }
 
-function buildReviewAgent(config: Config): ReviewAgent {
-	const review = config.review;
-	const agent = review?.agent ?? "omp";
-	const binary = review?.binary ?? agent;
+export function resolveReviewAgentConfig(
+	config: Config,
+	override?: ReviewAgentOverride,
+): { agent: "omp" | "claude"; binary: string; model?: string } {
+	const configured = config.review?.agent ?? "omp";
+	const agent = override?.agent ?? configured;
+	const binary =
+		agent === configured ? (config.review?.binary ?? agent) : agent;
+	const model = override?.model ?? config.review?.model;
+	return { agent, binary, model };
+}
+
+function buildReviewAgent(
+	config: Config,
+	override?: ReviewAgentOverride,
+): ReviewAgent {
+	const { agent, binary, model } = resolveReviewAgentConfig(config, override);
 
 	if (agent === "claude") {
-		return new ClaudeAgentAdapter({ binary, model: review?.model });
+		return new ClaudeAgentAdapter({ binary, model });
 	}
-	return new OmpAgentAdapter({ binary, model: review?.model });
+	return new OmpAgentAdapter({ binary, model });
 }
 
 export function buildContext(input: {
@@ -159,7 +176,8 @@ export function buildContext(input: {
 		ui,
 		vcs: new GitAdapter(),
 		llm: llmProxy, // default routes to commit provider
-		reviewAgent: reviewAgent ?? buildReviewAgent(config),
+		createReviewAgent: (override?: ReviewAgentOverride) =>
+			reviewAgent ?? buildReviewAgent(config, override),
 		createReviewBabysitterAgent:
 			createReviewBabysitterAgent ??
 			((model: string) => new OmpAgentAdapter({ model })),

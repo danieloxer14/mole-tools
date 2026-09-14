@@ -1,4 +1,4 @@
 [test]
 coverage = true
 coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["src/index.tsx", "src/adapters/ui/UiHost.tsx", "src/features/review/ui"]
+coveragePathIgnorePatterns = ["src/index.tsx", "src/adapters/ui/UiHost.tsx", "src/features/review/ui/**"]

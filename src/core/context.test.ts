@@ -7,7 +7,11 @@ import { OmpAgentAdapter } from "../adapters/agent/omp";
 import { ConfigSchema } from "../adapters/config/schema";
 import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
 import type { GenerateRequest, Llm } from "../ports/llm";
-import { buildContext, RoutingLlmProxy } from "./context";
+import {
+	buildContext,
+	RoutingLlmProxy,
+	resolveReviewAgentConfig,
+} from "./context";
 
 const config = ConfigSchema.parse({
 	providers: {
@@ -117,7 +121,7 @@ test("selects the configured review agent and accepts an override", () => {
 		config,
 		ui: new FakeUiPort(),
 	});
-	expect(defaultContext.reviewAgent).toBeInstanceOf(OmpAgentAdapter);
+	expect(defaultContext.createReviewAgent()).toBeInstanceOf(OmpAgentAdapter);
 
 	const claudeConfig = ConfigSchema.parse({
 		...config,
@@ -127,7 +131,10 @@ test("selects the configured review agent and accepts an override", () => {
 		config: claudeConfig,
 		ui: new FakeUiPort(),
 	});
-	expect(claudeContext.reviewAgent).toBeInstanceOf(ClaudeAgentAdapter);
+	expect(claudeContext.createReviewAgent()).toBeInstanceOf(ClaudeAgentAdapter);
+	expect(defaultContext.createReviewAgent({ agent: "claude" })).toBeInstanceOf(
+		ClaudeAgentAdapter,
+	);
 
 	const fake = new FakeReviewAgent();
 	const overriddenContext = buildContext({
@@ -135,7 +142,38 @@ test("selects the configured review agent and accepts an override", () => {
 		ui: new FakeUiPort(),
 		reviewAgent: fake,
 	});
-	expect(overriddenContext.reviewAgent).toBe(fake);
+	expect(overriddenContext.createReviewAgent()).toBe(fake);
+	expect(overriddenContext.createReviewAgent({ agent: "claude" })).toBe(fake);
+});
+test("resolves review agent config with override precedence", () => {
+	const configuredConfig = ConfigSchema.parse({
+		...config,
+		review: {
+			agent: "omp",
+			binary: "custom-omp",
+			model: "configured-model",
+		},
+	});
+
+	expect(resolveReviewAgentConfig(configuredConfig)).toEqual({
+		agent: "omp",
+		binary: "custom-omp",
+		model: "configured-model",
+	});
+	expect(
+		resolveReviewAgentConfig(configuredConfig, { model: "override-model" }),
+	).toEqual({
+		agent: "omp",
+		binary: "custom-omp",
+		model: "override-model",
+	});
+	expect(
+		resolveReviewAgentConfig(configuredConfig, { agent: "claude" }),
+	).toEqual({
+		agent: "claude",
+		binary: "claude",
+		model: "configured-model",
+	});
 });
 test("creates babysitter services without resolving Slack environment", () => {
 	const envName = "MOLE_TOOLS_CONTEXT_SLACK_WEBHOOK_URL";

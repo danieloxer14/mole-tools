@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
+import type { Config } from "../../adapters/config/schema";
+import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -148,6 +150,20 @@ function chatRequest(body: unknown, path = `/api/chat?t=${token}`): Request {
 		body: JSON.stringify(payload),
 	});
 }
+function promptRequest(path: string, body: unknown): Request {
+	return request(`${path}?t=${token}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
+}
+function reviewSettingsRequest(body: unknown): Request {
+	return request(`/api/settings/review?t=${token}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
+}
 
 class StreamChatAgent implements ReviewAgent {
 	readonly turns: AgentTurn[] = [];
@@ -252,6 +268,32 @@ class BlockingLayerAgent implements ReviewAgent {
 			}),
 		);
 		yield { kind: "session", sessionId: "old-layer-session" };
+		yield { kind: "turn_end" };
+	}
+}
+class RecordingLayerAgent implements ReviewAgent {
+	readonly prompts: string[] = [];
+
+	async preflight(): Promise<void> {}
+
+	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+		this.prompts.push(await Bun.file(turn.systemPromptFile).text());
+		const outputPath = turn.message.match(/absolute path: ([^\n]+)/)?.[1];
+		if (!outputPath) throw new Error("missing output path");
+		await Bun.write(
+			outputPath,
+			JSON.stringify({
+				version: 1,
+				layers: [
+					{
+						title: "Generated layer",
+						tldr: "Generated for route wiring.",
+						files: ["src/app.ts"],
+					},
+				],
+			}),
+		);
+		yield { kind: "session", sessionId: "layer-session" };
 		yield { kind: "turn_end" };
 	}
 }
@@ -1733,6 +1775,759 @@ describe("comment explain", () => {
 				400,
 			);
 			expect((await store.read())?.chats).toHaveLength(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("review settings wiring", () => {
+	test("uses configured layer preset for regeneration", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-layer-preset-"));
+		try {
+			const promptPath = join(dir, "review-layers-code", "terse", "001.md");
+			await mkdir(join(dir, "review-layers-code", "terse"), {
+				recursive: true,
+			});
+			await writeFile(promptPath, "TERSE LAYER PROMPT", "utf8");
+			const agent = new RecordingLayerAgent();
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				paths: chatPaths(dir),
+				diff,
+				layerAgent: agent,
+				promptSourceDir: dir,
+				config: {
+					jira: { enabled: false },
+					review: { agent: "omp" },
+					prompts: { "review-layers-code": "terse" },
+				},
+			});
+
+			const response = await routes(
+				request(`/api/layers/regenerate?t=${token}`, { method: "POST" }),
+			);
+			expect(response.status).toBe(200);
+			await response.text();
+
+			expect(agent.prompts).toHaveLength(1);
+			expect(agent.prompts[0]).toContain("TERSE LAYER PROMPT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("uses configured chat preset at turn start", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-preset-"));
+		try {
+			const promptDir = join(dir, "review-chat", "terse");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(join(promptDir, "001.md"), "TERSE CHAT PROMPT", "utf8");
+			const paths = chatPaths(dir);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(state());
+			const agent = new StreamChatAgent();
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths,
+				promptSourceDir: dir,
+				reviewAgent: agent,
+				config: {
+					prompts: { "review-chat": "terse" },
+				},
+			});
+
+			const response = await routes(
+				chatRequest({ message: "Explain this change" }),
+			);
+			expect(response.status).toBe(200);
+			await response.text();
+
+			const turn = agent.turns.at(0);
+			if (!turn) throw new Error("Chat agent did not receive a turn");
+			expect(await Bun.file(turn.systemPromptFile).text()).toContain(
+				"TERSE CHAT PROMPT",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("prompt settings read API", () => {
+	test("settings snapshot lists all prompt slots and review settings", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-settings-"));
+		try {
+			await mkdir(join(dir, "review-chat", "terse"), { recursive: true });
+			await writeFile(
+				join(dir, "review-chat", "terse", "001.md"),
+				"TERSE REVIEW CHAT",
+				"utf8",
+			);
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: {
+					review: { agent: "claude", model: "claude-sonnet" },
+					prompts: { "review-chat": "terse" },
+				},
+			});
+
+			const response = await routes(request(`/api/settings?t=${token}`));
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(body.slots).toHaveLength(7);
+			expect(body.slots.map((slot: { slot: string }) => slot.slot)).toEqual([
+				"commit-system",
+				"mr-code",
+				"mr-plan",
+				"review-layers-code",
+				"review-layers-plan",
+				"review-chat",
+				"review-explain-comment",
+			]);
+			expect(body.slots).toContainEqual({
+				slot: "review-chat",
+				activePreset: "terse",
+				presets: [
+					{ name: "default", latest: 1 },
+					{ name: "terse", latest: 1 },
+				],
+			});
+			expect(body.review).toEqual({
+				agent: "claude",
+				model: "claude-sonnet",
+				agents: ["omp", "claude"],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reads and seeds the active default prompt", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-default-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const response = await routes(
+				request(`/api/prompts/review-chat?t=${token}`),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({
+				text: DEFAULT_PROMPTS["review-chat"],
+				preset: "default",
+				version: 1,
+				versions: [1],
+			});
+			expect(
+				await Bun.file(join(dir, "review-chat", "default", "001.md")).text(),
+			).toBe(DEFAULT_PROMPTS["review-chat"]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reads an explicit preset revision and lists its versions", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-revision-"));
+		try {
+			const presetDir = join(dir, "review-chat", "terse");
+			await mkdir(presetDir, { recursive: true });
+			await writeFile(join(presetDir, "001.md"), "first", "utf8");
+			await writeFile(join(presetDir, "002.md"), "second", "utf8");
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const response = await routes(
+				request(`/api/prompts/review-chat?preset=terse&rev=1&t=${token}`),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({
+				text: "first",
+				preset: "terse",
+				version: 1,
+				versions: [1, 2],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects unknown slots, invalid presets, and missing revisions", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-errors-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const unknownSlot = await routes(
+				request(`/api/prompts/not-a-slot?t=${token}`),
+			);
+			expect(unknownSlot.status).toBe(404);
+
+			const invalidPreset = await routes(
+				request(`/api/prompts/review-chat?preset=not%20valid&t=${token}`),
+			);
+			expect(invalidPreset.status).toBe(400);
+			expect(await invalidPreset.json()).toEqual({
+				error: expect.any(String),
+			});
+
+			const missingRevision = await routes(
+				request(`/api/prompts/review-chat?rev=99&t=${token}`),
+			);
+			expect(missingRevision.status).toBe(400);
+			expect(await missingRevision.json()).toEqual({
+				error: expect.any(String),
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("requires the review token for both read APIs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-token-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const settings = await routes(request("/api/settings"));
+			expect(settings.status).toBe(401);
+			const prompt = await routes(request("/api/prompts/review-chat"));
+			expect(prompt.status).toBe(401);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("prompt settings version write API", () => {
+	test("saves, skips duplicate text, rolls back, and resets versions", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-write-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+			const changedText = "Edited commit prompt\n";
+
+			const saveResponse = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: changedText,
+				}),
+			);
+			expect(saveResponse.status).toBe(200);
+			expect(await saveResponse.json()).toEqual({
+				version: 2,
+				saved: true,
+			});
+			expect(
+				await Bun.file(join(dir, "commit-system", "default", "002.md")).text(),
+			).toBe(changedText);
+
+			const duplicateResponse = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: `  ${changedText.trim()}  `,
+				}),
+			);
+			expect(duplicateResponse.status).toBe(200);
+			expect(await duplicateResponse.json()).toEqual({
+				version: 2,
+				saved: false,
+			});
+			expect(
+				await Bun.file(
+					join(dir, "commit-system", "default", "003.md"),
+				).exists(),
+			).toBe(false);
+
+			const rollbackResponse = await routes(
+				promptRequest("/api/prompts/commit-system/rollback", {
+					preset: "default",
+					rev: 1,
+				}),
+			);
+			expect(rollbackResponse.status).toBe(200);
+			expect(await rollbackResponse.json()).toEqual({ version: 3 });
+			expect(
+				await Bun.file(join(dir, "commit-system", "default", "003.md")).text(),
+			).toBe(DEFAULT_PROMPTS["commit-system"]);
+
+			const resetResponse = await routes(
+				promptRequest("/api/prompts/commit-system/reset", {
+					preset: "default",
+				}),
+			);
+			expect(resetResponse.status).toBe(200);
+			expect(await resetResponse.json()).toEqual({ version: 4 });
+			expect(
+				await Bun.file(join(dir, "commit-system", "default", "004.md")).text(),
+			).toBe(DEFAULT_PROMPTS["commit-system"]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("uses active preset when save omits preset", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-active-"));
+		try {
+			const presetDir = join(dir, "commit-system", "terse");
+			await mkdir(presetDir, { recursive: true });
+			await writeFile(join(presetDir, "001.md"), "Terse prompt\n", "utf8");
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: { prompts: { "commit-system": "terse" } },
+			});
+
+			const response = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					text: "Updated terse prompt\n",
+				}),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({ version: 2, saved: true });
+			expect(await Bun.file(join(presetDir, "002.md")).text()).toBe(
+				"Updated terse prompt\n",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects unknown slots and invalid write bodies", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-errors-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const unknownSlot = await routes(
+				promptRequest("/api/prompts/not-a-slot", {
+					preset: "default",
+					text: "x",
+				}),
+			);
+			expect(unknownSlot.status).toBe(404);
+
+			const missingPreset = await routes(
+				promptRequest("/api/prompts/commit-system/rollback", { rev: 1 }),
+			);
+			expect(missingPreset.status).toBe(400);
+			expect(await missingPreset.json()).toEqual({
+				error: expect.any(String),
+			});
+
+			const nonNumericRevision = await routes(
+				promptRequest("/api/prompts/commit-system/rollback", {
+					preset: "default",
+					rev: "1",
+				}),
+			);
+			expect(nonNumericRevision.status).toBe(400);
+			expect(await nonNumericRevision.json()).toEqual({
+				error: expect.any(String),
+			});
+
+			const unknownPreset = await routes(
+				promptRequest("/api/prompts/commit-system/rollback", {
+					preset: "missing",
+					rev: 1,
+				}),
+			);
+			expect(unknownPreset.status).toBe(400);
+			expect(await unknownPreset.json()).toEqual({
+				error: expect.any(String),
+			});
+
+			const resetWithoutPreset = await routes(
+				promptRequest("/api/prompts/commit-system/reset", {}),
+			);
+			expect(resetWithoutPreset.status).toBe(400);
+			expect(await resetWithoutPreset.json()).toEqual({
+				error: expect.any(String),
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("prompt settings preset API", () => {
+	test("creates presets from the active latest prompt and rejects duplicates", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-preset-create-"));
+		try {
+			const persisted: Partial<Config>[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+			const latestText = "Latest commit prompt\n";
+			await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: latestText,
+				}),
+			);
+
+			const createResponse = await routes(
+				promptRequest("/api/prompts/commit-system/presets", {
+					name: "terse",
+				}),
+			);
+			expect(createResponse.status).toBe(200);
+			const created = (await createResponse.json()) as {
+				presets: string[];
+			};
+			expect(created.presets).toEqual(
+				expect.arrayContaining(["default", "terse"]),
+			);
+
+			const activeResponse = await routes(
+				request(`/api/prompts/commit-system?t=${token}`),
+			);
+			expect(activeResponse.status).toBe(200);
+			const active = (await activeResponse.json()) as { text: string };
+			expect(
+				await Bun.file(join(dir, "commit-system", "terse", "001.md")).text(),
+			).toBe(active.text);
+
+			const duplicateResponse = await routes(
+				promptRequest("/api/prompts/commit-system/presets", {
+					name: "terse",
+				}),
+			);
+			expect(duplicateResponse.status).toBe(409);
+			expect(await duplicateResponse.json()).toEqual({
+				presets: created.presets,
+			});
+
+			const invalidResponse = await routes(
+				promptRequest("/api/prompts/commit-system/presets", {
+					name: "Bad Name",
+				}),
+			);
+			expect(invalidResponse.status).toBe(400);
+			expect(await invalidResponse.json()).toEqual({
+				error: expect.any(String),
+			});
+			expect(persisted).toHaveLength(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("activates existing presets and persists the active map", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-preset-active-"));
+		try {
+			const persisted: Partial<Config>[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const createResponse = await routes(
+				promptRequest("/api/prompts/commit-system/presets", {
+					name: "terse",
+				}),
+			);
+			expect(createResponse.status).toBe(200);
+
+			const activateResponse = await routes(
+				promptRequest("/api/prompts/commit-system/active", {
+					preset: "terse",
+				}),
+			);
+			expect(activateResponse.status).toBe(200);
+			expect(await activateResponse.json()).toEqual({
+				activePreset: "terse",
+			});
+			expect(persisted).toEqual([{ prompts: { "commit-system": "terse" } }]);
+
+			const missingResponse = await routes(
+				promptRequest("/api/prompts/commit-system/active", {
+					preset: "nope",
+				}),
+			);
+			expect(missingResponse.status).toBe(400);
+			expect(await missingResponse.json()).toEqual({
+				error: "Prompt preset 'nope' not found for commit-system",
+			});
+
+			const invalidResponse = await routes(
+				promptRequest("/api/prompts/commit-system/active", {
+					preset: "Bad Name",
+				}),
+			);
+			expect(invalidResponse.status).toBe(400);
+			expect(await invalidResponse.json()).toEqual({
+				error: "Prompt preset 'Bad Name' not found for commit-system",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("maps persistConfig failures to 500 responses", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-preset-persist-error-"),
+		);
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				persistConfig: async () => {
+					throw new Error("persist failed");
+				},
+			});
+
+			const createResponse = await routes(
+				promptRequest("/api/prompts/commit-system/presets", {
+					name: "terse",
+				}),
+			);
+			expect(createResponse.status).toBe(200);
+
+			const activateResponse = await routes(
+				promptRequest("/api/prompts/commit-system/active", {
+					preset: "terse",
+				}),
+			);
+			expect(activateResponse.status).toBe(500);
+			expect(await activateResponse.json()).toEqual({
+				error: "persist failed",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("uses newly activated preset text for layer regeneration", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-preset-layer-"));
+		try {
+			const presetDir = join(dir, "review-layers-code", "terse");
+			await mkdir(presetDir, { recursive: true });
+			await writeFile(
+				join(presetDir, "001.md"),
+				"ACTIVATED LAYER PROMPT",
+				"utf8",
+			);
+			const agent = new RecordingLayerAgent();
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				paths: chatPaths(dir),
+				diff,
+				layerAgent: agent,
+				promptSourceDir: dir,
+				config: {
+					jira: { enabled: false },
+					review: { agent: "omp" },
+				},
+			});
+
+			const activateResponse = await routes(
+				promptRequest("/api/prompts/review-layers-code/active", {
+					preset: "terse",
+				}),
+			);
+			expect(activateResponse.status).toBe(200);
+
+			const regenerateResponse = await routes(
+				request(`/api/layers/regenerate?t=${token}`, { method: "POST" }),
+			);
+			expect(regenerateResponse.status).toBe(200);
+			await regenerateResponse.text();
+
+			expect(agent.prompts).toHaveLength(1);
+			expect(agent.prompts[0]).toContain("ACTIVATED LAYER PROMPT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("review agent settings API", () => {
+	test("updates, persists, and swaps the agent for the next chat turn", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-swap-"));
+		try {
+			const paths = chatPaths(dir);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: paths.chatsDir,
+			});
+			await store.write(state());
+
+			const original = new StreamChatAgent();
+			const swapped = new StreamChatAgent();
+			const factoryCalls: Array<{
+				agent?: "omp" | "claude";
+				model?: string;
+			}> = [];
+			const persisted: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths,
+				reviewAgent: original,
+				layerAgent: original,
+				config: { review: { agent: "omp" } },
+				createReviewAgent: (override) => {
+					factoryCalls.push(override ?? {});
+					return swapped;
+				},
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({ agent: "claude", model: "claude-model" }),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({
+				agent: "claude",
+				model: "claude-model",
+			});
+			expect(factoryCalls).toEqual([
+				{ agent: "claude", model: "claude-model" },
+			]);
+			expect(persisted).toEqual([
+				{ review: { agent: "claude", model: "claude-model" } },
+			]);
+
+			const chatResponse = await routes(
+				chatRequest({ message: "Use swapped agent" }),
+			);
+			expect(chatResponse.status).toBe(200);
+			await chatResponse.text();
+			expect(original.turns).toHaveLength(0);
+			expect(swapped.turns).toHaveLength(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("omits a blank model from response, persistence, and factory override", async () => {
+		const persisted: unknown[] = [];
+		const factoryCalls: Array<{
+			agent?: "omp" | "claude";
+			model?: string;
+		}> = [];
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			config: { review: { agent: "omp", model: "old-model" } },
+			createReviewAgent: (override) => {
+				factoryCalls.push(override ?? {});
+				return new StreamChatAgent();
+			},
+			persistConfig: async (partial) => {
+				persisted.push(partial);
+			},
+		});
+
+		const response = await routes(
+			reviewSettingsRequest({ agent: "claude", model: "   " }),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ agent: "claude" });
+		expect(factoryCalls).toEqual([{ agent: "claude" }]);
+		expect(persisted).toEqual([{ review: { agent: "claude" } }]);
+	});
+
+	test("rejects an invalid review agent", async () => {
+		const factoryCalls: unknown[] = [];
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			createReviewAgent: (override) => {
+				factoryCalls.push(override);
+				return new StreamChatAgent();
+			},
+		});
+
+		const response = await routes(reviewSettingsRequest({ agent: "gpt" }));
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: expect.any(String) });
+		expect(factoryCalls).toHaveLength(0);
+	});
+
+	test("returns 501 when review agent factory is unavailable", async () => {
+		const routes = createReviewRoutes({ token, state: state() });
+
+		const response = await routes(
+			reviewSettingsRequest({ agent: "claude", model: "m" }),
+		);
+		expect(response.status).toBe(501);
+		expect(await response.json()).toEqual({
+			error: "Review agent selection is unavailable",
+		});
+	});
+
+	test("reads swapped review settings from GET /api/settings", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-readback-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: { review: { agent: "omp", model: "old-model" } },
+				createReviewAgent: () => new StreamChatAgent(),
+			});
+
+			const updateResponse = await routes(
+				reviewSettingsRequest({ agent: "claude", model: "new-model" }),
+			);
+			expect(updateResponse.status).toBe(200);
+
+			const settingsResponse = await routes(
+				request(`/api/settings?t=${token}`),
+			);
+			expect(settingsResponse.status).toBe(200);
+			const settings = (await settingsResponse.json()) as {
+				review: {
+					agent: "omp" | "claude";
+					model?: string;
+					agents: string[];
+				};
+			};
+			expect(settings.review).toEqual({
+				agent: "claude",
+				model: "new-model",
+				agents: ["omp", "claude"],
+			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

@@ -1,8 +1,5 @@
 import { resolveLlmProvider } from "../../adapters/config/schema";
-import {
-	loadPrompt,
-	loadPromptWithFallback,
-} from "../../adapters/prompts/loader";
+import { activePreset, loadPrompt } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { AbortError } from "../../core/errors";
 import type { Issue } from "../../ports/issue-tracker";
@@ -20,10 +17,10 @@ export type MergeRequestMode = "code" | "plan";
 
 export async function loadMergeRequestPrompt(
 	mode: MergeRequestMode = "code",
-	dir?: string,
+	options: { preset?: string; dir?: string } = {},
 ): Promise<string> {
-	if (mode === "plan") return loadPrompt("mr-plan", dir);
-	return loadPromptWithFallback(["mr-code", "mr-system"], dir);
+	const slot = mode === "plan" ? "mr-plan" : "mr-code";
+	return loadPrompt(slot, { preset: options.preset, dir: options.dir });
 }
 
 export interface GenerateMergeRequestInput {
@@ -41,10 +38,11 @@ export async function generateMergeRequest(
 	ctx: Context,
 	input: GenerateMergeRequestInput,
 ): Promise<ParsedMergeRequest> {
-	const system = await loadMergeRequestPrompt(
-		input.mode,
-		input.promptSourceDir,
-	);
+	const slot = input.mode === "plan" ? "mr-plan" : "mr-code";
+	const system = await loadMergeRequestPrompt(input.mode, {
+		preset: activePreset(ctx.config, slot),
+		dir: input.promptSourceDir,
+	});
 	const prompt = buildMergeRequestPrompt({ ...input, system });
 	const llm = ctx.getLlmFor("mergeRequest");
 	const { providerKey, model } = resolveLlmProvider(ctx.config, "mergeRequest");

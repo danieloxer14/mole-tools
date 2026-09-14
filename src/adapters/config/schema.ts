@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PresetNameSchema, PromptNameSchema } from "../prompts/defaults";
 
 /** Connection details for a named provider. The map key is the provider identity. */
 export const OllamaProviderSchema = z.object({
@@ -91,6 +92,7 @@ export const ConfigSchema = z.object({
 	autoReviewer: z.object({ username: z.string() }).optional(),
 	worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
 	review: ReviewConfigSchema,
+	prompts: z.partialRecord(PromptNameSchema, PresetNameSchema).default({}),
 	reviewBabysitter: ReviewBabysitterConfigSchema.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
