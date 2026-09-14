@@ -138,6 +138,7 @@ test("description follows the selected slot, not the first visible one", () => {
 
 test("disables unchanged saves and renders review agent options and model", () => {
 	const markup = render();
+	expect(markup).toContain('rows="15"');
 
 	expect(markup).toMatch(
 		/<button[^>]*disabled(?:="")?[^>]*>Save as new version<\/button>/,

@@ -601,7 +601,7 @@ export function SettingsPanel({
 									value={text}
 									disabled={pending}
 									onChange={(event) => setText(controlValue(event))}
-									rows={18}
+									rows={15}
 								/>
 								<button
 									type="button"
