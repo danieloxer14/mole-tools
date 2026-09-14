@@ -104,7 +104,6 @@ interface DiffViewProps {
 	onSendDraft?: CommentDraftProps["onSend"];
 	onRetryDraft?: CommentDraftProps["onRetry"];
 	commentsCollapsed?: boolean;
-	onCommentsCollapsedChange?: (collapsed: boolean) => void;
 	findQuery?: string;
 	onFindQueryChange?: (query: string) => void;
 }
@@ -642,55 +641,116 @@ function discussionPositionLabel(position: HostDiscussion["position"]): string {
 	return `${path}:${side}:${line ?? "unknown"}`;
 }
 
+/**
+ * First non-blank line of the first non-system note body — the single-line
+ * preview shown while a discussion is collapsed.
+ */
+function discussionPreview(discussion: HostDiscussion): string {
+	const note = discussion.notes.find(
+		(candidate) => !candidate.system && candidate.body.trim().length > 0,
+	);
+	for (const line of (note?.body ?? "").split("\n")) {
+		const trimmed = line.trim();
+		if (trimmed.length > 0) return trimmed;
+	}
+	return "";
+}
+
 function DiscussionCard({
 	discussion,
+	collapsed,
+	onToggleCollapse,
 	onExplainDiscussion,
 	explainDisabled,
 }: {
 	discussion: HostDiscussion;
+	collapsed: boolean;
+	onToggleCollapse: () => void;
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 }) {
+	const expanded = !collapsed;
+	const preview = discussionPreview(discussion);
 	return (
 		<article
 			className={`inline-discussion ${
 				discussion.resolved ? "resolved" : "unresolved"
-			}`}
+			} ${collapsed ? "is-collapsed" : ""}`.trim()}
 			data-discussion-id={discussion.id}
 		>
 			<header className="inline-discussion-header">
-				<strong>
-					{discussion.resolved
-						? "Resolved discussion"
-						: "Unresolved discussion"}
-				</strong>
-				<span>{discussionPositionLabel(discussion.position)}</span>
-				{onExplainDiscussion ? (
-					<button
-						type="button"
-						className="inline-discussion-explain"
-						data-action="explain"
-						disabled={explainDisabled}
-						onClick={() => onExplainDiscussion(discussion.id)}
+				<button
+					type="button"
+					className="discussion-collapse"
+					aria-label={`${expanded ? "Collapse" : "Expand"} discussion`}
+					aria-expanded={expanded}
+					aria-controls={`discussion-body-${discussion.id}`}
+					onClick={onToggleCollapse}
+				>
+					<svg
+						className="discussion-collapse-icon"
+						viewBox="0 0 16 16"
+						aria-hidden="true"
+						focusable="false"
 					>
-						Explain
-					</button>
-				) : null}
+						<path
+							d="M3 6l5 5 5-5"
+							fill="none"
+							stroke="currentColor"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							strokeWidth="2"
+						/>
+					</svg>
+				</button>
+				<strong>{discussion.resolved ? "Resolved" : "Open"}</strong>
+				{expanded ? (
+					<>
+						<span>{discussionPositionLabel(discussion.position)}</span>
+						{onExplainDiscussion ? (
+							<button
+								type="button"
+								className="inline-discussion-explain"
+								data-action="explain"
+								disabled={explainDisabled}
+								onClick={() => onExplainDiscussion(discussion.id)}
+							>
+								Explain
+							</button>
+						) : null}
+					</>
+				) : (
+					<span
+						className="inline-discussion-preview"
+						title={preview.length > 0 ? preview : undefined}
+					>
+						{preview}
+					</span>
+				)}
 			</header>
-			{discussion.notes.length > 0 ? (
-				discussion.notes.map((note) => (
-					<div
-						className={`inline-discussion-note ${note.system ? "system" : ""}`}
-						key={note.id}
-					>
-						<strong>{note.author}</strong>
-						<time dateTime={note.createdAt}>{note.createdAt}</time>
-						<p>{note.body}</p>
-					</div>
-				))
-			) : (
-				<p className="inline-discussion-empty">No discussion notes.</p>
-			)}
+			<div
+				id={`discussion-body-${discussion.id}`}
+				className={`discussion-details ${collapsed ? "is-collapsed" : ""}`.trim()}
+				aria-hidden={collapsed}
+				inert={collapsed}
+			>
+				<div className="discussion-details-content">
+					{discussion.notes.length > 0 ? (
+						discussion.notes.map((note) => (
+							<div
+								className={`inline-discussion-note ${note.system ? "system" : ""}`}
+								key={note.id}
+							>
+								<strong>{note.author}</strong>
+								<time dateTime={note.createdAt}>{note.createdAt}</time>
+								<p>{note.body}</p>
+							</div>
+						))
+					) : (
+						<p className="inline-discussion-empty">No discussion notes.</p>
+					)}
+				</div>
+			</div>
 		</article>
 	);
 }
@@ -748,16 +808,19 @@ function InlineCommentRows({
 	line,
 	mode,
 	discussions,
+	collapsedDiscussionIds,
+	onToggleDiscussionCollapse,
 	onExplainDiscussion,
 	explainDisabled,
 	drafts,
 	commentDraftProps,
-	commentsCollapsed = false,
 }: {
 	file: ParsedFileDiff;
 	line: DiffLine;
 	mode: DiffMode;
 	discussions: readonly HostDiscussion[];
+	collapsedDiscussionIds: ReadonlySet<string>;
+	onToggleDiscussionCollapse: (discussionId: string) => void;
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	drafts: readonly Draft[];
@@ -765,13 +828,10 @@ function InlineCommentRows({
 		CommentDraftProps,
 		"onCancel" | "onEdit" | "onSend" | "onRetry"
 	>;
-	commentsCollapsed?: boolean;
 }) {
-	const lineDiscussions = commentsCollapsed
-		? []
-		: discussions.filter((discussion) =>
-				discussionMatchesLine(discussion, file, line),
-			);
+	const lineDiscussions = discussions.filter((discussion) =>
+		discussionMatchesLine(discussion, file, line),
+	);
 	const lineDrafts = drafts.filter((draft) =>
 		draftMatchesLine(draft, file, line, true),
 	);
@@ -783,6 +843,8 @@ function InlineCommentRows({
 					<DiscussionCard
 						key={discussion.id}
 						discussion={discussion}
+						collapsed={collapsedDiscussionIds.has(discussion.id)}
+						onToggleCollapse={() => onToggleDiscussionCollapse(discussion.id)}
 						onExplainDiscussion={onExplainDiscussion}
 						explainDisabled={explainDisabled}
 					/>
@@ -1155,7 +1217,8 @@ function HunkRows({
 	onCommentSelection,
 	onDragStart,
 	dragSelected,
-	commentsCollapsed,
+	collapsedDiscussionIds,
+	onToggleDiscussionCollapse,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
@@ -1189,7 +1252,8 @@ function HunkRows({
 		event: MouseEvent<HTMLElement>,
 	) => void;
 	dragSelected?: (row: DiffDragRow) => boolean;
-	commentsCollapsed?: boolean;
+	collapsedDiscussionIds: ReadonlySet<string>;
+	onToggleDiscussionCollapse: (discussionId: string) => void;
 }) {
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
@@ -1260,11 +1324,12 @@ function HunkRows({
 							line={line}
 							mode={mode}
 							discussions={discussions}
+							collapsedDiscussionIds={collapsedDiscussionIds}
+							onToggleDiscussionCollapse={onToggleDiscussionCollapse}
 							onExplainDiscussion={onExplainDiscussion}
 							explainDisabled={explainDisabled}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
-							commentsCollapsed={commentsCollapsed}
 						/>
 					</Fragment>
 				);
@@ -1304,7 +1369,8 @@ function DiffTable({
 	commentDraftProps,
 	onLineSelection,
 	onCommentSelection,
-	commentsCollapsed,
+	collapsedDiscussionIds,
+	onToggleDiscussionCollapse,
 }: {
 	file: ParsedFileDiff;
 	mode: DiffMode;
@@ -1321,7 +1387,8 @@ function DiffTable({
 	>;
 	onLineSelection?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
-	commentsCollapsed?: boolean;
+	collapsedDiscussionIds: ReadonlySet<string>;
+	onToggleDiscussionCollapse: (discussionId: string) => void;
 }) {
 	const path = file.newPath ?? file.oldPath ?? "";
 	const language = path.split(".").pop() ?? "text";
@@ -1495,7 +1562,8 @@ function DiffTable({
 								dragSelected={(row) =>
 									drag !== null && isRowInDiffDrag(row, drag)
 								}
-								commentsCollapsed={commentsCollapsed}
+								collapsedDiscussionIds={collapsedDiscussionIds}
+								onToggleDiscussionCollapse={onToggleDiscussionCollapse}
 							/>
 						</Fragment>
 					);
@@ -1538,7 +1606,6 @@ export function DiffView({
 	onSendDraft,
 	onRetryDraft,
 	commentsCollapsed,
-	onCommentsCollapsedChange,
 	findQuery: findQueryProp,
 	onFindQueryChange,
 }: DiffViewProps) {
@@ -1548,8 +1615,9 @@ export function DiffView({
 	const [expansionError, setExpansionError] = useState<string | null>(null);
 	const [internalFindQuery, setInternalFindQuery] = useState("");
 	const [findIndex, setFindIndex] = useState(0);
-	const [internalCommentsCollapsed, setInternalCommentsCollapsed] =
-		useState(false);
+	const [collapsedDiscussionIds, setCollapsedDiscussionIds] = useState<
+		Set<string>
+	>(() => new Set(commentsCollapsed ? discussions.map((d) => d.id) : []));
 	const findRowsRef = useRef<Map<string, HTMLElement>>(new Map());
 	const findInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1593,7 +1661,14 @@ export function DiffView({
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
 	}, []);
-
+	const toggleDiscussionCollapse = useCallback((discussionId: string) => {
+		setCollapsedDiscussionIds((previous) => {
+			const next = new Set(previous);
+			if (next.has(discussionId)) next.delete(discussionId);
+			else next.add(discussionId);
+			return next;
+		});
+	}, []);
 	if (!file) {
 		return (
 			<section className="empty-diff">
@@ -1613,21 +1688,24 @@ export function DiffView({
 	const binary = displayFile.binary;
 	const wholeFileEligible =
 		file.status === "modified" && !binary && !noPatch && !showingRendered;
-	const commentsControlled = commentsCollapsed !== undefined;
-	const commentsCollapsedActive = commentsControlled
-		? commentsCollapsed
-		: internalCommentsCollapsed;
 	const fileDiscussions = discussions.filter((discussion) =>
 		discussionMatchesDiff(discussion, displayFile),
 	);
-	const toggleComments = () => {
-		const next = !commentsCollapsedActive;
-		if (!commentsControlled) setInternalCommentsCollapsed(next);
-		onCommentsCollapsedChange?.(next);
+	const allCommentsCollapsed =
+		fileDiscussions.length > 0 &&
+		fileDiscussions.every((discussion) =>
+			collapsedDiscussionIds.has(discussion.id),
+		);
+	const collapseAllComments = () => {
+		setCollapsedDiscussionIds(
+			allCommentsCollapsed
+				? new Set()
+				: new Set(fileDiscussions.map((discussion) => discussion.id)),
+		);
 	};
-	const commentsLabel = commentsCollapsedActive
-		? `Show comments (${fileDiscussions.length})`
-		: `Collapse comments (${fileDiscussions.length})`;
+	const commentsLabel = allCommentsCollapsed
+		? "Expand all comments"
+		: "Collapse all comments";
 	const sourceLineCount =
 		fileContents === null ? null : splitSourceLines(fileContents).length;
 	const changeWholeFile = (next: boolean) => {
@@ -1689,175 +1767,175 @@ export function DiffView({
 	return (
 		<section className="diff-panel">
 			<header className="diff-header">
-				<div className="diff-header-title">
-					<h2>{path}</h2>
-					<div className="diff-stats">
-						<span className="file-additions">+{file.insertions}</span>
-						<span className="file-deletions">-{file.deletions}</span>
-					</div>
+				<h2>{path}</h2>
+				<div className="diff-stats">
+					<span className="file-additions">+{file.insertions}</span>
+					<span className="file-deletions">-{file.deletions}</span>
 				</div>
 				<div className="diff-controls">
-					{!binary && !showingRendered ? (
-						<div className="find-bar">
-							<div className="find-input-wrap">
-								<input
-									ref={findInputRef}
-									type="text"
-									className="find-input"
-									placeholder="Find in file..."
-									value={findQuery}
-									onChange={(event) => {
-										const value = event.target.value;
-										applyFindQuery(value);
-										setFindIndex(0);
-										if (value.length > 0 && collapsed && !expanded) {
-											requestExpansion();
-										}
-									}}
-									onKeyDown={(event) => {
-										if (event.key === "Enter" && event.shiftKey) {
-											event.preventDefault();
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, -1),
-											);
-										} else if (event.key === "Enter") {
-											event.preventDefault();
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, 1),
-											);
-										} else if (event.key === "Escape") {
-											event.preventDefault();
-											applyFindQuery("");
+					<div className="diff-controls-group">
+						{!binary && !showingRendered ? (
+							<div className="find-bar">
+								<div className="find-input-wrap">
+									<input
+										ref={findInputRef}
+										type="text"
+										className="find-input"
+										placeholder="Find in file..."
+										value={findQuery}
+										onChange={(event) => {
+											const value = event.target.value;
+											applyFindQuery(value);
 											setFindIndex(0);
-											event.currentTarget.blur();
-										}
-									}}
-									aria-label="Find in file"
-								/>
-								{findActive ? (
-									<span className="find-nav-group">
-										<span className="find-count" aria-live="polite">
-											{findCount}
-										</span>
-										<button
-											type="button"
-											className="find-nav"
-											aria-label="Previous match"
-											title="Previous match (Shift+Enter)"
-											disabled={matches.length === 0}
-											onClick={() =>
+											if (value.length > 0 && collapsed && !expanded) {
+												requestExpansion();
+											}
+										}}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" && event.shiftKey) {
+												event.preventDefault();
 												setFindIndex((current) =>
 													stepMatchIndex(current, matches.length, -1),
-												)
-											}
-										>
-											←
-										</button>
-										<button
-											type="button"
-											className="find-nav"
-											aria-label="Next match"
-											title="Next match (Enter)"
-											disabled={matches.length === 0}
-											onClick={() =>
+												);
+											} else if (event.key === "Enter") {
+												event.preventDefault();
 												setFindIndex((current) =>
 													stepMatchIndex(current, matches.length, 1),
-												)
+												);
+											} else if (event.key === "Escape") {
+												event.preventDefault();
+												applyFindQuery("");
+												setFindIndex(0);
+												event.currentTarget.blur();
 											}
-										>
-											→
-										</button>
-									</span>
-								) : null}
+										}}
+										aria-label="Find in file"
+									/>
+									{findActive ? (
+										<span className="find-nav-group">
+											<span className="find-count" aria-live="polite">
+												{findCount}
+											</span>
+											<button
+												type="button"
+												className="find-nav"
+												aria-label="Previous match"
+												title="Previous match (Shift+Enter)"
+												disabled={matches.length === 0}
+												onClick={() =>
+													setFindIndex((current) =>
+														stepMatchIndex(current, matches.length, -1),
+													)
+												}
+											>
+												←
+											</button>
+											<button
+												type="button"
+												className="find-nav"
+												aria-label="Next match"
+												title="Next match (Enter)"
+												disabled={matches.length === 0}
+												onClick={() =>
+													setFindIndex((current) =>
+														stepMatchIndex(current, matches.length, 1),
+													)
+												}
+											>
+												→
+											</button>
+										</span>
+									) : null}
+								</div>
 							</div>
-						</div>
-					) : null}
-					{markdown ? (
-						<fieldset className="seg-group" aria-label="Markdown view">
+						) : null}
+						{markdown ? (
+							<fieldset className="seg-group" aria-label="Markdown view">
+								<button
+									type="button"
+									className={`seg${showingRendered ? " active" : ""}`}
+									aria-pressed={showingRendered}
+									aria-label="Rendered"
+									title="Rendered"
+									onClick={() => onViewModeChange?.("rendered")}
+								>
+									¶
+								</button>
+								<button
+									type="button"
+									className={`seg${!showingRendered ? " active" : ""}`}
+									aria-pressed={!showingRendered}
+									aria-label="Diff"
+									title="Diff"
+									onClick={() => onViewModeChange?.("diff")}
+								>
+									±
+								</button>
+							</fieldset>
+						) : null}
+						{!showingRendered ? (
+							<fieldset className="seg-group" aria-label="Diff layout">
+								<button
+									type="button"
+									className={`seg${mode === "inline" ? " active" : ""}`}
+									aria-pressed={mode === "inline"}
+									aria-label="Inline"
+									title="Inline"
+									onClick={() => onModeChange("inline")}
+								>
+									≡
+								</button>
+								<button
+									type="button"
+									className={`seg${mode === "side-by-side" ? " active" : ""}`}
+									aria-pressed={mode === "side-by-side"}
+									aria-label="Side by side"
+									title="Side by side"
+									onClick={() => onModeChange("side-by-side")}
+								>
+									⇆
+								</button>
+							</fieldset>
+						) : null}
+						{wholeFileEligible ? (
+							<fieldset className="seg-group" aria-label="File scope">
+								<button
+									type="button"
+									className={`seg${wholeFile ? " active" : ""}`}
+									aria-pressed={wholeFile}
+									aria-label="Whole file"
+									title="Whole file"
+									onClick={() => changeWholeFile(true)}
+								>
+									⤢
+								</button>
+								<button
+									type="button"
+									className={`seg${!wholeFile ? " active" : ""}`}
+									aria-pressed={!wholeFile}
+									aria-label="Diff only"
+									title="Diff only"
+									onClick={() => changeWholeFile(false)}
+								>
+									✂
+								</button>
+							</fieldset>
+						) : null}
+						{!showingRendered &&
+						fileDiscussions.length > 0 &&
+						(!collapsed || expanded) ? (
 							<button
 								type="button"
-								className={`seg${showingRendered ? " active" : ""}`}
-								aria-pressed={showingRendered}
-								aria-label="Rendered"
-								title="Rendered"
-								onClick={() => onViewModeChange?.("rendered")}
+								className={`seg${allCommentsCollapsed ? " active" : ""}`}
+								aria-pressed={allCommentsCollapsed}
+								aria-label={commentsLabel}
+								title={commentsLabel}
+								onClick={collapseAllComments}
 							>
-								¶
+								❝
 							</button>
-							<button
-								type="button"
-								className={`seg${!showingRendered ? " active" : ""}`}
-								aria-pressed={!showingRendered}
-								aria-label="Diff"
-								title="Diff"
-								onClick={() => onViewModeChange?.("diff")}
-							>
-								±
-							</button>
-						</fieldset>
-					) : null}
-					{!showingRendered ? (
-						<fieldset className="seg-group" aria-label="Diff layout">
-							<button
-								type="button"
-								className={`seg${mode === "inline" ? " active" : ""}`}
-								aria-pressed={mode === "inline"}
-								aria-label="Inline"
-								title="Inline"
-								onClick={() => onModeChange("inline")}
-							>
-								≡
-							</button>
-							<button
-								type="button"
-								className={`seg${mode === "side-by-side" ? " active" : ""}`}
-								aria-pressed={mode === "side-by-side"}
-								aria-label="Side by side"
-								title="Side by side"
-								onClick={() => onModeChange("side-by-side")}
-							>
-								⇆
-							</button>
-						</fieldset>
-					) : null}
-					{wholeFileEligible ? (
-						<fieldset className="seg-group" aria-label="File scope">
-							<button
-								type="button"
-								className={`seg${wholeFile ? " active" : ""}`}
-								aria-pressed={wholeFile}
-								aria-label="Whole file"
-								title="Whole file"
-								onClick={() => changeWholeFile(true)}
-							>
-								⤢
-							</button>
-							<button
-								type="button"
-								className={`seg${!wholeFile ? " active" : ""}`}
-								aria-pressed={!wholeFile}
-								aria-label="Diff only"
-								title="Diff only"
-								onClick={() => changeWholeFile(false)}
-							>
-								✂
-							</button>
-						</fieldset>
-					) : null}
-					{!showingRendered &&
-					fileDiscussions.length > 0 &&
-					(!collapsed || expanded) ? (
-						<button
-							type="button"
-							className={`seg${commentsCollapsedActive ? " active" : ""}`}
-							aria-pressed={commentsCollapsedActive}
-							aria-label={commentsLabel}
-							title={commentsLabel}
-							onClick={toggleComments}
-						>
-							❝
-						</button>
-					) : null}
+						) : null}
+					</div>
 					<label className="diff-viewed" title="Mark file viewed">
 						<input
 							type="checkbox"
@@ -1926,7 +2004,8 @@ export function DiffView({
 							onLineSelection={onLineSelection}
 							onCommentSelection={onCommentSelection}
 							find={find}
-							commentsCollapsed={commentsCollapsedActive}
+							collapsedDiscussionIds={collapsedDiscussionIds}
+							onToggleDiscussionCollapse={toggleDiscussionCollapse}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (

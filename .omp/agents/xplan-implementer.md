@@ -3,7 +3,7 @@ name: xplan-implementer
 description: "Implements exactly one xplan ticket and proves it with the ticket's Verify command"
 tools: read, write, edit, ast_edit, grep, glob, bash, lsp
 spawns: ""
-model: "@default"
+model: "@IMPLEMENTER"
 output:
   properties:
     outcome:

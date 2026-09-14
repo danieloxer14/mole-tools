@@ -18,11 +18,11 @@ The command accepts a full GitLab URL containing
 mole-tools review <mr-url> [--mode code|plan] [--no-open] [--refresh]
 ```
 
-| Flag | Contract |
-|---|---|
-| `--mode code\|plan` | Selects the review lens. `code` is the default. The only mode difference is the layer prompt: `review-layers-code` or `review-layers-plan`. |
-| `--no-open` | Prints the local URL but does not ask the operating system to open a browser. |
-| `--refresh` | Re-fetches the MR head and rebuilds the detached worktree/diff before opening the server. Without it, an existing review remains anchored to its persisted revision. |
+| Flag                | Contract                                                                                                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--mode code\|plan` | Selects the review lens. `code` is the default. The only mode difference is the layer prompt: `review-layers-code` or `review-layers-plan`.                          |
+| `--no-open`         | Prints the local URL but does not ask the operating system to open a browser.                                                                                        |
+| `--refresh`         | Re-fetches the MR head and rebuilds the detached worktree/diff before opening the server. Without it, an existing review remains anchored to its persisted revision. |
 
 The feature requires an authenticated `glab` and the configured review agent
 binary on `PATH`. The optional top-level `review` config is independent of
@@ -31,12 +31,12 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```jsonc
 {
   "review": {
-    "agent": "omp",                 // "omp" or "claude"
-    "binary": "omp",                // optional binary override
-    "model": "review-model",        // optional OMP model
+    "agent": "omp", // "omp" or "claude"
+    "binary": "omp", // optional binary override
+    "model": "review-model", // optional OMP model
     "layerTimeoutSeconds": 600,
-    "largeFileLineThreshold": 800
-  }
+    "largeFileLineThreshold": 800,
+  },
 }
 ```
 
@@ -98,28 +98,28 @@ subprocess fails.
 
 Implemented HTTP surface:
 
-| Method + path | Contract |
-|---|---|
-| `GET /` | Serve embedded React HTML. |
-| `GET /api/state` | Return persisted state plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here. |
-| `GET /api/approval` | Return live GitLab approval status for the current user and merge request. |
-| `POST /api/approval` | Accept `{ action: "approve" | "unapprove" }` and mutate the current user's GitLab approval. |
-| `GET`/`POST /api/refresh` | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this check does not mutate the worktree. |
-| `POST /api/sync` | Explicitly fetch the new head, re-point the detached worktree, recompute merge base/diff/refs, mark layers stale, and flag drafts whose anchors no longer resolve. |
-| `POST /api/progress` | Persist a layer `done` toggle and/or a viewed-file change. |
-| `GET /api/file?path=&side=` | Return text from the worktree (`new`) or the merge-base revision (`old`); reject traversal outside the worktree. |
-| `GET /api/diff?path=` | Return the unfiltered parsed file diff for an explicit expansion. |
-| `POST /api/layers/regenerate` or `/api/layers/retry` | Run layer generation and stream status/done frames. |
-| `GET /api/chat?chatId=` | Return entries for the selected chat. |
-| `POST /api/chat` | Accept `{ chatId, message, tags[], openFile }` and stream text/tool/error frames. |
-| `POST /api/chat/cancel` | Accept `{ chatId }`, abort that chat's active turn, and return `204`. |
-| `POST /api/chats` | Create and activate a chat; return `201` with `{ chats, activeChatId }`. |
-| `POST /api/chats/active` | Accept `{ chatId }`, persist the selection, and return `204` (`404` for an unknown chat). |
-| `POST /api/comments/draft` | Accept `{ selection, filePath }`; persist and return an empty local draft. |
-| `POST /api/comments/explain` | Accept `{ discussionId }`; create and activate a chat titled after that published discussion and return `201` with `{ chatId, chats, activeChatId, message }`, where `message` is the first-turn text the browser then sends through `POST /api/chat`. `400` for a missing id, `404` for an unknown discussion; neither creates a chat. |
-| `PUT /api/comments/:id` | Edit a local draft body. Posted comments return a conflict and cannot be edited. |
-| `DELETE /api/comments/:id` | Cancel/remove a local draft. |
-| `POST /api/comments/:id/send` | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread. |
+| Method + path                                        | Contract                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `GET /`                                              | Serve embedded React HTML.                                                                                                                                                                                                                                                                                                              |
+| `GET /api/state`                                     | Return persisted state plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here.                                                                                                                                                                         |
+| `GET /api/approval`                                  | Return live GitLab approval status for the current user and merge request.                                                                                                                                                                                                                                                              |
+| `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's GitLab approval. |
+| `GET`/`POST /api/refresh`                            | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this check does not mutate the worktree.                                                                                                                                                                                                                          |
+| `POST /api/sync`                                     | Explicitly fetch the new head, re-point the detached worktree, recompute merge base/diff/refs, mark layers stale, and flag drafts whose anchors no longer resolve.                                                                                                                                                                      |
+| `POST /api/progress`                                 | Persist a layer `done` toggle and/or a viewed-file change.                                                                                                                                                                                                                                                                              |
+| `GET /api/file?path=&side=`                          | Return text from the worktree (`new`) or the merge-base revision (`old`); reject traversal outside the worktree.                                                                                                                                                                                                                        |
+| `GET /api/diff?path=`                                | Return the unfiltered parsed file diff for an explicit expansion.                                                                                                                                                                                                                                                                       |
+| `POST /api/layers/regenerate` or `/api/layers/retry` | Run layer generation and stream status/done frames.                                                                                                                                                                                                                                                                                     |
+| `GET /api/chat?chatId=`                              | Return entries for the selected chat.                                                                                                                                                                                                                                                                                                   |
+| `POST /api/chat`                                     | Accept `{ chatId, message, tags[], openFile }` and stream text/tool/error frames.                                                                                                                                                                                                                                                       |
+| `POST /api/chat/cancel`                              | Accept `{ chatId }`, abort that chat's active turn, and return `204`.                                                                                                                                                                                                                                                                   |
+| `POST /api/chats`                                    | Create and activate a chat; return `201` with `{ chats, activeChatId }`.                                                                                                                                                                                                                                                                |
+| `POST /api/chats/active`                             | Accept `{ chatId }`, persist the selection, and return `204` (`404` for an unknown chat).                                                                                                                                                                                                                                               |
+| `POST /api/comments/draft`                           | Accept `{ selection, filePath }`; persist and return an empty local draft.                                                                                                                                                                                                                                                              |
+| `POST /api/comments/explain`                         | Accept `{ discussionId }`; create and activate a chat titled after that published discussion and return `201` with `{ chatId, chats, activeChatId, message }`, where `message` is the first-turn text the browser then sends through `POST /api/chat`. `400` for a missing id, `404` for an unknown discussion; neither creates a chat. |
+| `PUT /api/comments/:id`                              | Edit a local draft body. Posted comments return a conflict and cannot be edited.                                                                                                                                                                                                                                                        |
+| `DELETE /api/comments/:id`                           | Cancel/remove a local draft.                                                                                                                                                                                                                                                                                                            |
+| `POST /api/comments/:id/send`                        | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread.                                                                                                                       |
 
 ## 4. Three-column UI and diff contract
 
@@ -169,11 +169,15 @@ own Explain button. Local drafts have no Explain.
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
 unpositioned discussions appear in the chat column as General discussions.
-Files with discussions rendered in the diff expose a `Collapse comments` /
-`Show comments` toggle in the diff header; the label counts those discussions
-and collapsing hides discussion rows while keeping diff lines. The toggle resets
-when the selected file changes. While the diff is hidden behind the large-diff
-placeholder, the toggle stays hidden until the table expands.
+Every positioned discussion has its own chevron that animates that one
+discussion's notes open and closed; a collapsed discussion stays in the DOM
+but shrinks to a single non-wrapping line showing its Resolved/Open status and
+the first line of its comment body, truncated with an ellipsis. Files with
+discussions rendered in the diff also expose a `Collapse all comments` /
+`Expand all comments` button in the diff header that toggles every discussion
+in that file at once. Collapse state resets when the selected file changes.
+While the diff is hidden behind the large-diff placeholder, both controls stay
+hidden until the table expands.
 
 ## 5. Layered review guide
 

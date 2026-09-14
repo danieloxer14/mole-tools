@@ -277,16 +277,11 @@ button.active {
 	overflow-wrap: anywhere;
 }
 .diff-header h2 {
-	margin: 0;
-	font-size: 1.05rem;
-	overflow-wrap: anywhere;
-}
-.diff-header-title {
-	align-items: center;
-	display: flex;
 	flex: 1 1 auto;
-	gap: 10px;
+	font-size: 0.9rem;
+	margin: 0;
 	min-width: 0;
+	overflow-wrap: anywhere;
 }
 .diff-stats {
 	display: flex;
@@ -672,6 +667,14 @@ button.active {
 .diff-controls {
 	align-items: center;
 	display: flex;
+	flex-shrink: 0;
+	gap: 5px;
+	white-space: nowrap;
+}
+.diff-controls-group {
+	align-items: center;
+	display: flex;
+	flex: 1 1 auto;
 	flex-wrap: wrap;
 	justify-content: flex-end;
 	column-gap: 5px;
@@ -1197,12 +1200,75 @@ button.seg:focus-visible {
 .inline-discussion.unresolved {
 	border-left-color: #d49b3f;
 }
+.discussion-collapse {
+	align-items: center;
+	background: transparent;
+	border: 0;
+	color: #8395a8;
+	display: inline-flex;
+	flex: 0 0 auto;
+	height: 22px;
+	justify-content: center;
+	margin-left: -4px;
+	padding: 3px;
+	width: 22px;
+}
+.discussion-collapse-icon {
+	display: block;
+	height: 14px;
+	transition: transform 180ms ease;
+	width: 14px;
+}
+.discussion-collapse[aria-expanded="false"] .discussion-collapse-icon {
+	transform: rotate(-90deg);
+}
+.discussion-collapse:hover,
+.discussion-collapse:focus-visible {
+	background: #355b80;
+	color: #d9ecfb;
+}
+.discussion-details {
+	display: grid;
+	grid-template-rows: 1fr;
+	opacity: 1;
+	transition:
+		grid-template-rows 180ms ease,
+		opacity 120ms ease;
+}
+.discussion-details.is-collapsed {
+	grid-template-rows: 0fr;
+	opacity: 0;
+}
+.discussion-details-content {
+	min-height: 0;
+	overflow: hidden;
+}
+.inline-discussion-preview {
+	color: #9bb0c5;
+	flex: 1 1 auto;
+	font-size: 0.74rem;
+	font-style: italic;
+	margin: 0;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+	.discussion-collapse-icon,
+	.discussion-details {
+		transition-duration: 0ms;
+	}
+}
 .inline-discussion-header,
 .comment-draft-header {
 	align-items: baseline;
 	display: flex;
 	gap: 8px;
 	justify-content: space-between;
+}
+.inline-discussion-header {
+	align-items: center;
 }
 .inline-discussion-header strong,
 .comment-draft-header strong {

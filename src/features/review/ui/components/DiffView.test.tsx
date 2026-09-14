@@ -356,7 +356,7 @@ test("hides the header controls when no file is selected", () => {
 	expect(markup).not.toContain("Mark file viewed");
 });
 
-test("offers a collapse control for positioned discussions", () => {
+test("offers a collapse-all control for positioned discussions", () => {
 	const markup = renderDiff({
 		discussions: [
 			discussion("discussion-1", {
@@ -368,12 +368,29 @@ test("offers a collapse control for positioned discussions", () => {
 		],
 	});
 
-	expect(markup).toContain("Collapse comments (1)");
+	expect(markup).toContain("Collapse all comments");
 	expect(markup).toContain('aria-pressed="false"');
 	expect(markup).toContain("Please consider this edge case.");
 });
 
-test("hides positioned discussion notes when comments are collapsed", () => {
+test("renders a per-discussion collapse chevron in the expanded state", () => {
+	const markup = renderDiff({
+		discussions: [
+			discussion("discussion-1", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+	});
+
+	expect(markup).toContain('aria-controls="discussion-body-discussion-1"');
+	expect(markup).toContain('aria-expanded="true"');
+	expect(markup).not.toContain("inline-discussion-preview");
+});
+
+test("collapses a seeded discussion to a single-line preview", () => {
 	const markup = renderDiff({
 		commentsCollapsed: true,
 		discussions: [
@@ -386,9 +403,12 @@ test("hides positioned discussion notes when comments are collapsed", () => {
 		],
 	});
 
-	expect(markup).toContain("Show comments (1)");
+	expect(markup).toContain("Expand all comments");
 	expect(markup).toContain('aria-pressed="true"');
-	expect(markup).not.toContain("Please consider this edge case.");
+	expect(markup).toContain('aria-expanded="false"');
+	expect(markup).toContain("discussion-details is-collapsed");
+	expect(markup).toContain("inline-discussion-preview");
+	expect(markup).toContain("Please consider this edge case.");
 	expect(markup).toContain("export const value = 1;");
 });
 
@@ -411,7 +431,7 @@ test("counts every positioned discussion rendered in the diff", () => {
 		],
 	});
 
-	expect(markup).toContain("Collapse comments (2)");
+	expect(markup).toContain("Collapse all comments");
 });
 
 test("does not offer a collapse control for general discussions", () => {
@@ -419,8 +439,8 @@ test("does not offer a collapse control for general discussions", () => {
 		discussions: [discussion("discussion-1", null)],
 	});
 
-	expect(markup).not.toContain("Collapse comments");
-	expect(markup).not.toContain("Show comments");
+	expect(markup).not.toContain("Collapse all comments");
+	expect(markup).not.toContain("Expand all comments");
 });
 
 test("does not count file-level discussions that render no diff row", () => {
@@ -435,7 +455,7 @@ test("does not count file-level discussions that render no diff row", () => {
 		],
 	});
 
-	expect(markup).not.toContain("Collapse comments");
+	expect(markup).not.toContain("Collapse all comments");
 });
 
 test("hides the collapse control while the large-diff placeholder replaces the table", () => {
@@ -454,6 +474,6 @@ test("hides the collapse control while the large-diff placeholder replaces the t
 
 	expect(markup).toContain("Large diff collapsed");
 	expect(markup).not.toContain("first change");
-	expect(markup).not.toContain("Collapse comments");
-	expect(markup).not.toContain("Show comments");
+	expect(markup).not.toContain("Collapse all comments");
+	expect(markup).not.toContain("Expand all comments");
 });
