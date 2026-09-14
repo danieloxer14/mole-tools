@@ -41,7 +41,7 @@ export function fakeContext(
 		ui: overrides.ui ?? new FakeUiPort(),
 		vcs: overrides.vcs ?? new FakeVcs(),
 		llm,
-		reviewAgent,
+		createReviewAgent: () => reviewAgent,
 		createReviewBabysitterAgent,
 		createNotifier,
 		getLlmFor: (_purpose: RoutingPurpose): Llm => llm,

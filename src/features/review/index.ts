@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { updateConfig } from "../../adapters/config/loader";
+import { promptsDir } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { PortError } from "../../core/errors";
 import type { Feature } from "../../core/feature";
@@ -99,6 +101,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 		notes: [
 			"Requires an authenticated `glab` and the configured review agent binary on PATH.",
 			"Review state persists under ~/.config/mole-tools/reviews.",
+			"Prompts and the review agent/model are managed from the review UI's Prompts & Models panel.",
 		],
 	},
 	async run(ctx, args) {
@@ -138,7 +141,10 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			ref: result.ref,
 			getFileContents,
 			worktreePath: result.state.worktreePath,
-			reviewAgent: ctx.reviewAgent,
+			reviewAgent: ctx.createReviewAgent(),
+			promptSourceDir: promptsDir(),
+			createReviewAgent: ctx.createReviewAgent,
+			persistConfig: (partial) => updateConfig(partial),
 			vcs: ctx.vcs,
 			issues: ctx.issues,
 			config: ctx.config,

@@ -31,6 +31,7 @@ export const CONFIG_TEMPLATE_TEXT = `{
   "diff": {
     "ignore": ["*.lock", "pnpm-lock.yaml", "bun.lockb", "package-lock.json", "*.snap"]
   }
+  // "prompts": { "commit-system": "default" }  // active prompt preset per slot (managed from the review UI)
   // "dynamicEnvRepos": ["org/repo"]                  // repos offered the "create dynamic env" option
   // "dynamicEnvScript": "hack/local/dynamic-env.sh"  // handoff script for configured repositories
   // "autoReviewer": { "username": "your-handle" },   // presence enables the "add auto-reviewer?" question
@@ -148,6 +149,7 @@ function normalizeConfig(raw: unknown): unknown {
 		diff: input.diff ?? { ignore: [] },
 		worktreePrune: input.worktreePrune,
 		review: input.review,
+		prompts: input.prompts,
 		reviewBabysitter: input.reviewBabysitter,
 	};
 	if (input.ollama) {

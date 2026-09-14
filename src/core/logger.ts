@@ -33,7 +33,7 @@ const MAX_DEPTH = 6;
 const MAX_ITEMS = 100;
 const MAX_STRING = 2_000;
 const MAX_EVENT_BYTES = 32_000;
-const TRUNCATED = "[Truncated]";
+const TRUNCATED = "Truncated";
 const REPLACED = "[Unsupported value]";
 
 function marker(reason = TRUNCATED): string {

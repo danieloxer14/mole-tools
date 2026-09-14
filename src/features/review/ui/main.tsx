@@ -38,6 +38,7 @@ import {
 } from "./components/DiffView";
 import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { SyncBanner } from "./components/SyncBanner";
 import "./app.css";
 
@@ -486,6 +487,22 @@ function ReviewApp() {
 	const [externalFile, setExternalFile] = useState<ExternalFilePreview | null>(
 		null,
 	);
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	useEffect(() => {
+		if (!settingsOpen) return;
+		const handleKeyDown = (event: unknown) => {
+			if (
+				typeof event === "object" &&
+				event !== null &&
+				"key" in event &&
+				event.key === "Escape"
+			) {
+				setSettingsOpen(false);
+			}
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [settingsOpen]);
 	const [error, setError] = useState<string | null>(null);
 	const [approvalLoading, setApprovalLoading] = useState(true);
 	const [approvalAction, setApprovalAction] = useState<ApprovalAction | null>(
@@ -1662,6 +1679,7 @@ function ReviewApp() {
 				approvalAction={approvalAction}
 				approvalError={approvalError}
 				onApprovalAction={handleApprovalAction}
+				onOpenSettings={() => setSettingsOpen(true)}
 			/>
 			<hr
 				aria-label="Resize review layers column"
@@ -1838,6 +1856,16 @@ function ReviewApp() {
 								{externalFile.contents}
 							</pre>
 						) : null}
+					</div>
+				</div>
+			) : null}
+			{settingsOpen ? (
+				<div className="settings-overlay">
+					<div className="settings-panel">
+						<SettingsPanel
+							token={token}
+							onClose={() => setSettingsOpen(false)}
+						/>
 					</div>
 				</div>
 			) : null}

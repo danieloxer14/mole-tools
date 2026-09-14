@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { resolveLlmProvider } from "../../adapters/config/schema";
-import { loadPrompt } from "../../adapters/prompts/loader";
+import { activePreset, loadPrompt } from "../../adapters/prompts/loader";
 import type { Context } from "../../core/context";
 import { AbortError, UserRejectedError } from "../../core/errors";
 import type { Feature } from "../../core/feature";
@@ -88,6 +88,8 @@ export interface CommitFlowOptions {
 	context?: string;
 	/** Skip all input prompts and never push. */
 	auto?: boolean;
+	/** Optional prompt directory for isolated tests. */
+	promptSourceDir?: string;
 }
 
 export async function runCommitFlow(
@@ -103,7 +105,10 @@ export async function runCommitFlow(
 	await ctx.ui.info(
 		`Fetched diff (${diff.length} file${diff.length === 1 ? "" : "s"})`,
 	);
-	const systemPrompt = await loadPrompt("commit-system");
+	const systemPrompt = await loadPrompt("commit-system", {
+		preset: activePreset(ctx.config, "commit-system"),
+		dir: options.promptSourceDir,
+	});
 	const prompt = buildCommitPrompt(systemPrompt, issue, diff, options.context);
 	const message = await generateValid(ctx, prompt);
 	await ctx.ui.info(message);

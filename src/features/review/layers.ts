@@ -120,6 +120,8 @@ export interface LayerGenerationOptions extends BuildLayerInputOptions {
 	outputDir?: string;
 	/** Optional directory containing user-configurable review prompts. */
 	promptSourceDir?: string;
+	/** Active preset for the layer prompt slot. */
+	promptPreset?: string;
 	promptText?: string;
 	runId?: string;
 	onState?: (state: ReviewState) => void | Promise<void>;
@@ -691,7 +693,10 @@ export async function generateLayers(
 		const promptName = reviewLayerPromptName(state.mode);
 		const basePrompt =
 			options.promptText ??
-			(await loadPrompt(promptName, options.promptSourceDir));
+			(await loadPrompt(promptName, {
+				preset: options.promptPreset,
+				dir: options.promptSourceDir,
+			}));
 		const maxPromptBytes = maxLayerPromptBytes(options.config);
 		const compactedInput = compactLayerInput(input);
 		let compacted = compactedInput.compacted;

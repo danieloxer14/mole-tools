@@ -22,6 +22,7 @@ interface LayerPaneProps {
 	approvalAction: ApprovalAction | null;
 	approvalError: string | null;
 	onApprovalAction: (action: ApprovalAction) => void;
+	onOpenSettings: () => void;
 }
 
 function statusLabel(status: VisibleLayerStatus): string {
@@ -136,6 +137,7 @@ export function LayerPane({
 	approvalAction,
 	approvalError,
 	onApprovalAction,
+	onOpenSettings,
 }: LayerPaneProps) {
 	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
 		() =>
@@ -220,6 +222,9 @@ export function LayerPane({
 						onClick={onRegenerate}
 					>
 						{layerAction === "regenerate" ? "Regenerating…" : "Regenerate"}
+					</button>
+					<button type="button" onClick={onOpenSettings}>
+						Prompts &amp; Models
 					</button>
 					{state.layerStatus === "failed" ? (
 						<button type="button" disabled={actionRunning} onClick={onRetry}>

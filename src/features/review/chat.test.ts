@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -199,6 +199,59 @@ describe("chat prompt construction", () => {
 });
 
 describe("persistent chat turns", () => {
+	test("selects prompt preset and defaults to the default preset", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-prompts-"));
+		try {
+			const promptSourceDir = join(dir, "prompts");
+			await mkdir(join(promptSourceDir, "review-chat", "default"), {
+				recursive: true,
+			});
+			await Bun.write(
+				join(promptSourceDir, "review-chat", "default", "001.md"),
+				"DEFAULT CHAT PROMPT",
+			);
+			await mkdir(join(promptSourceDir, "review-chat", "terse"), {
+				recursive: true,
+			});
+			await Bun.write(
+				join(promptSourceDir, "review-chat", "terse", "001.md"),
+				"TERSE CHAT PROMPT",
+			);
+
+			const terseAgent = new RecordingAgent();
+			await runChatTurn(
+				options(dir, terseAgent, {
+					turnId: "terse",
+					promptSourceDir,
+					promptPreset: "terse",
+					promptText: undefined,
+					message: "Use terse prompt",
+				}),
+			);
+			const tersePrompt = await Bun.file(
+				terseAgent.turns[0]?.systemPromptFile ?? "",
+			).text();
+			expect(tersePrompt).toContain("TERSE CHAT PROMPT");
+			expect(tersePrompt).not.toContain("DEFAULT CHAT PROMPT");
+
+			const defaultAgent = new RecordingAgent();
+			await runChatTurn(
+				options(dir, defaultAgent, {
+					turnId: "default",
+					promptSourceDir,
+					promptText: undefined,
+					message: "Use default prompt",
+				}),
+			);
+			const defaultPrompt = await Bun.file(
+				defaultAgent.turns[0]?.systemPromptFile ?? "",
+			).text();
+			expect(defaultPrompt).toContain("DEFAULT CHAT PROMPT");
+			expect(defaultPrompt).not.toContain("TERSE CHAT PROMPT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 	test("persists session, transcript, deltas, and read-only agent context", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-test-"));
 		try {

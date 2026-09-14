@@ -65,6 +65,8 @@ export interface ChatTurnOptions {
 	promptDir?: string;
 	promptPath?: (turnId: string) => string;
 	promptSourceDir?: string;
+	/** Active preset for the chat prompt slot. */
+	promptPreset?: string;
 	promptText?: string;
 	turnId?: string;
 	context?: ChatPromptContext;
@@ -343,7 +345,10 @@ export async function runChatTurn(
 	const paths = promptPaths(state, options, turnId);
 	const basePrompt =
 		options.promptText ??
-		(await loadPrompt("review-chat", options.promptSourceDir));
+		(await loadPrompt("review-chat", {
+			preset: options.promptPreset,
+			dir: options.promptSourceDir,
+		}));
 	const prompt = buildChatPrompt({
 		basePrompt,
 		firstTurn,

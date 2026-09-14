@@ -1,7 +1,23 @@
 import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { z } from "zod";
 import type { Config } from "../../adapters/config/schema";
-import { loadPrompt } from "../../adapters/prompts/loader";
+import {
+	DEFAULT_PROMPTS,
+	PROMPT_NAMES,
+	PresetNameSchema,
+	type PromptName,
+	PromptNameSchema,
+} from "../../adapters/prompts/defaults";
+import {
+	listPresets,
+	listVersions,
+	loadPrompt,
+	promptsDir,
+	readPrompt,
+	savePrompt,
+} from "../../adapters/prompts/loader";
+import { PortError } from "../../core/errors";
 import type {
 	CreateDiscussionInput,
 	GitHost,
@@ -23,6 +39,7 @@ import {
 	type LayerGenerationResult,
 	type LayerMergeRequest,
 	type ReviewLayerConfig,
+	reviewLayerPromptName,
 } from "./layers";
 import type { ReviewPaths } from "./paths";
 import {
@@ -90,17 +107,25 @@ export interface ReviewRoutesOptions {
 	vcs?: Vcs;
 	issues?: IssueTracker | null;
 	config?:
-		| (Pick<Config, "jira"> & Partial<Pick<Config, "review">>)
+		| (Pick<Config, "jira"> & Partial<Pick<Config, "review" | "prompts">>)
 		| {
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
 					largeFileLineThreshold?: number;
+					agent?: "omp" | "claude";
+					model?: string;
 				};
+				prompts?: Record<string, string>;
 		  };
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
 	promptText?: string;
 	explainPromptText?: string;
+	persistConfig?: (partial: Partial<Config>) => Promise<void>;
+	createReviewAgent?: (override?: {
+		agent?: "omp" | "claude";
+		model?: string;
+	}) => ReviewAgent;
 }
 
 export interface ReviewApiState extends ReviewState {
@@ -231,6 +256,13 @@ interface ChatRequestPayload {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function promptErrorResponse(error: unknown): Response {
+	if (error instanceof PortError || error instanceof z.ZodError) {
+		return jsonResponse({ error: errorMessage(error) }, 400);
+	}
+	return jsonResponse({ error: errorMessage(error) }, 500);
 }
 
 function sameRevision(
@@ -440,7 +472,288 @@ export function createReviewRoutes(
 		options.config?.review?.largeFileLineThreshold ??
 		DEFAULT_LARGE_FILE_LINE_THRESHOLD;
 
-	const layerAgent = options.layerAgent ?? options.reviewAgent;
+	const settings = {
+		prompts: {
+			...((
+				options.config as
+					| { prompts?: Partial<Record<PromptName, string>> }
+					| undefined
+			)?.prompts ?? {}),
+		} as Partial<Record<PromptName, string>>,
+		review: {
+			agent:
+				(
+					options.config as
+						| { review?: { agent?: "omp" | "claude" } }
+						| undefined
+				)?.review?.agent ?? "omp",
+			model: (options.config as { review?: { model?: string } } | undefined)
+				?.review?.model,
+		},
+	};
+	let layerAgent = options.layerAgent ?? options.reviewAgent;
+	let chatAgent = options.reviewAgent;
+	function presetFor(slot: PromptName): string {
+		return settings.prompts[slot] ?? "default";
+	}
+
+	function promptDirOption(): string {
+		return options.promptSourceDir ?? promptsDir();
+	}
+
+	function parseSlot(value: string): PromptName | null {
+		const parsed = PromptNameSchema.safeParse(value);
+		return parsed.success ? parsed.data : null;
+	}
+
+	async function latestVersion(
+		slot: PromptName,
+		preset: string,
+	): Promise<number> {
+		const versions = await listVersions(slot, preset, promptDirOption());
+		return versions.at(-1) ?? 1;
+	}
+
+	async function settingsSnapshot(): Promise<Response> {
+		try {
+			const slots = await Promise.all(
+				PROMPT_NAMES.map(async (slot) => {
+					const activePreset = settings.prompts[slot] ?? "default";
+					const presets = await listPresets(slot, promptDirOption());
+					return {
+						slot,
+						activePreset,
+						presets: await Promise.all(
+							presets.map(async (name) => ({
+								name,
+								latest: await latestVersion(slot, name),
+							})),
+						),
+					};
+				}),
+			);
+			return jsonResponse({
+				slots,
+				review: {
+					agent: settings.review.agent,
+					model: settings.review.model,
+					agents: ["omp", "claude"],
+				},
+			});
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
+	async function updateReviewSettings(request: Request): Promise<Response> {
+		const factory = options.createReviewAgent;
+		if (!factory)
+			return jsonResponse(
+				{ error: "Review agent selection is unavailable" },
+				501,
+			);
+
+		const parsed = z
+			.object({
+				agent: z.enum(["omp", "claude"]),
+				model: z.string().optional(),
+			})
+			.safeParse(await parseBody(request));
+		if (!parsed.success)
+			return jsonResponse({ error: parsed.error.message }, 400);
+
+		const model = parsed.data.model?.trim() || undefined;
+		settings.review = { agent: parsed.data.agent, model };
+
+		const { model: _existingModel, ...existingReview } =
+			options.config?.review ?? {};
+		const review = {
+			...existingReview,
+			agent: parsed.data.agent,
+			...(model === undefined ? {} : { model }),
+		};
+		await options.persistConfig?.({ review: review as Config["review"] });
+
+		const next = factory({ agent: parsed.data.agent, model });
+		layerAgent = next;
+		chatAgent = next;
+		return jsonResponse({ agent: parsed.data.agent, model });
+	}
+
+	async function promptRead(url: URL, slot: PromptName): Promise<Response> {
+		try {
+			const preset =
+				url.searchParams.get("preset") ?? settings.prompts[slot] ?? "default";
+			PresetNameSchema.parse(preset);
+
+			const rawRevision = url.searchParams.get("rev");
+			let version: number | undefined;
+			if (rawRevision !== null) {
+				if (!/^[1-9]\d*$/.test(rawRevision)) {
+					throw new PortError("Invalid prompt revision");
+				}
+				version = Number(rawRevision);
+				if (!Number.isSafeInteger(version)) {
+					throw new PortError("Invalid prompt revision");
+				}
+			}
+
+			const prompt = await readPrompt(slot, {
+				preset,
+				version,
+				dir: promptDirOption(),
+			});
+			const versions = await listVersions(slot, preset, promptDirOption());
+			return jsonResponse({
+				text: prompt.text,
+				preset: prompt.preset,
+				version: prompt.version,
+				versions,
+			});
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
+	async function promptSave(
+		request: Request,
+		slot: PromptName,
+	): Promise<Response> {
+		try {
+			const body = await parseBody(request);
+			if (!body) throw new PortError("Expected a JSON object");
+			if (typeof body.text !== "string")
+				throw new PortError("Prompt text must be a string");
+
+			const presetValue =
+				body.preset === undefined ? presetFor(slot) : body.preset;
+			if (typeof presetValue !== "string" || presetValue.length === 0)
+				throw new PortError("Prompt preset must be a non-empty string");
+			const preset = PresetNameSchema.parse(presetValue);
+			const latest = await readPrompt(slot, {
+				preset,
+				dir: promptDirOption(),
+			});
+			if (body.text.trim() === latest.text.trim())
+				return jsonResponse({ version: latest.version, saved: false });
+
+			const version = await savePrompt(slot, {
+				preset,
+				text: body.text,
+				dir: promptDirOption(),
+			});
+			return jsonResponse({ version, saved: true });
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
+	async function promptCreatePreset(
+		request: Request,
+		slot: PromptName,
+	): Promise<Response> {
+		try {
+			const body = await parseBody(request);
+			if (!body) throw new PortError("Expected a JSON object");
+
+			const parsedName = PresetNameSchema.safeParse(body.name);
+			if (!parsedName.success)
+				return jsonResponse({ error: errorMessage(parsedName.error) }, 400);
+
+			const name = parsedName.data;
+			const dir = promptDirOption();
+			const presets = await listPresets(slot, dir);
+			if (presets.includes(name)) return jsonResponse({ presets }, 409);
+
+			const source = body.from ?? settings.prompts[slot] ?? "default";
+			if (typeof source !== "string")
+				throw new PortError("Prompt preset must be a string");
+			const { text } = await readPrompt(slot, { preset: source, dir });
+			await savePrompt(slot, { preset: name, text, dir });
+			return jsonResponse({ presets: await listPresets(slot, dir) });
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
+	async function promptSetActive(
+		request: Request,
+		slot: PromptName,
+	): Promise<Response> {
+		try {
+			const body = await parseBody(request);
+			const preset = body?.preset;
+			const notFound = `Prompt preset '${String(preset)}' not found for ${slot}`;
+			if (typeof preset !== "string" || preset.length === 0)
+				return jsonResponse({ error: notFound }, 400);
+			if (!PresetNameSchema.safeParse(preset).success)
+				return jsonResponse({ error: notFound }, 400);
+
+			const dir = promptDirOption();
+			if (!(await listPresets(slot, dir)).includes(preset))
+				return jsonResponse({ error: notFound }, 400);
+
+			settings.prompts[slot] = preset;
+			await options.persistConfig?.({ prompts: { ...settings.prompts } });
+			return jsonResponse({ activePreset: preset });
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
+	async function promptRollback(
+		request: Request,
+		slot: PromptName,
+	): Promise<Response> {
+		try {
+			const body = await parseBody(request);
+			if (!body) throw new PortError("Expected a JSON object");
+			if (typeof body.preset !== "string" || body.preset.length === 0)
+				throw new PortError("Prompt preset must be a non-empty string");
+			const preset = PresetNameSchema.parse(body.preset);
+			const rev = body.rev;
+			if (typeof rev !== "number" || !Number.isSafeInteger(rev) || rev <= 0) {
+				throw new PortError("Invalid prompt revision");
+			}
+
+			const prompt = await readPrompt(slot, {
+				preset,
+				version: rev,
+				dir: promptDirOption(),
+			});
+			const version = await savePrompt(slot, {
+				preset,
+				text: prompt.text,
+				dir: promptDirOption(),
+			});
+			return jsonResponse({ version });
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
+	async function promptReset(
+		request: Request,
+		slot: PromptName,
+	): Promise<Response> {
+		try {
+			const body = await parseBody(request);
+			if (!body) throw new PortError("Expected a JSON object");
+			if (typeof body.preset !== "string" || body.preset.length === 0)
+				throw new PortError("Prompt preset must be a non-empty string");
+			const preset = PresetNameSchema.parse(body.preset);
+			await readPrompt(slot, { preset, dir: promptDirOption() });
+			const version = await savePrompt(slot, {
+				preset,
+				text: DEFAULT_PROMPTS[slot],
+				dir: promptDirOption(),
+			});
+			return jsonResponse({ version });
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
+	}
+
 	let layerRun: Promise<LayerGenerationResult> | null = null;
 
 	function recoverOrphanedLayerRun(state: ReviewState): ReviewState {
@@ -679,7 +992,8 @@ export function createReviewRoutes(
 	function startLayerGeneration(
 		force: boolean,
 	): Promise<LayerGenerationResult> | null {
-		if (!layerAgent) return null;
+		const runAgent = layerAgent;
+		if (!runAgent) return null;
 		if (layerRun) return layerRun;
 		const run = (async (): Promise<LayerGenerationResult> => {
 			const state = await currentState();
@@ -688,7 +1002,7 @@ export function createReviewRoutes(
 			}
 			const generationRevision = state.revision;
 			const result = await generateLayers({
-				agent: layerAgent,
+				agent: runAgent,
 				state,
 				store: options.store,
 				paths: options.paths,
@@ -700,6 +1014,9 @@ export function createReviewRoutes(
 				issues: options.issues,
 				config: options.config,
 				mr: currentMr,
+				promptSourceDir: options.promptSourceDir,
+				promptText: options.promptText,
+				promptPreset: presetFor(reviewLayerPromptName(state.mode)),
 				onState: (next) => {
 					// Without a store, prevent an old run's observer callback from
 					// replacing the in-memory state after sync.
@@ -790,7 +1107,7 @@ export function createReviewRoutes(
 
 		const store = options.store;
 		if (!store) return chatErrorStream("Review store is unavailable");
-		const agent = options.reviewAgent;
+		const agent = chatAgent;
 		if (!agent) return chatErrorStream("Review chat agent is unavailable");
 		if (activeTurns.has(input.chatId))
 			return chatErrorStream("Chat turn already in progress");
@@ -833,6 +1150,7 @@ export function createReviewRoutes(
 			paths: options.paths,
 			promptSourceDir: options.promptSourceDir,
 			promptText: options.promptText,
+			promptPreset: presetFor("review-chat"),
 			message: input.message,
 			tags: input.tags,
 			openFile: input.openFile,
@@ -923,7 +1241,9 @@ export function createReviewRoutes(
 		try {
 			const prefix =
 				options.explainPromptText ??
-				(await loadPrompt("review-explain-comment", options.promptSourceDir));
+				(await loadPrompt("review-explain-comment", {
+					dir: options.promptSourceDir,
+				}));
 			const diffs = [currentExpandedDiff ?? [], currentDiff];
 			const message = buildExplainMessage({ prefix, discussion, diffs });
 			const chat: ChatMeta = {
@@ -1372,6 +1692,39 @@ export function createReviewRoutes(
 					return deleteComment(draftId);
 				return emptyResponse(404);
 			}
+			if (request.method === "GET" && url.pathname === "/api/settings") {
+				return settingsSnapshot();
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/settings/review"
+			) {
+				return updateReviewSettings(request);
+			}
+			if (url.pathname.startsWith("/api/prompts/")) {
+				const suffix = url.pathname.slice("/api/prompts/".length);
+				const [rawSlot, action] = suffix.split("/");
+				let slot: PromptName | null = null;
+				try {
+					slot = rawSlot ? parseSlot(decodeURIComponent(rawSlot)) : null;
+				} catch {
+					slot = null;
+				}
+				if (!slot) return jsonResponse({ error: "Unknown prompt slot" }, 404);
+				if (!action && request.method === "GET") return promptRead(url, slot);
+				if (!action && request.method === "POST")
+					return promptSave(request, slot);
+				if (action === "presets" && request.method === "POST")
+					return promptCreatePreset(request, slot);
+				if (action === "active" && request.method === "POST")
+					return promptSetActive(request, slot);
+				if (action === "rollback" && request.method === "POST")
+					return promptRollback(request, slot);
+				if (action === "reset" && request.method === "POST")
+					return promptReset(request, slot);
+				return emptyResponse(404);
+			}
+
 			if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
 				return emptyResponse(404);
 			}
