@@ -169,11 +169,15 @@ own Explain button. Local drafts have no Explain.
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
 unpositioned discussions appear in the chat column as General discussions.
-Files with discussions rendered in the diff expose a `Collapse comments` /
-`Show comments` toggle in the diff header; the label counts those discussions
-and collapsing hides discussion rows while keeping diff lines. The toggle resets
-when the selected file changes. While the diff is hidden behind the large-diff
-placeholder, the toggle stays hidden until the table expands.
+Every positioned discussion has its own chevron that animates that one
+discussion's notes open and closed; a collapsed discussion stays in the DOM
+but shrinks to a single non-wrapping line showing its Resolved/Open status and
+the first line of its comment body, truncated with an ellipsis. Files with
+discussions rendered in the diff also expose a `Collapse all comments` /
+`Expand all comments` button in the diff header that toggles every discussion
+in that file at once. Collapse state resets when the selected file changes.
+While the diff is hidden behind the large-diff placeholder, both controls stay
+hidden until the table expands.
 
 ## 5. Layered review guide
 

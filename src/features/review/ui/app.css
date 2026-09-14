@@ -277,16 +277,11 @@ button.active {
 	overflow-wrap: anywhere;
 }
 .diff-header h2 {
-	margin: 0;
-	font-size: 1.05rem;
-	overflow-wrap: anywhere;
-}
-.diff-header-title {
-	align-items: center;
-	display: flex;
 	flex: 1 1 auto;
-	gap: 10px;
+	font-size: 0.9rem;
+	margin: 0;
 	min-width: 0;
+	overflow-wrap: anywhere;
 }
 .diff-stats {
 	display: flex;
@@ -672,6 +667,14 @@ button.active {
 .diff-controls {
 	align-items: center;
 	display: flex;
+	flex-shrink: 0;
+	gap: 5px;
+	white-space: nowrap;
+}
+.diff-controls-group {
+	align-items: center;
+	display: flex;
+	flex: 1 1 auto;
 	flex-wrap: wrap;
 	justify-content: flex-end;
 	column-gap: 5px;

@@ -1767,175 +1767,175 @@ export function DiffView({
 	return (
 		<section className="diff-panel">
 			<header className="diff-header">
-				<div className="diff-header-title">
-					<h2>{path}</h2>
-					<div className="diff-stats">
-						<span className="file-additions">+{file.insertions}</span>
-						<span className="file-deletions">-{file.deletions}</span>
-					</div>
+				<h2>{path}</h2>
+				<div className="diff-stats">
+					<span className="file-additions">+{file.insertions}</span>
+					<span className="file-deletions">-{file.deletions}</span>
 				</div>
 				<div className="diff-controls">
-					{!binary && !showingRendered ? (
-						<div className="find-bar">
-							<div className="find-input-wrap">
-								<input
-									ref={findInputRef}
-									type="text"
-									className="find-input"
-									placeholder="Find in file..."
-									value={findQuery}
-									onChange={(event) => {
-										const value = event.target.value;
-										applyFindQuery(value);
-										setFindIndex(0);
-										if (value.length > 0 && collapsed && !expanded) {
-											requestExpansion();
-										}
-									}}
-									onKeyDown={(event) => {
-										if (event.key === "Enter" && event.shiftKey) {
-											event.preventDefault();
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, -1),
-											);
-										} else if (event.key === "Enter") {
-											event.preventDefault();
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, 1),
-											);
-										} else if (event.key === "Escape") {
-											event.preventDefault();
-											applyFindQuery("");
+					<div className="diff-controls-group">
+						{!binary && !showingRendered ? (
+							<div className="find-bar">
+								<div className="find-input-wrap">
+									<input
+										ref={findInputRef}
+										type="text"
+										className="find-input"
+										placeholder="Find in file..."
+										value={findQuery}
+										onChange={(event) => {
+											const value = event.target.value;
+											applyFindQuery(value);
 											setFindIndex(0);
-											event.currentTarget.blur();
-										}
-									}}
-									aria-label="Find in file"
-								/>
-								{findActive ? (
-									<span className="find-nav-group">
-										<span className="find-count" aria-live="polite">
-											{findCount}
-										</span>
-										<button
-											type="button"
-											className="find-nav"
-											aria-label="Previous match"
-											title="Previous match (Shift+Enter)"
-											disabled={matches.length === 0}
-											onClick={() =>
+											if (value.length > 0 && collapsed && !expanded) {
+												requestExpansion();
+											}
+										}}
+										onKeyDown={(event) => {
+											if (event.key === "Enter" && event.shiftKey) {
+												event.preventDefault();
 												setFindIndex((current) =>
 													stepMatchIndex(current, matches.length, -1),
-												)
-											}
-										>
-											←
-										</button>
-										<button
-											type="button"
-											className="find-nav"
-											aria-label="Next match"
-											title="Next match (Enter)"
-											disabled={matches.length === 0}
-											onClick={() =>
+												);
+											} else if (event.key === "Enter") {
+												event.preventDefault();
 												setFindIndex((current) =>
 													stepMatchIndex(current, matches.length, 1),
-												)
+												);
+											} else if (event.key === "Escape") {
+												event.preventDefault();
+												applyFindQuery("");
+												setFindIndex(0);
+												event.currentTarget.blur();
 											}
-										>
-											→
-										</button>
-									</span>
-								) : null}
+										}}
+										aria-label="Find in file"
+									/>
+									{findActive ? (
+										<span className="find-nav-group">
+											<span className="find-count" aria-live="polite">
+												{findCount}
+											</span>
+											<button
+												type="button"
+												className="find-nav"
+												aria-label="Previous match"
+												title="Previous match (Shift+Enter)"
+												disabled={matches.length === 0}
+												onClick={() =>
+													setFindIndex((current) =>
+														stepMatchIndex(current, matches.length, -1),
+													)
+												}
+											>
+												←
+											</button>
+											<button
+												type="button"
+												className="find-nav"
+												aria-label="Next match"
+												title="Next match (Enter)"
+												disabled={matches.length === 0}
+												onClick={() =>
+													setFindIndex((current) =>
+														stepMatchIndex(current, matches.length, 1),
+													)
+												}
+											>
+												→
+											</button>
+										</span>
+									) : null}
+								</div>
 							</div>
-						</div>
-					) : null}
-					{markdown ? (
-						<fieldset className="seg-group" aria-label="Markdown view">
+						) : null}
+						{markdown ? (
+							<fieldset className="seg-group" aria-label="Markdown view">
+								<button
+									type="button"
+									className={`seg${showingRendered ? " active" : ""}`}
+									aria-pressed={showingRendered}
+									aria-label="Rendered"
+									title="Rendered"
+									onClick={() => onViewModeChange?.("rendered")}
+								>
+									¶
+								</button>
+								<button
+									type="button"
+									className={`seg${!showingRendered ? " active" : ""}`}
+									aria-pressed={!showingRendered}
+									aria-label="Diff"
+									title="Diff"
+									onClick={() => onViewModeChange?.("diff")}
+								>
+									±
+								</button>
+							</fieldset>
+						) : null}
+						{!showingRendered ? (
+							<fieldset className="seg-group" aria-label="Diff layout">
+								<button
+									type="button"
+									className={`seg${mode === "inline" ? " active" : ""}`}
+									aria-pressed={mode === "inline"}
+									aria-label="Inline"
+									title="Inline"
+									onClick={() => onModeChange("inline")}
+								>
+									≡
+								</button>
+								<button
+									type="button"
+									className={`seg${mode === "side-by-side" ? " active" : ""}`}
+									aria-pressed={mode === "side-by-side"}
+									aria-label="Side by side"
+									title="Side by side"
+									onClick={() => onModeChange("side-by-side")}
+								>
+									⇆
+								</button>
+							</fieldset>
+						) : null}
+						{wholeFileEligible ? (
+							<fieldset className="seg-group" aria-label="File scope">
+								<button
+									type="button"
+									className={`seg${wholeFile ? " active" : ""}`}
+									aria-pressed={wholeFile}
+									aria-label="Whole file"
+									title="Whole file"
+									onClick={() => changeWholeFile(true)}
+								>
+									⤢
+								</button>
+								<button
+									type="button"
+									className={`seg${!wholeFile ? " active" : ""}`}
+									aria-pressed={!wholeFile}
+									aria-label="Diff only"
+									title="Diff only"
+									onClick={() => changeWholeFile(false)}
+								>
+									✂
+								</button>
+							</fieldset>
+						) : null}
+						{!showingRendered &&
+						fileDiscussions.length > 0 &&
+						(!collapsed || expanded) ? (
 							<button
 								type="button"
-								className={`seg${showingRendered ? " active" : ""}`}
-								aria-pressed={showingRendered}
-								aria-label="Rendered"
-								title="Rendered"
-								onClick={() => onViewModeChange?.("rendered")}
+								className={`seg${allCommentsCollapsed ? " active" : ""}`}
+								aria-pressed={allCommentsCollapsed}
+								aria-label={commentsLabel}
+								title={commentsLabel}
+								onClick={collapseAllComments}
 							>
-								¶
+								❝
 							</button>
-							<button
-								type="button"
-								className={`seg${!showingRendered ? " active" : ""}`}
-								aria-pressed={!showingRendered}
-								aria-label="Diff"
-								title="Diff"
-								onClick={() => onViewModeChange?.("diff")}
-							>
-								±
-							</button>
-						</fieldset>
-					) : null}
-					{!showingRendered ? (
-						<fieldset className="seg-group" aria-label="Diff layout">
-							<button
-								type="button"
-								className={`seg${mode === "inline" ? " active" : ""}`}
-								aria-pressed={mode === "inline"}
-								aria-label="Inline"
-								title="Inline"
-								onClick={() => onModeChange("inline")}
-							>
-								≡
-							</button>
-							<button
-								type="button"
-								className={`seg${mode === "side-by-side" ? " active" : ""}`}
-								aria-pressed={mode === "side-by-side"}
-								aria-label="Side by side"
-								title="Side by side"
-								onClick={() => onModeChange("side-by-side")}
-							>
-								⇆
-							</button>
-						</fieldset>
-					) : null}
-					{wholeFileEligible ? (
-						<fieldset className="seg-group" aria-label="File scope">
-							<button
-								type="button"
-								className={`seg${wholeFile ? " active" : ""}`}
-								aria-pressed={wholeFile}
-								aria-label="Whole file"
-								title="Whole file"
-								onClick={() => changeWholeFile(true)}
-							>
-								⤢
-							</button>
-							<button
-								type="button"
-								className={`seg${!wholeFile ? " active" : ""}`}
-								aria-pressed={!wholeFile}
-								aria-label="Diff only"
-								title="Diff only"
-								onClick={() => changeWholeFile(false)}
-							>
-								✂
-							</button>
-						</fieldset>
-					) : null}
-					{!showingRendered &&
-					fileDiscussions.length > 0 &&
-					(!collapsed || expanded) ? (
-						<button
-							type="button"
-							className={`seg${allCommentsCollapsed ? " active" : ""}`}
-							aria-pressed={allCommentsCollapsed}
-							aria-label={commentsLabel}
-							title={commentsLabel}
-							onClick={collapseAllComments}
-						>
-							❝
-						</button>
-					) : null}
+						) : null}
+					</div>
 					<label className="diff-viewed" title="Mark file viewed">
 						<input
 							type="checkbox"
