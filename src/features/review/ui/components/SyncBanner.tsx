@@ -1,6 +1,7 @@
 export interface SyncBannerProps {
 	stale: boolean;
 	newCommitCount: number;
+	headSha: string;
 	refreshing: boolean;
 	syncing: boolean;
 	layerGenerating?: boolean;
@@ -13,6 +14,7 @@ export interface SyncBannerProps {
 export function SyncBanner({
 	stale,
 	newCommitCount,
+	headSha,
 	refreshing,
 	syncing,
 	layerGenerating = false,
@@ -30,7 +32,13 @@ export function SyncBanner({
 		>
 			<div className="sync-banner-copy">
 				<strong>
-					{stale ? "Merge request has changed" : "Merge request is current"}
+					{stale ? (
+						"Merge request has changed"
+					) : (
+						<>
+							Merge request at: <code>{headSha}</code>
+						</>
+					)}
 				</strong>
 				{stale ? (
 					<p>

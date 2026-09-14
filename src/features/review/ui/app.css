@@ -544,6 +544,7 @@ button.active {
 	min-width: 0;
 }
 .file-chips button {
+	font-size: 0.72rem;
 	max-width: 100%;
 	min-width: 0;
 	overflow-wrap: anywhere;
@@ -625,6 +626,13 @@ button.active {
 .sync-banner-copy strong {
 	font-size: 1.05rem;
 }
+.sync-banner code {
+	background: #18232e;
+	border-radius: 3px;
+	font-family: "SFMono-Regular", Consolas, monospace;
+	font-size: 0.82em;
+	padding: 2px 4px;
+}
 .sync-banner-copy p {
 	color: #aebccc;
 	font-size: 0.82rem;
@@ -664,9 +672,10 @@ button.active {
 .diff-controls {
 	align-items: center;
 	display: flex;
-	flex-wrap: nowrap;
+	flex-wrap: wrap;
 	justify-content: flex-end;
-	gap: 5px;
+	column-gap: 5px;
+	row-gap: 4px;
 }
 .diff-controls button,
 .collapsed-diff button,
@@ -678,6 +687,47 @@ button.active {
 	margin-left: 5px;
 }
 
+button.seg {
+	background: transparent;
+	border: 0;
+	color: #9eafc1;
+	font-size: 0.72rem;
+	line-height: 1.3;
+	padding: 4px 8px;
+}
+button.seg:hover,
+button.seg.active {
+	background: #355b80;
+	color: #e6edf3;
+}
+button.seg:focus-visible {
+	outline: 1px solid #7db8e8;
+	outline-offset: -1px;
+}
+.seg-group {
+	align-items: stretch;
+	border: 1px solid #3a4a5c;
+	border-radius: 5px;
+	display: inline-flex;
+	margin: 0;
+	padding: 0;
+}
+.seg-group button.seg + button.seg {
+	border-left: 1px solid #3a4a5c;
+}
+
+.diff-viewed {
+	align-items: center;
+	color: #9eafc1;
+	display: inline-flex;
+	font-size: 0.72rem;
+	gap: 5px;
+	white-space: nowrap;
+}
+.diff-viewed input {
+	accent-color: #52c878;
+}
+
 .find-bar {
 	align-items: center;
 	display: flex;
@@ -686,7 +736,7 @@ button.active {
 	margin-right: 4px;
 }
 .find-input-wrap {
-	min-width: 220px;
+	min-width: 280px;
 	position: relative;
 }
 .find-input {
@@ -696,7 +746,7 @@ button.active {
 	color: #e6edf3;
 	font-size: 0.8rem;
 	min-width: 100%;
-	padding: 5px 54px 5px 9px;
+	padding: 5px 108px 5px 9px;
 	width: 100%;
 }
 .find-input:focus {
@@ -706,6 +756,7 @@ button.active {
 .find-count {
 	color: #9eafc1;
 	font-size: 0.72rem;
+	margin-right: 3px;
 	white-space: nowrap;
 }
 .find-nav-group {
@@ -1301,6 +1352,7 @@ button.active {
 	border-radius: 4px;
 	color: #e7edf5;
 	display: block;
+	font-size: 0.82rem;
 	padding: 8px;
 	resize: vertical;
 	width: 100%;

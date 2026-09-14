@@ -171,3 +171,17 @@ export function stepMatchIndex(
 	if (count <= 0) return current;
 	return (((current + direction) % count) + count) % count;
 }
+
+/**
+ * The find-in-file result counter text, or null when no search is active.
+ * The counter only exists once a query has been entered: a zero-match search
+ * reads "0/0", but an untouched input shows nothing.
+ */
+export function findCountText(
+	query: string,
+	index: number,
+	matchCount: number,
+): string | null {
+	if (query.length === 0) return null;
+	return `${Math.min(index + 1, matchCount)}/${matchCount}`;
+}

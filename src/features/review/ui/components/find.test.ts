@@ -8,6 +8,7 @@ import {
 	contextLineId,
 	contextRanges,
 	diffLineId,
+	findCountText,
 	findMatches,
 	lineTextMatches,
 	stepMatchIndex,
@@ -187,4 +188,20 @@ test("stepMatchIndex wraps within the match count and is a no-op with no matches
 	// No matches -> index unchanged (no scroll, no counter movement).
 	expect(stepMatchIndex(0, 0, 1)).toBe(0);
 	expect(stepMatchIndex(5, 0, -1)).toBe(5);
+});
+
+test("findCountText is null when no search is active", () => {
+	expect(findCountText("", 0, 0)).toBeNull();
+});
+
+test("findCountText reports the current match position", () => {
+	expect(findCountText("x", 0, 3)).toBe("1/3");
+	expect(findCountText("x", 2, 3)).toBe("3/3");
+});
+
+test("findCountText clamps the index to the match count", () => {
+	// A query with no matches reads 0/0.
+	expect(findCountText("x", 0, 0)).toBe("0/0");
+	// An index past the end (stale after edits) clamps to the last match.
+	expect(findCountText("x", 7, 2)).toBe("2/2");
 });

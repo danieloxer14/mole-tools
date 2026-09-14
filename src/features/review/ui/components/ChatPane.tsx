@@ -10,6 +10,7 @@ import type { HostDiscussion } from "../../../../ports/git-host";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import { type ChatTag, isMarkdownChatTag } from "../../chat-tags";
 import type { ChatEntry } from "../../store";
+import { composerEnterAction } from "./composer-keydown";
 
 export interface ChatToolActivity {
 	id: number;
@@ -233,10 +234,15 @@ export function ChatPane({
 	};
 
 	const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-		if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-			event.preventDefault();
-			submit();
-		}
+		const action = composerEnterAction({
+			key: event.key,
+			shift: event.shiftKey,
+			meta: event.metaKey,
+			ctrl: event.ctrlKey,
+			composing: event.nativeEvent.isComposing,
+		});
+		if (action.prevent) event.preventDefault();
+		if (action.send) submit();
 	};
 
 	return (
@@ -449,7 +455,7 @@ export function ChatPane({
 							: sending
 								? "Agent is reading the review worktree…"
 								: "A turn is still running for this chat."
-						: "Ctrl/⌘ + Enter to send."}
+						: "Enter to send, Shift+Enter for a new line."}
 				</p>
 			</form>
 		</aside>

@@ -978,6 +978,45 @@ describe("review routes", () => {
 		}
 	});
 
+	test("persists object-form viewed-file toggles through ReviewStore", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-routes-"));
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			const store = new ReviewStore(paths);
+			await store.write(state());
+			const routes = createReviewRoutes({ token, store, diff });
+			const mark = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						viewedFile: { path: "src/app.ts", viewed: true },
+					}),
+				}),
+			);
+			expect(mark.status).toBe(200);
+			expect((await mark.json()).viewedFiles).toEqual(["src/app.ts"]);
+			const unmark = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						viewedFile: { path: "src/app.ts", viewed: false },
+					}),
+				}),
+			);
+			expect(unmark.status).toBe(200);
+			expect((await unmark.json()).viewedFiles).toEqual([]);
+			expect((await new ReviewStore(paths).read())?.viewedFiles).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("recovers a persisted layer run after server restart", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-routes-"));
 		try {

@@ -36,6 +36,7 @@ import {
 	isMarkdownPath,
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
+import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
 import { SyncBanner } from "./components/SyncBanner";
 import "./app.css";
@@ -456,6 +457,15 @@ function ReviewApp() {
 	const resizeSession = useRef<ResizeSession | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
+	const fileTreeRows = useRef<Map<string, HTMLElement>>(new Map());
+	const registerFileTreeRow = useCallback(
+		(path: string, el: HTMLElement | null) => {
+			const rows = fileTreeRows.current;
+			if (el) rows.set(path, el);
+			else rows.delete(path);
+		},
+		[],
+	);
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
 	const [fileViewModes, setFileViewModes] = useState<
 		Record<string, FileViewMode>
@@ -873,6 +883,13 @@ function ReviewApp() {
 		fileContentsError,
 		confirmedWholeFilePaths,
 	]);
+
+	// Scroll the selected Changed-files row into view. Only `selectedPath`
+	// drives this: row registrations stay current via `registerFileTreeRow`,
+	// and a file-list refresh must not re-jump the tree's scroll position.
+	useEffect(() => {
+		scrollSelectedFileRow(fileTreeRows.current, selectedPath);
+	}, [selectedPath]);
 
 	if (error)
 		return (
@@ -1665,6 +1682,7 @@ function ReviewApp() {
 					<SyncBanner
 						stale={freshness?.stale ?? false}
 						newCommitCount={freshness?.newCommitCount ?? 0}
+						headSha={data.revision.headSha}
 						refreshing={refreshing}
 						syncing={syncing}
 						layerGenerating={layerAction !== null}
@@ -1689,6 +1707,7 @@ function ReviewApp() {
 								<div
 									className={`file-row ${path === selectedPath ? "selected" : ""}`}
 									key={path}
+									ref={(el) => registerFileTreeRow(path, el)}
 								>
 									<button type="button" onClick={() => selectFile(path)}>
 										{path}
@@ -1730,6 +1749,15 @@ function ReviewApp() {
 					wholeFile={selectedWholeFile}
 					onWholeFileChange={changeWholeFile}
 					onViewModeChange={changeViewMode}
+					viewed={
+						selectedPath !== null && data.viewedFiles.includes(selectedPath)
+					}
+					onViewedChange={(viewed) => {
+						if (selectedPath === null) return;
+						saveProgress({
+							viewedFile: { path: selectedPath, viewed },
+						});
+					}}
 					onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
 					onLineSelection={handleLineSelection}
 					onCommentSelection={createCommentDraft}
