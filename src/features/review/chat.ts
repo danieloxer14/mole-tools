@@ -192,6 +192,13 @@ export function validateChatTags(value: unknown): ChatTag[] {
 
 export const validateLineTags = validateChatTags;
 
+/**
+ * Injected after tag JSON in both the user message and the system prompt so
+ * the agent knows exactly what each tag variant anchors and that tags are
+ * context only.
+ */
+const TAG_SEMANTICS =
+	'Tag semantics: tags are agent-chat context only, never host comments. A tag without a kind names an inclusive line range on one side of the diff with its hunk header; a tag with kind "markdown" names an inclusive source-line range of a rendered markdown block; a tag with kind "file" and a path only means inspect the entire file at that path.';
 function normalizedMessage(message: unknown): string {
 	if (typeof message !== "string" || message.trim().length === 0) {
 		throw new Error("Chat message must not be empty");
@@ -263,8 +270,9 @@ export function buildChatMessage(input: {
 	return [
 		"Reviewer message:",
 		message,
-		"New line tags:",
+		"New context tags:",
 		json(tags),
+		TAG_SEMANTICS,
 		"Current file:",
 		openFile ?? "(none)",
 	].join("\n\n");
@@ -308,7 +316,8 @@ export function buildChatPrompt(input: ChatPromptInput): string {
 				message,
 				newTags: tags,
 				currentFile: openFile,
-			}),
+			}) +
+			`\n\n${TAG_SEMANTICS}`,
 		`Current file:\n${openFile ?? "(none)"}`,
 	);
 	return `${sections.join("\n\n")}\n`;

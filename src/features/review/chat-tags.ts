@@ -41,9 +41,23 @@ export const MarkdownChatTagSchema = z
 	});
 export type MarkdownChatTag = z.infer<typeof MarkdownChatTagSchema>;
 
+/**
+ * Path-only chat tag asking the agent to inspect an entire file. Deliberately
+ * has no line range: binary, collapsed, renamed, deleted, or stat-only files
+ * can lack a valid diff position.
+ */
+export const FileChatTagSchema = z
+	.object({
+		kind: z.literal("file"),
+		path: z.string().min(1),
+	})
+	.strict();
+export type FileChatTag = z.infer<typeof FileChatTagSchema>;
+
 export const ChatTagSchema = z.union([
 	DiffChatTagSchema,
 	MarkdownChatTagSchema,
+	FileChatTagSchema,
 ]);
 export type ChatTag = z.infer<typeof ChatTagSchema>;
 
@@ -51,17 +65,26 @@ export function isMarkdownChatTag(tag: ChatTag): tag is MarkdownChatTag {
 	return "kind" in tag && tag.kind === "markdown";
 }
 
-/** Structural equality across both chat tag variants, for dedup/removal. */
+export function isFileChatTag(tag: ChatTag): tag is FileChatTag {
+	return "kind" in tag && tag.kind === "file";
+}
+
+/**
+ * Structural equality across all three chat tag variants, for dedup/removal.
+ * Path is always shared by the check; only the discriminating fields differ.
+ */
 export function chatTagsEqual(a: ChatTag, b: ChatTag): boolean {
-	if (
-		a.path !== b.path ||
-		a.startLine !== b.startLine ||
-		a.endLine !== b.endLine
-	) {
-		return false;
-	}
+	if (a.path !== b.path) return false;
+	const aFile = isFileChatTag(a);
+	const bFile = isFileChatTag(b);
+	if (aFile || bFile) return aFile && bFile;
 	const aMarkdown = isMarkdownChatTag(a);
 	const bMarkdown = isMarkdownChatTag(b);
 	if (aMarkdown || bMarkdown) return aMarkdown && bMarkdown;
-	return a.side === b.side && a.hunk === b.hunk;
+	return (
+		a.startLine === b.startLine &&
+		a.endLine === b.endLine &&
+		a.side === b.side &&
+		a.hunk === b.hunk
+	);
 }

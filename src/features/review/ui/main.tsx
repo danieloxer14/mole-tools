@@ -1645,6 +1645,15 @@ function ReviewApp() {
 				: [...current.tags, tag],
 		}));
 	};
+	const handleFileTag = (path: string) => {
+		if (!activeChatId) return;
+		const tag: ChatTag = { kind: "file", path };
+		patchChat(activeChatId, (current) => ({
+			tags: current.tags.some((candidate) => chatTagsEqual(candidate, tag))
+				? current.tags
+				: [...current.tags, tag],
+		}));
+	};
 	const removeChatTag = (tag: ChatTag) => {
 		if (!activeChatId) return;
 		patchChat(activeChatId, (current) => ({
@@ -1780,6 +1789,7 @@ function ReviewApp() {
 					onLineSelection={handleLineSelection}
 					onCommentSelection={createCommentDraft}
 					onMarkdownTag={handleMarkdownTag}
+					onFileTag={handleFileTag}
 					onMarkdownComment={createMarkdownCommentDraft}
 					onCancelDraft={cancelCommentDraft}
 					onEditDraft={updateCommentDraft}

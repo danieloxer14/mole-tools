@@ -140,8 +140,9 @@ The page has three working columns:
   its diff and scrolls its row into view; the scroll uses `nearest`, so an
   already-visible row does not move.
 - **Right — Agent chat.** General discussions, Explain per discussion,
-  restored transcript, streaming response/tool activity, line-context tags,
-  composer, New chat button, chat switcher, and Stop.
+  restored transcript, streaming response/tool activity, context tags (diff
+  line ranges, rendered-markdown block ranges, and whole files), composer,
+  New chat button, chat switcher, and Stop.
 
 The centre column supports Inline and Side by side layouts. Shiki highlights
 source lines. Added lines use the new side, deleted lines use the old side, and
@@ -157,8 +158,9 @@ and offers local `Tag line` only—never a GitLab `Comment`. `Whole file` is kep
 per file for the browser session, confirms files over the configured total-line
 threshold, and `Diff only` returns the nearest visible hunk to the viewport.
 The diff header renders its controls as compact icon buttons with tooltips:
-segmented `Inline`/`Side by side` and `Whole file`/`Diff only` groups, and a
-`Rendered`/`Diff` group for markdown files. The find box shows its result count
+segmented `Inline`/`Side by side` and `Whole file`/`Diff only` groups, a
+`Rendered`/`Diff` group for markdown files, and a `Tag whole file` button.
+The find box shows its result count
 and previous/next arrows only after a search is made.
 The header also offers a `Viewed` checkbox for the selected file, mirroring the
 `Changed files` row checkbox and persisting through the same progress save.
@@ -256,8 +258,11 @@ Turn construction is intentionally asymmetric:
   refreshed route state after sync or comment submission.
 - Later turns include only the new message, newly selected tags, and currently
   open file; the resumed provider session retains the initial context.
-- The user message is rejected when blank. Tags are validated objects carrying
-  `path`, `side`, inclusive `startLine`/`endLine`, and the hunk header.
+- The user message is rejected when blank. Tags are validated strict objects:
+  a diff-line tag carries `path`, `side`, inclusive `startLine`/`endLine`, and
+  the hunk header; a markdown-block tag carries `kind: "markdown"`, `path`,
+  the source-line range, and an optional `quote`; a file tag carries
+  `kind: "file"` and `path` only. Unknown fields and kinds are rejected.
 - Prompt files are stored under the review's `prompt/` directory. User and
   assistant entries are appended to that chat's `chats/<chatId>.ndjson`;
   each chat owns its provider session id, stored in state and on each
@@ -270,7 +275,13 @@ range as one tag in a single gesture; the drag is clamped to the origin hunk
 and the origin side, Esc aborts the drag with no tag added, and releasing the
 mouse outside the diff panel commits the last clamped range. Revealed
 inter-hunk context lines have no hunk to clamp to, so they keep tagging one
-line at a time via their own click and are never part of a drag. Dragging
+line at a time via their own click and are never part of a drag. The diff
+header's `Tag whole file` button adds one path-only `{ kind: "file", path }`
+path — no line range is implied. The button appears for any selected
+non-empty path, binary files included; there is no binary policy, so binary,
+collapsed, stat-only, and renamed files can all be tagged the same way. It
+is deduplicated against existing tags and never creates a GitLab discussion.
+Dragging
 from a rendered-Markdown block's Tag button across later blocks adds one tag
 spanning those blocks' source lines, snapping to block boundaries. Tags can
 be removed before sending, or cleared all at once. The UI streams text and

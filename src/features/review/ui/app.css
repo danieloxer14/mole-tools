@@ -718,6 +718,24 @@ button.seg:focus-visible {
 .seg-group button.seg + button.seg {
 	border-left: 1px solid #3a4a5c;
 }
+.diff-tag-file {
+	background: transparent;
+	border: 1px solid #3a4a5c;
+	border-radius: 5px;
+	color: #9eafc1;
+	cursor: pointer;
+	font-size: 0.72rem;
+	line-height: 1.3;
+	padding: 4px 8px;
+}
+.diff-tag-file:hover {
+	background: #355b80;
+	color: #e6edf3;
+}
+.diff-tag-file:focus-visible {
+	outline: 1px solid #7db8e8;
+	outline-offset: -1px;
+}
 
 .diff-viewed {
 	align-items: center;
