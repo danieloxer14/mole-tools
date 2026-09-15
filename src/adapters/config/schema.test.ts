@@ -47,6 +47,16 @@ describe("config schema", () => {
 		expect(configured.prompts).toEqual({ "commit-system": "terse" });
 	});
 
+	test("defaults the review agent to Claude with no forced model", () => {
+		const defaults = ConfigSchema.parse(baseConfig);
+		expect(defaults.review).toEqual({
+			agent: "claude",
+			layerTimeoutSeconds: 600,
+			largeFileLineThreshold: 800,
+			maxLayerPromptBytes: 100_000,
+		});
+	});
+
 	test("rejects unknown prompt slots with a prompts path", () => {
 		const result = ConfigSchema.safeParse({
 			...baseConfig,

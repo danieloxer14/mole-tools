@@ -31,14 +31,18 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```jsonc
 {
   "review": {
-    "agent": "omp", // "omp" or "claude"
-    "binary": "omp", // optional binary override
-    "model": "review-model", // optional OMP model
+    "agent": "claude", // "omp" or "claude"; default "claude"
+    "binary": "claude", // optional binary override
+    "model": "review-model", // optional model forwarded to the selected agent
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800,
   },
 }
 ```
+
+Omitting `review` uses the default agent `claude` with its default `claude`
+binary and no forced model, so the Claude CLI selects its own current default
+model.
 
 Prompt overrides use the existing prompt-loader convention. The first read
 seeds these files under `~/.config/mole-tools/prompts/` without overwriting user

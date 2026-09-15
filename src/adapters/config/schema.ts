@@ -61,7 +61,7 @@ export type ReviewBabysitterConfig = z.infer<
 
 export const ReviewConfigSchema = z
 	.object({
-		agent: z.enum(["omp", "claude"]).default("omp"),
+		agent: z.enum(["omp", "claude"]).default("claude"),
 		binary: z.string().min(1).optional(),
 		model: z.string().min(1).optional(),
 		layerTimeoutSeconds: z.number().int().positive().default(600),
@@ -69,7 +69,7 @@ export const ReviewConfigSchema = z
 		maxLayerPromptBytes: z.number().int().positive().default(100_000),
 	})
 	.default({
-		agent: "omp",
+		agent: "claude",
 		layerTimeoutSeconds: 600,
 		largeFileLineThreshold: 800,
 		maxLayerPromptBytes: 100_000,
