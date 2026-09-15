@@ -245,8 +245,15 @@ edits. Review worktree must remain byte-identical after chat.
 
 Turn construction is intentionally asymmetric:
 
-- Turn one of every chat includes MR metadata, the current layer guide, and the
-  changed-file list in its system-prompt file.
+- Turn one of every chat includes MR metadata, the current layer guide, the
+  changed-file list, and a snapshot of the current host review discussions
+  (standalone notes included as unpositioned general comments, threaded
+  discussions with explicit resolved status and position, system notes
+  omitted, note bodies truncated, at most 20 discussions) in its system-prompt
+  file as untrusted data, never treated as instructions. The discussion
+  section is omitted when there are no applicable discussions, and is only
+  supplied on the first turn — later turns rely on the resumed session and
+  refreshed route state after sync or comment submission.
 - Later turns include only the new message, newly selected tags, and currently
   open file; the resumed provider session retains the initial context.
 - The user message is rejected when blank. Tags are validated objects carrying
