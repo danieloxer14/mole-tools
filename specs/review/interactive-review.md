@@ -277,10 +277,10 @@ mouse outside the diff panel commits the last clamped range. Revealed
 inter-hunk context lines have no hunk to clamp to, so they keep tagging one
 line at a time via their own click and are never part of a drag. The diff
 header's `Tag whole file` button adds one path-only `{ kind: "file", path }`
-tag for `newPath ?? oldPath` so the agent inspects the entire file at that
-path — no line range is implied, and binary, collapsed, stat-only, and
-renamed files can be tagged the same way. It is deduplicated against existing
-tags and never creates a GitLab discussion.
+path — no line range is implied. The button appears for any selected
+non-empty path, binary files included; there is no binary policy, so binary,
+collapsed, stat-only, and renamed files can all be tagged the same way. It
+is deduplicated against existing tags and never creates a GitLab discussion.
 Dragging
 from a rendered-Markdown block's Tag button across later blocks adds one tag
 spanning those blocks' source lines, snapping to block boundaries. Tags can

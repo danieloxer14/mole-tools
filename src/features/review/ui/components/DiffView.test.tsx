@@ -230,6 +230,24 @@ test("offers Tag whole file for a collapsed stat-only file", () => {
 	expect(markup).toContain("<h2>src/stats.ts</h2>");
 });
 
+test("offers Tag whole file for a binary file", () => {
+	const markup = renderDiff({
+		file: {
+			oldPath: "assets/logo.png",
+			newPath: "assets/logo.png",
+			status: "modified",
+			binary: true,
+			insertions: 1,
+			deletions: 1,
+			hunks: [],
+		},
+		onFileTag: () => {},
+	});
+
+	expect(markup).toContain('aria-label="Tag whole file"');
+	expect(markup).toContain("<h2>assets/logo.png</h2>");
+});
+
 test("hides hunk summary in whole-file mode", () => {
 	const markup = renderDiff({ wholeFile: true });
 
