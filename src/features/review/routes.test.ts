@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
@@ -550,6 +557,51 @@ describe("review routes", () => {
 			);
 			expect(body.endsWith("event: done\ndata: null\n\n")).toBe(true);
 			expect(await store.readChat("chat-a")).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists file tags through /api/chat into transcript and prompt file", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-file-tags-"));
+		const fileTag = { kind: "file" as const, path: "src/whole.ts" };
+		try {
+			const paths = chatPaths(dir);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths,
+				promptText: "Test chat prompt.",
+				reviewAgent: new StreamChatAgent(),
+			});
+
+			const response = await routes(
+				chatRequest({
+					message: "Inspect this whole file",
+					tags: [fileTag],
+					openFile: null,
+				}),
+			);
+			const body = await response.text();
+
+			expect(body.endsWith("event: done\ndata: null\n\n")).toBe(true);
+
+			const entries = await store.readChat("chat-a");
+			const user = entries.find((entry) => entry.role === "user");
+			expect(user?.tags).toEqual([fileTag]);
+
+			const written = (await readdir(join(dir, "prompt"))).sort() as string[];
+			expect(written.length).toBe(1);
+			const prompt = await Bun.file(join(dir, "prompt", written[0]));
+			expect(await prompt.text()).toContain('"kind": "file"');
+			expect(await prompt.text()).toContain('"path": "src/whole.ts"');
+			expect(await prompt.text()).toContain("inspect the entire file");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

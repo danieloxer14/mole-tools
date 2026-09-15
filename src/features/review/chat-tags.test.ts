@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { ChatTagSchema, chatTagsEqual, isMarkdownChatTag } from "./chat-tags";
+import {
+	ChatTagSchema,
+	chatTagsEqual,
+	isFileChatTag,
+	isMarkdownChatTag,
+} from "./chat-tags";
 
 const diffTag = {
 	path: "src/app.ts",
@@ -16,6 +21,7 @@ const markdownTag = {
 	endLine: 6,
 	quote: "## Heading\n\nBody.",
 };
+const fileTag = { kind: "file" as const, path: "src/api.ts" };
 
 describe("ChatTagSchema", () => {
 	test("accepts a diff-line tag and reports it as non-markdown", () => {
@@ -44,6 +50,24 @@ describe("ChatTagSchema", () => {
 		const { hunk, ...withoutHunk } = diffTag;
 		expect(() => ChatTagSchema.parse(withoutHunk)).toThrow();
 	});
+
+	test("accepts a path-only file tag and reports its kind", () => {
+		const tag = ChatTagSchema.parse(fileTag);
+		expect(isFileChatTag(tag)).toBe(true);
+		expect(isMarkdownChatTag(tag)).toBe(false);
+	});
+
+	test("rejects a file tag with an empty path", () => {
+		expect(() => ChatTagSchema.parse({ ...fileTag, path: "" })).toThrow();
+	});
+
+	test("rejects a file tag carrying extra fields", () => {
+		expect(() => ChatTagSchema.parse({ ...fileTag, startLine: 1 })).toThrow();
+	});
+
+	test("rejects a diff-line tag carrying a file kind", () => {
+		expect(() => ChatTagSchema.parse({ ...diffTag, kind: "file" })).toThrow();
+	});
 });
 
 describe("chatTagsEqual", () => {
@@ -69,6 +93,17 @@ describe("chatTagsEqual", () => {
 		expect(chatTagsEqual(diffTag, { ...diffTag, hunk: "@@ other @@" })).toBe(
 			false,
 		);
+	});
+
+	test("matches identical file tags and rejects any other variant", () => {
+		expect(chatTagsEqual(fileTag, { ...fileTag })).toBe(true);
+		expect(chatTagsEqual(fileTag, { ...fileTag, path: "src/other.ts" })).toBe(
+			false,
+		);
+		expect(chatTagsEqual(fileTag, { ...markdownTag, path: fileTag.path })).toBe(
+			false,
+		);
+		expect(chatTagsEqual(fileTag, diffTag)).toBe(false);
 	});
 
 	test("does not match tags with a different line range", () => {

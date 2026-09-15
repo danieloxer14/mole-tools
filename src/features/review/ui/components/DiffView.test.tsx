@@ -152,6 +152,84 @@ test("renders line actions without hunk actions", () => {
 	expect(markup).toContain('aria-label="Diff only"');
 });
 
+const renamedFile = {
+	oldPath: "src/old.ts",
+	newPath: "src/new.ts",
+	status: "renamed",
+	binary: false,
+	insertions: 1,
+	deletions: 1,
+	hunks: [
+		{
+			header: "@@ -1 +1 @@",
+			oldStart: 1,
+			oldLines: 1,
+			newStart: 1,
+			newLines: 1,
+			lines: [
+				{
+					kind: "add",
+					oldLine: null,
+					newLine: 1,
+					text: "renamed body",
+				},
+			],
+		},
+	],
+} as const;
+
+test("hides Tag whole file when no file tag handler is supplied", () => {
+	const markup = renderDiff();
+
+	expect(markup).not.toContain("Tag whole file");
+});
+
+test("tags the whole selected file from the diff header as its new path", () => {
+	const markup = renderDiff({
+		file: renamedFile,
+		onFileTag: () => {},
+	});
+
+	expect(markup).toContain('class="diff-tag-file"');
+	expect(markup).toContain('aria-label="Tag whole file"');
+	// The button tags the same resolved path (newPath ?? oldPath) shown in
+	// the header, so a renamed file is tagged by its new path.
+	expect(markup).toContain("<h2>src/new.ts</h2>");
+});
+
+test("tags a deleted file by its old path", () => {
+	const markup = renderDiff({
+		file: {
+			...renamedFile,
+			oldPath: "src/gone.ts",
+			newPath: null,
+			status: "deleted",
+		},
+		onFileTag: () => {},
+	});
+
+	expect(markup).toContain('class="diff-tag-file"');
+	expect(markup).toContain("<h2>src/gone.ts</h2>");
+});
+
+test("offers Tag whole file for a collapsed stat-only file", () => {
+	const markup = renderDiff({
+		file: {
+			oldPath: "src/stats.ts",
+			newPath: "src/stats.ts",
+			status: "modified",
+			binary: false,
+			insertions: 4,
+			deletions: 2,
+			hunks: [],
+		},
+		onFileTag: () => {},
+	});
+
+	expect(markup).toContain('aria-label="Tag whole file"');
+	expect(markup).toContain("<h2>src/stats.ts</h2>");
+});
+
 test("hides hunk summary in whole-file mode", () => {
 	const markup = renderDiff({ wholeFile: true });
 

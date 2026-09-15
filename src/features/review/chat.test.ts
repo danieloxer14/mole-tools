@@ -9,6 +9,7 @@ import type {
 	ReviewAgent,
 } from "../../ports/review-agent";
 import {
+	buildChatMessage,
 	buildChatPrompt,
 	type ChatTurnOptions,
 	compactChatDiscussions,
@@ -239,6 +240,58 @@ describe("chat prompt construction", () => {
 				],
 			}),
 		).toThrow("Invalid chat tag");
+	});
+
+	test("serializes file tags with tag semantics in first and later turns", () => {
+		const fileTag = { kind: "file" as const, path: "src/whole.ts" };
+		const first = buildChatPrompt({
+			firstTurn: true,
+			basePrompt: "Base",
+			mr: { ...state().mr },
+			guide: [{ title: "API" }],
+			changedFiles: ["src/whole.ts"],
+			message: "Inspect this whole file",
+			tags: [fileTag],
+			worktreePath: "/tmp/review-worktree",
+		});
+		const later = buildChatPrompt({
+			firstTurn: false,
+			basePrompt: "Base",
+			message: "More detail",
+			newTags: [fileTag],
+			worktreePath: "/tmp/review-worktree",
+		});
+
+		for (const prompt of [first, later]) {
+			expect(prompt).toContain('"kind": "file"');
+			expect(prompt).toContain('"path": "src/whole.ts"');
+			expect(prompt).toContain("inspect the entire file");
+			expect(prompt).toContain("agent-chat context only, never host comments");
+		}
+	});
+
+	test("rejects malformed file tags", () => {
+		expect(() =>
+			buildChatPrompt({
+				firstTurn: false,
+				message: "Explain",
+				tags: [{ kind: "file", path: "src/api.ts", startLine: 4 }],
+			}),
+		).toThrow("Invalid chat tag");
+	});
+
+	test("labels the user message context tags and explains file tag semantics", () => {
+		const fileTag = { kind: "file" as const, path: "src/whole.ts" };
+		const message = buildChatMessage({
+			message: "Inspect this whole file",
+			tags: [fileTag],
+		});
+
+		expect(message).toContain("New context tags:");
+		expect(message).toContain('"kind": "file"');
+		expect(message).toContain('"path": "src/whole.ts"');
+		expect(message).toContain("inspect the entire file");
+		expect(message).toContain("(none)");
 	});
 
 	test("includes the current review discussions in the first turn", () => {
