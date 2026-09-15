@@ -1154,6 +1154,7 @@ export function createReviewRoutes(
 			message: input.message,
 			tags: input.tags,
 			openFile: input.openFile,
+			discussions: fallbackDiscussions,
 			signal: controller.signal,
 			onEvent: (event) => {
 				const frame = chatEventFrame(event);
