@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import { DiffView } from "./DiffView";
+
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const file = {
 	oldPath: "src/app.ts",
@@ -655,4 +659,87 @@ test("keeps collapsed discussion summaries as plain text", () => {
 	expect(preview).toBeDefined();
 	expect(preview).toContain("**Important**");
 	expect(preview).not.toContain("<strong>");
+});
+
+test("highlights multiline source comments with shared grammar state", {
+	timeout: 30_000,
+}, async () => {
+	const multilineCommentFile = {
+		oldPath: "src/example.ts",
+		newPath: "src/example.ts",
+		status: "added",
+		binary: false,
+		insertions: 4,
+		deletions: 0,
+		hunks: [
+			{
+				header: "@@ -0,0 +1,4 @@",
+				oldStart: 0,
+				oldLines: 0,
+				newStart: 1,
+				newLines: 4,
+				lines: [
+					{ kind: "add", oldLine: null, newLine: 1, text: "/**" },
+					{
+						kind: "add",
+						oldLine: null,
+						newLine: 2,
+						text: " * multiline comment",
+					},
+					{ kind: "add", oldLine: null, newLine: 3, text: " */" },
+					{
+						kind: "add",
+						oldLine: null,
+						newLine: 4,
+						text: "const value = 1;",
+					},
+				],
+			},
+		],
+	} as const;
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+
+	try {
+		act(() => {
+			root.render(
+				<DiffView
+					file={multilineCommentFile}
+					mode="inline"
+					largeFileLineThreshold={800}
+					fileContents={null}
+					fileContentsError={null}
+					onModeChange={() => {}}
+					onLineSelection={() => {}}
+					onCommentSelection={() => {}}
+				/>,
+			);
+		});
+		for (let attempt = 0; attempt < 500; attempt++) {
+			const commentToken = container
+				.querySelectorAll<HTMLElement>(".diff-line")[1]
+				?.querySelector<HTMLElement>(".line-text > span:nth-child(2) > span");
+			if (commentToken?.style.color === "rgb(106, 115, 125)") break;
+			await act(async () => {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				setTimeout(resolve, 10);
+				await promise;
+			});
+		}
+
+		const rows = container.querySelectorAll(".diff-line");
+		const commentToken = rows[1]?.querySelector<HTMLElement>(
+			".line-text > span:nth-child(2) > span",
+		);
+		expect(["#6A737D", "rgb(106, 115, 125)"]).toContain(
+			commentToken?.style.color,
+		);
+		expect(commentToken?.style.color).not.toBe("rgb(249, 117, 131)");
+	} finally {
+		act(() => {
+			root.unmount();
+		});
+		container.remove();
+	}
 });
