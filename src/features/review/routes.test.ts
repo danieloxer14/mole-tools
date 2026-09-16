@@ -1111,6 +1111,50 @@ describe("review routes", () => {
 		}
 	});
 
+	test("returns lightweight progress without refreshing host state", async () => {
+		let discussionCalls = 0;
+		let approvalCalls = 0;
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			diff,
+			getDiscussions: async () => {
+				discussionCalls++;
+				return [];
+			},
+			gitHost: {
+				fetchApprovalState: async () => {
+					approvalCalls++;
+					return {
+						approved: false,
+						currentUser: null,
+						approvalsLeft: null,
+						approvedBy: [],
+						rules: [],
+					};
+				},
+			},
+		});
+
+		const response = await routes(
+			request(`/api/progress?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					viewedFile: { path: "src/app.ts", viewed: true },
+				}),
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(Object.keys(await response.json())).toEqual([
+			"layers",
+			"viewedFiles",
+		]);
+		expect(discussionCalls).toBe(0);
+		expect(approvalCalls).toBe(0);
+	});
+
 	test("recovers a persisted layer run after server restart", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-routes-"));
 		try {

@@ -429,6 +429,7 @@ button.active {
 	border-radius: 3px;
 	flex: 0 0 120px;
 	height: 5px;
+	margin-left: auto;
 	overflow: hidden;
 	width: 120px;
 }

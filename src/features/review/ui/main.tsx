@@ -13,7 +13,7 @@ import type { HostDiscussion, MrApprovalState } from "../../../ports/git-host";
 import { splitSourceLines } from "../../../shared/diff-context";
 import type { ParsedFileDiff } from "../../../shared/diff-parse";
 import { type ChatTag, chatTagsEqual } from "../chat-tags";
-import type { ReviewApiState } from "../routes";
+import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
 import type { ChatEntry } from "../store";
 import {
@@ -1057,11 +1057,19 @@ function ReviewApp() {
 			.then(async (response) => {
 				if (!response.ok)
 					throw new Error(`Progress request failed (${response.status})`);
-				return (await response.json()) as ReviewStateResponse;
+				return (await response.json()) as ReviewProgressResponse;
 			})
 			.then((next) => {
 				setProgressError(null);
-				setData(next);
+				setData((current) =>
+					current
+						? {
+								...current,
+								layers: next.layers,
+								viewedFiles: next.viewedFiles,
+							}
+						: current,
+				);
 			})
 			.catch((reason: unknown) => {
 				setProgressError(

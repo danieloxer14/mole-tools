@@ -136,6 +136,13 @@ export interface ReviewApiState extends ReviewState {
 	/** Chats with a turn running on the server right now. */
 	busyChatIds: string[];
 }
+
+/** State changed by the lightweight progress endpoint. */
+export type ReviewProgressResponse = Pick<
+	ReviewApiState,
+	"layers" | "viewedFiles"
+>;
+
 export type ReviewRouteHandler = (request: Request) => Promise<Response>;
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -1536,8 +1543,10 @@ export function createReviewRoutes(
 			next = applyProgress(state);
 			await saveState(next);
 		}
-		fallbackState = next;
-		return jsonResponse(await apiState());
+		return jsonResponse({
+			layers: next.layers,
+			viewedFiles: next.viewedFiles,
+		});
 	}
 
 	async function file(request: Request): Promise<Response> {
