@@ -21,7 +21,11 @@ import {
 	initialColumnWidth,
 	type ReviewColumn,
 } from "./column-resize";
-import type { ApprovalAction } from "./components/ApprovalControls";
+import {
+	ChangedFilesHeader,
+	changedFileCount,
+	viewedFileCount,
+} from "./components/ChangedFilesHeader";
 import {
 	ChatPane,
 	type ChatSummary,
@@ -38,8 +42,14 @@ import {
 } from "./components/DiffView";
 import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
+import { type ApprovalAction, MrHeader } from "./components/MrHeader";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { SyncBanner } from "./components/SyncBanner";
+import {
+	errorToastMessage,
+	refreshResultToast,
+	type Toast,
+	Toasts,
+} from "./components/Toasts";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -444,10 +454,30 @@ type ChatRuntimePatch =
 	| Partial<ChatRuntime>
 	| ((current: ChatRuntime) => Partial<ChatRuntime>);
 
+function useToasts() {
+	const [toasts, setToasts] = useState<Toast[]>([]);
+	const toastId = useRef(0);
+	const dismissToast = useCallback((id: string) => {
+		setToasts((current) => current.filter((toast) => toast.id !== id));
+	}, []);
+	const pushToast = useCallback(
+		(toast: Omit<Toast, "id">) => {
+			const id = `toast-${++toastId.current}`;
+			setToasts((current) => [...current, { ...toast, id }]);
+			if (toast.kind === "info") {
+				setTimeout(() => dismissToast(id), 3000);
+			}
+		},
+		[dismissToast],
+	);
+	return { dismissToast, pushToast, toasts };
+}
+
 function ReviewApp() {
 	const token = useMemo(tokenFromLocation, []);
 	const [data, setData] = useState<ReviewStateResponse | null>(null);
 
+	const { dismissToast, pushToast, toasts } = useToasts();
 	const [columnMinimums] = useState<ColumnWidths>(() => ({
 		left: initialColumnWidth("left", window.innerWidth),
 		right: initialColumnWidth("right", window.innerWidth),
@@ -508,14 +538,12 @@ function ReviewApp() {
 	const [approvalAction, setApprovalAction] = useState<ApprovalAction | null>(
 		null,
 	);
-	const [approvalError, setApprovalError] = useState<string | null>(null);
 	const [freshness, setFreshness] = useState<ReviewFreshnessResponse | null>(
 		null,
 	);
 	const [refreshing, setRefreshing] = useState(false);
 	const [syncing, setSyncing] = useState(false);
 	const [regenerateAfterSync, setRegenerateAfterSync] = useState(false);
-	const [syncError, setSyncError] = useState<string | null>(null);
 	const [layerAction, setLayerAction] = useState<LayerAction | null>(null);
 	const [progressError, setProgressError] = useState<string | null>(null);
 	const [chatRuntimes, setChatRuntimes] = useState<Record<string, ChatRuntime>>(
@@ -642,14 +670,14 @@ function ReviewApp() {
 			.then((next) => {
 				if (active) {
 					setFreshness(next);
-					setSyncError(null);
 				}
 			})
 			.catch((reason: unknown) => {
 				if (active) {
-					setSyncError(
-						reason instanceof Error ? reason.message : String(reason),
-					);
+					pushToast({
+						kind: "error",
+						message: errorToastMessage(reason),
+					});
 				}
 			});
 		void fetchState(token)
@@ -699,13 +727,12 @@ function ReviewApp() {
 		return () => {
 			active = false;
 		};
-	}, [token]);
+	}, [token, pushToast]);
 	const reviewLoaded = data !== null;
 	useEffect(() => {
 		if (!token || !reviewLoaded) return;
 		let active = true;
 		setApprovalLoading(true);
-		setApprovalError(null);
 		void fetchApproval(token)
 			.then((next) => {
 				if (!active) return;
@@ -715,9 +742,10 @@ function ReviewApp() {
 			})
 			.catch((reason: unknown) => {
 				if (active) {
-					setApprovalError(
-						reason instanceof Error ? reason.message : String(reason),
-					);
+					pushToast({
+						kind: "error",
+						message: errorToastMessage(reason),
+					});
 				}
 			})
 			.finally(() => {
@@ -726,7 +754,7 @@ function ReviewApp() {
 		return () => {
 			active = false;
 		};
-	}, [token, reviewLoaded]);
+	}, [token, reviewLoaded, pushToast]);
 	const activeChatId = selectedChatId ?? data?.activeChatId ?? null;
 	const activeChat = activeChatId
 		? (chatRuntimes[activeChatId] ?? EMPTY_CHAT_RUNTIME)
@@ -919,7 +947,6 @@ function ReviewApp() {
 	const handleApprovalAction = (action: ApprovalAction) => {
 		if (approvalAction !== null) return;
 		setApprovalAction(action);
-		setApprovalError(null);
 		void updateApproval(token, action)
 			.then((next) => {
 				setData((current) =>
@@ -927,14 +954,17 @@ function ReviewApp() {
 				);
 			})
 			.catch((reason: unknown) => {
-				setApprovalError(
-					reason instanceof Error ? reason.message : String(reason),
-				);
+				pushToast({
+					kind: "error",
+					message: errorToastMessage(reason),
+				});
 			})
 			.finally(() => setApprovalAction(null));
 	};
 
 	const files = data.diff.map(filePath).filter((path) => path.length > 0);
+	const changedFileTotal = changedFileCount(files);
+	const viewedCount = viewedFileCount(files, data.viewedFiles);
 	const selectFile = (path: string) => {
 		setSelectedPath(path);
 	};
@@ -1300,13 +1330,17 @@ function ReviewApp() {
 	const refreshHead = () => {
 		if (refreshing || syncing || layerAction !== null) return;
 		setRefreshing(true);
-		setSyncError(null);
 		void fetchFreshness(token)
 			.then((next) => {
 				setFreshness(next);
+				const toast = refreshResultToast(next.stale);
+				if (toast) pushToast(toast);
 			})
 			.catch((reason: unknown) => {
-				setSyncError(reason instanceof Error ? reason.message : String(reason));
+				pushToast({
+					kind: "error",
+					message: errorToastMessage(reason),
+				});
 			})
 			.finally(() => setRefreshing(false));
 	};
@@ -1315,7 +1349,6 @@ function ReviewApp() {
 		if (syncing || layerAction !== null) return;
 		syncCompleted.current = true;
 		setSyncing(true);
-		setSyncError(null);
 		void fetch(apiUrl("/api/sync", token), {
 			method: "POST",
 			headers: { "X-Mole-Token": token },
@@ -1335,7 +1368,10 @@ function ReviewApp() {
 				if (regenerateAfterSync) await runLayerAction("regenerate");
 			})
 			.catch((reason: unknown) => {
-				setSyncError(reason instanceof Error ? reason.message : String(reason));
+				pushToast({
+					kind: "error",
+					message: errorToastMessage(reason),
+				});
 			})
 			.finally(() => setSyncing(false));
 	};
@@ -1683,12 +1719,6 @@ function ReviewApp() {
 				actionError={progressError}
 				onRegenerate={() => runLayerAction("regenerate")}
 				onRetry={() => runLayerAction("retry")}
-				approval={data.approval ?? null}
-				approvalLoading={approvalLoading}
-				approvalAction={approvalAction}
-				approvalError={approvalError}
-				onApprovalAction={handleApprovalAction}
-				onOpenSettings={() => setSettingsOpen(true)}
 			/>
 			<hr
 				aria-label="Resize review layers column"
@@ -1706,27 +1736,27 @@ function ReviewApp() {
 			/>
 			<section className="centre-column">
 				<div className="file-tree-panel">
-					<SyncBanner
-						stale={freshness?.stale ?? false}
-						newCommitCount={freshness?.newCommitCount ?? 0}
+					<MrHeader
+						mr={data.mr}
 						headSha={data.revision.headSha}
+						approval={data.approval ?? null}
+						approvalLoading={approvalLoading}
+						approvalAction={approvalAction}
+						onApprovalAction={handleApprovalAction}
+						freshness={freshness}
 						refreshing={refreshing}
 						syncing={syncing}
 						layerGenerating={layerAction !== null}
 						regenerateAfterSync={regenerateAfterSync}
+						onRegenerateAfterSyncChange={setRegenerateAfterSync}
 						onRefresh={refreshHead}
 						onSync={syncReviewState}
-						onRegenerateAfterSyncChange={setRegenerateAfterSync}
 					/>
-					{syncError ? (
-						<p className="layer-error" role="alert">
-							{syncError}
-						</p>
-					) : null}
-					<header className="file-tree-header">
-						<strong>Changed files</strong>
-						<span>{files.length} files</span>
-					</header>
+					<Toasts toasts={toasts} onDismiss={dismissToast} />
+					<ChangedFilesHeader
+						viewedCount={viewedCount}
+						total={changedFileTotal}
+					/>
 					<nav className="file-tree" aria-label="Changed files">
 						{data.diff.map((file) => {
 							const path = filePath(file);
@@ -1829,6 +1859,7 @@ function ReviewApp() {
 				activeChatId={activeChatId}
 				onSelectChat={handleSelectChat}
 				onNewChat={handleNewChat}
+				onOpenSettings={() => setSettingsOpen(true)}
 				creatingChat={creatingChat}
 				draft={activeChat.draft}
 				onDraftChange={(value) => {

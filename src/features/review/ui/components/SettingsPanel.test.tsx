@@ -63,6 +63,7 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-explain-comment",
 	]);
 	const markup = render();
+	expect(markup).toContain("<h2>Settings</h2>");
 
 	const visibleLabels = VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]);
 	const indexes = visibleLabels.map((label) => markup.indexOf(label));

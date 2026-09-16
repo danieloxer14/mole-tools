@@ -447,7 +447,7 @@ export function SettingsPanel({
 			<header className="settings-header">
 				<div>
 					<p className="eyebrow">Review settings</p>
-					<h2>Prompts &amp; Models</h2>
+					<h2>Settings</h2>
 				</div>
 				<button
 					type="button"

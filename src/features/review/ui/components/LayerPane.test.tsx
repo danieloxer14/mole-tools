@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { MrApprovalState } from "../../../../ports/git-host";
 import type { ReviewState } from "../../state";
 import {
 	collapseLayerOnDoneTransition,
 	collapseLayerWhenDone,
+	completedLayerCount,
 	LayerPane,
+	layersActionState,
+	layersStatusMessage,
 	shortFilePath,
 	splitBddScenario,
 	toggleLayerCollapsed,
@@ -43,21 +45,6 @@ test("falls back to the full path for a top-level file", () => {
 		"README.md",
 	);
 });
-
-const approval: MrApprovalState = {
-	approved: true,
-	currentUser: "reviewer",
-	approvalsLeft: 0,
-	approvedBy: ["reviewer"],
-	rules: [
-		{
-			name: "default",
-			approvalsRequired: 1,
-			approvalsLeft: 0,
-			approvedBy: ["reviewer"],
-		},
-	],
-};
 
 function reviewState(overrides: Partial<ReviewState> = {}): ReviewState {
 	return {
@@ -117,27 +104,124 @@ function renderLayerPane(
 			actionError={null}
 			onRegenerate={() => {}}
 			onRetry={() => {}}
-			approval={approval}
-			approvalLoading={false}
-			approvalAction={null}
-			approvalError={null}
-			onApprovalAction={() => {}}
-			onOpenSettings={() => {}}
 			{...props}
 		/>,
 	);
 }
 
-test("renders Prompts & Models action and wires its callback", () => {
-	let opened = false;
-	const onOpenSettings = () => {
-		opened = true;
-	};
-	const markup = renderLayerPane({ onOpenSettings });
+test("renders layers-only sticky header controls", () => {
+	const markup = renderLayerPane();
 
-	expect(markup).toContain(">Prompts &amp; Models</button>");
-	onOpenSettings();
-	expect(opened).toBe(true);
+	expect(markup).toContain('class="layers-header"');
+	expect(markup).toContain("<h2>Review layers</h2>");
+	expect((markup.match(/class="icon-button/g) ?? []).length).toBe(1);
+	expect(markup).toContain('aria-label="Regenerate layers"');
+	expect(markup).toContain('title="Regenerate layers (resets completed)"');
+	expect(markup).not.toContain("<h1");
+	expect(markup).not.toContain("approval");
+});
+
+test("renders status-specific sticky header content", () => {
+	expect(
+		renderLayerPane({ state: reviewState({ layerStatus: "pending" }) }),
+	).toContain("Preparing layers…");
+
+	const runningMarkup = renderLayerPane({
+		state: reviewState({ layerStatus: "running" }),
+	});
+	expect(runningMarkup).toContain("Generating layers…");
+	expect(runningMarkup).not.toContain('class="layers-progress"');
+	expect(runningMarkup).not.toContain('aria-label="Completed layers"');
+	expect(runningMarkup).toContain("layers-list--dimmed");
+	expect(runningMarkup).toContain(">Diff</button>");
+	expect(layersStatusMessage("running")).toBe("Generating layers…");
+
+	const failedMarkup = renderLayerPane({
+		state: reviewState({
+			layerStatus: "failed",
+			layerError: "Agent timed out",
+		}),
+	});
+	expect(failedMarkup).toContain("Layer generation failed");
+	expect(failedMarkup).toContain(
+		'<p class="layer-error" role="alert">Agent timed out</p>',
+	);
+	expect(failedMarkup).toContain('aria-label="Retry layer generation"');
+	expect(failedMarkup).toContain('title="Retry layer generation"');
+
+	const readyMarkup = renderLayerPane({
+		state: reviewState({
+			layers: [
+				{
+					id: "completed",
+					title: "Completed",
+					tldr: "Done",
+					files: ["src/completed.ts"],
+					bdd: [],
+					done: true,
+					stale: false,
+				},
+				{
+					id: "stale",
+					title: "Stale",
+					tldr: "Needs refresh",
+					files: ["src/stale.ts"],
+					bdd: [],
+					done: true,
+					stale: true,
+				},
+				{
+					id: "open",
+					title: "Open",
+					tldr: "Not done",
+					files: ["src/open.ts"],
+					bdd: [],
+					done: false,
+					stale: false,
+				},
+			],
+		}),
+		files: ["src/completed.ts", "src/stale.ts", "src/open.ts"],
+	});
+	expect(readyMarkup).toContain("Completed layers");
+	expect(readyMarkup).toContain('role="progressbar"');
+	expect(readyMarkup).toContain('aria-valuenow="1"');
+	expect(readyMarkup).toContain('aria-valuemax="3"');
+	expect(readyMarkup).toContain(">1/3</span>");
+	expect(readyMarkup).toContain(">Stale</span>");
+	expect(completedLayerCount(reviewState().layers)).toBe(0);
+});
+
+test("covers layer action state precedence across statuses", () => {
+	const pendingAction = layersActionState("pending", null);
+	expect(pendingAction).toEqual({
+		mode: "regenerate",
+		disabled: false,
+		tooltip: "Regenerate layers (resets completed)",
+		label: "Regenerate layers",
+	});
+
+	const runningAction = layersActionState("running", null);
+	expect(runningAction.disabled).toBe(true);
+	expect(runningAction.tooltip).toBe("Generating layers…");
+
+	const actionPending = layersActionState("ready", "regenerate");
+	expect(actionPending.disabled).toBe(true);
+	expect(actionPending.tooltip).toBe("Generating layers…");
+
+	const failedAction = layersActionState("failed", null);
+	expect(failedAction.mode).toBe("retry");
+	expect(failedAction.tooltip).toBe("Retry layer generation");
+});
+
+test("renders layer action errors as alerts in the sticky header", () => {
+	const markup = renderLayerPane({
+		actionError: "Unable to regenerate layers",
+	});
+
+	expect(markup).toContain(
+		'<p class="layer-error" role="alert">Unable to regenerate layers</p>',
+	);
 });
 
 test("renders layer file chips with shortened labels and full-path accessible labels", () => {
@@ -181,7 +265,6 @@ function renderCollapseLayers(): string {
 			],
 		}),
 		files: ["src/done.ts", "src/open.ts"],
-		approval: null,
 	});
 }
 
