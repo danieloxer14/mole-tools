@@ -64,7 +64,8 @@ continues to serve commit and merge-request generation.
 ### Review session
 Provider conversation uses active chat `sessionId` in per-chat review state,
 with `chats` and `activeChatId` identifying each conversation.
-First chat turn seeds MR metadata, layer guide, and changed-file list; later
+First chat turn seeds MR metadata, layer guide, changed-file list, and a
+snapshot of current host review discussions (bounded untrusted data); later
 turns resume that chat's session with message, new line tags, and open file only.
 User/assistant entries append to `chats/<chatId>.ndjson`. Legacy
 `chatSessionId` and `chat.ndjson` are read-only migration inputs for pre-multi-chat
