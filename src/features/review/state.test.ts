@@ -9,6 +9,7 @@ import {
 	deriveChatTitle,
 	ensureChats,
 	isMarkdownSelection,
+	LayerDocSchema,
 	LEGACY_CHAT_ID,
 	LineSelectionSchema,
 	type ReviewState,
@@ -43,6 +44,55 @@ function state(): ReviewState {
 		layers: [],
 	});
 }
+
+test("normalizes legacy BDD fields without a version bump", () => {
+	const legacyLayer = {
+		title: "API",
+		tldr: "Routes requests.",
+		files: ["src/api.ts"],
+		bdd: ["Given a request, When it arrives, Then route it."],
+	};
+
+	const document = LayerDocSchema.parse({
+		version: 1,
+		layers: [legacyLayer],
+	});
+	expect(document).toEqual({
+		version: 1,
+		layers: [
+			{
+				title: legacyLayer.title,
+				tldr: legacyLayer.tldr,
+				files: legacyLayer.files,
+			},
+		],
+	});
+
+	const stateWithLegacyLayer = ReviewStateSchema.parse({
+		...state(),
+		layerStatus: "ready",
+		layers: [
+			{
+				id: "layer-1",
+				...legacyLayer,
+				done: false,
+				stale: false,
+			},
+		],
+	});
+	expect(stateWithLegacyLayer.version).toBe(1);
+	expect(stateWithLegacyLayer.layers).toEqual([
+		{
+			id: "layer-1",
+			title: legacyLayer.title,
+			tldr: legacyLayer.tldr,
+			files: legacyLayer.files,
+			done: false,
+			stale: false,
+		},
+	]);
+});
+
 describe("ReviewState", () => {
 	test("migrates legacy session state at the store boundary", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-legacy-state-"));

@@ -74,7 +74,6 @@ const layerDoc = {
 			title: "Application layer",
 			tldr: "Routes the review request.",
 			files: ["src/app.ts"],
-			bdd: ["Given a request, When it arrives, Then route it."],
 		},
 	],
 };
@@ -242,7 +241,6 @@ describe("review layer generation", () => {
 			expect(result.state.layers[0]?.title).toBe("Application layer");
 			expect(result.state.layers[0]?.tldr).toBe("Routes the review request.");
 			expect(result.state.layers[0]?.files).toEqual(["src/app.ts"]);
-			expect(result.state.layers[0]?.bdd).toEqual(layerDoc.layers[0]?.bdd);
 			expect((await store.read())?.layers).toEqual(result.state.layers);
 			expect(agent.turns).toHaveLength(1);
 			expect(agent.turns[0]?.message).toContain("bash");

@@ -57,12 +57,6 @@ function statusDescription(
 			return "Layer guide is stale. Regenerate to refresh it.";
 	}
 }
-export function splitBddScenario(scenario: string): string[] {
-	return scenario
-		.split(/(?=\b(?:given|when|then)\b)/gi)
-		.map((step) => step.trim().replace(/,$/, ""))
-		.filter(Boolean);
-}
 
 export function toggleLayerCollapsed(
 	collapsedLayerIds: ReadonlySet<string>,
@@ -346,22 +340,6 @@ export function LayerPane({
 								>
 									<div className="layer-details-content">
 										<p>{layer.tldr}</p>
-										{layer.bdd.length > 0 ? (
-											<details className="layer-bdd">
-												<summary>BDD scenarios ({layer.bdd.length})</summary>
-												<ul>
-													{layer.bdd.map((scenario) => (
-														<li key={scenario}>
-															{splitBddScenario(scenario).map((step) => (
-																<span className="layer-bdd-step" key={step}>
-																	{step}
-																</span>
-															))}
-														</li>
-													))}
-												</ul>
-											</details>
-										) : null}
 										<div className="layer-coverage">
 											<div className="layer-coverage-label">
 												<span>File coverage</span>
