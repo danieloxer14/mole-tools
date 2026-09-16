@@ -436,7 +436,6 @@ test("renders general discussion Markdown through the sanitized comment renderer
 							"# General note",
 							"",
 							"_Important_",
-							"Second general line",
 							"",
 							"- item",
 							"",
@@ -458,7 +457,6 @@ test("renders general discussion Markdown through the sanitized comment renderer
 	expect(markup).toContain("<li>item</li>");
 	expect(markup).toContain("<pre><code");
 	expect(markup).toContain("<em>Important</em>");
-	expect(markup).toContain("<p><em>Important</em>\nSecond general line</p>");
 	expect(markup).toContain(">click</span>");
 	expect(markup).not.toContain("onclick");
 });

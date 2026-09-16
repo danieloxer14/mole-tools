@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import type { Tokens } from "marked";
 import mermaid from "mermaid";
 import {
+	type CSSProperties,
 	Fragment,
 	type KeyboardEvent,
 	type MouseEvent,
@@ -11,7 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { codeToHtml } from "shiki";
+import { codeToHtml, codeToTokens, type ThemedToken } from "shiki";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import {
 	CONTEXT_CHUNK_SIZE,
@@ -123,11 +124,142 @@ export function defaultFileViewMode(file: ParsedFileDiff): FileViewMode {
 interface CodeHighlightProps {
 	text: string;
 	language: string;
+	tokens?: readonly ThemedToken[];
+	tokenized?: boolean;
 }
 
-function CodeHighlight({ text, language }: CodeHighlightProps) {
+function tokenStyle(token: ThemedToken): CSSProperties {
+	if (token.htmlStyle) return token.htmlStyle as CSSProperties;
+	const style: CSSProperties = {};
+	if (token.color) style.color = token.color;
+	if (token.bgColor) style.backgroundColor = token.bgColor;
+	const fontStyle = token.fontStyle ?? 0;
+	if ((fontStyle & 1) !== 0) style.fontStyle = "italic";
+	if ((fontStyle & 2) !== 0) style.fontWeight = "bold";
+	const decorations: string[] = [];
+	if ((fontStyle & 4) !== 0) decorations.push("underline");
+	if ((fontStyle & 8) !== 0) decorations.push("line-through");
+	if (decorations.length > 0) style.textDecoration = decorations.join(" ");
+	return style;
+}
+
+interface HighlightSource {
+	source: string;
+	lineNumbers: readonly number[];
+}
+
+interface HighlightedCode {
+	side: "new" | "old";
+	tokensByLine: ReadonlyMap<number, readonly ThemedToken[]>;
+}
+
+function buildHighlightSources(
+	file: ParsedFileDiff,
+	fileContents: string | null,
+	side: "new" | "old",
+): HighlightSource[] {
+	if (fileContents !== null) {
+		const lineNumbers = splitSourceLines(fileContents).map(
+			(_, index) => index + 1,
+		);
+		return lineNumbers.length > 0
+			? [{ source: fileContents, lineNumbers }]
+			: [];
+	}
+	return file.hunks.flatMap((hunk) => {
+		const sourceLines: string[] = [];
+		const lineNumbers: number[] = [];
+		for (const line of hunk.lines) {
+			const lineNumber = side === "new" ? line.newLine : line.oldLine;
+			if (lineNumber === null) continue;
+			sourceLines.push(line.text);
+			lineNumbers.push(lineNumber);
+		}
+		return sourceLines.length > 0
+			? [{ source: sourceLines.join("\n"), lineNumbers }]
+			: [];
+	});
+}
+
+function useCodeHighlights(
+	file: ParsedFileDiff,
+	fileContents: string | null,
+	language: string,
+): HighlightedCode {
+	const side = file.status === "deleted" ? "old" : "new";
+	const sources = useMemo(
+		() => buildHighlightSources(file, fileContents, side),
+		[file, fileContents, side],
+	);
+	const [tokensByLine, setTokensByLine] = useState<
+		ReadonlyMap<number, readonly ThemedToken[]>
+	>(() => new Map());
+
+	useEffect(() => {
+		let active = true;
+		if (sources.length === 0) {
+			return () => {
+				active = false;
+			};
+		}
+		void Promise.all(
+			sources.map(async (source) => {
+				try {
+					const result = await codeToTokens(source.source, {
+						lang: language || "text",
+						theme: "github-dark",
+					});
+					return { source, tokens: result.tokens };
+				} catch {
+					return null;
+				}
+			}),
+		).then((results) => {
+			if (!active) return;
+			const next = new Map<number, readonly ThemedToken[]>();
+			for (const result of results) {
+				if (!result) continue;
+				for (const [index, tokens] of result.tokens.entries()) {
+					const lineNumber = result.source.lineNumbers[index];
+					if (lineNumber !== undefined) next.set(lineNumber, tokens);
+				}
+			}
+			setTokensByLine(next);
+		});
+		return () => {
+			active = false;
+		};
+	}, [language, sources]);
+
+	return { side, tokensByLine };
+}
+
+function lineHighlight(
+	highlightedCode: HighlightedCode,
+	side: "new" | "old",
+	lineNumber: number | null,
+): Pick<CodeHighlightProps, "tokens" | "tokenized"> {
+	if (highlightedCode.side !== side || lineNumber === null) {
+		return { tokenized: false };
+	}
+	return {
+		tokens: highlightedCode.tokensByLine.get(lineNumber),
+		tokenized: highlightedCode.tokensByLine.has(lineNumber),
+	};
+}
+
+function CodeHighlight({
+	text,
+	language,
+	tokens,
+	tokenized = false,
+}: CodeHighlightProps) {
 	const [html, setHtml] = useState<string | null>(null);
 	useEffect(() => {
+		if (tokenized) {
+			setHtml(null);
+			return;
+		}
 		let active = true;
 		void codeToHtml(text, {
 			lang: language || "text",
@@ -143,8 +275,21 @@ function CodeHighlight({ text, language }: CodeHighlightProps) {
 		return () => {
 			active = false;
 		};
-	}, [language, text]);
+	}, [language, text, tokenized]);
 
+	if (tokenized) {
+		return tokens ? (
+			<span>
+				{tokens.map((token) => (
+					<span key={token.offset} style={tokenStyle(token)}>
+						{token.content}
+					</span>
+				))}
+			</span>
+		) : (
+			text
+		);
+	}
 	if (html) {
 		// Shiki returns escaped HTML; this is the only rendering path for its output.
 		// biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki escapes highlighted source.
@@ -953,6 +1098,7 @@ function DiffLineRow({
 	line,
 	mode,
 	language,
+	highlightedCode,
 	find,
 	findId,
 	onSelect,
@@ -966,6 +1112,7 @@ function DiffLineRow({
 	line: DiffLine;
 	mode: DiffMode;
 	language: string;
+	highlightedCode: HighlightedCode;
 	find: FindRender;
 	findId: string;
 	onSelect?: (event: LineSelectionEvent) => void;
@@ -1017,6 +1164,14 @@ function DiffLineRow({
 		"data-find-line": findId,
 		...dragAttributes,
 	};
+	const inlineSide = line.newLine === null ? "old" : "new";
+	const inlineHighlight = lineHighlight(
+		highlightedCode,
+		inlineSide,
+		inlineSide === "old" ? line.oldLine : line.newLine,
+	);
+	const oldHighlight = lineHighlight(highlightedCode, "old", line.oldLine);
+	const newHighlight = lineHighlight(highlightedCode, "new", line.newLine);
 	return mode === "inline" ? (
 		<tr
 			ref={setRef}
@@ -1030,7 +1185,11 @@ function DiffLineRow({
 				<span className="line-prefix">
 					{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
 				</span>
-				<CodeHighlight text={line.text} language={language} />
+				<CodeHighlight
+					text={line.text}
+					language={language}
+					{...inlineHighlight}
+				/>
 				<LineActions
 					onTag={onTag}
 					onComment={onComment}
@@ -1051,7 +1210,11 @@ function DiffLineRow({
 					""
 				) : (
 					<>
-						<CodeHighlight text={line.text} language={language} />
+						<CodeHighlight
+							text={line.text}
+							language={language}
+							{...oldHighlight}
+						/>
 						{commentSide === "old" ? (
 							<LineActions
 								onTag={onTag}
@@ -1068,7 +1231,11 @@ function DiffLineRow({
 					""
 				) : (
 					<>
-						<CodeHighlight text={line.text} language={language} />
+						<CodeHighlight
+							text={line.text}
+							language={language}
+							{...newHighlight}
+						/>
 						{commentSide === "new" ? (
 							<LineActions
 								onTag={onTag}
@@ -1090,6 +1257,7 @@ function ContextRows({
 	wholeFile,
 	mode,
 	language,
+	highlightedCode,
 	path,
 	hunk,
 	onReveal,
@@ -1105,6 +1273,7 @@ function ContextRows({
 	mode: DiffMode;
 	wholeFile: boolean;
 	language: string;
+	highlightedCode: HighlightedCode;
 	path: string;
 	hunk: string;
 	onReveal: () => void;
@@ -1158,6 +1327,7 @@ function ContextRows({
 					key={`${gap.id}-${line.newLine}-${line.text}`}
 					line={{ kind: "context", ...line }}
 					mode={mode}
+					highlightedCode={highlightedCode}
 					language={language}
 					find={find}
 					findId={contextLineId(
@@ -1204,6 +1374,7 @@ function HunkRows({
 	showHeader,
 	mode,
 	language,
+	highlightedCode,
 	find,
 	path,
 	defaultSide,
@@ -1228,6 +1399,7 @@ function HunkRows({
 	showHeader: boolean;
 	mode: DiffMode;
 	language: string;
+	highlightedCode: HighlightedCode;
 	find: FindRender;
 	path: string;
 	defaultSide: "new" | "old";
@@ -1290,6 +1462,7 @@ function HunkRows({
 				return (
 					<Fragment key={`${lineLabel(line)}-${line.kind}-${line.text}`}>
 						<DiffLineRow
+							highlightedCode={highlightedCode}
 							line={line}
 							mode={mode}
 							language={language}
@@ -1395,6 +1568,7 @@ function DiffTable({
 	const path = file.newPath ?? file.oldPath ?? "";
 	const language = path.split(".").pop() ?? "text";
 	const defaultSide = file.status === "deleted" ? "old" : "new";
+	const highlightedCode = useCodeHighlights(file, fileContents, language);
 	const sourceLines = useMemo(
 		() => (fileContents === null ? null : splitSourceLines(fileContents)),
 		[fileContents],
@@ -1496,6 +1670,7 @@ function DiffTable({
 			wholeFile={wholeFile}
 			mode={mode}
 			language={language}
+			highlightedCode={highlightedCode}
 			path={path}
 			hunk={hunk}
 			onReveal={() => {
@@ -1547,6 +1722,7 @@ function DiffTable({
 								showHeader={showHunkHeader}
 								mode={mode}
 								language={language}
+								highlightedCode={highlightedCode}
 								find={find}
 								path={path}
 								defaultSide={defaultSide}
