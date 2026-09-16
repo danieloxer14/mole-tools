@@ -4,7 +4,11 @@ import type { Config } from "../../adapters/config/schema";
 import { PortError } from "../../core/errors";
 import type { FileDiff, Vcs } from "../../ports/vcs";
 import { filterDiff } from "../../shared/diff";
-import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
+import {
+	diffContentEqual,
+	type ParsedFileDiff,
+	parseFileDiffs,
+} from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
 import { getReviewPaths, type ReviewPaths } from "./paths";
@@ -100,6 +104,13 @@ export interface ReviewSyncInput {
 	repoRoot?: string;
 	worktreePath?: string;
 	config?: Pick<Config, "diff"> | { diff?: { ignore?: string[] } };
+	/**
+	 * When supplied, viewed marks are recomputed against this diff. When
+	 * omitted, there is nothing to compare, so viewedFiles is preserved as-is.
+	 * setupReview({ refresh: true }) uses this omitted form because it has no
+	 * previously served diff.
+	 */
+	previousDiff?: FileDiff[];
 }
 
 export interface ResolveRepoInput {
@@ -247,6 +258,7 @@ function syncedState(
 	mergeBaseSha: string,
 	diffRefs: ReviewDiffRefs,
 	syncedAt: string,
+	diff: FileDiff[],
 	parsedDiff: ParsedFileDiff[],
 ): ReviewState {
 	// A layer guide belongs to the revision that produced it. After a sync an
@@ -254,6 +266,25 @@ function syncedState(
 	// pending and becomes runnable again instead of pinning a dead error.
 	const layerRunDiscarded =
 		base.layerStatus === "running" || base.layerStatus === "failed";
+	const previousDiff = input.previousDiff;
+	const viewedFiles =
+		previousDiff === undefined
+			? base.viewedFiles
+			: (() => {
+					const previousByPath = new Map(
+						previousDiff.map((file) => [file.path, file]),
+					);
+					const nextByPath = new Map(diff.map((file) => [file.path, file]));
+					return base.viewedFiles.filter((path) => {
+						const previous = previousByPath.get(path);
+						const next = nextByPath.get(path);
+						return (
+							previous !== undefined &&
+							next !== undefined &&
+							diffContentEqual(previous, next)
+						);
+					});
+				})();
 	return ReviewStateSchema.parse({
 		...base,
 		mr: {
@@ -277,6 +308,7 @@ function syncedState(
 		layerStatus: layerRunDiscarded ? "pending" : base.layerStatus,
 		layerError: layerRunDiscarded ? null : base.layerError,
 		layers: base.layers.map((layer) => ({ ...layer, stale: true })),
+		viewedFiles,
 		drafts: base.drafts.map((draft) =>
 			draftAnchorResolves(draft, parsedDiff, diffRefs)
 				? { ...draft }
@@ -329,6 +361,7 @@ export async function syncReview(
 			mergeBaseSha,
 			diffRefs,
 			syncedAt,
+			diff,
 			parsedDiff,
 		);
 	const state = input.store
