@@ -1331,6 +1331,9 @@ button.seg:focus-visible {
 	overflow-wrap: anywhere;
 	overflow-y: auto;
 }
+.comment-markdown {
+	line-height: 1;
+}
 .comment-markdown-plain {
 	white-space: pre-wrap;
 }
