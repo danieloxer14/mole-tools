@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { MrApprovalState } from "../../../../ports/git-host";
 import type { ReviewState } from "../../state";
-import { type ApprovalAction, ApprovalControls } from "./ApprovalControls";
+import { IconButton } from "./IconButton";
+import { RegenerateIcon, RetryIcon } from "./Icons";
+import { ProgressBar } from "./ProgressBar";
 
 type LayerAction = "regenerate" | "retry";
-type VisibleLayerStatus = ReviewState["layerStatus"] | "stale";
 
 interface LayerPaneProps {
 	state: ReviewState;
@@ -17,46 +17,50 @@ interface LayerPaneProps {
 	actionError: string | null;
 	onRegenerate: () => void;
 	onRetry: () => void;
-	approval: MrApprovalState | null;
-	approvalLoading: boolean;
-	approvalAction: ApprovalAction | null;
-	approvalError: string | null;
-	onApprovalAction: (action: ApprovalAction) => void;
-	onOpenSettings: () => void;
 }
 
-function statusLabel(status: VisibleLayerStatus): string {
-	switch (status) {
-		case "pending":
-			return "Pending";
-		case "running":
-			return "Running";
-		case "ready":
-			return "Ready";
-		case "failed":
-			return "Failed";
-		case "stale":
-			return "Stale";
-	}
-}
-
-function statusDescription(
-	status: VisibleLayerStatus,
-	layerCount: number,
+export function layersStatusMessage(
+	status: ReviewState["layerStatus"],
 ): string {
 	switch (status) {
 		case "pending":
-			return "Layer guide is waiting to be generated.";
+			return "Preparing layers…";
 		case "running":
-			return "Layer guide is being generated. Diff stays available.";
-		case "ready":
-			return `${layerCount} ${layerCount === 1 ? "layer" : "layers"} ready.`;
+			return "Generating layers…";
 		case "failed":
-			return "Layer guide failed. Diff and file navigation remain available.";
-		case "stale":
-			return "Layer guide is stale. Regenerate to refresh it.";
+			return "Layer generation failed";
+		case "ready":
+			return "Completed layers";
 	}
 }
+
+export function layersActionState(
+	status: ReviewState["layerStatus"],
+	layerAction: LayerAction | null,
+): {
+	mode: LayerAction;
+	disabled: boolean;
+	tooltip: string;
+	label: string;
+} {
+	const mode = status === "failed" ? "retry" : "regenerate";
+	const disabled = status === "running" || layerAction !== null;
+	return {
+		mode,
+		disabled,
+		tooltip: disabled
+			? "Generating layers…"
+			: mode === "retry"
+				? "Retry layer generation"
+				: "Regenerate layers (resets completed)",
+		label: mode === "retry" ? "Retry layer generation" : "Regenerate layers",
+	};
+}
+
+export function completedLayerCount(layers: ReviewState["layers"]): number {
+	return layers.filter((layer) => layer.done && !layer.stale).length;
+}
+
 export function splitBddScenario(scenario: string): string[] {
 	return scenario
 		.split(/(?=\b(?:given|when|then)\b)/gi)
@@ -132,12 +136,6 @@ export function LayerPane({
 	actionError,
 	onRegenerate,
 	onRetry,
-	approval,
-	approvalLoading,
-	approvalAction,
-	approvalError,
-	onApprovalAction,
-	onOpenSettings,
 }: LayerPaneProps) {
 	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
 		() =>
@@ -174,38 +172,42 @@ export function LayerPane({
 	const changedFiles = new Set(files);
 	const changedFilePaths = [...new Set(files)];
 	const viewed = new Set(state.viewedFiles);
-	const viewedCount = changedFilePaths.filter((path) =>
-		viewed.has(path),
-	).length;
-	const hasStaleLayer = state.layers.some((layer) => layer.stale);
-	const visibleStatus: VisibleLayerStatus =
-		hasStaleLayer && state.layerStatus === "ready"
-			? "stale"
-			: state.layerStatus;
+	const action = layersActionState(state.layerStatus, layerAction);
+	const completed = completedLayerCount(state.layers);
 	const actionRunning = layerAction !== null;
 	return (
 		<aside className="left-column">
-			<header className="column-header">
-				<p className="eyebrow">Review layers</p>
-				<h1>{state.mr.title}</h1>
-				<ApprovalControls
-					mrWebUrl={state.mr.webUrl}
-					approval={approval}
-					loading={approvalLoading}
-					pendingAction={approvalAction}
-					error={approvalError}
-					onAction={onApprovalAction}
-				/>
-				<div className="layer-status-row" role="status" aria-live="polite">
-					<span className={`layer-status layer-status-${visibleStatus}`}>
-						{statusLabel(visibleStatus)}
-					</span>
-					{hasStaleLayer && visibleStatus !== "stale" ? (
-						<span className="layer-status layer-status-stale">Stale</span>
-					) : null}
+			<header className="layers-header">
+				<div className="layers-header-row">
+					<h2>Review layers</h2>
+					<IconButton
+						label={action.label}
+						tooltip={action.tooltip}
+						disabled={action.disabled}
+						busy={state.layerStatus === "running" || actionRunning}
+						onClick={action.mode === "retry" ? onRetry : onRegenerate}
+					>
+						{action.mode === "retry" ? <RetryIcon /> : <RegenerateIcon />}
+					</IconButton>
 				</div>
-				<p>{statusDescription(visibleStatus, state.layers.length)}</p>
-				{state.layerError ? (
+				{state.layerStatus === "ready" ? (
+					<div className="layers-progress">
+						<span>{layersStatusMessage("ready")}</span>
+						<ProgressBar
+							label="Completed layers"
+							value={completed}
+							max={state.layers.length}
+						/>
+						<span>
+							{completed}/{state.layers.length}
+						</span>
+					</div>
+				) : (
+					<p className="layers-status">
+						{layersStatusMessage(state.layerStatus)}
+					</p>
+				)}
+				{state.layerStatus === "failed" && state.layerError ? (
 					<p className="layer-error" role="alert">
 						{state.layerError}
 					</p>
@@ -215,53 +217,19 @@ export function LayerPane({
 						{actionError}
 					</p>
 				) : null}
-				<div className="layer-actions">
-					<button
-						type="button"
-						disabled={actionRunning || state.layerStatus === "running"}
-						onClick={onRegenerate}
-					>
-						{layerAction === "regenerate" ? "Regenerating…" : "Regenerate"}
-					</button>
-					<button type="button" onClick={onOpenSettings}>
-						Prompts &amp; Models
-					</button>
-					{state.layerStatus === "failed" ? (
-						<button type="button" disabled={actionRunning} onClick={onRetry}>
-							{layerAction === "retry" ? "Retrying…" : "Retry"}
-						</button>
-					) : null}
-				</div>
 			</header>
-			<div className="coverage-summary">
-				<span>
-					Viewed files <strong>{viewedCount}</strong>/{changedFilePaths.length}
-				</span>
-				<div
-					className="coverage-bar"
-					role="progressbar"
-					aria-label="Viewed file coverage"
-					aria-valuemin={0}
-					aria-valuemax={changedFilePaths.length}
-					aria-valuenow={viewedCount}
-				>
-					<span
-						style={{
-							width: `${
-								changedFilePaths.length
-									? (viewedCount / changedFilePaths.length) * 100
-									: 0
-							}%`,
-						}}
-					/>
-				</div>
-			</div>
 			{state.layers.length === 0 ? (
 				<p className="placeholder">
-					{statusDescription(visibleStatus, state.layers.length)}
+					{state.layerStatus === "ready"
+						? "No review layers."
+						: layersStatusMessage(state.layerStatus)}
 				</p>
 			) : (
-				<ul className="layer-list">
+				<ul
+					className={`layer-list${
+						state.layerStatus === "running" ? " layers-list--dimmed" : ""
+					}`}
+				>
 					{state.layers.map((layer) => {
 						const layerFiles = [...new Set(layer.files)].filter((path) =>
 							changedFiles.has(path),

@@ -1,6 +1,28 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { Window } from "happy-dom";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatPane } from "./ChatPane";
+
+const dom = new Window();
+Object.assign(globalThis, {
+	window: dom,
+	document: dom.document,
+	navigator: dom.navigator,
+	Node: dom.Node,
+	HTMLElement: dom.HTMLElement,
+	IS_REACT_ACT_ENVIRONMENT: true,
+});
+
+const interactiveRoots: Root[] = [];
+
+afterEach(() => {
+	for (const root of interactiveRoots.splice(0)) {
+		act(() => root.unmount());
+	}
+	document.body.replaceChildren();
+});
 
 test("renders general discussions collapsed by default", () => {
 	const markup = renderToStaticMarkup(
@@ -18,6 +40,7 @@ test("renders general discussions collapsed by default", () => {
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
+			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			discussions={[
@@ -77,6 +100,7 @@ test("renders one switcher item per chat with active and busy state", () => {
 			activeChatId="chat-2"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
+			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			streamingText=""
@@ -91,11 +115,51 @@ test("renders one switcher item per chat with active and busy state", () => {
 	);
 
 	expect(markup.match(/class="chat-switcher-item"/g)).toHaveLength(2);
+	expect(markup).toContain("<h2>Agent</h2>");
 	expect(markup).toContain("New chat 1");
 	expect(markup).toContain('aria-current="true"');
 	expect(markup.match(/aria-label="Turn running"/g)).toHaveLength(1);
 	expect(markup).toContain("New chat");
 	expect(markup).not.toContain("Clear chat");
+});
+
+test("wires rendered chat header controls to actions", () => {
+	let newChatCalls = 0;
+	let settingsCalls = 0;
+	const rendered = renderInteractive({
+		onNewChat: () => {
+			newChatCalls += 1;
+		},
+		onOpenSettings: () => {
+			settingsCalls += 1;
+		},
+	});
+
+	const newChatButton = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="New chat"]',
+	);
+	const settingsButton = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Settings"]',
+	);
+	expect(newChatButton).not.toBeNull();
+	expect(settingsButton).not.toBeNull();
+
+	act(() => {
+		newChatButton?.click();
+		settingsButton?.click();
+	});
+
+	expect(newChatCalls).toBe(1);
+	expect(settingsCalls).toBe(1);
+});
+
+test("disables and marks new chat busy while creating", () => {
+	const markup = renderComposer({ creatingChat: true });
+
+	expect(markup).toMatch(
+		/<button[^>]*aria-label="New chat"[^>]*disabled(?:="")?[^>]*aria-busy="true"/,
+	);
+	expect(markup).toContain('class="icon-button-spinner"');
 });
 
 test("renders parent-owned composer draft", () => {
@@ -114,6 +178,7 @@ test("renders parent-owned composer draft", () => {
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
+			onOpenSettings={() => {}}
 			draft="unsent question"
 			onDraftChange={() => {}}
 			streamingText=""
@@ -148,6 +213,7 @@ function renderComposer(
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
+			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			streamingText=""
@@ -161,6 +227,52 @@ function renderComposer(
 			{...props}
 		/>,
 	);
+}
+
+interface InteractiveRender {
+	container: HTMLDivElement;
+	root: Root;
+}
+
+function renderInteractive(
+	props: Partial<Parameters<typeof ChatPane>[0]> = {},
+): InteractiveRender {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	interactiveRoots.push(root);
+	act(() => {
+		root.render(
+			<ChatPane
+				transcript={[]}
+				tags={[]}
+				chats={[
+					{
+						id: "chat-1",
+						title: "First chat",
+						createdAt: "2026-08-24T00:00:00Z",
+						busy: false,
+					},
+				]}
+				activeChatId="chat-1"
+				onSelectChat={() => {}}
+				onNewChat={() => {}}
+				onOpenSettings={() => {}}
+				draft=""
+				onDraftChange={() => {}}
+				streamingText=""
+				tools={[]}
+				error={null}
+				sending={false}
+				stopping={false}
+				onSend={() => {}}
+				onStop={() => {}}
+				onRemoveTag={() => {}}
+				{...props}
+			/>,
+		);
+	});
+	return { container, root };
 }
 
 test("hints that Enter submits and Shift+Enter adds a new line", () => {
@@ -252,6 +364,7 @@ function renderGeneralDiscussions(
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
+			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			discussions={generalDiscussions}

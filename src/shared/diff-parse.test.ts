@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
+	diffContentEqual,
 	type ParsedFileDiff,
 	parseFileDiff,
 	parseFileDiffs,
@@ -171,5 +172,121 @@ describe("parseFileDiff", () => {
 			file("old.txt", await patch("deleted.patch")),
 		]);
 		expect(parsed.map((entry) => entry.status)).toEqual(["added", "deleted"]);
+	});
+});
+
+describe("diffContentEqual", () => {
+	test("treats identical patches as equal", async () => {
+		const text = await patch("modified.patch");
+		expect(
+			diffContentEqual(file("src/app.ts", text), file("src/app.ts", text)),
+		).toBe(true);
+	});
+
+	test("detects changed line text", () => {
+		expect(
+			diffContentEqual(
+				file("src/app.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+				file("src/app.ts", "@@ -1 +1 @@\n-old\n+updated\n"),
+			),
+		).toBe(false);
+	});
+
+	test("ignores hunk header line-number shifts", () => {
+		expect(
+			diffContentEqual(
+				file("src/app.ts", "@@ -1,2 +1,2 @@\n context\n-old\n+new\n"),
+				file("src/app.ts", "@@ -40,2 +40,2 @@\n context\n-old\n+new\n"),
+			),
+		).toBe(true);
+	});
+
+	test("detects added hunks", () => {
+		expect(
+			diffContentEqual(
+				file("src/app.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+				file(
+					"src/app.ts",
+					"@@ -1 +1 @@\n-old\n+new\n@@ -3 +3 @@\n-tail\n+next\n",
+				),
+			),
+		).toBe(false);
+	});
+
+	test("detects binary versus text changes", async () => {
+		expect(
+			diffContentEqual(
+				file("image.png", await patch("binary.patch")),
+				file("image.png", "@@ -1 +1 @@\n-old\n+new\n"),
+			),
+		).toBe(false);
+	});
+
+	test("detects parsed status changes", () => {
+		expect(
+			diffContentEqual(
+				file("src/app.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+				file(
+					"src/app.ts",
+					"--- /dev/null\n+++ b/src/app.ts\n@@ -0,0 +1 @@\n+new\n",
+				),
+			),
+		).toBe(false);
+	});
+
+	test("detects changed same-path stat-only files", () => {
+		expect(
+			diffContentEqual(
+				{
+					path: "src/app.ts",
+					statOnly: true,
+					patch: null,
+					insertions: 3,
+					deletions: 1,
+				},
+				{
+					path: "src/app.ts",
+					statOnly: true,
+					patch: null,
+					insertions: 8,
+					deletions: 4,
+				},
+			),
+		).toBe(false);
+	});
+
+	test("treats identical stat-only files as equal", () => {
+		expect(
+			diffContentEqual(
+				{
+					path: "src/app.ts",
+					statOnly: true,
+					patch: null,
+					insertions: 3,
+					deletions: 1,
+				},
+				{
+					path: "src/app.ts",
+					statOnly: true,
+					patch: null,
+					insertions: 3,
+					deletions: 1,
+				},
+			),
+		).toBe(true);
+	});
+
+	test("detects changed binary patches", async () => {
+		expect(
+			diffContentEqual(
+				file("image.png", await patch("binary.patch")),
+				file(
+					"image.png",
+					"diff --git a/image.png b/image.png\n" +
+						"index 3333333..4444444 100644\n" +
+						"Binary files a/image.png and b/image.png differ\n",
+				),
+			),
+		).toBe(false);
 	});
 });
