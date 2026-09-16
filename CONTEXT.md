@@ -75,7 +75,7 @@ creation opens empty local drafts; users author bodies and Send posts them
 directly, without an agent session or chat state change.
 
 ### Review layer
-Generated guide entry with `title`, `tldr`, `files[]`, optional `bdd[]`, plus
+Generated guide entry with `title`, `tldr`, and `files[]`, plus
 persisted id/done/stale state. Guide auto-runs once when pending, caches when
 ready, and can be Regenerated or Retried. A layer curates files from the full
 changed-file tree; global and per-layer viewed-file coverage are separate.

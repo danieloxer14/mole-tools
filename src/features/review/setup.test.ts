@@ -139,7 +139,6 @@ describe("setupReview chat state", () => {
 						title: "API",
 						tldr: "API layer",
 						files: ["src/api.ts"],
-						bdd: [],
 						done: true,
 						stale: false,
 					},

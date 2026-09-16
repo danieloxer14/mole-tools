@@ -232,7 +232,6 @@ describe("review feature", () => {
 						title: "API",
 						tldr: "API layer",
 						files: ["src/app.ts"],
-						bdd: [],
 						done: true,
 						stale: false,
 					},
@@ -389,13 +388,37 @@ describe("review feature", () => {
 				}),
 			);
 			const body = await stream.text();
-			expect(body).toContain('event: status\ndata: {"status":"running"}');
-			expect(body).toContain('event: done\ndata: {"status":"ready"');
+			const doneFrame = body.match(/event: done\ndata: ([^\n]+)/)?.[1];
+			expect(doneFrame).toBeDefined();
+			const doneData = JSON.parse(doneFrame ?? "{}") as {
+				layers?: Array<Record<string, unknown>>;
+			};
+			expect(doneData.layers).toEqual([
+				expect.objectContaining({
+					title: "API layer",
+					tldr: "Routes API requests.",
+					files: ["src/app.ts"],
+					done: false,
+					stale: false,
+				}),
+			]);
+			expect(body).not.toContain('"bdd"');
 			expect(body.endsWith("\n\n")).toBe(true);
 			expect(agent.turns).toHaveLength(1);
 
 			const cached = await routes(request("/api/state?t=route-layer-token"));
-			expect((await cached.json()).layerStatus).toBe("ready");
+			const cachedData = await cached.json();
+			expect(cachedData.layerStatus).toBe("ready");
+			expect(cachedData.layers).toEqual([
+				expect.objectContaining({
+					title: "API layer",
+					tldr: "Routes API requests.",
+					files: ["src/app.ts"],
+					done: false,
+					stale: false,
+				}),
+			]);
+			expect(cachedData.layers[0]).not.toHaveProperty("bdd");
 
 			const retryStream = await routes(
 				request("/api/layers/retry?t=route-layer-token", {

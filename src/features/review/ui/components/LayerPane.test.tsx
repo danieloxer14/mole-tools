@@ -9,21 +9,8 @@ import {
 	layersActionState,
 	layersStatusMessage,
 	shortFilePath,
-	splitBddScenario,
 	toggleLayerCollapsed,
 } from "./LayerPane";
-
-test("splits Given, When, Then clauses into display steps", () => {
-	expect(
-		splitBddScenario(
-			"Given a video model with capacity, when tagged assets are calculated, then capacity is used.",
-		),
-	).toEqual([
-		"Given a video model with capacity",
-		"when tagged assets are calculated",
-		"then capacity is used.",
-	]);
-});
 
 test("keeps a unique file basename in the shortened label", () => {
 	expect(
@@ -75,7 +62,6 @@ function reviewState(overrides: Partial<ReviewState> = {}): ReviewState {
 				title: "Diff",
 				tldr: "One paragraph.",
 				files: ["src/routes/route.ts", "web/route.ts"],
-				bdd: [],
 				done: false,
 				stale: false,
 			},
@@ -240,6 +226,22 @@ test("marks the selected layer file chip active", () => {
 	expect(markup).toContain('class="active"');
 });
 
+test("renders layer coverage without BDD and exposes regenerate", () => {
+	const markup = renderLayerPane();
+
+	expect(markup).toContain('aria-label="Regenerate layers"');
+	expect(markup).toContain("File coverage");
+	expect(markup).not.toContain("BDD");
+});
+
+test("exposes retry for a failed layer guide", () => {
+	const markup = renderLayerPane({
+		state: reviewState({ layerStatus: "failed" }),
+	});
+
+	expect(markup).toContain('aria-label="Retry layer generation"');
+});
+
 function renderCollapseLayers(): string {
 	return renderLayerPane({
 		state: reviewState({
@@ -249,7 +251,6 @@ function renderCollapseLayers(): string {
 					title: "Done layer",
 					tldr: "Done details",
 					files: ["src/done.ts"],
-					bdd: ["Given done behavior, When reviewed, Then it passes."],
 					done: true,
 					stale: false,
 				},
@@ -258,7 +259,6 @@ function renderCollapseLayers(): string {
 					title: "Open layer",
 					tldr: "Open details",
 					files: ["src/open.ts"],
-					bdd: ["Given open behavior, When reviewed, Then it passes."],
 					done: false,
 					stale: false,
 				},

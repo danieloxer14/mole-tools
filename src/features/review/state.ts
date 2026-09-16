@@ -63,7 +63,6 @@ export const LayerSchema = z.object({
 	title: z.string().min(1),
 	tldr: z.string().min(1),
 	files: z.array(z.string().min(1)).min(1),
-	bdd: z.array(z.string().min(1)).default([]),
 });
 export type Layer = z.infer<typeof LayerSchema>;
 

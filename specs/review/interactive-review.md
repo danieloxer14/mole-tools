@@ -221,7 +221,6 @@ validated document is version `1` and has one or more layers, each with:
       "title": "Short review concern or change area",
       "tldr": "One-paragraph explanation",
       "files": ["src/example.ts"],
-      "bdd": ["Given ... When ... Then ..."]
     }
   ]
 }
@@ -229,11 +228,9 @@ validated document is version `1` and has one or more layers, each with:
 
 `files` is curated over the full changed-file tree; unknown paths are dropped,
 and an empty layer is dropped. Prompts guide the agent to cover what changed,
-architecture/implementation layers, implied decisions, and verification. BDD
-sentences are guidance for verification layers, not a required fixed section.
-The plan prompt additionally examines requirements completeness, assumptions,
-risks, and acceptance-criteria testability.
-
+architecture/implementation layers, implied decisions, and verification. The
+plan prompt additionally examines requirements completeness, assumptions, risks,
+and acceptance-criteria testability.
 Layer output is written under
 `~/.config/mole-tools/reviews/<host>/<projectPath>/mr-<iid>/layers/`. Missing or
 invalid JSON gets one retry with the validation error; a second failure stores

@@ -46,6 +46,43 @@ describe("prompt store", () => {
 			await Bun.file(join(root, "commit-system", "default", "001.md")).text(),
 		).toBe(DEFAULT_PROMPTS["commit-system"]);
 	});
+	test("seeds layer defaults without BDD output instructions", async () => {
+		const root = await promptsDir();
+		for (const slot of ["review-layers-code", "review-layers-plan"] as const) {
+			const prompt = await loadPrompt(slot, { dir: root });
+			expect(prompt).toBe(DEFAULT_PROMPTS[slot].trim());
+			expect(prompt).not.toMatch(/\bBDD\b|Given\/When\/Then|\bbdd\b/i);
+		}
+	});
+
+	test("preserves an existing layer prompt version when the shipped default changes", async () => {
+		const root = await promptsDir();
+		const custom = "Custom layer prompt with local verification rules.\n";
+		await writeVersion(root, "review-layers-code", "default", "001.md", custom);
+
+		expect(await loadPrompt("review-layers-code", { dir: root })).toBe(
+			custom.trim(),
+		);
+		expect(
+			await Bun.file(
+				join(root, "review-layers-code", "default", "001.md"),
+			).text(),
+		).toBe(custom);
+	});
+	test("preserves flat legacy layer prompts without a migration bump", async () => {
+		const root = await promptsDir();
+		for (const slot of ["review-layers-code", "review-layers-plan"] as const) {
+			const text =
+				"Legacy layer prompt with Given/When/Then BDD instructions.\n";
+			await Bun.write(join(root, `${slot}.md`), text);
+
+			expect(await loadPrompt(slot, { dir: root })).toBe(text.trim());
+			expect(await listVersions(slot, "default", root)).toEqual([1]);
+			expect(await Bun.file(join(root, slot, "default", "001.md")).text()).toBe(
+				text,
+			);
+		}
+	});
 
 	test("returns an existing version unchanged", async () => {
 		const root = await promptsDir();

@@ -47,7 +47,6 @@ function state(): ReviewState {
 				title: "API",
 				tldr: "Review API behavior",
 				files: ["src/api.ts"],
-				bdd: [],
 				done: false,
 				stale: false,
 			},

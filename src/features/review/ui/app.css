@@ -469,29 +469,6 @@ button.active {
 	line-height: 1.4;
 	margin: 8px 0;
 }
-.layer-bdd {
-	color: #aebccc;
-	font-size: 0.75rem;
-	line-height: 1.4;
-	margin: 8px 0;
-}
-.layer-bdd summary {
-	color: #9eafc1;
-	cursor: pointer;
-}
-.layer-bdd ul {
-	list-style: none;
-	margin: 5px 0 0;
-	padding: 0;
-}
-.layer-bdd li {
-	border: 0;
-	margin: 3px 0;
-	padding: 0;
-}
-.layer-bdd-step {
-	display: block;
-}
 .layer-list li.done {
 	border-color: #4a8861;
 }
