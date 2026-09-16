@@ -11,6 +11,8 @@ import { renderMarkdownHtml } from "../../../../shared/markdown";
 import { type ChatTag, isMarkdownChatTag } from "../../chat-tags";
 import type { ChatEntry } from "../../store";
 import { composerEnterAction } from "./composer-keydown";
+import { IconButton } from "./IconButton";
+import { CogIcon, PlusIcon } from "./Icons";
 
 export interface ChatToolActivity {
 	id: number;
@@ -42,6 +44,7 @@ export interface ChatPaneProps {
 	activeChatId: string | null;
 	onSelectChat: (chatId: string) => void;
 	onNewChat: () => void;
+	onOpenSettings: () => void;
 	creatingChat?: boolean;
 	draft: string;
 	onDraftChange: (value: string) => void;
@@ -176,6 +179,7 @@ export function ChatPane({
 	activeChatId,
 	onSelectChat,
 	onNewChat,
+	onOpenSettings,
 	creatingChat = false,
 	draft,
 	onDraftChange,
@@ -283,19 +287,25 @@ export function ChatPane({
 			) : null}
 			<header className="column-header chat-header">
 				<div className="chat-header-row">
-					<div>
-						<p className="eyebrow">Agent chat</p>
-						<h2>Ask about this review</h2>
+					<h2>Agent</h2>
+					<div className="chat-header-actions">
+						<IconButton
+							label="New chat"
+							tooltip="Start a new agent conversation"
+							busy={creatingChat}
+							disabled={creatingChat}
+							onClick={onNewChat}
+						>
+							<PlusIcon />
+						</IconButton>
+						<IconButton
+							label="Settings"
+							tooltip="Settings"
+							onClick={onOpenSettings}
+						>
+							<CogIcon />
+						</IconButton>
 					</div>
-					<button
-						type="button"
-						className="chat-new"
-						onClick={onNewChat}
-						disabled={creatingChat}
-						title="Start a new agent conversation"
-					>
-						{creatingChat ? "Creating…" : "New chat"}
-					</button>
 				</div>
 				<details className="chat-switcher" ref={switcher}>
 					<summary aria-label="Switch chat">
@@ -334,7 +344,6 @@ export function ChatPane({
 						))}
 					</ul>
 				</details>
-				<p>Chat persists with this merge request.</p>
 			</header>
 			<div className="chat-messages" aria-live="polite">
 				{transcript.length === 0 && !streamingText && !isBusy ? (

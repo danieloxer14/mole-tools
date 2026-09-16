@@ -11,7 +11,7 @@ import type {
 	AgentTurn,
 	ReviewAgent,
 } from "../../ports/review-agent";
-import type { ParsedFileDiff } from "../../shared/diff-parse";
+import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { createReviewRoutes, resolveReviewFilePath } from "./routes";
 import { sseResponse } from "./sse";
 import { type ReviewState, ReviewStateSchema } from "./state";
@@ -1508,6 +1508,97 @@ describe("review routes", () => {
 					sha: "head-2",
 				},
 			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("filters viewed files against the previously served diff", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-viewed-route-"));
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			const previous = ReviewStateSchema.parse({
+				...state(),
+				viewedFiles: ["src/kept.ts", "src/changed.ts"],
+			});
+			const store = new ReviewStore(paths);
+			await store.write(previous);
+
+			const previousDiff = [
+				{
+					path: "src/kept.ts",
+					statOnly: false,
+					patch: "@@ -1 +1 @@\n-old\n+new\n",
+					insertions: 1,
+					deletions: 1,
+				},
+				{
+					path: "src/changed.ts",
+					statOnly: false,
+					patch: "@@ -1 +1 @@\n-old\n+new\n",
+					insertions: 1,
+					deletions: 1,
+				},
+			];
+			const nextDiff = [
+				{
+					path: "src/kept.ts",
+					statOnly: false,
+					patch: "@@ -40 +40 @@\n-old\n+new\n",
+					insertions: 1,
+					deletions: 1,
+				},
+				{
+					path: "src/changed.ts",
+					statOnly: false,
+					patch: "@@ -1 +1 @@\n-old\n+updated\n",
+					insertions: 1,
+					deletions: 1,
+				},
+			];
+			const vcs = new FakeVcs({
+				repoRoot: previous.repoRoot,
+				worktrees: [{ path: previous.worktreePath, ref: "head" }],
+				mergeBase: "base-2",
+				diffRange: nextDiff,
+			});
+			const routes = createReviewRoutes({
+				token,
+				store,
+				vcs,
+				ref: {
+					host: previous.mr.host,
+					projectPath: previous.mr.projectPath,
+					iid: previous.mr.iid,
+				},
+				fetchMr: async () => ({
+					iid: previous.mr.iid,
+					projectPath: previous.mr.projectPath,
+					title: "Updated review",
+					webUrl: previous.mr.webUrl,
+					sourceBranch: previous.mr.sourceBranch,
+					targetBranch: previous.mr.targetBranch,
+					headSha: "head-2",
+					diffRefs: {
+						baseSha: "base-2",
+						startSha: "base-2",
+						headSha: "head-2",
+					},
+				}),
+				diff: parseFileDiffs(previousDiff),
+				layerDiff: previousDiff,
+			});
+
+			const response = await routes(
+				request(`/api/sync?t=${token}`, { method: "POST" }),
+			);
+			expect(response.status).toBe(200);
+			expect((await response.json()).viewedFiles).toEqual(["src/kept.ts"]);
+			expect((await store.read())?.viewedFiles).toEqual(["src/kept.ts"]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

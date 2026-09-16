@@ -11,6 +11,7 @@ import {
 	resolveReviewRepo,
 	reviewRemoteUrl,
 	setupReview,
+	syncReview,
 } from "./setup";
 import { LEGACY_CHAT_ID, type ReviewState, ReviewStateSchema } from "./state";
 import { ReviewStore } from "./store";
@@ -95,6 +96,16 @@ function stateFor(
 		drafts: [],
 		...overrides,
 	});
+}
+
+function rawDiff(path: string, patchText: string) {
+	return {
+		path,
+		statOnly: false,
+		patch: patchText,
+		insertions: 1,
+		deletions: 1,
+	};
 }
 
 describe("setupReview chat state", () => {
@@ -250,6 +261,112 @@ describe("setupReview chat state", () => {
 			expect(await Bun.file(paths.chatPath).exists()).toBe(false);
 			expect(await Bun.file(adoptedPath).text()).toBe(adoptedTranscript);
 			expect(second.state.chats[0]?.title).toBe("Explain this review");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("syncReview viewed files", () => {
+	test("keeps viewed files whose diff content is unchanged", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-viewed-"));
+		try {
+			const paths = pathsFor(dir);
+			const previousDiff = [
+				rawDiff("src/kept.ts", "@@ -1 +1 @@\n context\n"),
+				rawDiff("src/changed.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+				rawDiff("src/shifted.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+				rawDiff("src/gone.ts", "@@ -1 +1 @@\n-old\n+gone\n"),
+			];
+			const nextDiff = [
+				rawDiff("src/kept.ts", "@@ -20 +20 @@\n context\n"),
+				rawDiff("src/changed.ts", "@@ -1 +1 @@\n-old\n+updated\n"),
+				rawDiff("src/shifted.ts", "@@ -40 +40 @@\n-old\n+new\n"),
+			];
+			const existing = stateFor(paths, {
+				viewedFiles: [
+					"src/kept.ts",
+					"src/changed.ts",
+					"src/shifted.ts",
+					"src/gone.ts",
+				],
+			});
+			const store = new ReviewStore(paths);
+			await store.write(existing);
+
+			const result = await syncReview({
+				vcs: new FakeVcs({
+					repoRoot: paths.repoPath,
+					worktrees: [],
+					mergeBase: "base-2",
+					diffRange: nextDiff,
+				}),
+				ref,
+				mr: {
+					...mergeRequest(),
+					headSha: "head-2",
+					diffRefs: {
+						baseSha: "base-2",
+						startSha: "base-2",
+						headSha: "head-2",
+					},
+				},
+				state: existing,
+				store,
+				paths,
+				previousDiff,
+			});
+
+			expect(result.state.viewedFiles).toEqual([
+				"src/kept.ts",
+				"src/shifted.ts",
+			]);
+			expect((await store.read())?.viewedFiles).toEqual([
+				"src/kept.ts",
+				"src/shifted.ts",
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("preserves viewed files when no previous diff is supplied", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-no-baseline-"));
+		try {
+			const paths = pathsFor(dir);
+			const existing = stateFor(paths, {
+				viewedFiles: ["src/kept.ts", "src/gone.ts"],
+			});
+			const store = new ReviewStore(paths);
+			await store.write(existing);
+
+			const result = await syncReview({
+				vcs: new FakeVcs({
+					repoRoot: paths.repoPath,
+					worktrees: [],
+					mergeBase: "base-2",
+					diffRange: [],
+				}),
+				ref,
+				mr: {
+					...mergeRequest(),
+					headSha: "head-2",
+					diffRefs: {
+						baseSha: "base-2",
+						startSha: "base-2",
+						headSha: "head-2",
+					},
+				},
+				state: existing,
+				store,
+				paths,
+			});
+
+			expect(result.state.viewedFiles).toEqual(["src/kept.ts", "src/gone.ts"]);
+			expect((await store.read())?.viewedFiles).toEqual([
+				"src/kept.ts",
+				"src/gone.ts",
+			]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

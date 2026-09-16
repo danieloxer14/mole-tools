@@ -195,6 +195,46 @@ export function parseFileDiff(file: FileDiff): ParsedFileDiff {
 	};
 }
 
+function flattenedDiffLines(
+	parsed: ParsedFileDiff,
+): Array<[DiffLineKind, string]> {
+	const lines: Array<[DiffLineKind, string]> = [];
+	for (const hunk of parsed.hunks) {
+		for (const line of hunk.lines) {
+			lines.push([line.kind, line.text]);
+		}
+	}
+	return lines;
+}
+
+export function diffContentEqual(a: FileDiff, b: FileDiff): boolean {
+	const parsedA = parseFileDiff(a);
+	const parsedB = parseFileDiff(b);
+	if (parsedA.status !== parsedB.status || parsedA.binary !== parsedB.binary) {
+		return false;
+	}
+	if (parsedA.hunks.length === 0 || parsedB.hunks.length === 0) {
+		return (
+			parsedA.hunks.length === parsedB.hunks.length &&
+			a.patch === b.patch &&
+			a.insertions === b.insertions &&
+			a.deletions === b.deletions
+		);
+	}
+
+	const linesA = flattenedDiffLines(parsedA);
+	const linesB = flattenedDiffLines(parsedB);
+	if (linesA.length !== linesB.length) return false;
+	for (let index = 0; index < linesA.length; index++) {
+		if (
+			linesA[index]?.[0] !== linesB[index]?.[0] ||
+			linesA[index]?.[1] !== linesB[index]?.[1]
+		) {
+			return false;
+		}
+	}
+	return true;
+}
 export function parseFileDiffs(files: FileDiff[]): ParsedFileDiff[] {
 	return files.map((file) => parseFileDiff(file));
 }
