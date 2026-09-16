@@ -969,11 +969,13 @@ export function createReviewRoutes(
 			return jsonResponse({ error: "MR sync is unavailable" }, 503);
 		const ref = reviewRef(state);
 		const mr = await fetcher(ref);
+		const previousDiff = currentLayerDiff;
 		const result = await syncReview({
 			vcs: options.vcs,
 			ref,
 			mr,
 			state,
+			previousDiff,
 			store: options.store,
 			repoRoot: state.repoRoot,
 			worktreePath: state.worktreePath,
