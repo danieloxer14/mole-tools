@@ -594,6 +594,7 @@ test("renders positioned discussion Markdown through the sanitized comment rende
 							"# Review note",
 							"",
 							"**Important**",
+							"Second important line",
 							"",
 							"- item",
 							"",
@@ -615,6 +616,9 @@ test("renders positioned discussion Markdown through the sanitized comment rende
 	});
 
 	expect(markup).toContain("<h1>Review note</h1>");
+	expect(markup).toContain(
+		"<p><strong>Important</strong>\nSecond important line</p>",
+	);
 	expect(markup).toContain("<strong>Important</strong>");
 	expect(markup).toContain("<li>item</li>");
 	expect(markup).toContain("<code>inline</code>");
