@@ -284,6 +284,28 @@ test("hints that Enter submits and Shift+Enter adds a new line", () => {
 	expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled/);
 });
 
+test("renders one whole-file chip per file tag path", () => {
+	const markup = renderComposer({
+		tags: [
+			{ kind: "file", path: "src/whole.ts" },
+			{
+				kind: "markdown",
+				path: "README.md",
+				startLine: 4,
+				endLine: 6,
+				quote: "## Heading",
+			},
+		],
+	});
+
+	expect(markup).toContain("src/whole.ts (whole file)");
+	expect(markup).toContain("README.md:4-6");
+	expect(markup).toContain("Whole file");
+	expect(markup).toContain(
+		'aria-label="Remove src/whole.ts (whole file) context"',
+	);
+});
+
 test("disables the composer and shows the busy hint while a turn runs", () => {
 	const markup = renderComposer({ sending: true });
 

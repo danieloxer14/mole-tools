@@ -8,7 +8,11 @@ import {
 } from "react";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
-import { type ChatTag, isMarkdownChatTag } from "../../chat-tags";
+import {
+	type ChatTag,
+	isFileChatTag,
+	isMarkdownChatTag,
+} from "../../chat-tags";
 import type { ChatEntry } from "../../store";
 import { composerEnterAction } from "./composer-keydown";
 import { IconButton } from "./IconButton";
@@ -56,12 +60,14 @@ export interface ChatPaneProps {
 }
 
 function tagLabel(tag: ChatTag): string {
+	if (isFileChatTag(tag)) return `${tag.path} (whole file)`;
 	return isMarkdownChatTag(tag)
 		? `${tag.path}:${tag.startLine}-${tag.endLine}`
 		: `${tag.path}:${tag.side}:${tag.startLine}-${tag.endLine}`;
 }
 
 function tagKey(tag: ChatTag): string {
+	if (isFileChatTag(tag)) return `${tag.path}-file`;
 	return isMarkdownChatTag(tag)
 		? `${tag.path}-markdown-${tag.startLine}-${tag.endLine}`
 		: `${tag.path}-${tag.side}-${tag.startLine}-${tag.endLine}-${tag.hunk}`;
@@ -405,7 +411,7 @@ export function ChatPane({
 			<form className="chat-composer" onSubmit={handleSubmit}>
 				{tags.length > 0 ? (
 					<fieldset className="chat-tags">
-						<legend>Line context tags</legend>
+						<legend>Context tags</legend>
 						{onClearTags ? (
 							<button
 								type="button"
@@ -419,7 +425,13 @@ export function ChatPane({
 							<span
 								className="chat-tag"
 								key={tagKey(tag)}
-								title={isMarkdownChatTag(tag) ? (tag.quote ?? "") : tag.hunk}
+								title={
+									isFileChatTag(tag)
+										? "Whole file"
+										: isMarkdownChatTag(tag)
+											? (tag.quote ?? "")
+											: tag.hunk
+								}
 							>
 								{tagLabel(tag)}
 								<button

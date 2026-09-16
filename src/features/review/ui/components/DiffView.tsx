@@ -98,6 +98,7 @@ interface DiffViewProps {
 	onLineSelection?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
 	onMarkdownTag?: (selection: MarkdownBlockSelection) => void;
+	onFileTag?: (path: string) => void;
 	onMarkdownComment?: (selection: MarkdownBlockSelection) => void;
 	onCancelDraft?: CommentDraftProps["onCancel"];
 	onEditDraft?: CommentDraftProps["onEdit"];
@@ -1600,6 +1601,7 @@ export function DiffView({
 	onLineSelection,
 	onCommentSelection,
 	onMarkdownTag,
+	onFileTag,
 	onMarkdownComment,
 	onCancelDraft,
 	onEditDraft,
@@ -1920,6 +1922,17 @@ export function DiffView({
 									✂
 								</button>
 							</fieldset>
+						) : null}
+						{onFileTag && path !== "(unknown file)" ? (
+							<button
+								type="button"
+								className="diff-tag-file"
+								aria-label="Tag whole file"
+								title="Add this whole file to the active chat context"
+								onClick={() => onFileTag(path)}
+							>
+								Tag whole file
+							</button>
 						) : null}
 						{!showingRendered &&
 						fileDiscussions.length > 0 &&
