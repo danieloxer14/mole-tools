@@ -307,3 +307,43 @@ test("omits Explain on general discussions when no handler is supplied", () => {
 	expect(markup).toContain('data-discussion-id="discussion-1"');
 	expect(markup).not.toContain('data-action="explain"');
 });
+
+test("renders general discussion Markdown through the sanitized comment renderer", () => {
+	const markup = renderGeneralDiscussions({
+		discussions: [
+			{
+				id: "markdown-general-discussion",
+				resolved: false,
+				position: null,
+				notes: [
+					{
+						id: "markdown-general-note",
+						author: "reviewer",
+						body: [
+							"# General note",
+							"",
+							"_Important_",
+							"",
+							"- item",
+							"",
+							"```text",
+							"general code",
+							"```",
+							"",
+							'<span onclick="alert(1)">click</span>',
+						].join("\n"),
+						createdAt: "2026-01-01T00:00:00.000Z",
+						system: false,
+					},
+				],
+			},
+		],
+	});
+
+	expect(markup).toContain("<h1>General note</h1>");
+	expect(markup).toContain("<li>item</li>");
+	expect(markup).toContain("<pre><code");
+	expect(markup).toContain("<em>Important</em>");
+	expect(markup).toContain(">click</span>");
+	expect(markup).not.toContain("onclick");
+});

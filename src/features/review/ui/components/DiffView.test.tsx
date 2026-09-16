@@ -573,3 +573,86 @@ test("hides the collapse control while the large-diff placeholder replaces the t
 	expect(markup).not.toContain("Collapse all comments");
 	expect(markup).not.toContain("Expand all comments");
 });
+
+test("renders positioned discussion Markdown through the sanitized comment renderer", () => {
+	const markup = renderDiff({
+		discussions: [
+			{
+				id: "markdown-discussion",
+				resolved: false,
+				position: {
+					newPath: "src/app.ts",
+					oldPath: "src/app.ts",
+					newLine: 1,
+					oldLine: null,
+				},
+				notes: [
+					{
+						id: "markdown-note",
+						author: "reviewer",
+						body: [
+							"# Review note",
+							"",
+							"**Important**",
+							"",
+							"- item",
+							"",
+							"`inline`",
+							"",
+							"```ts",
+							"const answer = 42;",
+							"```",
+							"",
+							'<img src="x" onerror="alert(1)">',
+							'<script>alert("x")</script>',
+						].join("\n"),
+						createdAt: "2026-01-01T00:00:00.000Z",
+						system: false,
+					},
+				],
+			},
+		],
+	});
+
+	expect(markup).toContain("<h1>Review note</h1>");
+	expect(markup).toContain("<strong>Important</strong>");
+	expect(markup).toContain("<li>item</li>");
+	expect(markup).toContain("<code>inline</code>");
+	expect(markup).toContain("<pre><code");
+	expect(markup).not.toContain("<script");
+	expect(markup).not.toContain("onerror");
+});
+
+test("keeps collapsed discussion summaries as plain text", () => {
+	const markup = renderDiff({
+		commentsCollapsed: true,
+		discussions: [
+			{
+				id: "collapsed-markdown-discussion",
+				resolved: false,
+				position: {
+					newPath: "src/app.ts",
+					oldPath: "src/app.ts",
+					newLine: 1,
+					oldLine: null,
+				},
+				notes: [
+					{
+						id: "collapsed-markdown-note",
+						author: "reviewer",
+						body: "**Important**\n\nMore detail",
+						createdAt: "2026-01-01T00:00:00.000Z",
+						system: false,
+					},
+				],
+			},
+		],
+	});
+	const preview = markup.match(
+		/<span class="inline-discussion-preview"[^>]*>[\s\S]*?<\/span>/,
+	)?.[0];
+
+	expect(preview).toBeDefined();
+	expect(preview).toContain("**Important**");
+	expect(preview).not.toContain("<strong>");
+});

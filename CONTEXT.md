@@ -86,6 +86,10 @@ New-side anchors use `new_line`; deleted-side anchors use `old_line`. Ranges
 cannot cross sides and must resolve against current diff refs before explicit
 Send posts one GitLab discussion. Existing discussions remain read-only.
 
+Review comment bodies support GitHub-flavoured Markdown in local previews and
+published positioned/general discussion cards; rendered output is sanitized,
+while collapsed discussion summaries stay plain text.
+
 ### Review sync
 Explicit re-synchronization after a head-SHA change. Refresh checks current
 head and reports staleness without mutating state. Sync recreates detached

@@ -34,6 +34,7 @@ import {
 } from "../../../../shared/markdown";
 import { type Draft, isMarkdownSelection } from "../../state";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
+import { CommentMarkdown } from "./CommentMarkdown";
 import {
 	contextLineId,
 	diffLineId,
@@ -744,7 +745,7 @@ function DiscussionCard({
 							>
 								<strong>{note.author}</strong>
 								<time dateTime={note.createdAt}>{note.createdAt}</time>
-								<p>{note.body}</p>
+								<CommentMarkdown body={note.body} />
 							</div>
 						))
 					) : (

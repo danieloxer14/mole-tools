@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
 	renderMarkdownBlocks,
+	renderMarkdownHtml,
 	wrapMarkdownBlocksWithActions,
 } from "./markdown";
 
@@ -45,4 +46,31 @@ test("assembles every block in document order with a distinct block id each", ()
 	expect(html.indexOf("<h1>")).toBeLessThan(html.indexOf("<p>"));
 	expect(blockRanges.size).toBe(2);
 	expect(new Set(blockRanges.keys()).size).toBe(2);
+});
+
+test("sanitizes unsafe tags, attributes, and URLs from comment HTML", () => {
+	const html = renderMarkdownHtml(
+		[
+			"# Safe",
+			'<script>alert("x")</script>',
+			'<span onclick="alert(1)" style="position:fixed">click</span>',
+			'<iframe src="https://example.test"></iframe>',
+			'<object data="movie.swf"></object>',
+			'<embed src="movie.swf">',
+			"<style>body{display:none}</style>",
+			'[unsafe](javascript:alert("x"))',
+		].join("\n\n"),
+	);
+
+	expect(html).toContain("<h1>Safe</h1>");
+	expect(html).toContain(">click</span>");
+	expect(html).not.toContain("<script");
+	expect(html).not.toContain("onclick");
+	expect(html).not.toContain('style="');
+	expect(html).not.toContain("<iframe");
+	expect(html).not.toContain("<object");
+	expect(html).not.toContain("<embed");
+	expect(html).not.toContain("<style");
+	expect(html).not.toContain("javascript:");
+	expect(html).not.toContain("alert(");
 });

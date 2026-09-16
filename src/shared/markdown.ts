@@ -29,6 +29,7 @@ export function renderMarkdownHtml(
 	}) as string;
 	return DOMPurify.sanitize(html, {
 		ADD_ATTR: ["data-mermaid-id", "data-code-block-id"],
+		FORBID_ATTR: ["style"],
 		FORBID_TAGS: ["embed", "iframe", "object", "script", "style"],
 	});
 }
