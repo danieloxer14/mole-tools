@@ -59,8 +59,7 @@ test("renders general discussions collapsed by default", () => {
 					],
 				},
 			]}
-			streamingText=""
-			tools={[]}
+			streamingSegments={[]}
 			error={null}
 			sending={false}
 			stopping={false}
@@ -103,8 +102,7 @@ test("renders one switcher item per chat with active and busy state", () => {
 			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
-			streamingText=""
-			tools={[]}
+			streamingSegments={[]}
 			error={null}
 			sending={false}
 			stopping={false}
@@ -181,8 +179,7 @@ test("renders parent-owned composer draft", () => {
 			onOpenSettings={() => {}}
 			draft="unsent question"
 			onDraftChange={() => {}}
-			streamingText=""
-			tools={[]}
+			streamingSegments={[]}
 			error={null}
 			sending={false}
 			stopping={false}
@@ -216,8 +213,7 @@ function renderComposer(
 			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
-			streamingText=""
-			tools={[]}
+			streamingSegments={[]}
 			error={null}
 			sending={false}
 			stopping={false}
@@ -232,6 +228,7 @@ function renderComposer(
 interface InteractiveRender {
 	container: HTMLDivElement;
 	root: Root;
+	rerender: (props: Partial<Parameters<typeof ChatPane>[0]>) => void;
 }
 
 function renderInteractive(
@@ -241,7 +238,7 @@ function renderInteractive(
 	document.body.append(container);
 	const root = createRoot(container);
 	interactiveRoots.push(root);
-	act(() => {
+	const render = (nextProps: Partial<Parameters<typeof ChatPane>[0]>) => {
 		root.render(
 			<ChatPane
 				transcript={[]}
@@ -260,30 +257,171 @@ function renderInteractive(
 				onOpenSettings={() => {}}
 				draft=""
 				onDraftChange={() => {}}
-				streamingText=""
-				tools={[]}
+				streamingSegments={[]}
 				error={null}
 				sending={false}
 				stopping={false}
 				onSend={() => {}}
 				onStop={() => {}}
 				onRemoveTag={() => {}}
-				{...props}
+				{...nextProps}
 			/>,
 		);
+	};
+	act(() => render(props));
+	return {
+		container,
+		root,
+		rerender: (nextProps) => act(() => render(nextProps)),
+	};
+}
+function setTranscriptMetrics(
+	element: HTMLElement,
+	metrics: { scrollHeight: number; clientHeight: number; scrollTop: number },
+	writes?: { count: number },
+) {
+	Object.defineProperties(element, {
+		scrollHeight: {
+			configurable: true,
+			get: () => metrics.scrollHeight,
+		},
+		clientHeight: {
+			configurable: true,
+			get: () => metrics.clientHeight,
+		},
+		scrollTop: {
+			configurable: true,
+			get: () => metrics.scrollTop,
+			set: (value: number) => {
+				if (writes) writes.count += 1;
+				metrics.scrollTop = value;
+			},
+		},
 	});
-	return { container, root };
 }
 
-test("hints that Enter submits and Shift+Enter adds a new line", () => {
-	const markup = renderComposer();
+test("follows transcript bottom, preserves upward reading, and sends from older history", () => {
+	const rendered = renderInteractive({ streamingSegments: ["first"] });
+	const messages = rendered.container.querySelector(".chat-messages");
+	expect(messages).not.toBeNull();
+	if (!messages) return;
+	const metrics = { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 };
+	const writes = { count: 0 };
+	setTranscriptMetrics(messages, metrics, writes);
+	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
 
-	expect(markup).toContain("Enter to send, Shift+Enter for a new line.");
-	expect(markup).not.toContain("Ctrl");
-	expect(markup).not.toContain("⌘");
-	expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled/);
+	metrics.scrollHeight = 1100;
+	rendered.rerender({ streamingSegments: ["first updated"] });
+	expect(metrics.scrollTop).toBe(700);
+
+	metrics.scrollTop = 500;
+	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
+	metrics.scrollHeight = 1200;
+	rendered.rerender({ streamingSegments: ["new output"] });
+	expect(metrics.scrollTop).toBe(500);
+
+	metrics.scrollTop = 784;
+	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
+	metrics.scrollHeight = 1300;
+	rendered.rerender({ streamingSegments: ["output at threshold"] });
+	expect(metrics.scrollTop).toBe(900);
+
+	metrics.scrollTop = 883;
+	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
+	metrics.scrollHeight = 1400;
+	rendered.rerender({
+		streamingSegments: ["output above threshold"],
+		draft: "send this",
+	});
+	expect(metrics.scrollTop).toBe(883);
+
+	const textarea = rendered.container.querySelector("textarea");
+	expect(textarea).not.toBeNull();
+	if (!textarea) return;
+	const writesBeforeSend = writes.count;
+	textarea.value = "send this";
+	textarea.dispatchEvent(
+		new dom.window.KeyboardEvent("keydown", {
+			bubbles: true,
+			key: "Enter",
+		}),
+	);
+	expect(writes.count).toBe(writesBeforeSend);
+	expect(metrics.scrollTop).toBe(883);
+	metrics.scrollHeight = 1500;
+	rendered.rerender({
+		streamingSegments: ["after explicit send"],
+		draft: "send this",
+	});
+	expect(writes.count).toBe(writesBeforeSend + 1);
+	expect(metrics.scrollTop).toBe(1100);
+	metrics.scrollHeight = 1600;
+	rendered.rerender({
+		streamingSegments: ["after explicit send updated"],
+		draft: "send this",
+	});
+	expect(writes.count).toBe(writesBeforeSend + 2);
+	expect(metrics.scrollTop).toBe(1200);
+});
+test("switching chats forces selected transcript to its latest message", () => {
+	const rendered = renderInteractive();
+	const messages = rendered.container.querySelector(".chat-messages");
+	expect(messages).not.toBeNull();
+	if (!messages) return;
+	const metrics = { scrollHeight: 1000, clientHeight: 400, scrollTop: 100 };
+	setTranscriptMetrics(messages, metrics);
+	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
+	rendered.rerender({
+		activeChatId: "chat-2",
+		chats: [
+			{
+				id: "chat-1",
+				title: "First chat",
+				createdAt: "2026-08-24T00:00:00Z",
+				busy: false,
+			},
+			{
+				id: "chat-2",
+				title: "Second chat",
+				createdAt: "2026-08-24T01:00:00Z",
+				busy: false,
+			},
+		],
+	});
+	expect(metrics.scrollTop).toBe(600);
 });
 
+test("keeps persisted card DOM stable when history objects refresh", () => {
+	const entry = {
+		role: "assistant" as const,
+		text: "Completed answer",
+		tags: [],
+		at: "2026-08-24T00:00:00Z",
+		sessionId: "session-1",
+		partial: false,
+	};
+	const rendered = renderInteractive({ transcript: [entry] });
+	const firstCard = rendered.container.querySelector(".chat-message");
+	expect(firstCard).not.toBeNull();
+
+	rendered.rerender({
+		transcript: [{ ...entry }],
+	});
+
+	expect(rendered.container.querySelector(".chat-message")).toBe(firstCard);
+});
+test("keeps idle keyboard hint but removes busy hint below composer", () => {
+	const idleMarkup = renderComposer();
+	expect(idleMarkup).toContain("Enter to send, Shift+Enter for a new line.");
+	expect(idleMarkup).toContain(
+		"Ask what changed, or select lines in a hunk for context.",
+	);
+
+	const busyMarkup = renderComposer({ sending: true, busy: true });
+	expect(busyMarkup).not.toContain(
+		"Enter to send, Shift+Enter for a new line.",
+	);
+});
 test("renders one whole-file chip per file tag path", () => {
 	const markup = renderComposer({
 		tags: [
@@ -306,15 +444,153 @@ test("renders one whole-file chip per file tag path", () => {
 	);
 });
 
-test("disables the composer and shows the busy hint while a turn runs", () => {
-	const markup = renderComposer({ sending: true });
+test("renders Thinking state without disabling the editable composer", () => {
+	const markup = renderComposer({ sending: true, busy: true, draft: "draft" });
 
-	expect(markup).toMatch(/<textarea[^>]*disabled/);
-	expect(markup).not.toContain("Enter to send, Shift+Enter for a new line.");
-	expect(markup).toContain("Agent is reading the review worktree…");
+	expect(markup).toMatch(/<textarea[^>]*>draft<\/textarea>/);
+	expect(markup).not.toMatch(/<textarea[^>]*disabled/);
+	expect(markup).toMatch(
+		/<button[^>]*type="submit"[^>]*disabled[^>]*aria-busy="true"/,
+	);
+	expect(markup).toContain("Thinking");
+	const busySubmit =
+		markup.match(/<button[^>]*type="submit"[^>]*>([\s\S]*?)<\/button>/)?.[1] ??
+		"";
+	expect(busySubmit).toContain('class="chat-spinner"');
+	expect(busySubmit).not.toContain("Thinking");
+	expect(markup).toContain('role="status"');
+	expect(markup).toContain('class="chat-spinner" aria-hidden="true"');
+	expect(markup).not.toContain("Agent is reading the review worktree…");
 	expect(markup).toContain(">Stop</button>");
 });
 
+test("renders separate assistant cards, partial labels, and no empty cards", () => {
+	const markup = renderComposer({
+		transcript: [
+			{
+				role: "user",
+				text: "What changed?",
+				tags: [],
+				at: "2026-08-24T00:00:00Z",
+				sessionId: "session-1",
+				partial: false,
+			},
+			{
+				role: "assistant",
+				text: "First answer",
+				tags: [],
+				at: "2026-08-24T00:00:01Z",
+				sessionId: "session-1",
+				partial: false,
+			},
+			{
+				role: "assistant",
+				text: "Partial answer",
+				tags: [],
+				at: "2026-08-24T00:00:02Z",
+				sessionId: "session-1",
+				partial: true,
+			},
+			{
+				role: "assistant",
+				text: "",
+				tags: [],
+				at: "2026-08-24T00:00:03Z",
+				sessionId: "session-1",
+				partial: false,
+			},
+		],
+		streamingSegments: ["Live before", "", "Live before"],
+		sending: true,
+		busy: true,
+	});
+
+	expect(markup.match(/class="chat-message assistant/g)).toHaveLength(4);
+	expect(markup).toContain("First answer");
+	expect(markup).toContain("Assistant · partial reply");
+	expect(markup.match(/Live before/g)).toHaveLength(2);
+	expect(markup).not.toContain("(No response)");
+	expect(markup).not.toContain("Assistant · streaming");
+});
+
+test("keeps errors visible without turning them into transcript cards", () => {
+	const markup = renderComposer({
+		error: "Agent failed",
+		streamingSegments: ["Partial answer"],
+	});
+	expect(markup).toContain(
+		'<p class="chat-error" role="alert">Agent failed</p>',
+	);
+	expect(markup).toContain("Assistant · partial reply");
+	expect(markup).not.toContain("Tool activity");
+});
+
+test("does not submit Enter while busy but submits plain Enter while idle", () => {
+	let busySends = 0;
+	const busyRender = renderInteractive({
+		draft: "queued draft",
+		sending: true,
+		busy: true,
+		onSend: () => {
+			busySends += 1;
+		},
+	});
+	const busyTextarea = busyRender.container.querySelector("textarea");
+	expect(busyTextarea).not.toBeNull();
+	const busyEnter = new dom.window.KeyboardEvent("keydown", {
+		bubbles: true,
+		key: "Enter",
+	});
+	const busyShiftEnter = new dom.window.KeyboardEvent("keydown", {
+		bubbles: true,
+		key: "Enter",
+		shiftKey: true,
+	});
+	busyTextarea?.dispatchEvent(busyEnter);
+	busyTextarea?.dispatchEvent(busyShiftEnter);
+	expect(busySends).toBe(0);
+	expect(busyTextarea?.disabled).toBe(false);
+	expect(busyEnter.defaultPrevented).toBe(false);
+	expect(busyShiftEnter.defaultPrevented).toBe(false);
+
+	let idleSends = 0;
+	const idleRender = renderInteractive({
+		draft: "send this",
+		onSend: () => {
+			idleSends += 1;
+		},
+	});
+	const idleTextarea = idleRender.container.querySelector("textarea");
+	const idleEnter = new dom.window.KeyboardEvent("keydown", {
+		bubbles: true,
+		key: "Enter",
+	});
+	idleTextarea?.dispatchEvent(idleEnter);
+	expect(idleSends).toBe(1);
+});
+test("leaves parent-owned draft clearing to the accepted send path", () => {
+	let draftChanges = 0;
+	let sends = 0;
+	const rendered = renderInteractive({
+		draft: "send this",
+		onDraftChange: () => {
+			draftChanges += 1;
+		},
+		onSend: () => {
+			sends += 1;
+		},
+	});
+	const textarea = rendered.container.querySelector("textarea");
+	expect(textarea).not.toBeNull();
+	textarea?.dispatchEvent(
+		new dom.window.KeyboardEvent("keydown", {
+			bubbles: true,
+			key: "Enter",
+		}),
+	);
+	expect(sends).toBe(1);
+	expect(draftChanges).toBe(0);
+});
 const generalDiscussions = [
 	{
 		id: "discussion-1",
@@ -368,8 +644,7 @@ function renderGeneralDiscussions(
 			draft=""
 			onDraftChange={() => {}}
 			discussions={generalDiscussions}
-			streamingText=""
-			tools={[]}
+			streamingSegments={[]}
 			error={null}
 			sending={false}
 			stopping={false}

@@ -12,11 +12,12 @@ import {
 	buildChatMessage,
 	buildChatPrompt,
 	type ChatTurnOptions,
+	type ChatTurnResult,
 	compactChatDiscussions,
 	runChatTurn,
 } from "./chat";
 import { type ReviewState, ReviewStateSchema } from "./state";
-import { ReviewStore } from "./store";
+import { type ChatEntry, ReviewStore } from "./store";
 
 function state(): ReviewState {
 	return ReviewStateSchema.parse({
@@ -179,7 +180,42 @@ class RecordingAgent implements ReviewAgent {
 		})();
 	}
 }
+class SequenceAgent implements ReviewAgent {
+	constructor(
+		private readonly events: readonly AgentEvent[],
+		private readonly throwAfterEvents = false,
+	) {}
 
+	async preflight(): Promise<void> {}
+
+	async *run(_turn: AgentTurn): AsyncIterable<AgentEvent> {
+		for (const event of this.events) yield event;
+		if (this.throwAfterEvents) throw new Error("stopped");
+	}
+}
+
+async function runSequence(
+	events: readonly AgentEvent[],
+	throwAfterEvents = false,
+): Promise<{ result: ChatTurnResult; entries: ChatEntry[] }> {
+	const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-sequence-"));
+	try {
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		});
+		const result = await runChatTurn(
+			options(dir, new SequenceAgent(events, throwAfterEvents), {
+				store,
+				message: "Sequence test",
+			}),
+		);
+		return { result, entries: await store.readChat("legacy") };
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+}
 describe("chat prompt construction", () => {
 	test("seeds first turn and sends only deltas on later turns", () => {
 		const tag = {
@@ -661,9 +697,147 @@ describe("persistent chat turns", () => {
 				role: "assistant",
 				text: "partial ",
 				sessionId: "session-1",
+				partial: true,
 			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("segments non-empty assistant text at tool boundaries without empty entries", async () => {
+		const session = { kind: "session" as const, sessionId: "session-1" };
+		const toolStart = {
+			kind: "tool" as const,
+			name: "grep",
+			phase: "start" as const,
+		};
+		const toolEnd = {
+			kind: "tool" as const,
+			name: "grep",
+			phase: "end" as const,
+		};
+		const scenarios: Array<{
+			name: string;
+			events: AgentEvent[];
+			expected: Array<{ text: string; partial: boolean }>;
+			throwAfterEvents?: boolean;
+			error?: string;
+		}> = [
+			{
+				name: "text tool text",
+				events: [
+					session,
+					{ kind: "text", delta: "first" },
+					toolStart,
+					toolEnd,
+					{ kind: "text", delta: "second" },
+				],
+				expected: [
+					{ text: "first", partial: false },
+					{ text: "second", partial: false },
+				],
+			},
+			{
+				name: "text tool text tool text",
+				events: [
+					session,
+					{ kind: "text", delta: "one" },
+					toolStart,
+					toolEnd,
+					{ kind: "text", delta: "two" },
+					toolStart,
+					toolEnd,
+					{ kind: "text", delta: "three" },
+				],
+				expected: [
+					{ text: "one", partial: false },
+					{ text: "two", partial: false },
+					{ text: "three", partial: false },
+				],
+			},
+			{
+				name: "consecutive tools",
+				events: [
+					session,
+					{ kind: "text", delta: "before" },
+					toolStart,
+					toolEnd,
+					toolStart,
+					toolEnd,
+					{ kind: "text", delta: "after" },
+				],
+				expected: [
+					{ text: "before", partial: false },
+					{ text: "after", partial: false },
+				],
+			},
+			{
+				name: "tools before text",
+				events: [session, toolStart, toolEnd, { kind: "text", delta: "reply" }],
+				expected: [{ text: "reply", partial: false }],
+			},
+			{
+				name: "tools after text",
+				events: [session, { kind: "text", delta: "reply" }, toolStart, toolEnd],
+				expected: [{ text: "reply", partial: false }],
+			},
+			{
+				name: "tool only",
+				events: [session, toolStart, toolEnd, { kind: "text", delta: "" }],
+				expected: [],
+			},
+			{
+				name: "stop before text",
+				events: [session],
+				throwAfterEvents: true,
+				expected: [],
+				error: "stopped",
+			},
+			{
+				name: "stop after partial text",
+				events: [session, { kind: "text", delta: "partial" }],
+				throwAfterEvents: true,
+				expected: [{ text: "partial", partial: true }],
+				error: "stopped",
+			},
+			{
+				name: "error after text",
+				events: [
+					session,
+					{ kind: "text", delta: "partial" },
+					{ kind: "error", message: "agent failed" },
+				],
+				expected: [{ text: "partial", partial: true }],
+				error: "agent failed",
+			},
+			{
+				name: "error after a completed segment",
+				events: [
+					session,
+					{ kind: "text", delta: "complete" },
+					toolStart,
+					{ kind: "text", delta: "partial" },
+					{ kind: "error", message: "agent failed" },
+				],
+				expected: [
+					{ text: "complete", partial: false },
+					{ text: "partial", partial: true },
+				],
+				error: "agent failed",
+			},
+		];
+
+		for (const scenario of scenarios) {
+			const { result, entries } = await runSequence(
+				scenario.events,
+				scenario.throwAfterEvents,
+			);
+			expect(
+				entries
+					.filter((entry) => entry.role === "assistant")
+					.map(({ text, partial }) => ({ text, partial })),
+			).toEqual(scenario.expected);
+			expect(result.error).toBe(scenario.error ?? null);
 		}
 	});
 

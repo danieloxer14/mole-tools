@@ -469,7 +469,14 @@ describe("review routes", () => {
 				expect.objectContaining({ role: "user", text: "Explain this change" }),
 				expect.objectContaining({
 					role: "assistant",
-					text: "Hello world",
+					text: "Hello",
+					partial: false,
+					sessionId: "chat-session",
+				}),
+				expect.objectContaining({
+					role: "assistant",
+					text: " world",
+					partial: false,
 					sessionId: "chat-session",
 				}),
 			]);
@@ -523,6 +530,7 @@ describe("review routes", () => {
 				(await store.readChat("chat-a")).map((entry) => entry.role),
 			).toEqual(["user", "assistant", "user", "assistant"]);
 			expect((await store.readChat("chat-a"))[1]?.text).toBe("partial");
+			expect((await store.readChat("chat-a"))[1]?.partial).toBe(true);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -2008,7 +2016,16 @@ describe("comment explain", () => {
 			).toBe("Explain: Please rename this helper");
 			expect(await store.readChat(chatId)).toEqual([
 				expect.objectContaining({ role: "user", text: message }),
-				expect.objectContaining({ role: "assistant", text: "Hello world" }),
+				expect.objectContaining({
+					role: "assistant",
+					text: "Hello",
+					partial: false,
+				}),
+				expect.objectContaining({
+					role: "assistant",
+					text: " world",
+					partial: false,
+				}),
 			]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

@@ -2,7 +2,9 @@ import {
 	type FormEvent,
 	type KeyboardEvent,
 	type MouseEvent as ReactMouseEvent,
+	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 } from "react";
@@ -18,12 +20,10 @@ import { CommentMarkdown } from "./CommentMarkdown";
 import { composerEnterAction } from "./composer-keydown";
 import { IconButton } from "./IconButton";
 import { CogIcon, PlusIcon } from "./Icons";
-
-export interface ChatToolActivity {
-	id: number;
-	name: string;
-	phase: "start" | "end";
-}
+import {
+	isTranscriptAtBottom,
+	scrollTranscriptToBottom,
+} from "./transcript-scroll";
 
 export interface ChatSummary {
 	id: string;
@@ -38,8 +38,7 @@ export interface ChatPaneProps {
 	discussions?: readonly HostDiscussion[];
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
-	streamingText: string;
-	tools: readonly ChatToolActivity[];
+	streamingSegments: readonly string[];
 	error: string | null;
 	sending: boolean;
 	stopping: boolean;
@@ -53,7 +52,7 @@ export interface ChatPaneProps {
 	creatingChat?: boolean;
 	draft: string;
 	onDraftChange: (value: string) => void;
-	onSend: (message: string) => void;
+	onSend: (message: string) => boolean | undefined;
 	onStop: () => void;
 	onRemoveTag: (tag: ChatTag) => void;
 	onClearTags?: () => void;
@@ -166,6 +165,10 @@ function roleLabel(role: string): string {
 	if (role === "assistant") return "Assistant";
 	return role;
 }
+/** Transcript entries append in order; position keeps refreshed history objects mounted. */
+function transcriptKeyForPosition(position: number): string {
+	return `transcript-${position}`;
+}
 function chatLabel(chat: ChatSummary, index: number): string {
 	return chat.title || `New chat ${index + 1}`;
 }
@@ -176,8 +179,7 @@ export function ChatPane({
 	discussions = [],
 	onExplainDiscussion,
 	explainDisabled = false,
-	streamingText,
-	tools,
+	streamingSegments,
 	error,
 	sending,
 	stopping,
@@ -197,6 +199,16 @@ export function ChatPane({
 	onOpenFileRef,
 }: ChatPaneProps) {
 	const switcher = useRef<HTMLDetailsElement | null>(null);
+	const transcriptElement = useRef<HTMLDivElement | null>(null);
+	const followTranscript = useRef(true);
+	const previousActiveChatId = useRef(activeChatId);
+	const streamingKeySequence = useRef(0);
+	const streamingKeys = useRef<string[]>([]);
+	while (streamingKeys.current.length < streamingSegments.length) {
+		streamingKeys.current.push(`streaming-${++streamingKeySequence.current}`);
+	}
+	if (streamingKeys.current.length > streamingSegments.length)
+		streamingKeys.current.length = streamingSegments.length;
 	const activeChatIndex = chats.findIndex((chat) => chat.id === activeChatId);
 	const activeChat = activeChatIndex >= 0 ? chats[activeChatIndex] : null;
 	const activeLabel = activeChat
@@ -204,6 +216,43 @@ export function ChatPane({
 		: "No chats";
 
 	const isBusy = sending || busy;
+	const forceScrollOnNextLayout = useRef(false);
+	const scrollToBottom = useCallback((force = false) => {
+		if (force) {
+			followTranscript.current = true;
+			forceScrollOnNextLayout.current = true;
+			return;
+		}
+		const element = transcriptElement.current;
+		if (!element || !followTranscript.current) return;
+		scrollTranscriptToBottom(element);
+	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: transcript, streaming, error, and busy state intentionally trigger this layout effect; DOM refs carry mutable scroll state.
+	useLayoutEffect(() => {
+		const switchedChat = previousActiveChatId.current !== activeChatId;
+		previousActiveChatId.current = activeChatId;
+		const forceScroll = forceScrollOnNextLayout.current;
+		forceScrollOnNextLayout.current = false;
+		if (forceScroll || switchedChat) {
+			followTranscript.current = true;
+			const element = transcriptElement.current;
+			if (element) scrollTranscriptToBottom(element);
+			return;
+		}
+		scrollToBottom();
+	}, [
+		activeChatId,
+		error,
+		isBusy,
+		scrollToBottom,
+		streamingSegments,
+		transcript,
+		transcriptElement,
+	]);
+	const handleTranscriptScroll = () => {
+		const element = transcriptElement.current;
+		if (element) followTranscript.current = isTranscriptAtBottom(element);
+	};
 	useEffect(() => {
 		const element = switcher.current;
 		if (!element) return;
@@ -235,8 +284,7 @@ export function ChatPane({
 	const submit = () => {
 		const value = draft.trim();
 		if (!value || isBusy) return;
-		onSend(value);
-		onDraftChange("");
+		if (onSend(value) !== false) scrollToBottom(true);
 	};
 
 	const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -353,61 +401,71 @@ export function ChatPane({
 					</ul>
 				</details>
 			</header>
-			<div className="chat-messages" aria-live="polite">
-				{transcript.length === 0 && !streamingText && !isBusy ? (
+			<div
+				className="chat-messages"
+				ref={transcriptElement}
+				onScroll={handleTranscriptScroll}
+			>
+				{transcript.length === 0 &&
+				!isBusy &&
+				streamingSegments.every((segment) => segment.length === 0) ? (
 					<p className="placeholder">
 						Ask what changed, or select lines in a hunk for context.
 					</p>
 				) : null}
-				{isBusy && !sending && !streamingText ? (
-					<p className="placeholder">A turn is still running for this chat.</p>
-				) : null}
-				{transcript.map((entry) => (
-					<article
-						className={`chat-message ${entry.role === "user" ? "user" : "assistant"}`}
-						key={`${entry.at}-${entry.role}-${entry.sessionId ?? "new"}-${entry.text}`}
-					>
-						<strong>{roleLabel(entry.role)}</strong>
-						<ChatMessageBody
-							text={entry.text || "(No response)"}
-							onOpenFileRef={onOpenFileRef}
-						/>
-						{entry.tags.length > 0 ? (
-							<ul className="chat-message-tags">
-								{entry.tags.map((tag) => (
-									<li key={tagKey(tag)}>{tagLabel(tag)}</li>
-								))}
-							</ul>
-						) : null}
-					</article>
-				))}
-				{streamingText ? (
-					<article className="chat-message assistant chat-streaming">
-						<strong>
-							Assistant{sending ? " · streaming" : " · partial reply"}
-						</strong>
-						<ChatMessageBody
-							text={streamingText}
-							onOpenFileRef={onOpenFileRef}
-						/>
-					</article>
-				) : null}
-				{tools.length > 0 ? (
-					<section className="chat-tools" aria-label="Agent tool activity">
-						<strong>Tool activity</strong>
-						<ul>
-							{tools.map((tool) => (
-								<li key={`${tool.id}-${tool.name}`}>
-									{tool.name} · {tool.phase === "start" ? "running" : "done"}
-								</li>
-							))}
-						</ul>
-					</section>
-				) : null}
+				{transcript.map((entry, index) => {
+					if (entry.role === "assistant" && entry.text.length === 0)
+						return null;
+					return (
+						<article
+							className={`chat-message ${entry.role === "user" ? "user" : "assistant"}`}
+							key={transcriptKeyForPosition(index)}
+							aria-live={entry.role === "assistant" ? "polite" : undefined}
+						>
+							<strong>
+								{entry.role === "assistant" && entry.partial
+									? "Assistant · partial reply"
+									: roleLabel(entry.role)}
+							</strong>
+							<ChatMessageBody
+								text={entry.text}
+								onOpenFileRef={onOpenFileRef}
+							/>
+							{entry.tags.length > 0 ? (
+								<ul className="chat-message-tags">
+									{entry.tags.map((tag) => (
+										<li key={tagKey(tag)}>{tagLabel(tag)}</li>
+									))}
+								</ul>
+							) : null}
+						</article>
+					);
+				})}
+				{streamingSegments.map((segment, index) =>
+					segment.length > 0 ? (
+						<article
+							className="chat-message assistant chat-streaming"
+							key={streamingKeys.current[index]}
+						>
+							<strong>
+								{index === streamingSegments.length - 1 && !sending
+									? "Assistant · partial reply"
+									: "Assistant"}
+							</strong>
+							<ChatMessageBody text={segment} onOpenFileRef={onOpenFileRef} />
+						</article>
+					) : null,
+				)}
 				{error ? (
 					<p className="chat-error" role="alert">
 						{error}
 					</p>
+				) : null}
+				{isBusy ? (
+					<div className="chat-thinking" role="status">
+						<span className="chat-spinner" aria-hidden="true" />
+						Thinking
+					</div>
 				) : null}
 			</div>
 			<form className="chat-composer" onSubmit={handleSubmit}>
@@ -453,12 +511,21 @@ export function ChatPane({
 					value={draft}
 					onChange={(event) => onDraftChange(event.target.value)}
 					onKeyDown={handleKeyDown}
-					disabled={isBusy}
 					rows={4}
 				/>
 				<div className="chat-composer-actions">
-					<button type="submit" disabled={isBusy || draft.trim().length === 0}>
-						Send
+					<button
+						type="submit"
+						className="chat-send"
+						disabled={isBusy || draft.trim().length === 0}
+						aria-busy={isBusy}
+						aria-label={isBusy ? "Thinking" : undefined}
+					>
+						{isBusy ? (
+							<span className="chat-spinner" aria-hidden="true" />
+						) : (
+							"Send"
+						)}
 					</button>
 					{isBusy ? (
 						<button
@@ -471,15 +538,11 @@ export function ChatPane({
 						</button>
 					) : null}
 				</div>
-				<p className="chat-composer-hint">
-					{isBusy
-						? stopping
-							? "Stopping agent; partial reply will be kept."
-							: sending
-								? "Agent is reading the review worktree…"
-								: "A turn is still running for this chat."
-						: "Enter to send, Shift+Enter for a new line."}
-				</p>
+				{!isBusy ? (
+					<p className="chat-composer-hint">
+						Enter to send, Shift+Enter for a new line.
+					</p>
+				) : null}
 			</form>
 		</aside>
 	);
