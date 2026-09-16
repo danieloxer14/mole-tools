@@ -14,6 +14,7 @@ import {
 	isMarkdownChatTag,
 } from "../../chat-tags";
 import type { ChatEntry } from "../../store";
+import { CommentMarkdown } from "./CommentMarkdown";
 import { composerEnterAction } from "./composer-keydown";
 import { IconButton } from "./IconButton";
 import { CogIcon, PlusIcon } from "./Icons";
@@ -283,9 +284,10 @@ export function ChatPane({
 								</button>
 							) : null}
 							{discussion.notes.map((note) => (
-								<p key={note.id}>
-									<strong>{note.author}</strong>: {note.body}
-								</p>
+								<div key={note.id} className="chat-general-note">
+									<strong>{note.author}</strong>
+									<CommentMarkdown body={note.body} />
+								</div>
 							))}
 						</article>
 					))}

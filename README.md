@@ -328,6 +328,10 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
+Drafts support local Write/Preview Markdown modes. Published positioned and
+general discussions render sanitized GitHub-flavoured Markdown; collapsed
+discussion summaries remain plain text.
+
 The **Prompts & Models** overlay manages the four review prompt slots
 (`review-layers-code`, `review-layers-plan`, `review-chat`,
 `review-explain-comment`), their presets and

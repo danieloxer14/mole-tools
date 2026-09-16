@@ -182,8 +182,17 @@ the first line of its comment body, truncated with an ellipsis. Files with
 discussions rendered in the diff also expose a `Collapse all comments` /
 `Expand all comments` button in the diff header that toggles every discussion
 in that file at once. Collapse state resets when the selected file changes.
+
+Published discussion notes render GitHub-flavoured Markdown through the shared
+sanitized comment-rendering boundary, for both positioned notes in the diff
+and general notes in chat. Collapsed discussion summaries remain plain-text
+previews rather than rendered Markdown. Local comment drafts start in Write
+mode when empty and Preview mode when they already contain text; switching
+modes changes only local editor state and does not alter draft persistence or
+comment posting transport.
 While the diff is hidden behind the large-diff placeholder, both controls stay
 hidden until the table expands.
+
 
 ## 5. Layered review guide
 

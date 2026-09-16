@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type Draft, isMarkdownSelection } from "../../state";
+import { CommentMarkdown } from "./CommentMarkdown";
 
 export interface CommentDraftProps {
 	draft: Draft;
@@ -66,7 +67,9 @@ export function CommentDraft({
 					rows={4}
 				/>
 			) : (
-				<p className="comment-draft-body">{body}</p>
+				<div className="comment-draft-preview">
+					<CommentMarkdown body={body} />
+				</div>
 			)}
 			{draft.error ? (
 				<p className="comment-draft-error" role="alert">
@@ -78,9 +81,24 @@ export function CommentDraft({
 					Cancel
 				</button>
 				{canEdit ? (
-					<button type="button" onClick={() => setEditing((value) => !value)}>
-						{editing ? "Done editing" : "Edit"}
-					</button>
+					<fieldset className="seg-group" aria-label="Draft editor mode">
+						<button
+							type="button"
+							className={`seg${!editing ? " active" : ""}`}
+							aria-pressed={!editing}
+							onClick={() => setEditing(false)}
+						>
+							Preview
+						</button>
+						<button
+							type="button"
+							className={`seg${editing ? " active" : ""}`}
+							aria-pressed={editing}
+							onClick={() => setEditing(true)}
+						>
+							Write
+						</button>
+					</fieldset>
 				) : null}
 				{draft.status === "draft" ? (
 					<button
