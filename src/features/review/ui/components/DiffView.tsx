@@ -6,6 +6,7 @@ import {
 	Fragment,
 	type KeyboardEvent,
 	type MouseEvent,
+	memo,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -739,6 +740,7 @@ function RenderedMarkdown({
 		</div>
 	);
 }
+const MemoizedRenderedMarkdown = memo(RenderedMarkdown);
 
 function MarkdownView({
 	fileContents,
@@ -765,7 +767,7 @@ function MarkdownView({
 	if (fileContents === null)
 		return <p className="placeholder">Loading file...</p>;
 	return (
-		<RenderedMarkdown
+		<MemoizedRenderedMarkdown
 			source={fileContents}
 			path={path}
 			drafts={drafts}
@@ -1848,6 +1850,41 @@ export function DiffView({
 			return next;
 		});
 	}, []);
+	const onMarkdownTagRef = useRef(onMarkdownTag);
+	onMarkdownTagRef.current = onMarkdownTag;
+	const stableOnMarkdownTag = useCallback(
+		(selection: MarkdownBlockSelection) => {
+			onMarkdownTagRef.current?.(selection);
+		},
+		[],
+	);
+	const onMarkdownCommentRef = useRef(onMarkdownComment);
+	onMarkdownCommentRef.current = onMarkdownComment;
+	const stableOnMarkdownComment = useCallback(
+		(selection: MarkdownBlockSelection) => {
+			onMarkdownCommentRef.current?.(selection);
+		},
+		[],
+	);
+	const onCancelDraftRef = useRef(onCancelDraft);
+	onCancelDraftRef.current = onCancelDraft;
+	const onEditDraftRef = useRef(onEditDraft);
+	onEditDraftRef.current = onEditDraft;
+	const onSendDraftRef = useRef(onSendDraft);
+	onSendDraftRef.current = onSendDraft;
+	const onRetryDraftRef = useRef(onRetryDraft);
+	onRetryDraftRef.current = onRetryDraft;
+	const stableCommentDraftProps = useMemo<
+		Pick<CommentDraftProps, "onCancel" | "onEdit" | "onSend" | "onRetry">
+	>(
+		() => ({
+			onCancel: (id) => onCancelDraftRef.current?.(id),
+			onEdit: (id, body) => onEditDraftRef.current?.(id, body),
+			onSend: (id) => onSendDraftRef.current?.(id),
+			onRetry: (id) => onRetryDraftRef.current?.(id),
+		}),
+		[],
+	);
 	if (!file) {
 		return (
 			<section className="empty-diff">
@@ -1933,15 +1970,7 @@ export function DiffView({
 			})
 			.finally(() => setExpanding(false));
 	};
-	const commentDraftProps: Pick<
-		CommentDraftProps,
-		"onCancel" | "onEdit" | "onSend" | "onRetry"
-	> = {
-		onCancel: onCancelDraft ?? (() => undefined),
-		onEdit: onEditDraft ?? (() => undefined),
-		onSend: onSendDraft ?? (() => undefined),
-		onRetry: onRetryDraft ?? (() => undefined),
-	};
+	const commentDraftProps = stableCommentDraftProps;
 
 	return (
 		<section className="diff-panel">
@@ -2148,8 +2177,8 @@ export function DiffView({
 					path={path}
 					drafts={drafts}
 					commentDraftProps={commentDraftProps}
-					onTagBlock={onMarkdownTag}
-					onCommentBlock={onMarkdownComment}
+					onTagBlock={stableOnMarkdownTag}
+					onCommentBlock={stableOnMarkdownComment}
 				/>
 			) : null}
 			{!showingRendered || binary ? (

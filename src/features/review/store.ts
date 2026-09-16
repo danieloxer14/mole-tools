@@ -21,6 +21,7 @@ export const ChatEntrySchema = z
 		tags: z.array(ChatTagSchema),
 		at: z.string().min(1),
 		sessionId: z.string().min(1).nullable(),
+		partial: z.boolean().default(false),
 	})
 	.strict();
 export type ChatEntry = z.infer<typeof ChatEntrySchema>;
@@ -107,8 +108,8 @@ export class ReviewStore {
 
 	async appendChat(
 		chatId: string,
-		entry: Omit<ChatEntry, "tags" | "at" | "sessionId"> &
-			Partial<Pick<ChatEntry, "tags" | "at" | "sessionId">>,
+		entry: Omit<ChatEntry, "tags" | "at" | "sessionId" | "partial"> &
+			Partial<Pick<ChatEntry, "tags" | "at" | "sessionId" | "partial">>,
 	): Promise<void> {
 		const transcriptPath = this.transcriptPath(chatId);
 		const normalized = ChatEntrySchema.parse({
@@ -117,6 +118,7 @@ export class ReviewStore {
 			tags: entry.tags ?? [],
 			at: entry.at ?? new Date().toISOString(),
 			sessionId: entry.sessionId ?? null,
+			partial: entry.partial ?? false,
 		});
 		await this.queueChatWrite(chatId, async () => {
 			await mkdir(dirname(transcriptPath), { recursive: true });

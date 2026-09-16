@@ -453,8 +453,24 @@ export async function runChatTurn(
 
 	const events: AgentEvent[] = [];
 	let assistantText = "";
+	let currentAssistantSegment = "";
+	let sawToolBoundary = false;
+	let turnEnded = false;
 	let sessionId = sessionIdFromState;
 	let failure: string | null = null;
+	const interrupted = () =>
+		failure !== null || (options.signal?.aborted === true && !turnEnded);
+	const persistAssistantSegment = async (partial: boolean) => {
+		if (currentAssistantSegment.length === 0) return;
+		await options.store.appendChat(options.chatId, {
+			role: "assistant",
+			text: currentAssistantSegment,
+			tags: [],
+			sessionId,
+			partial,
+		});
+		currentAssistantSegment = "";
+	};
 	const turn = {
 		cwd: state.worktreePath,
 		sessionId: sessionIdFromState ?? undefined,
@@ -480,8 +496,19 @@ export async function runChatTurn(
 					failure ??= `Unable to persist chat session: ${errorMessage(error)}`;
 				}
 			}
-			if (event.kind === "text") assistantText += event.delta;
+			if (event.kind === "text") {
+				if (event.delta.length === 0) continue;
+				if (sawToolBoundary) sawToolBoundary = false;
+				assistantText += event.delta;
+				currentAssistantSegment += event.delta;
+			}
+			if (event.kind === "tool") {
+				if (sawToolBoundary) continue;
+				await persistAssistantSegment(interrupted());
+				sawToolBoundary = true;
+			}
 			if (event.kind === "error") failure ??= event.message;
+			if (event.kind === "turn_end") turnEnded = true;
 		}
 	} catch (error) {
 		failure ??= errorMessage(error);
@@ -489,12 +516,7 @@ export async function runChatTurn(
 		events.push(event);
 		await notify(options.onEvent, event);
 	} finally {
-		await options.store.appendChat(options.chatId, {
-			role: "assistant",
-			text: assistantText,
-			tags: [],
-			sessionId,
-		});
+		await persistAssistantSegment(interrupted());
 	}
 
 	return {

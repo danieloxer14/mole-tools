@@ -16,6 +16,7 @@ import { type ChatTag, chatTagsEqual } from "../chat-tags";
 import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
 import type { ChatEntry } from "../store";
+import { createRequestSequence } from "./chat-request-sequence";
 import {
 	clampColumnWidth,
 	initialColumnWidth,
@@ -26,11 +27,7 @@ import {
 	changedFileCount,
 	viewedFileCount,
 } from "./components/ChangedFilesHeader";
-import {
-	ChatPane,
-	type ChatSummary,
-	type ChatToolActivity,
-} from "./components/ChatPane";
+import { ChatPane, type ChatSummary } from "./components/ChatPane";
 import {
 	type DiffLineSelection,
 	type DiffMode,
@@ -426,11 +423,16 @@ function centreColumnMinimumWidth(): number {
 function otherColumn(column: ReviewColumn): ReviewColumn {
 	return column === "left" ? "right" : "left";
 }
+interface ChatToolActivity {
+	id: number;
+	name: string;
+	phase: "start" | "end";
+}
 interface ChatRuntime {
 	entries: ChatEntry[];
 	tags: ChatTag[];
 	draft: string;
-	streamingText: string;
+	streamingSegments: string[];
 	tools: ChatToolActivity[];
 	error: string | null;
 	sending: boolean;
@@ -442,7 +444,7 @@ const EMPTY_CHAT_RUNTIME: ChatRuntime = {
 	entries: [],
 	tags: [],
 	draft: "",
-	streamingText: "",
+	streamingSegments: [],
 	tools: [],
 	error: null,
 	sending: false,
@@ -554,6 +556,10 @@ function ReviewApp() {
 	const [commentError, setCommentError] = useState<string | null>(null);
 	const chatControllers = useRef(new Map<string, AbortController>());
 	const chatToolSequence = useRef(0);
+	const chatHistoryRequests = useRef(createRequestSequence());
+	const chatStateRequests = useRef(createRequestSequence());
+	const chatSelectionRequests = useRef(createRequestSequence());
+	const chatSelectionQueue = useRef(Promise.resolve());
 	const autoRunRequested = useRef(false);
 	const syncCompleted = useRef(false);
 	const draftEditSequence = useRef(new Map<string, number>());
@@ -775,13 +781,29 @@ function ReviewApp() {
 		activeChatId !== null && chatRuntimes[activeChatId]?.loaded === true;
 
 	useEffect(() => {
-		if (!activeChatId || activeChatLoaded) return;
+		if (
+			!activeChatId ||
+			activeChatLoaded ||
+			chatControllers.current.has(activeChatId)
+		)
+			return;
 		const chatId = activeChatId;
+		const requestId = chatHistoryRequests.current.next(chatId);
 		void fetchChatHistory(token, chatId)
 			.then((entries) => {
+				if (
+					!chatHistoryRequests.current.isCurrent(chatId, requestId) ||
+					chatControllers.current.has(chatId)
+				)
+					return;
 				patchChat(chatId, { entries, loaded: true, error: null });
 			})
 			.catch((reason: unknown) => {
+				if (
+					!chatHistoryRequests.current.isCurrent(chatId, requestId) ||
+					chatControllers.current.has(chatId)
+				)
+					return;
 				patchChat(chatId, {
 					error: reason instanceof Error ? reason.message : String(reason),
 				});
@@ -799,6 +821,7 @@ function ReviewApp() {
 		let timer = 0;
 		const refresh = async () => {
 			if (!active) return;
+			const stateRequestId = chatStateRequests.current.next("state");
 			try {
 				const latest = await fetchState(token);
 				const chatIds = [
@@ -806,16 +829,27 @@ function ReviewApp() {
 				];
 				await Promise.all(
 					chatIds.map(async (chatId) => {
+						if (chatControllers.current.has(chatId)) return;
+						const requestId = chatHistoryRequests.current.next(chatId);
 						try {
 							const entries = await fetchChatHistory(token, chatId);
-							if (active) patchChat(chatId, { entries, loaded: true });
+							if (
+								active &&
+								chatHistoryRequests.current.isCurrent(chatId, requestId) &&
+								!chatControllers.current.has(chatId)
+							)
+								patchChat(chatId, { entries, loaded: true });
 						} catch {
 							// Keep polling; a transient history failure must not hide
 							// the eventual assistant entry.
 						}
 					}),
 				);
-				if (!active) return;
+				if (
+					!active ||
+					!chatStateRequests.current.isCurrent("state", stateRequestId)
+				)
+					return;
 				setData(latest);
 				if (latest.busyChatIds.length > 0)
 					timer = window.setTimeout(refresh, 750);
@@ -1398,9 +1432,16 @@ function ReviewApp() {
 			typeof (frame.data as Record<string, unknown>).text === "string"
 		) {
 			const text = (frame.data as Record<string, unknown>).text as string;
-			patchChat(chatId, (current) => ({
-				streamingText: `${current.streamingText}${text}`,
-			}));
+			if (text.length === 0) return;
+			patchChat(chatId, (current) => {
+				const streamingSegments = [...current.streamingSegments];
+				const lastIndex = streamingSegments.length - 1;
+				if (lastIndex < 0) streamingSegments.push(text);
+				else
+					streamingSegments[lastIndex] =
+						`${streamingSegments[lastIndex]}${text}`;
+				return { streamingSegments };
+			});
 			return;
 		}
 		if (
@@ -1416,9 +1457,15 @@ function ReviewApp() {
 				return;
 			}
 			patchChat(chatId, (current) => {
+				const streamingSegments =
+					current.streamingSegments.length === 0 ||
+					current.streamingSegments.at(-1)?.length !== 0
+						? [...current.streamingSegments, ""]
+						: current.streamingSegments;
 				if (tool.phase === "start") {
 					chatToolSequence.current += 1;
 					return {
+						streamingSegments,
 						tools: [
 							...current.tools,
 							{
@@ -1435,6 +1482,7 @@ function ReviewApp() {
 				if (index < 0) {
 					chatToolSequence.current += 1;
 					return {
+						streamingSegments,
 						tools: [
 							...current.tools,
 							{
@@ -1446,6 +1494,7 @@ function ReviewApp() {
 					};
 				}
 				return {
+					streamingSegments,
 					tools: current.tools.map((item, itemIndex) =>
 						itemIndex === index ? { ...item, phase: "end" } : item,
 					),
@@ -1465,11 +1514,12 @@ function ReviewApp() {
 	const startChatTurn = (chatId: string, message: string, tags: ChatTag[]) => {
 		const controller = new AbortController();
 		chatControllers.current.set(chatId, controller);
+		chatHistoryRequests.current.next(chatId);
 		const sessionId =
 			data.chats.find((chat) => chat.id === chatId)?.sessionId ?? null;
 		patchChat(chatId, {
 			error: null,
-			streamingText: "",
+			streamingSegments: [],
 			tools: [],
 			tags: [],
 			draft: "",
@@ -1485,6 +1535,7 @@ function ReviewApp() {
 					tags,
 					at: new Date().toISOString(),
 					sessionId,
+					partial: false,
 				},
 			],
 		}));
@@ -1495,16 +1546,20 @@ function ReviewApp() {
 			controller.signal,
 		)
 			.then(async () => {
+				const historyRequestId = chatHistoryRequests.current.next(chatId);
+				const stateRequestId = chatStateRequests.current.next("state");
 				const [entries, latest] = await Promise.all([
 					fetchChatHistory(token, chatId),
 					fetchState(token),
 				]);
-				patchChat(chatId, {
-					entries,
-					loaded: true,
-					streamingText: "",
-				});
-				setData(latest);
+				if (chatHistoryRequests.current.isCurrent(chatId, historyRequestId))
+					patchChat(chatId, {
+						entries,
+						loaded: true,
+						streamingSegments: [],
+					});
+				if (chatStateRequests.current.isCurrent("state", stateRequestId))
+					setData(latest);
 			})
 			.catch((reason: unknown) => {
 				if (controller.signal.aborted) return;
@@ -1520,8 +1575,15 @@ function ReviewApp() {
 	};
 	const handleChatSend = (message: string) => {
 		const chatId = activeChatId;
-		if (!chatId || activeChat.sending || activeChatBusy) return;
+		if (
+			!chatId ||
+			activeChat.sending ||
+			activeChatBusy ||
+			chatControllers.current.has(chatId)
+		)
+			return false;
 		startChatTurn(chatId, message, [...activeChat.tags]);
+		return true;
 	};
 	const handleChatStop = () => {
 		const chatId = activeChatId;
@@ -1648,19 +1710,25 @@ function ReviewApp() {
 	const handleSelectChat = (chatId: string) => {
 		if (!data.chats.some((chat) => chat.id === chatId)) return;
 		setSelectedChatId(chatId);
-		void fetch(apiUrl("/api/chats/active", token), {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				"X-Mole-Token": token,
-			},
-			body: JSON.stringify({ chatId }),
-		})
-			.then((response) => {
-				if (!response.ok)
-					throw new Error(`Select chat request failed (${response.status})`);
-			})
+		const requestId = chatSelectionRequests.current.next("active-chat");
+		const persistSelection = async () => {
+			const response = await fetch(apiUrl("/api/chats/active", token), {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"X-Mole-Token": token,
+				},
+				body: JSON.stringify({ chatId }),
+			});
+			if (!response.ok)
+				throw new Error(`Select chat request failed (${response.status})`);
+		};
+		chatSelectionQueue.current = chatSelectionQueue.current
+			.catch(() => undefined)
+			.then(persistSelection)
 			.catch((reason: unknown) => {
+				if (!chatSelectionRequests.current.isCurrent("active-chat", requestId))
+					return;
 				patchChat(chatId, {
 					error: reason instanceof Error ? reason.message : String(reason),
 				});
@@ -1857,8 +1925,7 @@ function ReviewApp() {
 				)}
 				onExplainDiscussion={explainDiscussion}
 				explainDisabled={creatingChat}
-				streamingText={activeChat.streamingText}
-				tools={activeChat.tools}
+				streamingSegments={activeChat.streamingSegments}
 				error={activeChat.error ?? commentError}
 				sending={activeChat.sending}
 				busy={activeChatBusy}

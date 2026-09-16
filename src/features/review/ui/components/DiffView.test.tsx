@@ -743,3 +743,52 @@ test("highlights multiline source comments with shared grammar state", {
 		container.remove();
 	}
 });
+
+test("keeps rendered markdown DOM intact during unrelated parent updates", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	const fileContents = "# Guide\n\n```ts\nconst value = 1;\n```";
+	const drafts = [] as const;
+
+	const render = () => {
+		root.render(
+			<DiffView
+				file={markdownFile}
+				mode="inline"
+				viewMode="rendered"
+				largeFileLineThreshold={800}
+				fileContents={fileContents}
+				fileContentsError={null}
+				drafts={drafts}
+				onModeChange={() => {}}
+				onLineSelection={() => {}}
+				onCommentSelection={() => {}}
+				onMarkdownTag={() => {}}
+				onMarkdownComment={() => {}}
+			/>,
+		);
+	};
+
+	try {
+		act(render);
+		const markdown = container.querySelector(".rendered-markdown");
+		expect(markdown).not.toBeNull();
+		if (!markdown) return;
+		const marker = document.createElement("span");
+		marker.dataset.testMarker = "sentinel";
+		marker.textContent = "sentinel";
+		markdown.append(marker);
+
+		act(render);
+
+		expect(markdown.querySelector('[data-test-marker="sentinel"]')).toBe(
+			marker,
+		);
+	} finally {
+		act(() => {
+			root.unmount();
+		});
+		container.remove();
+	}
+});
