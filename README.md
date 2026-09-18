@@ -555,6 +555,7 @@ bun install                          # install dependencies
 bun run build                        # compile to standalone binary (macOS arm64)
 ./mole-tools --version               # verify binary works
 ```
+# UI styles: Tailwind v4 + shadcn (base-luma). Production build runs scripts/build.ts because the CLI compiler skips bundler plugins.
 
 Produces `mole-tools` — a standalone compiled binary with no external `node_modules` requirement at runtime.
 

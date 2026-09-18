@@ -1,4 +1,7 @@
+import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { Button, buttonVariants } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export interface IconButtonProps {
 	label: string;
@@ -6,6 +9,7 @@ export interface IconButtonProps {
 	disabled?: boolean;
 	busy?: boolean;
 	badge?: boolean;
+	size?: "icon-sm" | "icon-xs";
 	onClick?: () => void;
 	href?: string;
 	children: ReactNode;
@@ -17,49 +21,59 @@ export function IconButton({
 	disabled = false,
 	busy = false,
 	badge = false,
+	size = "icon-sm",
 	onClick,
 	href,
 	children,
 }: IconButtonProps) {
-	const className = "icon-button";
 	const title = tooltip ?? label;
 	const content = (
 		<>
-			{children}
-			{busy ? (
-				<span className="icon-button-spinner" aria-hidden="true">
-					↻
-				</span>
+			{busy ? <Loader2 className="animate-spin" aria-hidden /> : children}
+			{badge ? (
+				<span
+					data-badge=""
+					className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary animate-in zoom-in duration-150 ease-out"
+					aria-hidden
+				/>
 			) : null}
-			{badge ? <span className="icon-button-badge" aria-hidden="true" /> : null}
 		</>
 	);
-	if (href !== undefined) {
-		return (
+	const trigger =
+		href !== undefined ? (
 			<a
-				className={className}
+				className={buttonVariants({
+					variant: "ghost",
+					size,
+					className: "relative",
+				})}
 				href={href}
 				target="_blank"
 				rel="noreferrer"
 				aria-label={label}
-				title={title}
 				aria-busy={busy ? "true" : undefined}
 			>
 				{content}
 			</a>
+		) : (
+			<Button
+				type="button"
+				variant="ghost"
+				size={size}
+				className="relative"
+				aria-label={label}
+				disabled={disabled}
+				aria-busy={busy ? "true" : undefined}
+				onClick={onClick}
+			>
+				{content}
+			</Button>
 		);
-	}
+
 	return (
-		<button
-			type="button"
-			className={className}
-			aria-label={label}
-			title={title}
-			disabled={disabled}
-			aria-busy={busy ? "true" : undefined}
-			onClick={onClick}
-		>
-			{content}
-		</button>
+		<Tooltip>
+			<TooltipTrigger render={trigger} />
+			<TooltipContent>{title}</TooltipContent>
+		</Tooltip>
 	);
 }

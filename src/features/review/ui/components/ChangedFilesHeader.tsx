@@ -20,16 +20,20 @@ export function ChangedFilesHeader({
 	total: number;
 }) {
 	return (
-		<header className="file-tree-header">
-			<strong>Viewed files</strong>
+		<div
+			data-region="changed-files"
+			className="flex items-center gap-3 border-t border-b px-4 py-2 text-xs text-muted-foreground"
+		>
+			<span className="shrink-0">Viewed files</span>
 			<ProgressBar
+				className="flex-1"
 				label="Viewed file coverage"
 				value={viewedCount}
 				max={total}
 			/>
-			<span>
+			<span className="tabular-nums">
 				{viewedCount}/{total} files
 			</span>
-		</header>
+		</div>
 	);
 }

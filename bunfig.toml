@@ -3,3 +3,6 @@ coverage = true
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = ["src/index.tsx", "src/adapters/ui/UiHost.tsx", "src/features/review/ui/**", "test/setup-dom.ts"]
 preload = ["./test/setup-dom.ts"]
+
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

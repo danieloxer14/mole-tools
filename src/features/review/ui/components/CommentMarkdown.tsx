@@ -19,11 +19,15 @@ export function CommentMarkdown({ body }: { body: string }) {
 	}, [body]);
 
 	if (parsed.error) {
-		return <p className="comment-markdown-plain">{body}</p>;
+		return (
+			<p className="comment-markdown-plain min-w-0 max-w-full [overflow-wrap:anywhere]">
+				{body}
+			</p>
+		);
 	}
 	return (
 		<div
-			className="comment-markdown"
+			className="comment-markdown min-w-0 w-full max-w-full [overflow-wrap:anywhere]"
 			// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
 			dangerouslySetInnerHTML={{ __html: parsed.html }}
 		/>

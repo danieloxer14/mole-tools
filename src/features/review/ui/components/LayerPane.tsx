@@ -1,8 +1,24 @@
+import {
+	ChevronDown,
+	FileText,
+	Layers,
+	Loader2,
+	RefreshCw,
+	Sparkles,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReviewState } from "../../state";
 import { IconButton } from "./IconButton";
-import { RegenerateIcon, RetryIcon } from "./Icons";
 import { ProgressBar } from "./ProgressBar";
+import { Alert } from "./ui/alert";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "./ui/collapsible";
 
 type LayerAction = "regenerate" | "retry";
 
@@ -125,6 +141,7 @@ export function shortFilePath(
 	}
 	return path;
 }
+
 export function LayerPane({
 	state,
 	files,
@@ -175,184 +192,230 @@ export function LayerPane({
 	const action = layersActionState(state.layerStatus, layerAction);
 	const completed = completedLayerCount(state.layers);
 	const actionRunning = layerAction !== null;
+	const running = state.layerStatus === "running";
 	return (
-		<aside className="left-column">
-			<header className="layers-header">
-				<div className="layers-header-row">
-					<h2>Review layers</h2>
+		<aside className="flex h-full min-h-0 flex-col border-r bg-sidebar">
+			<header className="sticky top-0 z-10 border-b bg-card/95 backdrop-blur">
+				<div className="flex items-center justify-between px-4 pt-4 pb-3 leading-none">
+					<h2 className="min-w-0 truncate text-base font-semibold text-foreground">
+						Review layers
+					</h2>
 					<IconButton
 						label={action.label}
 						tooltip={action.tooltip}
 						disabled={action.disabled}
-						busy={state.layerStatus === "running" || actionRunning}
+						busy={running || actionRunning}
 						onClick={action.mode === "retry" ? onRetry : onRegenerate}
 					>
-						{action.mode === "retry" ? <RetryIcon /> : <RegenerateIcon />}
+						{action.mode === "retry" ? (
+							<RefreshCw aria-hidden />
+						) : (
+							<Sparkles aria-hidden />
+						)}
 					</IconButton>
 				</div>
 				{state.layerStatus === "ready" ? (
-					<div className="layers-progress">
-						<span>{layersStatusMessage("ready")}</span>
+					<div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(3rem,1fr)_auto] items-center gap-2 px-4 pb-3 text-xs leading-none text-muted-foreground">
+						<Layers className="size-4 shrink-0" aria-hidden />
+						<span className="min-w-0 truncate">
+							{layersStatusMessage("ready")}
+						</span>
 						<ProgressBar
+							className="min-w-0"
 							label="Completed layers"
 							value={completed}
 							max={state.layers.length}
 						/>
-						<span>
+						<span className="inline-flex items-center tabular-nums leading-none">
 							{completed}/{state.layers.length}
 						</span>
 					</div>
 				) : (
-					<p className="layers-status">
-						{layersStatusMessage(state.layerStatus)}
-					</p>
+					<div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-4 pb-3 text-xs leading-none text-muted-foreground">
+						{running ? (
+							<Loader2 className="size-4 animate-spin" aria-hidden />
+						) : (
+							<Layers className="size-4" aria-hidden />
+						)}
+						<span className="min-w-0 truncate">
+							{layersStatusMessage(state.layerStatus)}
+						</span>
+					</div>
 				)}
 				{state.layerStatus === "failed" && state.layerError ? (
-					<p className="layer-error" role="alert">
+					<Alert className="mx-4 mb-3" variant="destructive">
 						{state.layerError}
-					</p>
+					</Alert>
 				) : null}
 				{actionError ? (
-					<p className="layer-error" role="alert">
+					<Alert className="mx-4 mb-3" variant="destructive">
 						{actionError}
-					</p>
+					</Alert>
 				) : null}
 			</header>
 			{state.layers.length === 0 ? (
-				<p className="placeholder">
+				<p className="p-4 text-sm text-muted-foreground">
 					{state.layerStatus === "ready"
 						? "No review layers."
 						: layersStatusMessage(state.layerStatus)}
 				</p>
 			) : (
 				<ul
-					className={`layer-list${
-						state.layerStatus === "running" ? " layers-list--dimmed" : ""
-					}`}
+					className="m-0 flex-1 list-none space-y-2 overflow-auto px-4 pt-4 pb-4 transition-opacity duration-200 ease-out data-[dimmed]:opacity-60"
+					data-dimmed={running ? "" : undefined}
 				>
-					{state.layers.map((layer) => {
+					{state.layers.map((layer, index) => {
 						const layerFiles = [...new Set(layer.files)].filter((path) =>
 							changedFiles.has(path),
 						);
 						const layerViewedCount = layerFiles.filter((path) =>
 							viewed.has(path),
 						).length;
-						const layerCoverage = layerFiles.length
-							? (layerViewedCount / layerFiles.length) * 100
-							: 0;
+						const collapsed = collapsedLayerIds.has(layer.id);
+						const layerState = layer.stale
+							? "stale"
+							: layer.done
+								? "done"
+								: "open";
 						return (
 							<li
-								className={`${layer.stale ? "stale" : ""} ${
-									layer.done ? "done" : ""
-								}`.trim()}
+								className="animate-in fade-in slide-in-from-left-2 duration-200 ease-out"
 								key={layer.id}
+								style={{
+									animationDelay: `${Math.min(index, 8) * 30}ms`,
+								}}
 							>
-								<div className="layer-title-row">
-									<button
-										type="button"
-										className="layer-collapse"
-										aria-label={`${
-											collapsedLayerIds.has(layer.id) ? "Expand" : "Collapse"
-										} ${layer.title}`}
-										aria-expanded={!collapsedLayerIds.has(layer.id)}
-										aria-controls={`layer-details-${layer.id}`}
-										onClick={() =>
-											setCollapsedLayerIds((current) =>
-												toggleLayerCollapsed(current, layer.id),
-											)
-										}
-									>
-										<svg
-											className="layer-collapse-icon"
-											viewBox="0 0 16 16"
-											aria-hidden="true"
-											focusable="false"
-										>
-											<path
-												d="M3 6l5 5 5-5"
-												fill="none"
-												stroke="currentColor"
-												strokeLinecap="round"
-												strokeLinejoin="round"
-												strokeWidth="2"
-											/>
-										</svg>
-									</button>
-									<input
-										id={`layer-done-${layer.id}`}
-										type="checkbox"
-										checked={layer.done}
-										aria-label={`Mark ${layer.title} done`}
-										onChange={(event) => {
-											const done = event.target.checked;
-											setCollapsedLayerIds((current) =>
-												collapseLayerWhenDone(current, layer.id, done),
-											);
-											onToggleDone(layer.id, done);
-										}}
-									/>
-									<button
-										type="button"
-										className={`layer-select ${
-											layerFiles.includes(selectedPath ?? "") ? "active" : ""
-										}`}
-										onClick={() => onSelectLayer(layer.id)}
-									>
-										{layer.title}
-									</button>
-									<span className="layer-state">
-										{layer.stale ? "Stale" : layer.done ? "Done" : "Open"}
-									</span>
-								</div>
-								<div
-									id={`layer-details-${layer.id}`}
-									className={`layer-details ${
-										collapsedLayerIds.has(layer.id) ? "is-collapsed" : ""
-									}`.trim()}
-									aria-hidden={collapsedLayerIds.has(layer.id)}
-									inert={collapsedLayerIds.has(layer.id)}
+								<Collapsible
+									className="rounded-md border bg-card shadow-xs transition-colors duration-150 ease-out data-[done]:opacity-70 data-[stale]:border-warning/40"
+									data-done={layer.done ? "" : undefined}
+									data-stale={layer.stale ? "" : undefined}
+									open={!collapsed}
+									onOpenChange={(open) => {
+										setCollapsedLayerIds((current) => {
+											const next = new Set(current);
+											if (open) {
+												next.delete(layer.id);
+											} else {
+												next.add(layer.id);
+											}
+											return next;
+										});
+									}}
 								>
-									<div className="layer-details-content">
+									<div className="flex items-center gap-2 p-3">
+										<CollapsibleTrigger
+											aria-label={`${collapsed ? "Expand" : "Collapse"} ${
+												layer.title
+											}`}
+											aria-controls={`layer-details-${layer.id}`}
+											render={
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-xs"
+													className="group"
+													title={`${collapsed ? "Expand" : "Collapse"} ${
+														layer.title
+													}`}
+												>
+													<ChevronDown
+														className="transition-transform duration-200 ease-out -rotate-90 group-data-[panel-open]:rotate-0"
+														aria-hidden
+													/>
+												</Button>
+											}
+										/>
+										<Checkbox
+											id={`layer-done-${layer.id}`}
+											checked={layer.done}
+											aria-label={`Mark ${layer.title} done`}
+											onCheckedChange={(checked) => {
+												const done = checked === true;
+												setCollapsedLayerIds((current) =>
+													collapseLayerWhenDone(current, layer.id, done),
+												);
+												onToggleDone(layer.id, done);
+											}}
+										/>
+										<button
+											type="button"
+											className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"
+											data-active={
+												layerFiles.includes(selectedPath ?? "")
+													? "true"
+													: "false"
+											}
+											onClick={() => onSelectLayer(layer.id)}
+										>
+											{layer.title}
+										</button>
+										<Badge
+											variant="secondary"
+											className={
+												layerState === "done"
+													? "bg-success/15 text-success"
+													: layerState === "stale"
+														? "bg-warning/15 text-warning"
+														: undefined
+											}
+											data-layer-state={layerState}
+										>
+											{layer.stale ? "Stale" : layer.done ? "Done" : "Open"}
+										</Badge>
+									</div>
+									<CollapsibleContent
+										keepMounted
+										id={`layer-details-${layer.id}`}
+										className="space-y-3 px-3 pb-3 text-sm text-foreground"
+										data-collapsed={collapsed ? "true" : "false"}
+									>
 										<p>{layer.tldr}</p>
-										<div className="layer-coverage">
-											<div className="layer-coverage-label">
+										<div className="space-y-1">
+											<div className="flex items-center justify-between text-xs">
 												<span>File coverage</span>
-												<span>
+												<span className="tabular-nums">
 													{layerViewedCount}/{layerFiles.length}
 												</span>
 											</div>
-											<div
-												className="layer-coverage-bar"
-												role="progressbar"
-												aria-label={`${layer.title} file coverage`}
-												aria-valuemin={0}
-												aria-valuemax={layerFiles.length}
-												aria-valuenow={layerViewedCount}
-											>
-												<span style={{ width: `${layerCoverage}%` }} />
-											</div>
+											<ProgressBar
+												label={`${layer.title} file coverage`}
+												value={layerViewedCount}
+												max={layerFiles.length}
+											/>
 										</div>
-										<div className="file-chips">
+										<div className="flex min-w-0 flex-wrap gap-1.5">
 											{layerFiles.map((path) => (
-												<button
-													type="button"
-													className={path === selectedPath ? "active" : ""}
+												<Badge
+													className="h-auto max-w-full min-w-0 shrink cursor-pointer justify-start gap-1 overflow-visible text-left font-mono text-xs whitespace-normal break-words hover:bg-muted hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground [overflow-wrap:anywhere]"
 													key={path}
-													title={path}
-													aria-label={path}
-													onClick={() => onSelectFile(path)}
+													variant="secondary"
+													render={
+														<button
+															type="button"
+															title={path}
+															aria-label={path}
+															aria-current={
+																path === selectedPath ? "true" : undefined
+															}
+															data-active={
+																path === selectedPath ? "true" : "false"
+															}
+															onClick={() => onSelectFile(path)}
+														/>
+													}
 												>
+													<FileText aria-hidden />
 													{shortFilePath(path, changedFilePaths)}
-												</button>
+												</Badge>
 											))}
 											{layerFiles.length === 0 ? (
-												<span className="file-chip-empty">
+												<span className="text-xs text-muted-foreground">
 													No changed files
 												</span>
 											) : null}
 										</div>
-									</div>
-								</div>
+									</CollapsibleContent>
+								</Collapsible>
 							</li>
 						);
 					})}

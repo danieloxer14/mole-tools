@@ -22,6 +22,7 @@ Object.assign(globalThis, {
 	document: dom.document,
 	navigator: dom.navigator,
 	Node: dom.Node,
+	Element: dom.Element,
 	HTMLElement: dom.HTMLElement,
 	IS_REACT_ACT_ENVIRONMENT: true,
 });
@@ -70,8 +71,12 @@ const base: MrHeaderProps = {
 	onSync: () => {},
 };
 
-function render(overrides: Partial<MrHeaderProps> = {}): string {
-	return renderToStaticMarkup(<MrHeader {...base} {...overrides} />);
+function render(overrides: Partial<MrHeaderProps> = {}): HTMLDivElement {
+	const container = document.createElement("div");
+	container.innerHTML = renderToStaticMarkup(
+		<MrHeader {...base} {...overrides} />,
+	);
+	return container;
 }
 
 interface InteractiveRender {
@@ -90,6 +95,19 @@ function renderInteractive(
 		root.render(<MrHeader {...base} {...overrides} />);
 	});
 	return { container, root };
+}
+
+function expectBefore(before: Element | null, after: Element | null): void {
+	expect(before).not.toBeNull();
+	expect(after).not.toBeNull();
+	if (before !== null && after !== null) {
+		expect(
+			Boolean(
+				before.compareDocumentPosition(after) &
+					Node.DOCUMENT_POSITION_FOLLOWING,
+			),
+		).toBe(true);
+	}
 }
 
 test("reports copied only after clipboard write succeeds", async () => {
@@ -141,86 +159,116 @@ test("does not report copied when clipboard write fails", async () => {
 });
 
 test("renders title, sha identity, approved pill, and GitLab link", () => {
-	const html = render();
+	const container = render();
+	const title = container.querySelector("h1");
+	const sha = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Copy commit sha"]',
+	);
+	const status = container.querySelector('[data-approval="approved"]');
+	const link = container.querySelector<HTMLAnchorElement>('a[target="_blank"]');
 
-	expect(html).toContain(
-		'<h1 class="mr-title" title="Add review header">Add review header</h1>',
+	expect(title?.textContent).toBe("Add review header");
+	expect(title?.getAttribute("title")).toBe("Add review header");
+	expect(sha?.textContent).toContain("12345678");
+	expect(sha?.getAttribute("title")).toBe(base.headSha);
+	expect(status?.textContent).toBe("Approved");
+	expect(status?.getAttribute("title")).toBe(
+		"Approved by reviewer, maintainer",
 	);
-	expect(html).toContain(
-		'<button type="button" class="mr-sha" aria-label="Copy commit sha" title="1234567890abcdef1234567890abcdef12345678">12345678',
-	);
-	expect(html).toContain('class="mr-status-pill mr-status-pill-approved"');
-	expect(html).toContain('title="Approved by reviewer, maintainer"');
-	expect(html).toContain(
-		'href="https://gitlab.example.test/group/project/-/merge_requests/42"',
-	);
-	expect(html).toContain('target="_blank"');
-	expect(html).toContain('title="Open in GitLab"');
+	expect(link?.getAttribute("href")).toBe(base.mr.webUrl);
+	expect(link?.getAttribute("target")).toBe("_blank");
+	expect(link?.getAttribute("title")).toBeNull();
 });
 
 test("falls back to IID when title is empty", () => {
-	const html = render({ mr: { ...base.mr, title: "" } });
+	const title = render({ mr: { ...base.mr, title: "" } }).querySelector("h1");
 
-	expect(html).toContain('<h1 class="mr-title" title="">!42</h1>');
+	expect(title?.textContent).toBe("!42");
+	expect(title?.getAttribute("title")).toBe("");
 });
 
 test("hides approval pill while loading or unavailable", () => {
-	expect(render({ approvalLoading: true })).not.toContain("mr-status-pill");
-	expect(render({ approval: null })).not.toContain("mr-status-pill");
-	expect(render({ approval: { ...approval, approved: false } })).toContain(
-		'class="mr-status-pill mr-status-pill-neutral"',
-	);
-	expect(render({ approval: { ...approval, approved: false } })).toContain(
-		">Not approved</span>",
-	);
+	expect(
+		render({ approvalLoading: true }).querySelector("[data-approval]"),
+	).toBeNull();
+	expect(
+		render({ approval: null }).querySelector("[data-approval]"),
+	).toBeNull();
+	const notApproved = render({
+		approval: { ...approval, approved: false },
+	}).querySelector('[data-approval="not-approved"]');
+
+	expect(notApproved?.textContent).toBe("Not approved");
 });
 
 test("renders stale controls between refresh and GitLab link", () => {
-	const html = render({
+	const container = render({
 		freshness: { stale: true, newCommitCount: 1 },
 	});
-	const refresh = html.indexOf('aria-label="Refresh merge request"');
-	const sync = html.indexOf('aria-label="Sync to latest"');
-	const regenerate = html.indexOf("Regenerate layers after sync");
-	const open = html.indexOf('title="Open in GitLab"');
+	const refresh = container.querySelector(
+		'button[aria-label="Refresh merge request"]',
+	);
+	const sync = container.querySelector('button[aria-label="Sync to latest"]');
+	const regenerate = [...container.querySelectorAll("label")].find((label) =>
+		label.textContent?.includes("Regenerate layers after sync"),
+	);
+	const open = container.querySelector('a[target="_blank"]');
 
-	expect(sync).toBeGreaterThan(refresh);
-	expect(regenerate).toBeGreaterThan(sync);
-	expect(open).toBeGreaterThan(regenerate);
-	expect(html).toContain('class="icon-button-badge"');
-	expect(html).toContain('title="Sync to latest — 1 new commit"');
-	expect(render({ freshness: null })).not.toContain("Sync to latest");
-	expect(render({ freshness: null })).not.toContain(
+	expectBefore(refresh, sync);
+	expectBefore(sync, regenerate ?? null);
+	expectBefore(regenerate ?? null, open);
+	expect(container.querySelector("[data-badge]")).not.toBeNull();
+	expect(
+		container.querySelector('button[aria-label="Sync to latest"]'),
+	).not.toBeNull();
+	const freshContainer = render({ freshness: null });
+	expect(
+		freshContainer.querySelector('button[aria-label="Sync to latest"]'),
+	).toBeNull();
+	expect(freshContainer.textContent).not.toContain(
 		"Regenerate layers after sync",
 	);
 });
 
 test("refresh busy and disabled states reflect ongoing work", () => {
-	const refreshing = render({ refreshing: true });
-	expect(refreshing).toContain('aria-label="Refresh merge request"');
-	expect(refreshing).toContain('aria-busy="true"');
-	expect(refreshing).toContain('disabled=""');
+	const refreshing = render({
+		refreshing: true,
+	}).querySelector<HTMLButtonElement>(
+		'button[aria-label="Refresh merge request"]',
+	);
+	expect(refreshing?.getAttribute("aria-busy")).toBe("true");
+	expect(refreshing?.disabled).toBe(true);
 
-	const syncing = render({ syncing: true });
-	expect(syncing).toContain('aria-label="Refresh merge request"');
-	expect(syncing).toContain('disabled=""');
+	const syncing = render({ syncing: true }).querySelector<HTMLButtonElement>(
+		'button[aria-label="Refresh merge request"]',
+	);
+	expect(syncing?.disabled).toBe(true);
 
-	const layerGenerating = render({ layerGenerating: true });
-	expect(layerGenerating).toContain('aria-label="Refresh merge request"');
-	expect(layerGenerating).toContain('disabled=""');
+	const layerGenerating = render({
+		layerGenerating: true,
+	}).querySelector<HTMLButtonElement>(
+		'button[aria-label="Refresh merge request"]',
+	);
+	expect(layerGenerating?.disabled).toBe(true);
 });
 
 test("approve action uses state variant and disabled tooltip precedence", () => {
-	const approved = render();
-	expect(approved).toContain('class="mr-approve mr-approve-danger"');
-	expect(approved).toContain(">Unapprove</button>");
-
-	const notApproved = render({ approval: { ...approval, approved: false } });
-	expect(notApproved).toContain('class="mr-approve mr-approve-success"');
-	expect(notApproved).toContain(">Approve</button>");
-	expect(render({ freshness: { stale: true, newCommitCount: 2 } })).toContain(
-		'title="MR out of date — approves 12345678"',
+	const approved = render().querySelector<HTMLButtonElement>(
+		'button[aria-label="Unapprove"]',
 	);
+	expect(approved?.textContent).toContain("Unapprove");
+	expect(approved?.disabled).toBe(false);
+
+	const notApproved = render({
+		approval: { ...approval, approved: false },
+	}).querySelector<HTMLButtonElement>('button[aria-label="Approve"]');
+	expect(notApproved?.textContent).toContain("Approve");
+	expect(notApproved?.disabled).toBe(false);
+
+	const stale = render({
+		freshness: { stale: true, newCommitCount: 2 },
+	}).querySelector<HTMLButtonElement>('button[aria-label="Unapprove"]');
+	expect(stale?.getAttribute("title")).toBeNull();
 });
 
 test("covers approval helper matrix", () => {
@@ -254,4 +302,76 @@ test("covers pure display helpers", () => {
 	expect(approveTooltip(null, false, base.headSha, true)).toBe("Unapprove");
 	expect(syncTooltip(1)).toBe("Sync to latest — 1 new commit");
 	expect(syncTooltip(2)).toBe("Sync to latest — 2 new commits");
+});
+test("keeps SHA copy control centered with adjacent header controls", async () => {
+	Object.defineProperty(dom.navigator, "clipboard", {
+		configurable: true,
+		value: {
+			writeText: () => Promise.resolve(),
+		},
+	});
+	const rendered = renderInteractive();
+	const sha = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Copy commit sha"]',
+	);
+	const metadata = sha?.parentElement;
+	const actions = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Refresh merge request"]',
+	)?.parentElement;
+
+	expect(metadata?.className).toContain("inline-flex");
+	expect(metadata?.className).toContain("items-center");
+	expect(metadata?.className).toContain("leading-none");
+	expect(actions?.className).toContain("inline-flex");
+	expect(actions?.className).toContain("items-center");
+	expect(actions?.className).toContain("leading-none");
+	expect(sha?.className).toContain("items-center");
+	expect(sha?.className).toContain("leading-none");
+	expect(sha?.querySelector("[data-sha-label]")?.textContent).toBe("12345678");
+});
+
+test("uses success approval styling without changing destructive unapproval", () => {
+	const approve = render({
+		approval: { ...approval, approved: false },
+	}).querySelector<HTMLButtonElement>('button[aria-label="Approve"]');
+	expect(approve?.className).toContain("bg-success");
+	expect(approve?.className).toContain("text-success-foreground");
+	expect(approve?.className).toContain("hover:bg-success/80");
+	expect(approve?.className).not.toContain("dark:bg-success");
+	expect(approve?.className).not.toContain("bg-primary");
+
+	const unapprove = render().querySelector<HTMLButtonElement>(
+		'button[aria-label="Unapprove"]',
+	);
+	expect(unapprove?.className).toContain("bg-destructive/10");
+	expect(unapprove?.className).toContain("text-destructive");
+	expect(unapprove?.className).not.toContain("bg-success");
+});
+
+test("keeps approval disabled states and callbacks intact", () => {
+	const unavailable = render({
+		approval: null,
+	}).querySelector<HTMLButtonElement>('button[aria-label="Approve"]');
+	expect(unavailable?.disabled).toBe(true);
+	expect(unavailable?.getAttribute("aria-describedby")).toBe("approve-tooltip");
+	const unavailableTooltip = render({
+		approval: null,
+	}).querySelector("#approve-tooltip");
+	expect(unavailableTooltip?.textContent).toBe("Approval unavailable");
+
+	const loading = render({
+		approvalLoading: true,
+	}).querySelector<HTMLButtonElement>('button[aria-label="Unapprove"]');
+	expect(loading?.disabled).toBe(true);
+
+	const actions: ApprovalAction[] = [];
+	const unapproved = renderInteractive({
+		approval: { ...approval, approved: false },
+		onApprovalAction: (action) => actions.push(action),
+	});
+	const approve = unapproved.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Approve"]',
+	);
+	act(() => approve?.click());
+	expect(actions).toEqual(["approve"]);
 });

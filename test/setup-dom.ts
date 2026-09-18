@@ -11,7 +11,26 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>");
 (globalThis as Record<string, unknown>).document = dom.window.document;
 (globalThis as Record<string, unknown>).Node = dom.window.Node;
 (globalThis as Record<string, unknown>).NodeFilter = dom.window.NodeFilter;
+(globalThis as Record<string, unknown>).Element = dom.window.Element;
 (globalThis as Record<string, unknown>).HTMLElement = dom.window.HTMLElement;
 (globalThis as Record<string, unknown>).HTMLTemplateElement =
 	dom.window.HTMLTemplateElement;
+(globalThis as Record<string, unknown>).MutationObserver =
+	dom.window.MutationObserver;
+(globalThis as Record<string, unknown>).getComputedStyle =
+	dom.window.getComputedStyle.bind(dom.window);
 (globalThis as Record<string, unknown>).DOMParser = dom.window.DOMParser;
+if (!("ResizeObserver" in globalThis)) {
+	(globalThis as Record<string, unknown>).ResizeObserver = class {
+		observe(_target: Element) {}
+		unobserve(_target: Element) {}
+		disconnect() {}
+	};
+}
+if (!("requestAnimationFrame" in globalThis)) {
+	(globalThis as Record<string, unknown>).requestAnimationFrame = (
+		callback: FrameRequestCallback,
+	) => setTimeout(() => callback(Date.now()), 0);
+	(globalThis as Record<string, unknown>).cancelAnimationFrame = (id: number) =>
+		clearTimeout(id);
+}

@@ -1,4 +1,23 @@
 import DOMPurify from "dompurify";
+import {
+	ChevronDown,
+	ChevronsUpDown,
+	ChevronUp,
+	CircleCheck,
+	CircleDot,
+	Columns2,
+	Diff,
+	Eye,
+	EyeOff,
+	Loader2,
+	MessageSquarePlus,
+	Minus,
+	Pilcrow,
+	Rows3,
+	Search,
+	Sparkles,
+	Tag,
+} from "lucide-react";
 import type { Tokens } from "marked";
 import mermaid from "mermaid";
 import {
@@ -46,6 +65,7 @@ import {
 	lineTextMatches,
 	stepMatchIndex,
 } from "./find";
+import { IconButton } from "./IconButton";
 import {
 	type DiffDragRow,
 	type DragAction,
@@ -57,9 +77,37 @@ import {
 	markdownDragRange,
 	nextMarkdownDragEnd,
 } from "./line-drag";
+import { Alert } from "./ui/alert";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "./ui/collapsible";
+import { Input } from "./ui/input";
+import {
+	SegmentedToggleGroup,
+	SegmentedToggleGroupItem,
+} from "./ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { useDiffDrag } from "./use-diff-drag";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
+
+function TooltipToggleGroupItem({
+	label,
+	...props
+}: Parameters<typeof SegmentedToggleGroupItem>[0] & { label: string }) {
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={<SegmentedToggleGroupItem {...props} aria-label={label} />}
+			/>
+			<TooltipContent>{label}</TooltipContent>
+		</Tooltip>
+	);
+}
 
 export interface DiffLineSelection {
 	path: string;
@@ -330,13 +378,13 @@ function renderMarkdown(source: string): RenderedMarkdown {
 				code: token.text,
 				lang: token.lang?.trim() || "text",
 			});
-			return `<div class="code-block" data-code-block-id="${id}"><pre><code>${escapeHtml(
+			return `<div class="code-block min-w-0 max-w-full" data-code-block-id="${id}"><pre><code>${escapeHtml(
 				token.text,
 			)}</code></pre></div>`;
 		};
 		renderer.html = ({ text }: Tokens.HTML | Tokens.Tag) => escapeHtml(text);
 		renderer.table = (token: Tokens.Table) =>
-			`<div class="rendered-table-wrap">${defaultTable(token)}</div>`;
+			`<div class="rendered-table-wrap min-w-0 max-w-full">${defaultTable(token)}</div>`;
 	});
 	const { html: bodyHtml, blockRanges } = wrapMarkdownBlocksWithActions(blocks);
 	const html = DOMPurify.sanitize(bodyHtml, {
@@ -703,14 +751,16 @@ function RenderedMarkdown({
 				drag !== null &&
 				candidate !== null &&
 				isBlockInMarkdownDrag(candidate, drag);
-			block.classList.toggle("drag-selected", inDrag);
+			block.toggleAttribute("data-drag-selected", inDrag);
 		}
 	}, [drag]);
 
 	if (parsed.error) {
 		return (
-			<div className="markdown-render-error">
-				<p className="render-error">Markdown render failed: {parsed.error}</p>
+			<div>
+				<Alert variant="destructive">
+					Markdown render failed: {parsed.error}
+				</Alert>
 				<pre className="mermaid-source">{source}</pre>
 			</div>
 		);
@@ -723,15 +773,15 @@ function RenderedMarkdown({
 			isMarkdownSelection(draft.selection),
 	);
 	return (
-		<div className={`markdown-view${drag ? " drag-selecting" : ""}`}>
+		<div className="min-w-0 max-w-full">
 			<div
-				className="rendered-markdown"
+				className="rendered-markdown min-w-0 max-w-full [overflow-wrap:anywhere]"
 				ref={containerRef}
 				// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
 				dangerouslySetInnerHTML={{ __html: parsed.value.html }}
 			/>
 			{markdownDrafts.length > 0 ? (
-				<div className="markdown-draft-list">
+				<div>
 					{markdownDrafts.map((draft) => (
 						<CommentDraft key={draft.id} draft={draft} {...commentDraftProps} />
 					))}
@@ -763,7 +813,7 @@ function MarkdownView({
 	onCommentBlock?: (selection: MarkdownBlockSelection) => void;
 }) {
 	if (fileContentsError)
-		return <p className="render-error">{fileContentsError}</p>;
+		return <Alert variant="destructive">{fileContentsError}</Alert>;
 	if (fileContents === null)
 		return <p className="placeholder">Loading file...</p>;
 	return (
@@ -784,10 +834,9 @@ interface SelectableLine {
 }
 function discussionPositionLabel(position: HostDiscussion["position"]): string {
 	if (!position) return "General discussion";
-	const path = position.newPath ?? position.oldPath ?? "(unknown file)";
 	const side = position.newLine !== null ? "new" : "old";
 	const line = position.newLine ?? position.oldLine;
-	return `${path}:${side}:${line ?? "unknown"}`;
+	return `${side}:${line ?? "unknown"}`;
 }
 
 /**
@@ -820,87 +869,106 @@ function DiscussionCard({
 }) {
 	const expanded = !collapsed;
 	const preview = discussionPreview(discussion);
+	const firstNote =
+		discussion.notes.find((note) => !note.system) ?? discussion.notes[0];
+	const author = firstNote?.author ?? "Discussion";
 	return (
-		<article
-			className={`inline-discussion ${
-				discussion.resolved ? "resolved" : "unresolved"
-			} ${collapsed ? "is-collapsed" : ""}`.trim()}
+		<Collapsible
+			className="min-w-0 max-w-full overflow-hidden rounded-md border border-l-2 bg-card shadow-xs data-[resolved=true]:border-l-success data-[resolved=false]:border-l-warning"
+			data-collapsed={collapsed ? "true" : "false"}
 			data-discussion-id={discussion.id}
+			data-resolved={discussion.resolved ? "true" : "false"}
+			open={expanded}
+			onOpenChange={(open) => {
+				if (open !== expanded) onToggleCollapse();
+			}}
+			render={<article />}
 		>
-			<header className="inline-discussion-header">
-				<button
-					type="button"
-					className="discussion-collapse"
+			<header className="flex min-w-0 flex-wrap items-center gap-2 p-3">
+				<CollapsibleTrigger
 					aria-label={`${expanded ? "Collapse" : "Expand"} discussion`}
-					aria-expanded={expanded}
 					aria-controls={`discussion-body-${discussion.id}`}
-					onClick={onToggleCollapse}
-				>
-					<svg
-						className="discussion-collapse-icon"
-						viewBox="0 0 16 16"
-						aria-hidden="true"
-						focusable="false"
-					>
-						<path
-							d="M3 6l5 5 5-5"
-							fill="none"
-							stroke="currentColor"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							strokeWidth="2"
+					render={
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							className="group"
 						/>
-					</svg>
-				</button>
-				<strong>{discussion.resolved ? "Resolved" : "Open"}</strong>
+					}
+				>
+					<ChevronDown
+						className="transition-transform duration-200 ease-out group-data-[panel-open]:rotate-0 -rotate-90"
+						aria-hidden
+					/>
+				</CollapsibleTrigger>
+				{discussion.resolved ? (
+					<CircleCheck className="size-4 text-success" aria-hidden />
+				) : (
+					<CircleDot className="size-4 text-warning" aria-hidden />
+				)}
+				<span className="min-w-0 max-w-full shrink-0 break-words whitespace-normal text-sm font-medium [overflow-wrap:anywhere]">
+					{author}
+				</span>
 				{expanded ? (
 					<>
-						<span>{discussionPositionLabel(discussion.position)}</span>
+						<span className="min-w-0 flex-1 break-words whitespace-normal text-xs text-muted-foreground [overflow-wrap:anywhere]">
+							{discussionPositionLabel(discussion.position)}
+						</span>
 						{onExplainDiscussion ? (
-							<button
-								type="button"
-								className="inline-discussion-explain"
-								data-action="explain"
-								disabled={explainDisabled}
-								onClick={() => onExplainDiscussion(discussion.id)}
+							<div
+								className="flex min-w-0 shrink-0 items-center gap-1"
+								data-action-group="discussion-actions"
 							>
-								Explain
-							</button>
+								<Button
+									type="button"
+									variant="default"
+									size="xs"
+									data-action="explain"
+									disabled={explainDisabled}
+									aria-busy={explainDisabled ? "true" : undefined}
+									onClick={() => onExplainDiscussion(discussion.id)}
+								>
+									{explainDisabled ? (
+										<Loader2 className="animate-spin" aria-hidden />
+									) : (
+										<Sparkles aria-hidden />
+									)}
+									Explain
+								</Button>
+							</div>
 						) : null}
 					</>
 				) : (
 					<span
-						className="inline-discussion-preview"
+						className="min-w-0 flex-1 break-words whitespace-normal text-xs text-muted-foreground italic [overflow-wrap:anywhere]"
 						title={preview.length > 0 ? preview : undefined}
 					>
 						{preview}
 					</span>
 				)}
 			</header>
-			<div
+			<CollapsibleContent
+				keepMounted
 				id={`discussion-body-${discussion.id}`}
-				className={`discussion-details ${collapsed ? "is-collapsed" : ""}`.trim()}
-				aria-hidden={collapsed}
-				inert={collapsed}
+				className="min-w-0 max-w-full space-y-2 px-3 pb-3"
 			>
-				<div className="discussion-details-content">
+				<div className="min-w-0 max-w-full divide-y">
 					{discussion.notes.length > 0 ? (
 						discussion.notes.map((note) => (
 							<div
-								className={`inline-discussion-note ${note.system ? "system" : ""}`}
+								className={`min-w-0 max-w-full py-2 text-sm${note.system ? " opacity-70" : ""}`}
 								key={note.id}
 							>
-								<strong>{note.author}</strong>
-								<time dateTime={note.createdAt}>{note.createdAt}</time>
 								<CommentMarkdown body={note.body} />
 							</div>
 						))
 					) : (
-						<p className="inline-discussion-empty">No discussion notes.</p>
+						<p className="py-2 text-sm">No discussion notes.</p>
 					)}
 				</div>
-			</div>
-		</article>
+			</CollapsibleContent>
+		</Collapsible>
 	);
 }
 
@@ -987,7 +1055,10 @@ function InlineCommentRows({
 	if (lineDiscussions.length === 0 && lineDrafts.length === 0) return null;
 	return (
 		<tr className="inline-comment-row">
-			<td colSpan={mode === "side-by-side" ? 4 : 3}>
+			<td
+				className="min-w-0 max-w-full"
+				colSpan={mode === "side-by-side" ? 4 : 3}
+			>
 				{lineDiscussions.map((discussion) => (
 					<DiscussionCard
 						key={discussion.id}
@@ -1020,8 +1091,8 @@ function lineLabel(line: DiffLine): string {
 	return `${line.oldLine ?? ""}\n${line.newLine ?? ""}`;
 }
 
-function lineClass(line: DiffLine, selected = false): string {
-	return `diff-line diff-line-${line.kind}${selected ? " line-selected" : ""}`;
+function lineClass(line: DiffLine): string {
+	return `diff-line diff-line-${line.kind}`;
 }
 
 type LineSelectionEvent = {
@@ -1041,9 +1112,10 @@ function LineActions({
 	return (
 		<span className="line-actions">
 			{onTag ? (
-				<button
+				<Button
 					type="button"
-					className="line-tag"
+					size="xs"
+					variant="secondary"
 					{...(onDragStart
 						? {
 								onMouseDown: (event) => onDragStart("tag", event),
@@ -1063,13 +1135,15 @@ function LineActions({
 								onKeyDown: (event) => event.stopPropagation(),
 							})}
 				>
+					<Tag aria-hidden />
 					Tag line
-				</button>
+				</Button>
 			) : null}
 			{onComment ? (
-				<button
+				<Button
 					type="button"
-					className="line-comment"
+					size="xs"
+					variant="secondary"
 					{...(onDragStart
 						? {
 								onMouseDown: (event) => onDragStart("comment", event),
@@ -1089,8 +1163,9 @@ function LineActions({
 								onKeyDown: (event) => event.stopPropagation(),
 							})}
 				>
+					<MessageSquarePlus aria-hidden />
 					Comment
-				</button>
+				</Button>
 			) : null}
 		</span>
 	);
@@ -1128,7 +1203,7 @@ function DiffLineRow({
 	const isMatch = lineTextMatches(line.text, find.query);
 	const isCurrent = find.currentId === findId;
 	const className = [
-		lineClass(line, selected),
+		lineClass(line),
 		isMatch ? "find-match" : "",
 		isCurrent ? "find-match-current" : "",
 	].join(" ");
@@ -1164,6 +1239,7 @@ function DiffLineRow({
 	const trProps = {
 		...selectableProps,
 		"data-find-line": findId,
+		"data-selected": selected ? "true" : undefined,
 		...dragAttributes,
 	};
 	const inlineSide = line.newLine === null ? "old" : "new";
@@ -1298,18 +1374,31 @@ function ContextRows({
 			<tr className="expand-context-row">
 				<td colSpan={mode === "side-by-side" ? 4 : 3}>
 					{fullyRevealed ? (
-						<button type="button" onClick={onHide}>
+						<Button type="button" variant="ghost" size="xs" onClick={onHide}>
+							<Minus aria-hidden />
 							Hide lines {gap.newStart}-{gap.newEnd}
-						</button>
+						</Button>
 					) : (
 						<>
-							<button type="button" onClick={onReveal}>
+							<Button
+								type="button"
+								variant="ghost"
+								size="xs"
+								onClick={onReveal}
+							>
+								<ChevronsUpDown aria-hidden />
 								Expand lines {hidden.startLine}-{hidden.endLine}
-							</button>
+							</Button>
 							{gap.position !== "between" ? (
-								<button type="button" onClick={onRevealAll}>
+								<Button
+									type="button"
+									variant="ghost"
+									size="xs"
+									onClick={onRevealAll}
+								>
+									<ChevronsUpDown aria-hidden />
 									Expand all
-								</button>
+								</Button>
 							) : null}
 						</>
 					)}
@@ -1512,19 +1601,23 @@ function HunkRows({
 				);
 			})}
 			{selectedRange ? (
-				<tr className="selection-comment-row">
-					<td colSpan={mode === "side-by-side" ? 4 : 3}>
+				<tr className="selection-comment-row animate-in fade-in slide-in-from-top-1 duration-200 ease-out">
+					<td
+						className="min-w-0 max-w-full"
+						colSpan={mode === "side-by-side" ? 4 : 3}
+					>
 						<span>
 							Selected {selectedRange.side} lines {selectedRange.startLine}-
 							{selectedRange.endLine}
 						</span>
 						{onCommentSelection ? (
-							<button
+							<Button
 								type="button"
+								size="sm"
 								onClick={() => onCommentSelection(selectedRange)}
 							>
 								Add comment
-							</button>
+							</Button>
 						) : null}
 					</td>
 				</tr>
@@ -1695,7 +1788,7 @@ function DiffTable({
 	const tail = gaps.find((gap) => gap.position === "tail");
 
 	return (
-		<table className={`diff-table ${mode}${drag ? " drag-selecting" : ""}`}>
+		<table className={`diff-table ${mode} min-w-0 max-w-full`}>
 			<tbody>
 				{file.hunks.map((hunk, index) => {
 					const precedingGap =
@@ -1887,7 +1980,7 @@ export function DiffView({
 	);
 	if (!file) {
 		return (
-			<section className="empty-diff">
+			<section className="flex flex-col items-center gap-2 p-8 text-sm text-muted-foreground">
 				Select changed file to inspect diff.
 			</section>
 		);
@@ -1927,7 +2020,7 @@ export function DiffView({
 	const changeWholeFile = (next: boolean) => {
 		if (!next) {
 			const headers = Array.from(
-				document.querySelectorAll<HTMLElement>(".diff-panel .hunk-header"),
+				document.querySelectorAll<HTMLElement>(".diff-table .hunk-header"),
 			);
 			const anchor = headers.reduce<HTMLElement | null>((nearest, header) => {
 				if (
@@ -1973,200 +2066,235 @@ export function DiffView({
 	const commentDraftProps = stableCommentDraftProps;
 
 	return (
-		<section className="diff-panel">
-			<header className="diff-header">
-				<h2>{path}</h2>
-				<div className="diff-stats">
-					<span className="file-additions">+{file.insertions}</span>
-					<span className="file-deletions">-{file.deletions}</span>
+		<section className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto">
+			<header className="sticky top-0 z-10 flex min-w-0 flex-wrap items-center gap-2 border-b bg-card/95 px-4 py-2 backdrop-blur">
+				<h2 className="min-w-0 flex-1 truncate font-mono text-sm font-medium">
+					{path}
+				</h2>
+				<div className="flex shrink-0 items-center gap-2 text-xs tabular-nums">
+					<span className="text-success">+{file.insertions}</span>
+					<span className="text-destructive">−{file.deletions}</span>
 				</div>
-				<div className="diff-controls">
-					<div className="diff-controls-group">
-						{!binary && !showingRendered ? (
-							<div className="find-bar">
-								<div className="find-input-wrap">
-									<input
-										ref={findInputRef}
-										type="text"
-										className="find-input"
-										placeholder="Find in file..."
-										value={findQuery}
-										onChange={(event) => {
-											const value = event.target.value;
-											applyFindQuery(value);
+				<div className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-2">
+					{!binary && !showingRendered ? (
+						<div
+							className="flex h-8 w-56 min-w-0 max-w-full shrink items-center overflow-hidden rounded-3xl border border-border bg-input/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30"
+							data-find-control=""
+						>
+							<div className="relative min-w-0 flex-1">
+								<Search
+									className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground"
+									aria-hidden
+								/>
+								<Input
+									ref={findInputRef}
+									type="text"
+									className="h-8 w-full min-w-0 rounded-none border-0 bg-transparent pl-8 text-sm shadow-none focus-visible:ring-0"
+									placeholder="Find in file…"
+									value={findQuery}
+									onChange={(event) => {
+										const value = event.target.value;
+										applyFindQuery(value);
+										setFindIndex(0);
+										if (value.length > 0 && collapsed && !expanded) {
+											requestExpansion();
+										}
+									}}
+									onKeyDown={(event) => {
+										if (event.key === "Enter" && event.shiftKey) {
+											event.preventDefault();
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, -1),
+											);
+										} else if (event.key === "Enter") {
+											event.preventDefault();
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, 1),
+											);
+										} else if (event.key === "Escape") {
+											event.preventDefault();
+											applyFindQuery("");
 											setFindIndex(0);
-											if (value.length > 0 && collapsed && !expanded) {
-												requestExpansion();
-											}
-										}}
-										onKeyDown={(event) => {
-											if (event.key === "Enter" && event.shiftKey) {
-												event.preventDefault();
-												setFindIndex((current) =>
-													stepMatchIndex(current, matches.length, -1),
-												);
-											} else if (event.key === "Enter") {
-												event.preventDefault();
-												setFindIndex((current) =>
-													stepMatchIndex(current, matches.length, 1),
-												);
-											} else if (event.key === "Escape") {
-												event.preventDefault();
-												applyFindQuery("");
-												setFindIndex(0);
-												event.currentTarget.blur();
-											}
-										}}
-										aria-label="Find in file"
-									/>
-									{findActive ? (
-										<span className="find-nav-group">
-											<span className="find-count" aria-live="polite">
-												{findCount}
-											</span>
-											<button
-												type="button"
-												className="find-nav"
-												aria-label="Previous match"
-												title="Previous match (Shift+Enter)"
-												disabled={matches.length === 0}
-												onClick={() =>
-													setFindIndex((current) =>
-														stepMatchIndex(current, matches.length, -1),
-													)
-												}
-											>
-												←
-											</button>
-											<button
-												type="button"
-												className="find-nav"
-												aria-label="Next match"
-												title="Next match (Enter)"
-												disabled={matches.length === 0}
-												onClick={() =>
-													setFindIndex((current) =>
-														stepMatchIndex(current, matches.length, 1),
-													)
-												}
-											>
-												→
-											</button>
-										</span>
-									) : null}
-								</div>
+											event.currentTarget.blur();
+										}
+									}}
+									aria-label="Find in file"
+								/>
 							</div>
-						) : null}
-						{markdown ? (
-							<fieldset className="seg-group" aria-label="Markdown view">
-								<button
-									type="button"
-									className={`seg${showingRendered ? " active" : ""}`}
-									aria-pressed={showingRendered}
-									aria-label="Rendered"
-									title="Rendered"
-									onClick={() => onViewModeChange?.("rendered")}
+							{findActive ? (
+								<span
+									className="flex shrink-0 items-center gap-0.5 pr-1 whitespace-nowrap"
+									data-find-navigation=""
 								>
-									¶
-								</button>
-								<button
-									type="button"
-									className={`seg${!showingRendered ? " active" : ""}`}
-									aria-pressed={!showingRendered}
-									aria-label="Diff"
-									title="Diff"
-									onClick={() => onViewModeChange?.("diff")}
-								>
-									±
-								</button>
-							</fieldset>
-						) : null}
-						{!showingRendered ? (
-							<fieldset className="seg-group" aria-label="Diff layout">
-								<button
-									type="button"
-									className={`seg${mode === "inline" ? " active" : ""}`}
-									aria-pressed={mode === "inline"}
-									aria-label="Inline"
-									title="Inline"
-									onClick={() => onModeChange("inline")}
-								>
-									≡
-								</button>
-								<button
-									type="button"
-									className={`seg${mode === "side-by-side" ? " active" : ""}`}
-									aria-pressed={mode === "side-by-side"}
-									aria-label="Side by side"
-									title="Side by side"
-									onClick={() => onModeChange("side-by-side")}
-								>
-									⇆
-								</button>
-							</fieldset>
-						) : null}
-						{wholeFileEligible ? (
-							<fieldset className="seg-group" aria-label="File scope">
-								<button
-									type="button"
-									className={`seg${wholeFile ? " active" : ""}`}
-									aria-pressed={wholeFile}
-									aria-label="Whole file"
-									title="Whole file"
-									onClick={() => changeWholeFile(true)}
-								>
-									⤢
-								</button>
-								<button
-									type="button"
-									className={`seg${!wholeFile ? " active" : ""}`}
-									aria-pressed={!wholeFile}
-									aria-label="Diff only"
-									title="Diff only"
-									onClick={() => changeWholeFile(false)}
-								>
-									✂
-								</button>
-							</fieldset>
-						) : null}
-						{onFileTag && path !== "(unknown file)" ? (
-							<button
-								type="button"
-								className="diff-tag-file"
-								aria-label="Tag whole file"
-								title="Add this whole file to the active chat context"
-								onClick={() => onFileTag(path)}
+									<span
+										className="text-xs tabular-nums text-muted-foreground"
+										aria-live="polite"
+										data-find-count=""
+									>
+										{findCount}
+									</span>
+									<IconButton
+										label="Previous match"
+										size="icon-xs"
+										tooltip="Previous match (Shift+Enter)"
+										disabled={matches.length === 0}
+										onClick={() =>
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, -1),
+											)
+										}
+									>
+										<ChevronUp aria-hidden />
+									</IconButton>
+									<IconButton
+										label="Next match"
+										size="icon-xs"
+										tooltip="Next match (Enter)"
+										disabled={matches.length === 0}
+										onClick={() =>
+											setFindIndex((current) =>
+												stepMatchIndex(current, matches.length, 1),
+											)
+										}
+									>
+										<ChevronDown aria-hidden />
+									</IconButton>
+								</span>
+							) : null}
+						</div>
+					) : null}
+					{markdown ? (
+						<SegmentedToggleGroup
+							multiple={false}
+							value={showingRendered ? ["rendered"] : ["diff"]}
+							onValueChange={(values) => {
+								const value = values[0];
+								if (value === "rendered" || value === "diff") {
+									onViewModeChange?.(value);
+								}
+							}}
+							aria-label="Markdown view"
+						>
+							<TooltipToggleGroupItem
+								label="Rendered"
+								value="rendered"
+								aria-pressed={showingRendered}
+								data-state={showingRendered ? "on" : "off"}
 							>
-								Tag whole file
-							</button>
-						) : null}
-						{!showingRendered &&
-						fileDiscussions.length > 0 &&
-						(!collapsed || expanded) ? (
-							<button
-								type="button"
-								className={`seg${allCommentsCollapsed ? " active" : ""}`}
-								aria-pressed={allCommentsCollapsed}
-								aria-label={commentsLabel}
-								title={commentsLabel}
-								onClick={collapseAllComments}
+								<Pilcrow aria-hidden />
+								<span className="sr-only">Rendered</span>
+							</TooltipToggleGroupItem>
+							<TooltipToggleGroupItem
+								label="Raw"
+								value="diff"
+								aria-pressed={!showingRendered}
+								data-state={!showingRendered ? "on" : "off"}
 							>
-								❝
-							</button>
-						) : null}
-					</div>
-					<label className="diff-viewed" title="Mark file viewed">
-						<input
-							type="checkbox"
-							checked={viewed ?? false}
-							onChange={(event) => onViewedChange?.(event.target.checked)}
-						/>
-						Viewed
-					</label>
+								<Diff aria-hidden />
+								<span className="sr-only">Raw</span>
+							</TooltipToggleGroupItem>
+						</SegmentedToggleGroup>
+					) : null}
+					{!showingRendered ? (
+						<SegmentedToggleGroup
+							multiple={false}
+							value={[mode]}
+							onValueChange={(values) => {
+								const value = values[0];
+								if (value === "inline" || value === "side-by-side") {
+									onModeChange(value);
+								}
+							}}
+							aria-label="Diff layout"
+						>
+							<TooltipToggleGroupItem
+								label="Inline"
+								value="inline"
+								aria-pressed={mode === "inline"}
+								data-state={mode === "inline" ? "on" : "off"}
+							>
+								<Rows3 aria-hidden />
+								<span className="sr-only">Inline</span>
+							</TooltipToggleGroupItem>
+							<TooltipToggleGroupItem
+								label="Side by side"
+								value="side-by-side"
+								aria-pressed={mode === "side-by-side"}
+								data-state={mode === "side-by-side" ? "on" : "off"}
+							>
+								<Columns2 aria-hidden />
+								<span className="sr-only">Side by side</span>
+							</TooltipToggleGroupItem>
+						</SegmentedToggleGroup>
+					) : null}
+					{wholeFileEligible ? (
+						<SegmentedToggleGroup
+							multiple={false}
+							value={wholeFile ? ["whole-file"] : ["diff-only"]}
+							onValueChange={(values) => {
+								const value = values[0];
+								if (value === "whole-file") changeWholeFile(true);
+								else if (value === "diff-only") changeWholeFile(false);
+							}}
+							aria-label="File scope"
+						>
+							<TooltipToggleGroupItem
+								label="Full file"
+								value="whole-file"
+								aria-pressed={wholeFile}
+								data-state={wholeFile ? "on" : "off"}
+							>
+								<Eye aria-hidden />
+								<span className="sr-only">Full file</span>
+							</TooltipToggleGroupItem>
+							<TooltipToggleGroupItem
+								value="diff-only"
+								label="Diff only"
+								aria-pressed={!wholeFile}
+								data-state={!wholeFile ? "on" : "off"}
+							>
+								<EyeOff aria-hidden />
+								<span className="sr-only">Diff only</span>
+							</TooltipToggleGroupItem>
+						</SegmentedToggleGroup>
+					) : null}
+					{onFileTag && path !== "(unknown file)" ? (
+						<IconButton
+							label="Tag whole file"
+							tooltip="Add this whole file to the active chat context"
+							onClick={() => onFileTag(path)}
+						>
+							<Tag aria-hidden />
+						</IconButton>
+					) : null}
+					{!showingRendered &&
+					fileDiscussions.length > 0 &&
+					(!collapsed || expanded) ? (
+						<IconButton
+							label={commentsLabel}
+							tooltip={commentsLabel}
+							onClick={collapseAllComments}
+						>
+							<ChevronsUpDown aria-hidden />
+						</IconButton>
+					) : null}
 				</div>
+				<label
+					className="flex shrink-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground"
+					title="Mark file viewed"
+					htmlFor="diff-viewed"
+				>
+					<Checkbox
+						id="diff-viewed"
+						aria-label="Viewed"
+						checked={viewed ?? false}
+						onCheckedChange={(checked) => onViewedChange?.(checked === true)}
+					/>
+					<span>Viewed</span>
+				</label>
 			</header>
 			{binary ? (
-				<p className="stat-line">
+				<p className="flex flex-col items-center gap-2 p-8 text-sm text-muted-foreground">
 					Binary file; {file.insertions} additions, {file.deletions} deletions.
 				</p>
 			) : null}
@@ -2184,10 +2312,10 @@ export function DiffView({
 			{!showingRendered || binary ? (
 				<>
 					{fileContentsError ? (
-						<p className="render-error">{fileContentsError}</p>
+						<Alert variant="destructive">{fileContentsError}</Alert>
 					) : null}
 					{!binary && collapsed && !expanded ? (
-						<div className="collapsed-diff">
+						<div className="flex flex-col items-center gap-2 p-8 text-sm text-muted-foreground">
 							<p>
 								{overThreshold
 									? `Large diff collapsed after ${largeFileLineThreshold} lines.`
@@ -2195,18 +2323,26 @@ export function DiffView({
 										? "Diff contents unavailable for this file."
 										: "Diff collapsed."}
 							</p>
-							<button type="button" onClick={requestExpansion}>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={requestExpansion}
+							>
 								Expand diff
-							</button>
+							</Button>
 						</div>
 					) : null}
 					{!binary && collapsed && expanded && noPatch && !expandedFile ? (
-						<p className="stat-line">
-							{expanding
-								? "Loading full diff..."
-								: (expansionError ??
-									"Diff contents unavailable for this file.")}
-						</p>
+						<div className="flex flex-col items-center gap-2 p-8 text-sm text-muted-foreground">
+							{expanding ? (
+								<p>Loading full diff...</p>
+							) : expansionError ? (
+								<Alert variant="destructive">{expansionError}</Alert>
+							) : (
+								<p>Diff contents unavailable for this file.</p>
+							)}
+						</div>
 					) : null}
 					{!binary &&
 					(!collapsed || (expanded && (!noPatch || expandedFile !== null))) ? (
@@ -2228,9 +2364,14 @@ export function DiffView({
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (
-						<button type="button" onClick={() => setExpanded(false)}>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setExpanded(false)}
+						>
 							Collapse diff
-						</button>
+						</Button>
 					) : null}
 				</>
 			) : null}

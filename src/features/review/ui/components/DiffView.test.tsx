@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import { DiffView } from "./DiffView";
@@ -145,6 +145,39 @@ function renderDiff(
 	);
 }
 
+function mountDiff(props: Partial<Parameters<typeof DiffView>[0]> = {}): {
+	container: HTMLDivElement;
+	root: Root;
+} {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	act(() => {
+		root.render(
+			<DiffView
+				file={multiHunkFile}
+				mode="inline"
+				largeFileLineThreshold={800}
+				fileContents={null}
+				fileContentsError={null}
+				onModeChange={() => {}}
+				onLineSelection={() => {}}
+				onCommentSelection={() => {}}
+				{...props}
+			/>,
+		);
+	});
+	return { container, root };
+}
+
+function setInputValue(input: HTMLInputElement, value: string): void {
+	Object.getOwnPropertyDescriptor(
+		window.HTMLInputElement.prototype,
+		"value",
+	)?.set?.call(input, value);
+	input.dispatchEvent(new window.Event("input", { bubbles: true }));
+}
+
 test("renders line actions without hunk actions", () => {
 	const markup = renderDiff();
 
@@ -152,7 +185,7 @@ test("renders line actions without hunk actions", () => {
 	expect(markup).toContain("Comment");
 	expect(markup).not.toContain("Tag hunk");
 	expect(markup).not.toContain("Add a comment to the full hunk");
-	expect(markup).toContain('aria-label="Whole file"');
+	expect(markup).toContain('aria-label="Full file"');
 	expect(markup).toContain('aria-label="Diff only"');
 });
 
@@ -194,11 +227,14 @@ test("tags the whole selected file from the diff header as its new path", () => 
 		onFileTag: () => {},
 	});
 
-	expect(markup).toContain('class="diff-tag-file"');
 	expect(markup).toContain('aria-label="Tag whole file"');
+	expect(markup).not.toContain(
+		'title="Add this whole file to the active chat context"',
+	);
+	expect(markup).not.toMatch(/>Tag whole file<\/button>/);
 	// The button tags the same resolved path (newPath ?? oldPath) shown in
 	// the header, so a renamed file is tagged by its new path.
-	expect(markup).toContain("<h2>src/new.ts</h2>");
+	expect(markup).toMatch(/<h2[^>]*>src\/new\.ts<\/h2>/);
 });
 
 test("tags a deleted file by its old path", () => {
@@ -212,8 +248,8 @@ test("tags a deleted file by its old path", () => {
 		onFileTag: () => {},
 	});
 
-	expect(markup).toContain('class="diff-tag-file"');
-	expect(markup).toContain("<h2>src/gone.ts</h2>");
+	expect(markup).toContain('aria-label="Tag whole file"');
+	expect(markup).toMatch(/<h2[^>]*>src\/gone\.ts<\/h2>/);
 });
 
 test("offers Tag whole file for a collapsed stat-only file", () => {
@@ -231,7 +267,7 @@ test("offers Tag whole file for a collapsed stat-only file", () => {
 	});
 
 	expect(markup).toContain('aria-label="Tag whole file"');
-	expect(markup).toContain("<h2>src/stats.ts</h2>");
+	expect(markup).toMatch(/<h2[^>]*>src\/stats\.ts<\/h2>/);
 });
 
 test("offers Tag whole file for a binary file", () => {
@@ -249,7 +285,7 @@ test("offers Tag whole file for a binary file", () => {
 	});
 
 	expect(markup).toContain('aria-label="Tag whole file"');
-	expect(markup).toContain("<h2>assets/logo.png</h2>");
+	expect(markup).toMatch(/<h2[^>]*>assets\/logo\.png<\/h2>/);
 });
 
 test("hides hunk summary in whole-file mode", () => {
@@ -290,8 +326,10 @@ test("renders an Explain button on inline discussions when a handler is supplied
 	)?.[0];
 	expect(card).toBeDefined();
 	expect(card).toContain('data-action="explain"');
-	expect(card).toContain(">Explain</button>");
-	expect(card).not.toContain("disabled");
+	expect(card).toContain('data-resolved="false"');
+	expect(card).toContain('data-collapsed="false"');
+	expect(card).toContain("Explain");
+	expect(card).not.toMatch(/\sdisabled(?:=""|[\s>])/);
 });
 
 test("disables the inline Explain button when explainDisabled is set", () => {
@@ -304,6 +342,15 @@ test("disables the inline Explain button when explainDisabled is set", () => {
 	const button = markup.match(/<button[^>]*data-action="explain"[^>]*>/)?.[0];
 	expect(button).toBeDefined();
 	expect(button).toMatch(/\sdisabled(?:=""|[\s>])/);
+});
+
+test("marks resolved discussion state with data attributes", () => {
+	const markup = renderDiff({
+		discussions: [{ ...positionedDiscussion, resolved: true }],
+	});
+
+	expect(markup).toContain('data-resolved="true"');
+	expect(markup).toContain('data-collapsed="false"');
 });
 
 test("omits Explain when no handler is supplied", () => {
@@ -350,36 +397,27 @@ test("keeps revealed inter-hunk context rows out of drag identity", () => {
 test("renders the find box without results or navigation until a search is made", () => {
 	const markup = renderDiff();
 
-	const controlsIndex = markup.indexOf('class="diff-controls"');
-	const statsIndex = markup.indexOf('class="diff-stats"');
-	const findBarIndex = markup.indexOf('class="find-bar"');
-	expect(markup).toContain('class="diff-header"');
-	expect(statsIndex).toBeGreaterThanOrEqual(0);
-	expect(statsIndex).toBeLessThan(findBarIndex);
 	expect(markup).toContain("+1");
-	expect(markup).not.toContain(" additions,");
-	expect(markup).not.toContain(" deletions");
-	expect(controlsIndex).toBeGreaterThanOrEqual(0);
-	expect(findBarIndex).toBeGreaterThan(controlsIndex);
-	expect(markup).toContain('class="find-input-wrap"');
+	expect(markup).toContain("−0");
+	expect(markup).toContain('placeholder="Find in file…"');
 	expect(markup).toContain('aria-label="Find in file"');
 	// The result counter and previous/next arrows appear only after a search.
-	expect(markup).not.toContain('class="find-count"');
-	expect(markup).not.toContain('class="find-nav-group"');
-	// The layout and file-scope controls are icon buttons with tooltips.
-	expect(markup).toContain('aria-label="Inline" title="Inline"');
-	expect(markup).toContain('aria-label="Side by side" title="Side by side"');
-	expect(markup).toContain('aria-label="Whole file" title="Whole file"');
-	expect(markup).toContain('aria-label="Diff only" title="Diff only"');
+	expect(markup).not.toContain("1/1");
+	expect(markup).not.toContain("Previous match");
+	expect(markup).not.toContain("Next match");
+	// The layout and file-scope controls are icon toggles with accessible labels.
+	expect(markup).toContain('aria-label="Inline"');
+	expect(markup).toContain('aria-label="Side by side"');
+	expect(markup).toContain('aria-label="Full file"');
+	expect(markup).toContain('aria-label="Diff only"');
 });
 
 test("shows the find result count and navigation once a search is made", () => {
 	const markup = renderDiff({ findQuery: "value" });
 
-	expect(markup).toContain('class="find-count"');
 	expect(markup).toContain("1/1");
-	expect(markup).toContain('class="find-nav-group"');
-	expect(markup.match(/class="find-nav"/g)).toHaveLength(2);
+	expect(markup).toContain('aria-label="Previous match"');
+	expect(markup).toContain('aria-label="Next match"');
 	const prevButton = markup.match(
 		/<button[^>]*aria-label="Previous match"[^>]*>/,
 	)?.[0];
@@ -395,8 +433,8 @@ test("shows the find result count and navigation once a search is made", () => {
 test("shows a 0/0 count with disabled arrows when the search matches nothing", () => {
 	const markup = renderDiff({ findQuery: "no-such-token" });
 
-	expect(markup).toContain('class="find-count"');
 	expect(markup).toContain("0/0");
+	expect(markup).toContain('aria-live="polite"');
 	const prevButton = markup.match(
 		/<button[^>]*aria-label="Previous match"[^>]*>/,
 	)?.[0];
@@ -408,39 +446,458 @@ test("shows a 0/0 count with disabled arrows when the search matches nothing", (
 	expect(nextButton).toBeDefined();
 	expect(nextButton).toMatch(/\sdisabled(?:=""|[\s>])/);
 });
-
-test("offers the markdown rendered/diff view as icon segments with tooltips", () => {
-	const markup = renderDiff({ file: markdownFile });
-
-	expect(markup).toContain('aria-label="Rendered" title="Rendered"');
-	expect(markup).toContain('aria-label="Diff" title="Diff"');
-	// The diff view is the default; the rendered segment is inactive.
-	expect(markup).toContain(
-		'class="seg active" aria-pressed="true" aria-label="Diff"',
+test("keeps find controls in one constrained inline group", () => {
+	const markup = renderDiff({
+		file: multiHunkFile,
+		findQuery: "change",
+	});
+	const documentFragment = document.createElement("div");
+	documentFragment.innerHTML = markup;
+	const control = documentFragment.querySelector<HTMLElement>(
+		"[data-find-control]",
 	);
-	expect(markup).toContain(
-		'class="seg" aria-pressed="false" aria-label="Rendered"',
+
+	expect(control).not.toBeNull();
+	if (!control) throw new Error("find control missing");
+	expect(control.classList.contains("min-w-0")).toBe(true);
+	expect(control.classList.contains("max-w-full")).toBe(true);
+	expect(control.classList.contains("shrink")).toBe(true);
+	expect(control.classList.contains("overflow-hidden")).toBe(true);
+	expect(control.classList.contains("flex-wrap")).toBe(false);
+	expect(
+		control.querySelector('input[aria-label="Find in file"]'),
+	).not.toBeNull();
+	expect(control.querySelector("[data-find-count]")).not.toBeNull();
+	expect(control.querySelector("[data-find-navigation]")).not.toBeNull();
+	expect(
+		control.querySelector('button[aria-label="Previous match"]'),
+	).not.toBeNull();
+	expect(
+		control.querySelector('button[aria-label="Next match"]'),
+	).not.toBeNull();
+});
+test("keeps toolbar buttons aligned to the find control height", () => {
+	const markup = renderDiff({
+		file: markdownFile,
+		findQuery: "Review",
+		onFileTag: () => {},
+		onViewModeChange: () => {},
+		onWholeFileChange: () => {},
+	});
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+
+	const findControl = container.querySelector<HTMLElement>(
+		"[data-find-control]",
 	);
-	// The find box remains available for a markdown diff.
-	expect(markup).toContain('class="find-bar"');
+	const segmentedGroups = [
+		...container.querySelectorAll<HTMLElement>(
+			'[data-slot="toggle-group"][data-variant="segmented"]',
+		),
+	];
+	const segmentedItems = [
+		...container.querySelectorAll<HTMLElement>(
+			'[data-slot="toggle-group-item"][data-variant="segmented"]',
+		),
+	];
+	const tagButton = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Tag whole file"]',
+	);
+
+	expect(findControl?.classList.contains("h-8")).toBe(true);
+	expect(segmentedGroups).toHaveLength(3);
+	expect(segmentedItems.every((item) => item.classList.contains("h-7"))).toBe(
+		true,
+	);
+	expect(tagButton?.className).toContain("size-8");
 });
 
+test("shows the current match and total for multiple matches", () => {
+	const markup = renderDiff({
+		file: multiHunkFile,
+		findQuery: "change",
+	});
+
+	expect(markup).toContain("1/2");
+});
+
+test("navigates find matches with mouse controls and wraps around", () => {
+	const { container, root } = mountDiff();
+
+	const originalScrollIntoView = Element.prototype.scrollIntoView;
+	Element.prototype.scrollIntoView = () => {};
+	try {
+		const input = container.querySelector<HTMLInputElement>(
+			'input[aria-label="Find in file"]',
+		);
+		expect(input).not.toBeNull();
+		if (!input) throw new Error("find input missing");
+
+		act(() => setInputValue(input, "change"));
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("1/2");
+
+		const previous = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Previous match"]',
+		);
+		const next = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Next match"]',
+		);
+		expect(previous).not.toBeNull();
+		expect(next).not.toBeNull();
+		if (!previous || !next) throw new Error("find navigation missing");
+
+		act(() => next.click());
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("2/2");
+		act(() => next.click());
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("1/2");
+		act(() => previous.click());
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("2/2");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		Element.prototype.scrollIntoView = originalScrollIntoView;
+	}
+});
+
+test("focuses find with Cmd/Ctrl-F and preserves keyboard navigation", () => {
+	const { container, root } = mountDiff();
+
+	const originalScrollIntoView = Element.prototype.scrollIntoView;
+	Element.prototype.scrollIntoView = () => {};
+	try {
+		const input = container.querySelector<HTMLInputElement>(
+			'input[aria-label="Find in file"]',
+		);
+		expect(input).not.toBeNull();
+		if (!input) throw new Error("find input missing");
+
+		act(() => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "f",
+					metaKey: true,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
+		expect(document.activeElement).toBe(input);
+
+		act(() => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "f",
+					ctrlKey: true,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
+		expect(document.activeElement).toBe(input);
+
+		act(() => setInputValue(input, "change"));
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("1/2");
+
+		act(() => {
+			input.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Enter",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("2/2");
+
+		act(() => {
+			input.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Enter",
+					shiftKey: true,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("1/2");
+
+		act(() => {
+			input.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Escape",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
+		expect(input.value).toBe("");
+		expect(container.querySelector("[data-find-count]")).toBeNull();
+		expect(document.activeElement).not.toBe(input);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		Element.prototype.scrollIntoView = originalScrollIntoView;
+	}
+});
+test("offers the markdown rendered/diff view as icon segments with custom tooltips", () => {
+	const markup = renderDiff({ file: markdownFile });
+
+	expect(markup).toContain('aria-label="Rendered"');
+	expect(markup).toContain('aria-label="Raw"');
+	expect(markup).not.toContain('title="Rendered"');
+	expect(markup).not.toContain('title="Raw"');
+	// The diff view is the default; the rendered segment is inactive.
+	expect(markup).toContain('aria-label="Raw"');
+	expect(markup).toContain('aria-label="Rendered"');
+	expect(markup).toContain('data-state="on"');
+	expect(markup).toContain('data-state="off"');
+	expect(markup).toContain('aria-pressed="true"');
+	expect(markup).toContain('aria-pressed="false"');
+	expect(markup).toContain("aria-pressed:bg-primary");
+	expect(markup).toContain("aria-pressed:text-primary-foreground");
+	expect(markup).toContain("data-[state=on]:bg-primary");
+	// The find box remains available for a markdown diff.
+	expect(markup).toContain('placeholder="Find in file…"');
+});
+test("keeps the icon-only whole-file tag callback and custom trigger", () => {
+	const taggedPaths: string[] = [];
+	const { container, root } = mountDiff({
+		onFileTag: (path) => taggedPaths.push(path),
+	});
+
+	try {
+		const button = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Tag whole file"]',
+		);
+		expect(button).not.toBeNull();
+		expect(button?.getAttribute("title")).toBeNull();
+		expect(button?.getAttribute("data-slot")).toBe("tooltip-trigger");
+		expect(button?.textContent?.trim()).toBe("");
+
+		act(() => button?.click());
+		expect(taggedPaths).toEqual(["src/app.ts"]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+test("transitions layout and file-scope toggles while keeping one option pressed", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	let mode: "inline" | "side-by-side" = "inline";
+	let wholeFile = false;
+	const modeChanges: string[] = [];
+	const wholeFileChanges: boolean[] = [];
+	const render = () => {
+		root.render(
+			<DiffView
+				file={file}
+				mode={mode}
+				wholeFile={wholeFile}
+				largeFileLineThreshold={800}
+				fileContents={null}
+				fileContentsError={null}
+				onModeChange={(next) => {
+					modeChanges.push(next);
+					mode = next;
+					render();
+				}}
+				onWholeFileChange={(next) => {
+					wholeFileChanges.push(next);
+					wholeFile = next;
+					render();
+				}}
+				onLineSelection={() => {}}
+				onCommentSelection={() => {}}
+			/>,
+		);
+	};
+	const toggle = (label: string) =>
+		container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+	try {
+		act(render);
+		const inline = toggle("Inline");
+		const sideBySide = toggle("Side by side");
+		const whole = toggle("Full file");
+		const diffOnly = toggle("Diff only");
+		expect(inline?.getAttribute("aria-pressed")).toBe("true");
+		expect(sideBySide?.getAttribute("aria-pressed")).toBe("false");
+		expect(whole?.getAttribute("aria-pressed")).toBe("false");
+		expect(diffOnly?.getAttribute("aria-pressed")).toBe("true");
+		if (!inline || !sideBySide || !whole || !diffOnly) return;
+
+		act(() => sideBySide.click());
+		expect(modeChanges).toEqual(["side-by-side"]);
+		expect(toggle("Inline")?.getAttribute("aria-pressed")).toBe("false");
+		expect(toggle("Side by side")?.getAttribute("aria-pressed")).toBe("true");
+
+		// Pressing active single-select option must not leave group empty.
+		act(() => sideBySide.click());
+		expect(modeChanges).toEqual(["side-by-side"]);
+		expect(toggle("Side by side")?.getAttribute("aria-pressed")).toBe("true");
+
+		act(() => toggle("Full file")?.click());
+		expect(wholeFileChanges).toEqual([true]);
+		expect(toggle("Full file")?.getAttribute("aria-pressed")).toBe("true");
+		expect(toggle("Diff only")?.getAttribute("aria-pressed")).toBe("false");
+
+		act(() => toggle("Diff only")?.click());
+		expect(wholeFileChanges).toEqual([true, false]);
+		expect(toggle("Full file")?.getAttribute("aria-pressed")).toBe("false");
+		expect(toggle("Diff only")?.getAttribute("aria-pressed")).toBe("true");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("transitions markdown view toggles and preserves one pressed option", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	let viewMode: "rendered" | "diff" = "diff";
+	const viewModeChanges: string[] = [];
+	const render = () => {
+		root.render(
+			<DiffView
+				file={markdownFile}
+				mode="inline"
+				viewMode={viewMode}
+				largeFileLineThreshold={800}
+				fileContents={null}
+				fileContentsError={null}
+				onModeChange={() => {}}
+				onViewModeChange={(next) => {
+					viewModeChanges.push(next);
+					viewMode = next;
+					render();
+				}}
+				onLineSelection={() => {}}
+				onCommentSelection={() => {}}
+			/>,
+		);
+	};
+	const toggle = (label: string) =>
+		container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+	try {
+		act(render);
+		expect(toggle("Rendered")?.getAttribute("aria-pressed")).toBe("false");
+		expect(toggle("Raw")?.getAttribute("aria-pressed")).toBe("true");
+		const rendered = toggle("Rendered");
+		const diff = toggle("Raw");
+		if (!rendered || !diff) return;
+
+		act(() => rendered.click());
+		expect(viewModeChanges).toEqual(["rendered"]);
+		expect(toggle("Rendered")?.getAttribute("aria-pressed")).toBe("true");
+		expect(toggle("Raw")?.getAttribute("aria-pressed")).toBe("false");
+
+		act(() => rendered.click());
+		expect(viewModeChanges).toEqual(["rendered"]);
+		expect(toggle("Rendered")?.getAttribute("aria-pressed")).toBe("true");
+
+		act(() => diff.click());
+		expect(viewModeChanges).toEqual(["rendered", "diff"]);
+		expect(toggle("Rendered")?.getAttribute("aria-pressed")).toBe("false");
+		expect(toggle("Raw")?.getAttribute("aria-pressed")).toBe("true");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("moves focus between layout toggles with horizontal arrow keys", async () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+
+	try {
+		act(() => {
+			root.render(
+				<DiffView
+					file={file}
+					mode="inline"
+					largeFileLineThreshold={800}
+					fileContents={null}
+					fileContentsError={null}
+					onModeChange={() => {}}
+					onLineSelection={() => {}}
+					onCommentSelection={() => {}}
+				/>,
+			);
+		});
+		await act(async () => {
+			await Promise.resolve();
+		});
+		const inline = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Inline"]',
+		);
+		const sideBySide = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Side by side"]',
+		);
+		expect(inline).not.toBeNull();
+		expect(sideBySide).not.toBeNull();
+		if (!inline || !sideBySide) return;
+		await act(async () => {
+			inline.focus();
+			inline.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "ArrowRight",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await Promise.resolve();
+		});
+		expect(document.activeElement).toBe(sideBySide);
+
+		await act(async () => {
+			sideBySide.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "ArrowLeft",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await Promise.resolve();
+		});
+		expect(document.activeElement).toBe(inline);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
 test("offers a Viewed checkbox in the diff header that defaults to unchecked", () => {
 	const markup = renderDiff();
 
 	expect(markup).toContain('title="Mark file viewed"');
 	expect(markup).toContain("Viewed");
-	const input = markup.match(/<input[^>]*type="checkbox"[^>]*>/)?.[0];
-	expect(input).toBeDefined();
-	expect(input).not.toMatch(/\bchecked/);
+	expect(markup).toContain('aria-label="Viewed"');
+	expect(markup).toMatch(/role="checkbox"[^>]*aria-checked="false"/);
 });
 
 test("marks the header Viewed checkbox when the file is viewed", () => {
 	const markup = renderDiff({ viewed: true });
 
-	const input = markup.match(/<input[^>]*type="checkbox"[^>]*>/)?.[0];
-	expect(input).toBeDefined();
-	expect(input).toMatch(/\bchecked/);
+	expect(markup).toContain('aria-label="Viewed"');
+	expect(markup).toMatch(/role="checkbox"[^>]*aria-checked="true"/);
 });
 
 test("keeps the Viewed checkbox when markdown renders instead of the diff", () => {
@@ -468,8 +925,7 @@ test("offers a collapse-all control for positioned discussions", () => {
 		],
 	});
 
-	expect(markup).toContain("Collapse all comments");
-	expect(markup).toContain('aria-pressed="false"');
+	expect(markup).toContain('aria-label="Collapse all comments"');
 	expect(markup).toContain("Please consider this edge case.");
 });
 
@@ -490,6 +946,24 @@ test("renders a per-discussion collapse chevron in the expanded state", () => {
 	expect(markup).not.toContain("inline-discussion-preview");
 });
 
+test("omits discussion paths and repeated note metadata", () => {
+	const markup = renderDiff({
+		discussions: [
+			discussion("discussion-1", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+	});
+
+	expect(markup).toContain(">new:1</span>");
+	expect(markup).not.toContain("src/app.ts:new:1");
+	expect(markup).not.toContain("<time");
+	expect(markup).not.toContain("2026-01-01T00:00:00.000Z");
+});
+
 test("collapses a seeded discussion to a single-line preview", () => {
 	const markup = renderDiff({
 		commentsCollapsed: true,
@@ -503,11 +977,9 @@ test("collapses a seeded discussion to a single-line preview", () => {
 		],
 	});
 
-	expect(markup).toContain("Expand all comments");
-	expect(markup).toContain('aria-pressed="true"');
+	expect(markup).toContain('aria-label="Expand all comments"');
 	expect(markup).toContain('aria-expanded="false"');
-	expect(markup).toContain("discussion-details is-collapsed");
-	expect(markup).toContain("inline-discussion-preview");
+	expect(markup).toContain('data-collapsed="true"');
 	expect(markup).toContain("Please consider this edge case.");
 	expect(markup).toContain("export const value = 1;");
 });
@@ -653,7 +1125,7 @@ test("keeps collapsed discussion summaries as plain text", () => {
 		],
 	});
 	const preview = markup.match(
-		/<span class="inline-discussion-preview"[^>]*>[\s\S]*?<\/span>/,
+		/<span[^>]*title="\*\*Important\*\*"[^>]*>\*\*Important\*\*<\/span>/,
 	)?.[0];
 
 	expect(preview).toBeDefined();
@@ -791,4 +1263,130 @@ test("keeps rendered markdown DOM intact during unrelated parent updates", () =>
 		});
 		container.remove();
 	}
+});
+
+test("marks selected diff rows with data-selected", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+
+	try {
+		act(() => {
+			root.render(
+				<DiffView
+					file={file}
+					mode="inline"
+					largeFileLineThreshold={800}
+					fileContents={null}
+					fileContentsError={null}
+					onModeChange={() => {}}
+					onLineSelection={() => {}}
+					onCommentSelection={() => {}}
+				/>,
+			);
+		});
+
+		const row = container.querySelector<HTMLTableRowElement>(
+			'.diff-line[role="button"]',
+		);
+		expect(row).not.toBeNull();
+		if (!row) return;
+
+		act(() => {
+			row.click();
+		});
+
+		expect(
+			container.querySelector('.diff-line[data-selected="true"]'),
+		).not.toBeNull();
+	} finally {
+		act(() => {
+			root.unmount();
+		});
+		container.remove();
+	}
+});
+test("bounds long inline discussion content and keeps code and table regions internal", () => {
+	const longPath =
+		"packages/review/features/comments/components/very-long-discussion-file-name.ts";
+	const body = [
+		`Please inspect ${longPath} and https://example.test/review/${"segment".repeat(20)}.`,
+		"",
+		"`inline-code-that-needs-to-wrap-within-the-card`",
+		"",
+		"```ts",
+		"const result = calculateSomethingWithAnIntentionallyLongIdentifier();",
+		"```",
+		"",
+		"| file | detail |",
+		"| --- | --- |",
+		`| ${longPath} | table content |`,
+	].join("\n");
+	const markup = renderDiff({
+		discussions: [
+			{
+				...positionedDiscussion,
+				notes: [{ ...positionedDiscussion.notes[0], body }],
+			},
+		],
+	});
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	const card = container.querySelector<HTMLElement>(
+		'[data-discussion-id="disc-1"]',
+	);
+	const markdown = card?.querySelector<HTMLElement>(".comment-markdown");
+	const tableWrap = markdown?.querySelector<HTMLElement>(
+		".rendered-table-wrap",
+	);
+
+	expect(card?.className).toContain("min-w-0");
+	expect(card?.className).toContain("max-w-full");
+	expect(card?.className).toContain("overflow-hidden");
+	expect(markdown?.className).toContain("min-w-0");
+	expect(markdown?.className).toContain("max-w-full");
+	expect(markdown?.className).toContain("[overflow-wrap:anywhere]");
+	expect(tableWrap?.className).toContain("max-w-full");
+	expect(markdown?.querySelector("pre")).not.toBeNull();
+	expect(container.textContent).toContain(longPath);
+});
+
+test("groups inline Explain in compact actions and preserves its callback", () => {
+	let explained = "";
+	const { container } = mountDiff({
+		discussions: [positionedDiscussion],
+		onExplainDiscussion: (discussionId) => {
+			explained = discussionId;
+		},
+	});
+	const group = container.querySelector<HTMLElement>(
+		'[data-action-group="discussion-actions"]',
+	);
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[data-action="explain"]',
+	);
+
+	expect(group?.className).toContain("flex");
+	expect(group?.className).toContain("shrink-0");
+	expect(button?.className).toContain("bg-primary");
+	expect(button?.getAttribute("aria-busy")).toBeNull();
+	act(() => button?.click());
+	expect(explained).toBe("disc-1");
+});
+
+test("marks inline Explain as busy while disabled", () => {
+	const markup = renderDiff({
+		discussions: [positionedDiscussion],
+		onExplainDiscussion: () => {},
+		explainDisabled: true,
+	});
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[data-action="explain"]',
+	);
+
+	expect(button?.disabled).toBe(true);
+	expect(button?.getAttribute("aria-busy")).toBe("true");
+	expect(button?.querySelector("svg.animate-spin")).not.toBeNull();
 });

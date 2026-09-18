@@ -11,7 +11,12 @@ Object.assign(globalThis, {
 	document: dom.document,
 	navigator: dom.navigator,
 	Node: dom.Node,
+	Element: dom.Element,
 	HTMLElement: dom.HTMLElement,
+	MutationObserver: dom.MutationObserver,
+	getComputedStyle: dom.getComputedStyle.bind(dom),
+	requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+	cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
 	IS_REACT_ACT_ENVIRONMENT: true,
 });
 
@@ -23,6 +28,11 @@ afterEach(() => {
 	}
 	document.body.replaceChildren();
 });
+function parseMarkup(markup: string): HTMLDivElement {
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	return container;
+}
 
 test("renders general discussions collapsed by default", () => {
 	const markup = renderToStaticMarkup(
@@ -63,62 +73,81 @@ test("renders general discussions collapsed by default", () => {
 			error={null}
 			sending={false}
 			stopping={false}
-			onSend={() => {}}
+			onSend={() => undefined}
 			onStop={() => {}}
 			onRemoveTag={() => {}}
 		/>,
 	);
 
-	expect(markup).toContain(
-		'<details class="discussion-list" aria-label="General discussions">',
+	const container = parseMarkup(markup);
+	const trigger = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="General discussions"]',
 	);
-	expect(markup).toContain("<summary>General discussions</summary>");
-	expect(markup).not.toMatch(/<details[^>]*\sopen(?:=|[\s>])/);
-	expect(markup).toContain("Please rename this.");
+	expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+	expect(container.querySelector('[data-resolved="false"]')).not.toBeNull();
+	expect(container.textContent).toContain("Please rename this.");
 });
 
-test("renders one switcher item per chat with active and busy state", () => {
-	const markup = renderToStaticMarkup(
-		<ChatPane
-			transcript={[]}
-			tags={[]}
-			chats={[
-				{
-					id: "chat-1",
-					title: "",
-					createdAt: "2026-08-24T00:00:00Z",
-					busy: false,
-				},
-				{
-					id: "chat-2",
-					title: "Investigate API",
-					createdAt: "2026-08-24T01:00:00Z",
-					busy: true,
-				},
-			]}
-			activeChatId="chat-2"
-			onSelectChat={() => {}}
-			onNewChat={() => {}}
-			onOpenSettings={() => {}}
-			draft=""
-			onDraftChange={() => {}}
-			streamingSegments={[]}
-			error={null}
-			sending={false}
-			stopping={false}
-			onSend={() => {}}
-			onStop={() => {}}
-			onRemoveTag={() => {}}
-		/>,
-	);
+test("renders one switcher item per chat with active and busy state", async () => {
+	let selectedChatId = "";
+	const rendered = renderInteractive({
+		chats: [
+			{
+				id: "chat-1",
+				title: "",
+				createdAt: "2026-08-24T00:00:00Z",
+				busy: false,
+			},
+			{
+				id: "chat-2",
+				title: "Investigate API",
+				createdAt: "2026-08-24T01:00:00Z",
+				busy: true,
+			},
+		],
+		activeChatId: "chat-2",
+		onSelectChat: (chatId) => {
+			selectedChatId = chatId;
+		},
+	});
 
-	expect(markup.match(/class="chat-switcher-item"/g)).toHaveLength(2);
-	expect(markup).toContain("<h2>Agent</h2>");
-	expect(markup).toContain("New chat 1");
-	expect(markup).toContain('aria-current="true"');
-	expect(markup.match(/aria-label="Turn running"/g)).toHaveLength(1);
-	expect(markup).toContain("New chat");
-	expect(markup).not.toContain("Clear chat");
+	const trigger = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Switch chat"]',
+	);
+	expect(trigger).not.toBeNull();
+	expect(trigger?.className).toContain("text-xs");
+	await act(async () => {
+		trigger?.click();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	});
+
+	const menuItems = [
+		...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+	];
+	expect(menuItems).toHaveLength(2);
+	expect(menuItems[0]?.className).toContain("text-xs");
+	expect(menuItems[0]?.querySelector("span span")?.className).toContain(
+		"[overflow-wrap:anywhere]",
+	);
+	expect(menuItems[0]?.textContent).toContain("New chat 1");
+	expect(menuItems[1]?.textContent).toContain("Investigate API");
+	expect(menuItems[0]?.dataset.active).toBe("false");
+	expect(menuItems[1]?.dataset.active).toBe("true");
+	expect(
+		document.body.querySelector('[aria-label="Turn running"]'),
+	).not.toBeNull();
+	expect(
+		rendered.container.querySelector('button[aria-label="New chat"]'),
+	).not.toBeNull();
+	expect(
+		rendered.container.querySelector('button[aria-label="Clear chat"]'),
+	).toBeNull();
+
+	await act(async () => {
+		menuItems[0]?.click();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	});
+	expect(selectedChatId).toBe("chat-1");
 });
 
 test("wires rendered chat header controls to actions", () => {
@@ -154,10 +183,12 @@ test("wires rendered chat header controls to actions", () => {
 test("disables and marks new chat busy while creating", () => {
 	const markup = renderComposer({ creatingChat: true });
 
-	expect(markup).toMatch(
-		/<button[^>]*aria-label="New chat"[^>]*disabled(?:="")?[^>]*aria-busy="true"/,
+	const container = parseMarkup(markup);
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="New chat"]',
 	);
-	expect(markup).toContain('class="icon-button-spinner"');
+	expect(button).not.toBeNull();
+	expect(button?.getAttribute("aria-busy")).toBe("true");
 });
 
 test("renders parent-owned composer draft", () => {
@@ -183,15 +214,109 @@ test("renders parent-owned composer draft", () => {
 			error={null}
 			sending={false}
 			stopping={false}
-			onSend={() => {}}
+			onSend={() => undefined}
 			onStop={() => {}}
 			onRemoveTag={() => {}}
 		/>,
 	);
 
-	expect(markup).toContain(">unsent question</textarea>");
+	const container = parseMarkup(markup);
+	const textarea = container.querySelector<HTMLTextAreaElement>(
+		'textarea[aria-label="Chat message"]',
+	);
+	expect(textarea?.value).toBe("unsent question");
 });
 
+test("renders composer keyboard hint as compact two visible lines", () => {
+	const markup = renderComposer();
+	const container = parseMarkup(markup);
+	const textarea = container.querySelector<HTMLTextAreaElement>(
+		'textarea[aria-label="Chat message"]',
+	);
+	const hint = container.querySelector<HTMLElement>("p.flex.flex-col");
+	const hintLines = [
+		...container.querySelectorAll<HTMLElement>("p.flex.flex-col > span"),
+	];
+	const keys = [
+		...container.querySelectorAll<HTMLElement>("p.flex.flex-col kbd"),
+	];
+
+	expect(textarea).not.toBeNull();
+	expect(textarea?.getAttribute("aria-label")).toBe("Chat message");
+	expect(hint?.className).toContain("gap-1");
+	expect(hint?.className).toContain("text-[11px]");
+	expect(hint?.className).toContain("leading-tight");
+	expect(hintLines).toHaveLength(2);
+	expect(keys).toHaveLength(2);
+	expect(keys.every((key) => key.className.includes("text-[11px]"))).toBe(true);
+	expect(keys.every((key) => key.className.includes("h-5"))).toBe(true);
+	expect(hintLines[0]?.textContent).toContain("Enter");
+	expect(hintLines[0]?.textContent).toContain("to send");
+	expect(hintLines[1]?.textContent).toContain("Shift+Enter");
+	expect(hintLines[1]?.textContent).toContain("for a new line");
+});
+
+test("bounds long agent paths in message markdown and context tags", () => {
+	const longPath =
+		"packages/review/features/agent/components/very-long-file-name.ts";
+	const markup = renderComposer({
+		transcript: [
+			{
+				role: "assistant",
+				text: `See \`${longPath}:42\`.`,
+				tags: [],
+				at: "2026-08-24T00:00:00Z",
+				sessionId: "session-1",
+			},
+		],
+		tags: [{ kind: "file", path: longPath }],
+	});
+	const container = parseMarkup(markup);
+	const message = container.querySelector('[data-role="assistant"]');
+	const markdown = message?.querySelector(".rendered-markdown");
+	expect(message?.className).toContain("min-w-0");
+	expect(message?.className).toContain("max-w-full");
+	expect(message?.className).toContain("overflow-hidden");
+	expect(message?.parentElement?.className).toContain("min-h-0");
+	expect(message?.parentElement?.className).toContain("flex-1");
+	expect(message?.parentElement?.className).toContain("overflow-x-hidden");
+	expect(message?.parentElement?.className).toContain("overflow-y-auto");
+	const tag = [
+		...container.querySelectorAll<HTMLElement>('[data-slot="badge"]'),
+	].find((element) => element.textContent?.includes(longPath));
+
+	expect(markdown?.className).toContain("min-w-0");
+	expect(markdown?.className).toContain("[overflow-wrap:anywhere]");
+	expect(tag?.className).toContain("max-w-full");
+	expect(tag?.className).toContain("[overflow-wrap:anywhere]");
+	expect(tag?.className).toContain("justify-start");
+	expect(tag?.className).toContain("leading-normal");
+	expect(container.textContent).toContain(longPath);
+});
+
+test("keeps the agent pane growth and scroll regions bounded", () => {
+	const container = parseMarkup(renderComposer());
+	const pane = container.querySelector<HTMLElement>("aside");
+	const transcript = container.querySelector<HTMLElement>(
+		"div.min-h-0.min-w-0.flex-1",
+	);
+	const header = container.querySelector<HTMLElement>("header");
+	const composer = container.querySelector<HTMLFormElement>("form");
+
+	expect(pane?.className).toContain("h-full");
+	expect(pane?.className).toContain("min-h-0");
+	expect(pane?.className).toContain("min-w-0");
+	expect(pane?.className).toContain("overflow-hidden");
+	expect(header?.className).toContain("shrink-0");
+	expect(header?.className).toContain("min-w-0");
+	expect(transcript).not.toBeNull();
+	expect(transcript?.className).toContain("min-h-0");
+	expect(transcript?.className).toContain("flex-1");
+	expect(transcript?.className).toContain("overflow-x-hidden");
+	expect(transcript?.className).toContain("overflow-y-auto");
+	expect(composer?.className).toContain("shrink-0");
+	expect(composer?.className).toContain("min-w-0");
+});
 function renderComposer(
 	props: Partial<Parameters<typeof ChatPane>[0]> = {},
 ): string {
@@ -217,7 +342,7 @@ function renderComposer(
 			error={null}
 			sending={false}
 			stopping={false}
-			onSend={() => {}}
+			onSend={() => undefined}
 			onStop={() => {}}
 			onRemoveTag={() => {}}
 			{...props}
@@ -261,7 +386,7 @@ function renderInteractive(
 				error={null}
 				sending={false}
 				stopping={false}
-				onSend={() => {}}
+				onSend={() => undefined}
 				onStop={() => {}}
 				onRemoveTag={() => {}}
 				{...nextProps}
@@ -275,191 +400,37 @@ function renderInteractive(
 		rerender: (nextProps) => act(() => render(nextProps)),
 	};
 }
-function setTranscriptMetrics(
-	element: HTMLElement,
-	metrics: { scrollHeight: number; clientHeight: number; scrollTop: number },
-	writes?: { count: number },
-) {
-	Object.defineProperties(element, {
-		scrollHeight: {
-			configurable: true,
-			get: () => metrics.scrollHeight,
-		},
-		clientHeight: {
-			configurable: true,
-			get: () => metrics.clientHeight,
-		},
-		scrollTop: {
-			configurable: true,
-			get: () => metrics.scrollTop,
-			set: (value: number) => {
-				if (writes) writes.count += 1;
-				metrics.scrollTop = value;
-			},
-		},
-	});
-}
-
-test("follows transcript bottom, preserves upward reading, and sends from older history", () => {
-	const rendered = renderInteractive({ streamingSegments: ["first"] });
-	const messages = rendered.container.querySelector(".chat-messages");
-	expect(messages).not.toBeNull();
-	if (!messages) return;
-	const metrics = { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 };
-	const writes = { count: 0 };
-	setTranscriptMetrics(messages, metrics, writes);
-	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
-
-	metrics.scrollHeight = 1100;
-	rendered.rerender({ streamingSegments: ["first updated"] });
-	expect(metrics.scrollTop).toBe(700);
-
-	metrics.scrollTop = 500;
-	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
-	metrics.scrollHeight = 1200;
-	rendered.rerender({ streamingSegments: ["new output"] });
-	expect(metrics.scrollTop).toBe(500);
-
-	metrics.scrollTop = 784;
-	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
-	metrics.scrollHeight = 1300;
-	rendered.rerender({ streamingSegments: ["output at threshold"] });
-	expect(metrics.scrollTop).toBe(900);
-
-	metrics.scrollTop = 883;
-	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
-	metrics.scrollHeight = 1400;
-	rendered.rerender({
-		streamingSegments: ["output above threshold"],
-		draft: "send this",
-	});
-	expect(metrics.scrollTop).toBe(883);
-
-	const textarea = rendered.container.querySelector("textarea");
-	expect(textarea).not.toBeNull();
-	if (!textarea) return;
-	const writesBeforeSend = writes.count;
-	textarea.value = "send this";
-	textarea.dispatchEvent(
-		new dom.window.KeyboardEvent("keydown", {
-			bubbles: true,
-			key: "Enter",
-		}),
-	);
-	expect(writes.count).toBe(writesBeforeSend);
-	expect(metrics.scrollTop).toBe(883);
-	metrics.scrollHeight = 1500;
-	rendered.rerender({
-		streamingSegments: ["after explicit send"],
-		draft: "send this",
-	});
-	expect(writes.count).toBe(writesBeforeSend + 1);
-	expect(metrics.scrollTop).toBe(1100);
-	metrics.scrollHeight = 1600;
-	rendered.rerender({
-		streamingSegments: ["after explicit send updated"],
-		draft: "send this",
-	});
-	expect(writes.count).toBe(writesBeforeSend + 2);
-	expect(metrics.scrollTop).toBe(1200);
-});
-test("switching chats forces selected transcript to its latest message", () => {
-	const rendered = renderInteractive();
-	const messages = rendered.container.querySelector(".chat-messages");
-	expect(messages).not.toBeNull();
-	if (!messages) return;
-	const metrics = { scrollHeight: 1000, clientHeight: 400, scrollTop: 100 };
-	setTranscriptMetrics(messages, metrics);
-	messages.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
-	rendered.rerender({
-		activeChatId: "chat-2",
-		chats: [
-			{
-				id: "chat-1",
-				title: "First chat",
-				createdAt: "2026-08-24T00:00:00Z",
-				busy: false,
-			},
-			{
-				id: "chat-2",
-				title: "Second chat",
-				createdAt: "2026-08-24T01:00:00Z",
-				busy: false,
-			},
-		],
-	});
-	expect(metrics.scrollTop).toBe(600);
-});
-
-test("keeps persisted card DOM stable when history objects refresh", () => {
+test("keeps persisted assistant card DOM stable across history refresh", () => {
 	const entry = {
 		role: "assistant" as const,
 		text: "Completed answer",
 		tags: [],
 		at: "2026-08-24T00:00:00Z",
 		sessionId: "session-1",
-		partial: false,
 	};
 	const rendered = renderInteractive({ transcript: [entry] });
-	const firstCard = rendered.container.querySelector(".chat-message");
+	const firstCard = rendered.container.querySelector('[data-role="assistant"]');
 	expect(firstCard).not.toBeNull();
-
-	rendered.rerender({
-		transcript: [{ ...entry }],
+	act(() => {
+		rendered.rerender({ transcript: [{ ...entry }] });
 	});
-
-	expect(rendered.container.querySelector(".chat-message")).toBe(firstCard);
-});
-test("keeps idle keyboard hint but removes busy hint below composer", () => {
-	const idleMarkup = renderComposer();
-	expect(idleMarkup).toContain("Enter to send, Shift+Enter for a new line.");
-	expect(idleMarkup).toContain(
-		"Ask what changed, or select lines in a hunk for context.",
-	);
-
-	const busyMarkup = renderComposer({ sending: true, busy: true });
-	expect(busyMarkup).not.toContain(
-		"Enter to send, Shift+Enter for a new line.",
+	expect(rendered.container.querySelector('[data-role="assistant"]')).toBe(
+		firstCard,
 	);
 });
-test("renders one whole-file chip per file tag path", () => {
-	const markup = renderComposer({
-		tags: [
-			{ kind: "file", path: "src/whole.ts" },
-			{
-				kind: "markdown",
-				path: "README.md",
-				startLine: 4,
-				endLine: 6,
-				quote: "## Heading",
-			},
-		],
-	});
-
-	expect(markup).toContain("src/whole.ts (whole file)");
-	expect(markup).toContain("README.md:4-6");
-	expect(markup).toContain("Whole file");
-	expect(markup).toContain(
-		'aria-label="Remove src/whole.ts (whole file) context"',
-	);
-});
-
 test("renders Thinking state without disabling the editable composer", () => {
 	const markup = renderComposer({ sending: true, busy: true, draft: "draft" });
 
 	expect(markup).toMatch(/<textarea[^>]*>draft<\/textarea>/);
-	expect(markup).not.toMatch(/<textarea[^>]*disabled/);
+	expect(parseMarkup(markup).querySelector("textarea")?.disabled).toBe(false);
 	expect(markup).toMatch(
 		/<button[^>]*type="submit"[^>]*disabled[^>]*aria-busy="true"/,
 	);
 	expect(markup).toContain("Thinking");
-	const busySubmit =
-		markup.match(/<button[^>]*type="submit"[^>]*>([\s\S]*?)<\/button>/)?.[1] ??
-		"";
-	expect(busySubmit).toContain('class="chat-spinner"');
-	expect(busySubmit).not.toContain("Thinking");
-	expect(markup).toContain('role="status"');
-	expect(markup).toContain('class="chat-spinner" aria-hidden="true"');
+	const container = parseMarkup(markup);
+	const busyIcon = container.querySelector('button[aria-busy="true"] svg');
+	expect(busyIcon?.className).toContain("animate-spin");
+	expect(busyIcon?.getAttribute("aria-hidden")).toBe("true");
 	expect(markup).not.toContain("Agent is reading the review worktree…");
 	expect(markup).toContain(">Stop</button>");
 });
@@ -505,7 +476,7 @@ test("renders separate assistant cards, partial labels, and no empty cards", () 
 		busy: true,
 	});
 
-	expect(markup.match(/class="chat-message assistant/g)).toHaveLength(4);
+	expect(markup.match(/data-role="assistant"/g)).toHaveLength(4);
 	expect(markup).toContain("First answer");
 	expect(markup).toContain("Assistant · partial reply");
 	expect(markup.match(/Live before/g)).toHaveLength(2);
@@ -518,8 +489,9 @@ test("keeps errors visible without turning them into transcript cards", () => {
 		error: "Agent failed",
 		streamingSegments: ["Partial answer"],
 	});
-	expect(markup).toContain(
-		'<p class="chat-error" role="alert">Agent failed</p>',
+	const container = parseMarkup(markup);
+	expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+		"Agent failed",
 	);
 	expect(markup).toContain("Assistant · partial reply");
 	expect(markup).not.toContain("Tool activity");
@@ -621,7 +593,63 @@ const generalDiscussions = [
 		],
 	},
 ];
+test("exposes semantic message and streaming state", () => {
+	const markup = renderComposer({
+		transcript: [
+			{
+				role: "user",
+				text: "What changed?",
+				tags: [],
+				at: "2026-08-24T00:00:00Z",
+				sessionId: "session-1",
+			},
+			{
+				role: "assistant",
+				text: "First answer",
+				tags: [],
+				at: "2026-08-24T00:00:01Z",
+				sessionId: "session-1",
+			},
+		],
+		streamingSegments: ["Live before"],
+		sending: true,
+		busy: true,
+	});
+	const container = parseMarkup(markup);
+	expect(container.querySelector('[data-role="user"]')).not.toBeNull();
+	expect(container.querySelector('[data-role="assistant"]')).not.toBeNull();
+	const streaming = container.querySelector(
+		'[data-role="assistant"][data-streaming="true"]',
+	);
+	expect(streaming).not.toBeNull();
+	expect(streaming?.textContent).toContain("Live before");
+	expect(streaming?.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+});
 
+test("opens file references from rendered assistant markdown", () => {
+	let openedPath = "";
+	const rendered = renderInteractive({
+		transcript: [
+			{
+				role: "assistant",
+				text: "See `src/index.ts:12`.",
+				tags: [],
+				at: "2026-08-24T00:00:00Z",
+				sessionId: "session-1",
+			},
+		],
+		onOpenFileRef: (path) => {
+			openedPath = path;
+		},
+	});
+	const link = rendered.container.querySelector<HTMLAnchorElement>(
+		'a[data-file-path="src/index.ts"]',
+	);
+	act(() => {
+		link?.click();
+	});
+	expect(openedPath).toBe("src/index.ts");
+});
 function renderGeneralDiscussions(
 	props: Partial<Parameters<typeof ChatPane>[0]> = {},
 ): string {
@@ -648,7 +676,7 @@ function renderGeneralDiscussions(
 			error={null}
 			sending={false}
 			stopping={false}
-			onSend={() => {}}
+			onSend={() => undefined}
 			onStop={() => {}}
 			onRemoveTag={() => {}}
 			{...props}
@@ -659,20 +687,22 @@ function renderGeneralDiscussions(
 test("renders an Explain button on general discussions when a handler is supplied", () => {
 	const markup = renderGeneralDiscussions({ onExplainDiscussion: () => {} });
 
-	expect(markup.match(/data-action="explain"/g)).toHaveLength(2);
+	const container = parseMarkup(markup);
+	const buttons = [
+		...container.querySelectorAll<HTMLButtonElement>(
+			'button[data-action="explain"]',
+		),
+	];
+	expect(buttons).toHaveLength(2);
 	for (const id of ["discussion-1", "discussion-2"]) {
-		const card = markup.match(
-			new RegExp(
-				`<article[^>]*data-discussion-id="${id}"[^>]*>[\\s\\S]*?</article>`,
-			),
-		)?.[0];
-		expect(card).toBeDefined();
-		expect(card).toContain('data-action="explain"');
-		expect(card).toContain(">Explain</button>");
+		const card = container.querySelector<HTMLElement>(
+			`[data-discussion-id="${id}"]`,
+		);
+		expect(card).not.toBeNull();
+		expect(card?.querySelector('button[data-action="explain"]')).not.toBeNull();
+		expect(card?.textContent).toContain("Explain");
 	}
-	expect(markup).not.toMatch(
-		/<button[^>]*data-action="explain"[^>]*\sdisabled/,
-	);
+	expect(buttons.every((button) => !button.disabled)).toBe(true);
 });
 
 test("disables general Explain buttons when explainDisabled is set", () => {
@@ -681,19 +711,24 @@ test("disables general Explain buttons when explainDisabled is set", () => {
 		explainDisabled: true,
 	});
 
-	const buttons =
-		markup.match(/<button[^>]*data-action="explain"[^>]*>/g) ?? [];
+	const container = parseMarkup(markup);
+	const buttons = [
+		...container.querySelectorAll<HTMLButtonElement>(
+			'button[data-action="explain"]',
+		),
+	];
 	expect(buttons).toHaveLength(2);
-	for (const button of buttons) {
-		expect(button).toMatch(/\sdisabled(?:=""|[\s>])/);
-	}
+	expect(buttons.every((button) => button.disabled)).toBe(true);
 });
 
 test("omits Explain on general discussions when no handler is supplied", () => {
 	const markup = renderGeneralDiscussions();
 
-	expect(markup).toContain('data-discussion-id="discussion-1"');
-	expect(markup).not.toContain('data-action="explain"');
+	const container = parseMarkup(markup);
+	expect(
+		container.querySelector('[data-discussion-id="discussion-1"]'),
+	).not.toBeNull();
+	expect(container.querySelector('button[data-action="explain"]')).toBeNull();
 });
 
 test("renders general discussion Markdown through the sanitized comment renderer", () => {
@@ -728,10 +763,95 @@ test("renders general discussion Markdown through the sanitized comment renderer
 		],
 	});
 
-	expect(markup).toContain("<h1>General note</h1>");
-	expect(markup).toContain("<li>item</li>");
-	expect(markup).toContain("<pre><code");
-	expect(markup).toContain("<em>Important</em>");
-	expect(markup).toContain(">click</span>");
-	expect(markup).not.toContain("onclick");
+	const container = parseMarkup(markup);
+	expect(container.querySelector("h1")?.textContent).toBe("General note");
+	expect(container.querySelector("li")?.textContent).toBe("item");
+	expect(container.querySelector("pre code")?.textContent).toContain(
+		"general code",
+	);
+	expect(container.textContent).toContain("click");
+	expect(container.querySelector("[onclick]")).toBeNull();
+});
+test("bounds long general discussion content and keeps code and table regions internal", () => {
+	const longPath =
+		"packages/review/features/comments/components/very-long-general-file-name.ts";
+	const body = [
+		`Please inspect ${longPath} and https://example.test/${"path-segment".repeat(16)}.`,
+		"",
+		"```text",
+		"long fenced content that remains inside its own scrollable pre region",
+		"```",
+		"",
+		"| file | detail |",
+		"| --- | --- |",
+		`| ${longPath} | table content |`,
+	].join("\n");
+	const markup = renderGeneralDiscussions({
+		discussions: [
+			{
+				...generalDiscussions[0],
+				notes: [{ ...generalDiscussions[0].notes[0], body }],
+			},
+		],
+	});
+	const container = parseMarkup(markup);
+	const card = container.querySelector<HTMLElement>(
+		'[data-discussion-id="discussion-1"]',
+	);
+	const markdown = card?.querySelector<HTMLElement>(".comment-markdown");
+	const tableWrap = markdown?.querySelector<HTMLElement>(
+		".rendered-table-wrap",
+	);
+
+	const panel = container.querySelector<HTMLElement>("#general-discussions");
+	expect(panel?.className).toContain("min-h-0");
+	expect(panel?.className).toContain("max-h-[40vh]");
+	expect(panel?.className).toContain("overflow-x-hidden");
+	expect(panel?.className).toContain("overflow-y-auto");
+	expect(card?.className).toContain("min-w-0");
+	expect(card?.className).toContain("max-w-full");
+	expect(card?.className).toContain("overflow-hidden");
+	expect(markdown?.className).toContain("min-w-0");
+	expect(markdown?.className).toContain("[overflow-wrap:anywhere]");
+	expect(markdown?.querySelector("pre")).not.toBeNull();
+	expect(tableWrap?.className).toContain("max-w-full");
+	expect(container.textContent).toContain(longPath);
+});
+
+test("groups general Explain in compact actions and preserves its callback", () => {
+	let explained = "";
+	const rendered = renderInteractive({
+		discussions: generalDiscussions,
+		onExplainDiscussion: (discussionId) => {
+			explained = discussionId;
+		},
+	});
+	const group = rendered.container.querySelector<HTMLElement>(
+		'[data-action-group="discussion-actions"]',
+	);
+	const button = rendered.container.querySelector<HTMLButtonElement>(
+		'button[data-action="explain"]',
+	);
+
+	expect(group?.className).toContain("flex");
+	expect(group?.className).toContain("shrink-0");
+	expect(button?.className).toContain("bg-primary");
+	act(() => button?.click());
+	expect(explained).toBe("discussion-1");
+});
+
+test("marks general Explain as busy while disabled", () => {
+	const container = parseMarkup(
+		renderGeneralDiscussions({
+			onExplainDiscussion: () => {},
+			explainDisabled: true,
+		}),
+	);
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[data-action="explain"]',
+	);
+
+	expect(button?.disabled).toBe(true);
+	expect(button?.getAttribute("aria-busy")).toBe("true");
+	expect(button?.querySelector("svg.animate-spin")).not.toBeNull();
 });

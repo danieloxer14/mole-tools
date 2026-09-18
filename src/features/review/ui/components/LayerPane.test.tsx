@@ -98,13 +98,10 @@ function renderLayerPane(
 test("renders layers-only sticky header controls", () => {
 	const markup = renderLayerPane();
 
-	expect(markup).toContain('class="layers-header"');
-	expect(markup).toContain("<h2>Review layers</h2>");
-	expect((markup.match(/class="icon-button/g) ?? []).length).toBe(1);
+	expect(markup).toContain("<h2");
+	expect(markup).toContain("Review layers");
 	expect(markup).toContain('aria-label="Regenerate layers"');
-	expect(markup).toContain('title="Regenerate layers (resets completed)"');
 	expect(markup).not.toContain("<h1");
-	expect(markup).not.toContain("approval");
 });
 
 test("renders status-specific sticky header content", () => {
@@ -116,9 +113,8 @@ test("renders status-specific sticky header content", () => {
 		state: reviewState({ layerStatus: "running" }),
 	});
 	expect(runningMarkup).toContain("Generating layers…");
-	expect(runningMarkup).not.toContain('class="layers-progress"');
 	expect(runningMarkup).not.toContain('aria-label="Completed layers"');
-	expect(runningMarkup).toContain("layers-list--dimmed");
+	expect(runningMarkup).toContain("data-dimmed");
 	expect(runningMarkup).toContain(">Diff</button>");
 	expect(layersStatusMessage("running")).toBe("Generating layers…");
 
@@ -129,11 +125,9 @@ test("renders status-specific sticky header content", () => {
 		}),
 	});
 	expect(failedMarkup).toContain("Layer generation failed");
-	expect(failedMarkup).toContain(
-		'<p class="layer-error" role="alert">Agent timed out</p>',
-	);
+	expect(failedMarkup).toContain('role="alert"');
+	expect(failedMarkup).toContain("Agent timed out");
 	expect(failedMarkup).toContain('aria-label="Retry layer generation"');
-	expect(failedMarkup).toContain('title="Retry layer generation"');
 
 	const readyMarkup = renderLayerPane({
 		state: reviewState({
@@ -143,7 +137,6 @@ test("renders status-specific sticky header content", () => {
 					title: "Completed",
 					tldr: "Done",
 					files: ["src/completed.ts"],
-					bdd: [],
 					done: true,
 					stale: false,
 				},
@@ -152,7 +145,6 @@ test("renders status-specific sticky header content", () => {
 					title: "Stale",
 					tldr: "Needs refresh",
 					files: ["src/stale.ts"],
-					bdd: [],
 					done: true,
 					stale: true,
 				},
@@ -161,7 +153,6 @@ test("renders status-specific sticky header content", () => {
 					title: "Open",
 					tldr: "Not done",
 					files: ["src/open.ts"],
-					bdd: [],
 					done: false,
 					stale: false,
 				},
@@ -175,6 +166,11 @@ test("renders status-specific sticky header content", () => {
 	expect(readyMarkup).toContain('aria-valuemax="3"');
 	expect(readyMarkup).toContain(">1/3</span>");
 	expect(readyMarkup).toContain(">Stale</span>");
+	expect(readyMarkup).toContain('data-layer-state="done"');
+	expect(readyMarkup).toContain('data-layer-state="stale"');
+	expect(readyMarkup).toContain('data-layer-state="open"');
+	expect(readyMarkup).toContain("data-done");
+	expect(readyMarkup).toContain("data-stale");
 	expect(completedLayerCount(reviewState().layers)).toBe(0);
 });
 
@@ -205,9 +201,8 @@ test("renders layer action errors as alerts in the sticky header", () => {
 		actionError: "Unable to regenerate layers",
 	});
 
-	expect(markup).toContain(
-		'<p class="layer-error" role="alert">Unable to regenerate layers</p>',
-	);
+	expect(markup).toContain('role="alert"');
+	expect(markup).toContain("Unable to regenerate layers");
 });
 
 test("renders layer file chips with shortened labels and full-path accessible labels", () => {
@@ -220,18 +215,165 @@ test("renders layer file chips with shortened labels and full-path accessible la
 	expect(markup).toContain('title="web/route.ts"');
 });
 
+test("allows long file chip labels to wrap without clipping", () => {
+	const longPath =
+		"src/features/review/components/very-long-file-name-that-wraps-safely-and-stays-visible-in-chip.ts";
+	const visibleLabel =
+		"very-long-file-name-that-wraps-safely-and-stays-visible-in-chip.ts";
+	const markup = renderLayerPane({
+		files: [longPath],
+		state: reviewState({
+			layers: [
+				{
+					...reviewState().layers[0],
+					files: [longPath],
+				},
+			],
+		}),
+	});
+
+	expect(markup).toContain(`>${visibleLabel}</button>`);
+	expect(markup).toContain("h-auto");
+	expect(markup).toContain("overflow-visible");
+	expect(markup).toContain("whitespace-normal");
+	expect(markup).toContain("break-words");
+	expect(markup).toContain("[overflow-wrap:anywhere]");
+	expect(markup).toContain("justify-start");
+	expect(markup).toContain("text-left");
+});
+
 test("marks the selected layer file chip active", () => {
 	const markup = renderLayerPane({ selectedPath: "src/routes/route.ts" });
 
-	expect(markup).toContain('class="active"');
+	expect(markup).toContain('data-active="true"');
+	expect(markup).toContain('data-active="false"');
+});
+
+test("uses foreground title text without orange selected override", () => {
+	const markup = renderLayerPane({ selectedPath: "src/routes/route.ts" });
+
+	expect(markup).toContain(
+		'class="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"',
+	);
+	expect(markup).toContain("space-y-3 px-3 pb-3 text-sm text-foreground");
+});
+
+test("keeps foreground title text for done and stale layers", () => {
+	const markup = renderLayerPane({
+		state: reviewState({
+			layers: [
+				{
+					id: "done",
+					title: "Done layer",
+					tldr: "Done details",
+					files: ["src/done.ts"],
+					done: true,
+					stale: false,
+				},
+				{
+					id: "stale",
+					title: "Stale layer",
+					tldr: "Stale details",
+					files: ["src/stale.ts"],
+					done: false,
+					stale: true,
+				},
+			],
+		}),
+		files: ["src/done.ts", "src/stale.ts"],
+	});
+
+	const titleClass =
+		'class="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"';
+	expect((markup.match(new RegExp(titleClass, "g")) ?? []).length).toBe(2);
+});
+
+test("gives file labels hover and filled selected treatments", () => {
+	const markup = renderLayerPane({ selectedPath: "src/routes/route.ts" });
+
+	expect(markup).toContain("hover:bg-muted");
+	expect(markup).toContain("data-[active=true]:bg-primary");
+	expect(markup).toContain("data-[active=true]:text-primary-foreground");
+	expect(markup).toContain('aria-current="true"');
+});
+test("uses padded spacing between layer header and cards", () => {
+	const markup = renderLayerPane();
+
+	expect(markup).toContain(
+		'class="m-0 flex-1 list-none space-y-2 overflow-auto px-4 pt-4 pb-4 transition-opacity duration-200 ease-out data-[dimmed]:opacity-60"',
+	);
+});
+
+test("uses centered, tight alignment for layer header controls", () => {
+	const markup = renderLayerPane();
+
+	expect(markup).toContain("px-4 pt-4 pb-3 leading-none");
+	expect(markup).toContain("items-center gap-2 px-4 pb-3 text-xs leading-none");
+	expect(markup).toContain(
+		'class="inline-flex items-center tabular-nums leading-none"',
+	);
+	expect(markup).toContain(
+		"grid-cols-[auto_minmax(0,1fr)_minmax(3rem,1fr)_auto]",
+	);
+});
+
+test("keeps white title and description classes for done and stale layers", () => {
+	const markup = renderLayerPane({
+		state: reviewState({
+			layers: [
+				{
+					id: "done",
+					title: "Done layer",
+					tldr: "Done details",
+					files: ["src/done.ts"],
+					done: true,
+					stale: false,
+				},
+				{
+					id: "stale",
+					title: "Stale layer",
+					tldr: "Stale details",
+					files: ["src/stale.ts"],
+					done: true,
+					stale: true,
+				},
+			],
+		}),
+		files: ["src/done.ts", "src/stale.ts"],
+	});
+
+	expect(
+		(markup.match(/text-foreground/g) ?? []).length,
+	).toBeGreaterThanOrEqual(4);
 });
 
 test("renders layer coverage without BDD and exposes regenerate", () => {
-	const markup = renderLayerPane();
+	const markup = renderLayerPane({
+		state: reviewState({ viewedFiles: ["src/routes/route.ts"] }),
+	});
 
 	expect(markup).toContain('aria-label="Regenerate layers"');
 	expect(markup).toContain("File coverage");
+	expect(markup).toContain('style="width:50%"');
 	expect(markup).not.toContain("BDD");
+});
+
+test("renders zero and full layer coverage", () => {
+	const zeroMarkup = renderLayerPane();
+	expect(zeroMarkup).toContain('aria-label="Diff file coverage"');
+	expect(zeroMarkup).toContain('aria-valuenow="0"');
+	expect(zeroMarkup).toContain('aria-valuemax="2"');
+	expect(zeroMarkup).toContain('style="width:0%"');
+
+	const fullMarkup = renderLayerPane({
+		state: reviewState({
+			viewedFiles: ["src/routes/route.ts", "web/route.ts"],
+		}),
+	});
+	expect(fullMarkup).toContain('aria-label="Diff file coverage"');
+	expect(fullMarkup).toContain('aria-valuenow="2"');
+	expect(fullMarkup).toContain('aria-valuemax="2"');
+	expect(fullMarkup).toContain('style="width:100%"');
 });
 
 test("exposes retry for a failed layer guide", () => {
@@ -279,20 +421,13 @@ test("renders chevron collapse controls before each checkbox", () => {
 		expect(collapseControl).toBeGreaterThanOrEqual(0);
 		expect(collapseControl).toBeLessThan(doneCheckbox);
 	}
-	expect(markup).toContain(
-		'class="layer-collapse" aria-label="Expand Done layer" aria-expanded="false" aria-controls="layer-details-done-layer"',
-	);
-	expect(markup).toContain(
-		'class="layer-collapse" aria-label="Collapse Open layer" aria-expanded="true" aria-controls="layer-details-open-layer"',
-	);
-	expect(markup).toContain('class="layer-collapse-icon"');
+	expect(markup).toContain('aria-label="Expand Done layer"');
+	expect(markup).toContain('aria-expanded="false"');
+	expect(markup).toContain('aria-label="Collapse Open layer"');
+	expect(markup).toContain('aria-expanded="true"');
+	expect(markup).toContain('data-collapsed="true"');
+	expect(markup).toContain('data-collapsed="false"');
 	expect(markup).not.toContain(">Expand</button>");
-	expect(markup).toContain(
-		'id="layer-details-done-layer" class="layer-details is-collapsed" aria-hidden="true" inert=""><div class="layer-details-content"><p>Done details</p>',
-	);
-	expect(markup).toContain(
-		'id="layer-details-open-layer" class="layer-details" aria-hidden="false"><div class="layer-details-content"><p>Open details</p>',
-	);
 	expect(markup).toContain('aria-label="Mark Done layer done"');
 	expect(markup).toContain('aria-label="Mark Open layer done"');
 	expect(markup).toContain(">Done</span>");
