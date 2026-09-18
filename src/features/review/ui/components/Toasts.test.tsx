@@ -27,9 +27,11 @@ test("renders dismissible alert and status toasts", () => {
 	);
 
 	expect(html).toContain('role="alert"');
+	expect(html).toContain('data-kind="error"');
 	expect(html).toContain("boom");
 	expect(html).toContain('aria-label="Dismiss"');
 	expect(html).toContain('role="status"');
+	expect(html).toContain('data-kind="info"');
 	expect(html).toContain("Up to date");
 });
 

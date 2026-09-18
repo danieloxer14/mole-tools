@@ -36,6 +36,7 @@ UI. Invoke it as
 the same diff/chat/comment flow around requirements and acceptance criteria.
 `--no-open` suppresses browser launch. `--refresh` re-fetches the MR head and
 rebuilds the detached worktree before serving.
+Review UI is styled with Tailwind v4 + vendored shadcn base-luma components (`src/features/review/ui/components/ui`) and Lucide icons.
 
 ### Review URL and run token
 The URL printed by `mole-tools review` points to

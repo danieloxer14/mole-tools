@@ -1,3 +1,4 @@
+import { Loader2, TriangleAlert, X } from "lucide-react";
 import {
 	type CSSProperties,
 	type KeyboardEvent,
@@ -27,7 +28,11 @@ import {
 	changedFileCount,
 	viewedFileCount,
 } from "./components/ChangedFilesHeader";
-import { ChatPane, type ChatSummary } from "./components/ChatPane";
+import {
+	ChatPane,
+	type ChatSummary,
+	type ChatToolActivity,
+} from "./components/ChatPane";
 import {
 	type DiffLineSelection,
 	type DiffMode,
@@ -47,6 +52,17 @@ import {
 	type Toast,
 	Toasts,
 } from "./components/Toasts";
+import { Alert } from "./components/ui/alert";
+import { Button } from "./components/ui/button";
+import { Checkbox } from "./components/ui/checkbox";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+} from "./components/ui/dialog";
+import { Spinner } from "./components/ui/spinner";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -423,11 +439,6 @@ function centreColumnMinimumWidth(): number {
 function otherColumn(column: ReviewColumn): ReviewColumn {
 	return column === "left" ? "right" : "left";
 }
-interface ChatToolActivity {
-	id: number;
-	name: string;
-	phase: "start" | "end";
-}
 interface ChatRuntime {
 	entries: ChatEntry[];
 	tags: ChatTag[];
@@ -520,21 +531,6 @@ function ReviewApp() {
 		null,
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	useEffect(() => {
-		if (!settingsOpen) return;
-		const handleKeyDown = (event: unknown) => {
-			if (
-				typeof event === "object" &&
-				event !== null &&
-				"key" in event &&
-				event.key === "Escape"
-			) {
-				setSettingsOpen(false);
-			}
-		};
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [settingsOpen]);
 	const [error, setError] = useState<string | null>(null);
 	const [approvalLoading, setApprovalLoading] = useState(true);
 	const [approvalAction, setApprovalAction] = useState<ApprovalAction | null>(
@@ -972,12 +968,21 @@ function ReviewApp() {
 
 	if (error)
 		return (
-			<main className="review-error">
-				<h1>Review unavailable</h1>
-				<p>{error}</p>
+			<main className="flex h-screen items-center justify-center gap-2 text-sm text-destructive">
+				<TriangleAlert className="size-4 shrink-0" aria-hidden />
+				<div>
+					<h1 className="font-medium">Review unavailable</h1>
+					<p>{error}</p>
+				</div>
 			</main>
 		);
-	if (!data) return <main className="review-loading">Loading review...</main>;
+	if (!data)
+		return (
+			<main className="flex h-screen items-center justify-center gap-2 text-sm text-muted-foreground">
+				<Spinner />
+				<span>Loading review...</span>
+			</main>
+		);
 	const handleApprovalAction = (action: ApprovalAction) => {
 		if (approvalAction !== null) return;
 		setApprovalAction(action);
@@ -1783,7 +1788,11 @@ function ReviewApp() {
 	} as CSSProperties;
 
 	return (
-		<main className="review-shell" ref={reviewShell} style={reviewShellStyle}>
+		<main
+			className="grid h-screen w-screen min-h-0 min-w-0 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)] overflow-hidden bg-background text-foreground"
+			ref={reviewShell}
+			style={reviewShellStyle}
+		>
 			<LayerPane
 				state={data}
 				files={files}
@@ -1802,7 +1811,7 @@ function ReviewApp() {
 				aria-valuemax={leftColumnMaximum}
 				aria-valuemin={columnMinimums.left}
 				aria-valuenow={columnWidths.left}
-				className="column-splitter column-splitter-left"
+				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
 				onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
 				onPointerCancel={stopResizing}
 				onPointerDown={(event) => handleSplitterPointerDown(event, "left")}
@@ -1810,8 +1819,8 @@ function ReviewApp() {
 				onPointerUp={stopResizing}
 				tabIndex={0}
 			/>
-			<section className="centre-column">
-				<div className="file-tree-panel">
+			<section className="flex min-h-0 min-w-0 flex-col">
+				<div className="flex min-h-0 max-h-[40vh] shrink-0 flex-col border-b bg-sidebar">
 					<MrHeader
 						mr={data.mr}
 						headSha={data.revision.headSha}
@@ -1833,34 +1842,45 @@ function ReviewApp() {
 						viewedCount={viewedCount}
 						total={changedFileTotal}
 					/>
-					<nav className="file-tree" aria-label="Changed files">
+					<nav
+						className="min-h-0 max-h-[40vh] flex-1 overflow-auto"
+						aria-label="Changed files"
+					>
 						{data.diff.map((file) => {
 							const path = filePath(file);
 							return (
 								<div
-									className={`file-row ${path === selectedPath ? "selected" : ""}`}
+									className="group flex items-center gap-2 px-4 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/60 data-[state=selected]:bg-accent"
 									key={path}
 									ref={(el) => registerFileTreeRow(path, el)}
+									data-state={path === selectedPath ? "selected" : "idle"}
 								>
-									<button type="button" onClick={() => selectFile(path)}>
+									<button
+										type="button"
+										className="min-w-0 flex-1 truncate text-left font-mono text-xs"
+										onClick={() => selectFile(path)}
+									>
 										{path}
 									</button>
-									<span className="file-stats">
-										<span className="file-additions">+{file.insertions}</span>
-										<span className="file-deletions">−{file.deletions}</span>
+									<span className="flex shrink-0 gap-1 text-xs tabular-nums">
+										<span className="text-success">+{file.insertions}</span>
+										<span className="text-destructive">−{file.deletions}</span>
 									</span>
-									<label title="Mark file viewed">
-										<input
-											type="checkbox"
+									<div
+										className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+										title="Mark file viewed"
+									>
+										<Checkbox
 											checked={data.viewedFiles.includes(path)}
-											onChange={(event) =>
+											aria-label={`Viewed ${path}`}
+											onCheckedChange={(checked) =>
 												saveProgress({
-													viewedFile: { path, viewed: event.target.checked },
+													viewedFile: { path, viewed: checked === true },
 												})
 											}
 										/>
-										Viewed
-									</label>
+										<span>Viewed</span>
+									</div>
 								</div>
 							);
 						})}
@@ -1909,7 +1929,7 @@ function ReviewApp() {
 				aria-valuemax={rightColumnMaximum}
 				aria-valuemin={columnMinimums.right}
 				aria-valuenow={columnWidths.right}
-				className="column-splitter column-splitter-right"
+				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
 				onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
 				onPointerCancel={stopResizing}
 				onPointerDown={(event) => handleSplitterPointerDown(event, "right")}
@@ -1926,6 +1946,7 @@ function ReviewApp() {
 				onExplainDiscussion={explainDiscussion}
 				explainDisabled={creatingChat}
 				streamingSegments={activeChat.streamingSegments}
+				tools={activeChat.tools}
 				error={activeChat.error ?? commentError}
 				sending={activeChat.sending}
 				busy={activeChatBusy}
@@ -1946,45 +1967,70 @@ function ReviewApp() {
 				onClearTags={clearTags}
 				onOpenFileRef={openFileRef}
 			/>
-			{externalFile ? (
-				<div className="file-preview-overlay">
-					<div className="file-preview-panel">
-						<header className="file-preview-header">
-							<code>{externalFile.path}</code>
-							<button
-								type="button"
-								onClick={() => setExternalFile(null)}
-								aria-label="Close file preview"
-							>
-								×
-							</button>
-						</header>
-						{externalFile.loading ? (
-							<p className="placeholder">Loading {externalFile.path}...</p>
-						) : null}
-						{externalFile.error ? (
-							<p className="render-error">
-								Couldn't open {externalFile.path}: {externalFile.error}
-							</p>
-						) : null}
-						{externalFile.contents !== null ? (
-							<pre className="file-preview-contents">
-								{externalFile.contents}
-							</pre>
-						) : null}
-					</div>
-				</div>
-			) : null}
-			{settingsOpen ? (
-				<div className="settings-overlay">
-					<div className="settings-panel">
-						<SettingsPanel
-							token={token}
-							onClose={() => setSettingsOpen(false)}
-						/>
-					</div>
-				</div>
-			) : null}
+			<Dialog
+				open={externalFile !== null}
+				onOpenChange={(open) => {
+					if (!open) setExternalFile(null);
+				}}
+			>
+				<DialogContent
+					className="w-[min(92vw,56rem)] max-w-none"
+					showCloseButton={false}
+				>
+					{externalFile ? (
+						<>
+							<DialogHeader>
+								<DialogTitle className="font-mono text-sm">
+									{externalFile.path}
+								</DialogTitle>
+							</DialogHeader>
+							<DialogClose
+								render={
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-sm"
+										className="absolute top-4 right-4 bg-secondary"
+										aria-label="Close file preview"
+									>
+										<X aria-hidden />
+										<span className="sr-only">Close file preview</span>
+									</Button>
+								}
+							/>
+							{externalFile.loading ? (
+								<div className="flex items-center gap-2 text-sm text-muted-foreground">
+									<Loader2 className="size-4 animate-spin" aria-hidden />
+									<span>Loading {externalFile.path}…</span>
+								</div>
+							) : null}
+							{externalFile.error ? (
+								<Alert variant="destructive">
+									Couldn't open {externalFile.path}: {externalFile.error}
+								</Alert>
+							) : null}
+							{externalFile.contents !== null ? (
+								<pre className="max-h-[70vh] overflow-auto rounded-md border bg-card p-4 font-mono text-[13px]">
+									{externalFile.contents}
+								</pre>
+							) : null}
+						</>
+					) : null}
+				</DialogContent>
+			</Dialog>
+			<Dialog
+				open={settingsOpen}
+				onOpenChange={(open) => {
+					if (!open) setSettingsOpen(false);
+				}}
+			>
+				<DialogContent className="h-[min(calc(100dvh-2rem),56rem)] w-[min(calc(100vw-2rem),64rem)] max-w-none grid-rows-[minmax(0,1fr)] overflow-hidden p-0 sm:max-w-none">
+					<DialogHeader className="sr-only">
+						<DialogTitle>Settings</DialogTitle>
+					</DialogHeader>
+					<SettingsPanel token={token} onClose={() => setSettingsOpen(false)} />
+				</DialogContent>
+			</Dialog>
 		</main>
 	);
 }

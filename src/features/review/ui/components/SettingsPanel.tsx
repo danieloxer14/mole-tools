@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import { Alert } from "./ui/alert";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { NativeSelect } from "./ui/native-select";
+import { Separator } from "./ui/separator";
+import { Textarea } from "./ui/textarea";
 export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-layers-code",
 	"review-layers-plan",
@@ -162,13 +168,14 @@ function clearPromptState(
 
 export function SettingsPanel({
 	token,
-	onClose,
 	initialSettings,
 	initialPrompt,
 }: SettingsPanelProps) {
-	const firstSlot =
+	const firstSlot: PromptName =
 		initialSettings?.slots.find((slot) => VISIBLE_SLOTS.includes(slot.slot))
-			?.slot ?? VISIBLE_SLOTS[0];
+			?.slot ??
+		VISIBLE_SLOTS[0] ??
+		"review-layers-code";
 	const initialSlotSettings = initialSettings?.slots.find(
 		(slot) => slot.slot === firstSlot,
 	);
@@ -443,73 +450,72 @@ export function SettingsPanel({
 	};
 
 	return (
-		<section className="settings-panel" aria-busy={pending}>
-			<header className="settings-header">
+		<section className="flex h-full min-h-0 flex-col" aria-busy={pending}>
+			<header className="flex items-start justify-between border-b px-6 py-4">
 				<div>
-					<p className="eyebrow">Review settings</p>
-					<h2>Settings</h2>
+					<p className="text-xs uppercase tracking-wider text-muted-foreground">
+						Review settings
+					</p>
+					<h2 className="text-lg font-semibold">Settings</h2>
 				</div>
-				<button
-					type="button"
-					aria-label="Close settings"
-					disabled={pending}
-					onClick={onClose}
-				>
-					Close
-				</button>
 			</header>
 			{status ? (
-				<p className="settings-status" role="status" aria-live="polite">
+				<Alert role="status" aria-live="polite" className="mx-6 mt-4">
 					{status}
-				</p>
+				</Alert>
 			) : null}
 			{!settings ? (
-				<p className="settings-placeholder">
-					{settingsLoadFailed ? "Settings unavailable." : "Loading settings…"}
-				</p>
+				<div className="flex-1 overflow-auto p-6">
+					<Alert variant={settingsLoadFailed ? "destructive" : undefined}>
+						{settingsLoadFailed ? "Settings unavailable." : "Loading settings…"}
+					</Alert>
+				</div>
 			) : (
-				<div className="settings-layout">
-					<aside className="settings-slots" aria-label="Prompt slots">
-						<ul>
-							{settings.slots
-								.filter((slot) => VISIBLE_SLOTS.includes(slot.slot))
-								.map((slot) => (
-									<li key={slot.slot}>
-										<button
-											type="button"
-											className={
-												selectedSlot === slot.slot ? "active" : undefined
-											}
-											aria-current={
-												selectedSlot === slot.slot ? "true" : undefined
-											}
-											disabled={pending}
-											onClick={() => handleSlotSelect(slot.slot)}
-										>
-											<span>{SLOT_LABELS[slot.slot]}</span>
-											<span>
-												{slot.activePreset} · v{slotLatest(slot)}
-											</span>
-										</button>
-									</li>
-								))}
-						</ul>
-					</aside>
+				<div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-6">
+					<nav className="space-y-1" aria-label="Prompt slots">
+						{settings.slots
+							.filter((slot) => VISIBLE_SLOTS.includes(slot.slot))
+							.map((slot) => (
+								<button
+									key={slot.slot}
+									type="button"
+									className="w-full rounded-md px-3 py-2 text-left transition-colors duration-150 ease-out hover:bg-muted/60 data-[active=true]:bg-accent"
+									data-active={selectedSlot === slot.slot ? "true" : "false"}
+									aria-current={selectedSlot === slot.slot ? "true" : undefined}
+									disabled={pending}
+									onClick={() => handleSlotSelect(slot.slot)}
+								>
+									<span className="block text-sm font-medium">
+										{SLOT_LABELS[slot.slot]}
+									</span>
+									<span className="block text-xs text-muted-foreground">
+										{slot.activePreset} · v{slotLatest(slot)}
+									</span>
+								</button>
+							))}
+					</nav>
 					<section
-						className="settings-editor"
+						className="min-w-0 space-y-4"
 						aria-label={SLOT_LABELS[selectedSlot]}
 					>
-						<p className="settings-slot-description">
+						<p className="text-sm text-muted-foreground">
 							{SLOT_DESCRIPTIONS[selectedSlot]}
 						</p>
 						{!prompt ? (
-							<p className="settings-placeholder">Loading prompt…</p>
+							<Alert>Loading prompt…</Alert>
 						) : (
 							<>
-								<div className="settings-control-row">
-									<label htmlFor="settings-preset">Preset</label>
-									<select
+								<div className="flex flex-wrap items-center gap-2">
+									<label
+										className="w-24 shrink-0 text-xs font-medium"
+										htmlFor="settings-preset"
+									>
+										Preset
+									</label>
+									<NativeSelect
+										className="min-w-0 flex-1"
 										id="settings-preset"
+										size="sm"
 										value={selectedPreset}
 										disabled={pending}
 										onChange={(event) =>
@@ -524,9 +530,10 @@ export function SettingsPanel({
 													: ""}
 											</option>
 										))}
-									</select>
-									<button
-										type="button"
+									</NativeSelect>
+									<Button
+										size="sm"
+										variant="secondary"
 										disabled={
 											pending ||
 											selectedPreset === selectedSlotSettings?.activePreset
@@ -534,30 +541,44 @@ export function SettingsPanel({
 										onClick={handleActivate}
 									>
 										Activate
-									</button>
+									</Button>
 								</div>
 
-								<div className="settings-control-row settings-new-preset">
-									<label htmlFor="settings-new-preset">New preset…</label>
-									<input
+								<div className="flex flex-wrap items-center gap-2">
+									<label
+										className="w-24 shrink-0 text-xs font-medium"
+										htmlFor="settings-new-preset"
+									>
+										New preset…
+									</label>
+									<Input
 										id="settings-new-preset"
+										className="h-8 min-w-0 flex-1"
 										value={newPreset}
 										disabled={pending}
 										onChange={(event) => setNewPreset(controlValue(event))}
 									/>
-									<button
-										type="button"
+									<Button
+										size="sm"
+										variant="secondary"
 										disabled={pending || newPreset.trim().length === 0}
 										onClick={handleCreatePreset}
 									>
 										Create preset
-									</button>
+									</Button>
 								</div>
 
-								<div className="settings-control-row">
-									<label htmlFor="settings-version">Version</label>
-									<select
+								<div className="flex flex-wrap items-center gap-2">
+									<label
+										className="w-24 shrink-0 text-xs font-medium"
+										htmlFor="settings-version"
+									>
+										Version
+									</label>
+									<NativeSelect
+										className="min-w-0 flex-1"
 										id="settings-version"
+										size="sm"
 										value={String(selectedVersion)}
 										disabled={pending}
 										onChange={(event) =>
@@ -571,106 +592,142 @@ export function SettingsPanel({
 													v{version}
 												</option>
 											))}
-									</select>
+									</NativeSelect>
 									{selectedVersion !== latestVersion ? (
-										<button
-											type="button"
+										<Button
+											size="sm"
+											variant="outline"
 											disabled={pending}
 											onClick={handleRollback}
 										>
 											Roll back to this version
-										</button>
+										</Button>
 									) : null}
-									<button
-										type="button"
+									<Button
+										size="sm"
+										variant="outline"
 										disabled={pending}
 										onClick={handleReset}
 									>
 										Reset to shipped default
-									</button>
+									</Button>
 								</div>
 
-								<label
-									className="settings-prompt-label"
-									htmlFor="settings-prompt"
-								>
-									Prompt text
-								</label>
-								<textarea
-									id="settings-prompt"
-									value={text}
-									disabled={pending}
-									onChange={(event) => setText(controlValue(event))}
-									rows={15}
-								/>
-								<button
-									type="button"
+								<div className="space-y-2">
+									<label
+										className="text-sm font-medium"
+										htmlFor="settings-prompt"
+									>
+										Prompt text
+									</label>
+									<Textarea
+										id="settings-prompt"
+										className="min-h-64 font-mono text-sm"
+										value={text}
+										disabled={pending}
+										onChange={(event) => setText(controlValue(event))}
+										rows={15}
+									/>
+								</div>
+								<Button
+									size="sm"
 									disabled={isSaveDisabled(loadedText, text, pending)}
 									onClick={handleSave}
 								>
 									Save as new version
-								</button>
+								</Button>
 
-								<fieldset className="settings-review-agent" disabled={pending}>
-									<legend>Review agent</legend>
-									<label htmlFor="settings-agent">Agent</label>
-									<select
-										id="settings-agent"
-										value={reviewAgent}
-										disabled={pending}
-										onChange={(event) =>
-											setReviewAgent(
-												controlValue(event) === "claude" ? "claude" : "omp",
-											)
-										}
+								<section
+									className="space-y-3"
+									aria-labelledby="settings-review-agent-heading"
+								>
+									<Separator />
+									<h3
+										id="settings-review-agent-heading"
+										className="text-sm font-medium"
 									>
-										{settings.review.agents.map((agent) => (
-											<option key={agent} value={agent}>
-												{agent}
-											</option>
-										))}
-									</select>
-									<label htmlFor="settings-model">Model</label>
-									<input
-										id="settings-model"
-										type="text"
-										value={reviewModel}
-										disabled={pending}
-										onChange={(event) => setReviewModel(controlValue(event))}
-									/>
-									<select
-										id="settings-model-quickpick"
-										aria-label="Model quick pick"
-										value={
-											MODEL_QUICK_PICKS.includes(reviewModel) ? reviewModel : ""
-										}
-										disabled={pending}
-										onChange={(event) => {
-											const value = controlValue(event);
-											if (value !== "") setReviewModel(value);
-										}}
-									>
-										<option value="">Custom…</option>
-										{MODEL_QUICK_PICKS.map((model) => (
-											<option key={model} value={model}>
-												{model}
-											</option>
-										))}
-									</select>
-									<button
-										type="button"
+										Review agent
+									</h3>
+									<div className="flex flex-wrap items-center gap-2">
+										<label
+											className="w-24 shrink-0 text-xs font-medium"
+											htmlFor="settings-agent"
+										>
+											Agent
+										</label>
+										<NativeSelect
+											className="min-w-0 flex-1"
+											id="settings-agent"
+											size="sm"
+											value={reviewAgent}
+											disabled={pending}
+											onChange={(event) =>
+												setReviewAgent(
+													controlValue(event) === "claude" ? "claude" : "omp",
+												)
+											}
+										>
+											{settings.review.agents.map((agent) => (
+												<option key={agent} value={agent}>
+													{agent}
+												</option>
+											))}
+										</NativeSelect>
+									</div>
+									<div className="flex flex-wrap items-center gap-2">
+										<label
+											className="w-24 shrink-0 text-xs font-medium"
+											htmlFor="settings-model"
+										>
+											Model
+										</label>
+										<Input
+											id="settings-model"
+											type="text"
+											className="h-8 min-w-0 flex-1"
+											value={reviewModel}
+											disabled={pending}
+											onChange={(event) => setReviewModel(controlValue(event))}
+										/>
+										<NativeSelect
+											className="max-w-full shrink-0"
+											id="settings-model-quickpick"
+											aria-label="Model quick pick"
+											size="sm"
+											value={
+												MODEL_QUICK_PICKS.includes(reviewModel)
+													? reviewModel
+													: ""
+											}
+											disabled={pending}
+											onChange={(event) => {
+												const value = controlValue(event);
+												if (value !== "") setReviewModel(value);
+											}}
+										>
+											<option value="">Custom…</option>
+											{MODEL_QUICK_PICKS.map((model) => (
+												<option key={model} value={model}>
+													{model}
+												</option>
+											))}
+										</NativeSelect>
+									</div>
+									<Button
+										size="sm"
 										disabled={pending}
 										onClick={handleSaveReview}
 									>
 										Save review agent
-									</button>
-									<p>
-										{
-											"Applies to the next layer run or chat turn. Use Regenerate to rebuild cached layers."
-										}
+									</Button>
+									<p className="text-xs text-muted-foreground">
+										Applies to the next layer run or chat turn. Use Regenerate
+										to rebuild cached layers.
 									</p>
-									<p>Switching agents may restart existing chat sessions.</p>
-								</fieldset>
+									<p className="text-xs text-muted-foreground">
+										Switching agents may restart existing chat sessions.
+									</p>
+								</section>
 							</>
 						)}
 					</section>

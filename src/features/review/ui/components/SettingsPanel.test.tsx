@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { createElement } from "react";
+import { act, createElement, useState } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import {
@@ -12,6 +13,7 @@ import {
 	SLOT_LABELS,
 	VISIBLE_SLOTS,
 } from "./SettingsPanel";
+import { Dialog, DialogContent } from "./ui/dialog";
 
 const initialSettings: SettingsSnapshot = {
 	slots: PROMPT_NAMES.map((slot) => ({
@@ -63,7 +65,7 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-explain-comment",
 	]);
 	const markup = render();
-	expect(markup).toContain("<h2>Settings</h2>");
+	expect(markup).toContain('class="text-lg font-semibold">Settings</h2>');
 
 	const visibleLabels = VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]);
 	const indexes = visibleLabels.map((label) => markup.indexOf(label));
@@ -77,7 +79,7 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		}
 	}
 	expect(markup).toMatch(
-		/<button[^>]*class="active"[^>]*aria-current="true"[^>]*>[\s\S]*?<span>Review layers \(code\)<\/span>/,
+		/<button[^>]*data-active="true"[^>]*aria-current="true"[^>]*>[\s\S]*?<span class="block text-sm font-medium">Review layers \(code\)<\/span>/,
 	);
 	expect((markup.match(/aria-current="true"/g) ?? []).length).toBe(1);
 	expect(markup).toContain("default (active)");
@@ -88,7 +90,9 @@ test("renders a description for the selected slot", () => {
 	const markup = render();
 
 	expect(markup).toContain(SLOT_DESCRIPTIONS["review-layers-code"]);
-	expect(markup).toMatch(/<p class="settings-slot-description">[\s\S]*?<\/p>/);
+	expect(markup).toMatch(
+		/<p class="text-sm text-muted-foreground">[\s\S]*?<\/p>/,
+	);
 	for (const slot of PROMPT_NAMES) {
 		if (!VISIBLE_SLOTS.includes(slot)) {
 			expect(markup).not.toContain(escapedText(SLOT_DESCRIPTIONS[slot]));
@@ -159,6 +163,17 @@ test("disables unchanged saves and renders review agent options and model", () =
 	);
 });
 
+test("styles prompt heading like review agent heading with editor spacing", () => {
+	const markup = render();
+
+	expect(markup).toContain(
+		'<label class="text-sm font-medium" for="settings-prompt">Prompt text</label>',
+	);
+	expect(markup).toMatch(
+		/<div class="space-y-2"><label class="text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea/,
+	);
+});
+
 test("quickpick and text input both reflect a listed model value", () => {
 	const settings: SettingsSnapshot = {
 		...initialSettings,
@@ -216,4 +231,137 @@ test("isSaveDisabled covers unchanged, changed, and pending text", () => {
 	expect(isSaveDisabled("same", "same", false)).toBe(true);
 	expect(isSaveDisabled("loaded", "changed", false)).toBe(false);
 	expect(isSaveDisabled("loaded", "changed", true)).toBe(true);
+});
+test("keeps settings controls reachable in responsive bounded layout", () => {
+	const markup = render();
+
+	expect(markup).toContain("flex h-full min-h-0 flex-col");
+	expect(markup).toContain("grid-cols-1");
+	expect(markup).toContain("md:grid-cols-[14rem_minmax(0,1fr)]");
+	expect(markup).toContain("overflow-auto");
+	expect(markup).toContain('<nav class="space-y-1" aria-label="Prompt slots">');
+	expect(
+		markup.match(/class="flex flex-wrap items-center gap-2"/g),
+	).toHaveLength(5);
+
+	for (const id of [
+		"settings-preset",
+		"settings-version",
+		"settings-agent",
+		"settings-model-quickpick",
+	]) {
+		expect(markup).toContain(`<select id="${id}"`);
+	}
+	expect(markup).toContain('<option value="default">default (active)</option>');
+	expect(markup).toContain('<option value="omp" selected="">omp</option>');
+	expect(markup).toContain('<option value="sonnet">sonnet</option>');
+});
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
+test("settings dialog closes through icon, Escape, and backdrop with focus return", async () => {
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	function Harness() {
+		const [open, setOpen] = useState(false);
+		return createElement(
+			"div",
+			null,
+			createElement(
+				"button",
+				{ type: "button", onClick: () => setOpen(true) },
+				"Open settings",
+			),
+			createElement(
+				Dialog,
+				{
+					open,
+					onOpenChange: (nextOpen) => setOpen(nextOpen),
+				},
+				createElement(
+					DialogContent,
+					{
+						className:
+							"h-[min(calc(100dvh-2rem),56rem)] w-[min(calc(100vw-2rem),64rem)] max-w-none grid-rows-[minmax(0,1fr)] overflow-hidden p-0 sm:max-w-none",
+					},
+					createElement(SettingsPanel, {
+						token: "settings-test-token",
+						onClose: () => setOpen(false),
+						initialSettings,
+						initialPrompt,
+					}),
+				),
+			),
+		);
+	}
+
+	try {
+		act(() => root.render(createElement(Harness)));
+		const trigger = container.querySelector<HTMLButtonElement>("button");
+		expect(trigger).not.toBeNull();
+
+		await act(async () => {
+			trigger?.focus();
+			trigger?.click();
+			await Bun.sleep(0);
+		});
+		expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+
+		const close = document.body.querySelector<HTMLButtonElement>(
+			'[data-slot="dialog-close"]',
+		);
+		expect(close).not.toBeNull();
+		expect(close?.querySelector(".sr-only")?.textContent).toBe("Close");
+		expect(
+			Array.from(close?.childNodes ?? [])
+				.filter((node) => node.nodeType === Node.TEXT_NODE)
+				.map((node) => node.textContent)
+				.join(""),
+		).toBe("");
+		expect(
+			document.body.querySelector('button[aria-label="Close settings"]'),
+		).toBeNull();
+		await act(async () => {
+			close?.click();
+			await Bun.sleep(0);
+		});
+		expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+
+		await act(async () => {
+			trigger?.click();
+			await Bun.sleep(0);
+		});
+		await act(async () => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Escape",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await Bun.sleep(0);
+		});
+		expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+
+		await act(async () => {
+			trigger?.click();
+			await Bun.sleep(0);
+		});
+		const backdrop = document.body.querySelector<HTMLElement>(
+			'[data-slot="dialog-overlay"]',
+		);
+		expect(backdrop).not.toBeNull();
+		await act(async () => {
+			backdrop?.click();
+			await Bun.sleep(0);
+		});
+		expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
 });

@@ -74,3 +74,24 @@ test("sanitizes unsafe tags, attributes, and URLs from comment HTML", () => {
 	expect(html).not.toContain("javascript:");
 	expect(html).not.toContain("alert(");
 });
+test("wraps Markdown tables for internal scrolling while preserving fenced code", () => {
+	const longUrl = `https://example.test/${"segment".repeat(20)}`;
+	const html = renderMarkdownHtml(
+		[
+			`Review ${longUrl}.`,
+			"",
+			"```text",
+			"long fenced content remains preformatted",
+			"```",
+			"",
+			"| file | detail |",
+			"| --- | --- |",
+			"| src/app.ts | table content |",
+		].join("\n"),
+	);
+
+	expect(html).toContain(longUrl);
+	expect(html).toContain("<pre><code");
+	expect(html).toContain('class="rendered-table-wrap min-w-0 max-w-full"');
+	expect(html).toContain("<table>");
+});

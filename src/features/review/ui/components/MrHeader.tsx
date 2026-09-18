@@ -1,13 +1,17 @@
+import {
+	Check,
+	Copy,
+	ExternalLink,
+	RefreshCcwDot,
+	RefreshCw,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../../ports/git-host";
 import { IconButton } from "./IconButton";
-import {
-	CheckIcon,
-	CopyIcon,
-	ExternalLinkIcon,
-	RefreshIcon,
-	SyncIcon,
-} from "./Icons";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type ApprovalAction = "approve" | "unapprove";
 
@@ -104,13 +108,17 @@ export function MrHeader({
 		approvalAction,
 	);
 	const approved = approval?.approved ?? false;
+	const approvalButtonTooltip = approveTooltip(
+		approveReason,
+		freshness?.stale ?? false,
+		headSha,
+		approved,
+	);
 	const copySha = () => {
 		void navigator.clipboard.writeText(headSha).then(
 			() => {
 				setCopied(true);
-				if (copyTimer.current !== undefined) {
-					clearTimeout(copyTimer.current);
-				}
+				clearTimeout(copyTimer.current);
 				copyTimer.current = setTimeout(() => setCopied(false), 1500);
 			},
 			() => undefined,
@@ -121,26 +129,65 @@ export function MrHeader({
 			clearTimeout(copyTimer.current);
 		};
 	}, []);
+	const approvalButton = (
+		<Button
+			type="button"
+			size="sm"
+			variant={approved ? "destructive" : "default"}
+			className={
+				approved
+					? undefined
+					: "bg-success text-success-foreground hover:bg-success/80 focus-visible:border-success/40 focus-visible:ring-success/20"
+			}
+			aria-label={approved ? "Unapprove" : "Approve"}
+			aria-describedby="approve-tooltip"
+			disabled={approveReason !== null}
+			onClick={() => onApprovalAction(approved ? "unapprove" : "approve")}
+		>
+			{approved ? "Unapprove" : "Approve"}
+		</Button>
+	);
 	return (
-		<header className="mr-header">
-			<div className="mr-identity">
-				<h1 className="mr-title" title={mr.title}>
+		<header className="flex items-center justify-between gap-4 bg-card px-4 py-3">
+			<div className="min-w-0 flex-1">
+				<h1
+					className="truncate text-lg font-semibold tracking-tight"
+					title={mr.title}
+				>
 					{headerTitle(mr.title, mr.iid)}
 				</h1>
-				<div className="mr-identity-meta">
-					<button
+				<div className="inline-flex items-center gap-2 leading-none">
+					<Button
 						type="button"
-						className="mr-sha"
+						variant="ghost"
+						size="xs"
+						className="inline-flex min-w-24 items-center overflow-hidden font-mono text-xs leading-none"
+						data-sha-control=""
 						aria-label="Copy commit sha"
 						title={headSha}
 						onClick={copySha}
 					>
-						{shaButtonLabel(headSha, copied)}
-						{copied ? <CheckIcon /> : <CopyIcon />}
-					</button>
+						<span className="min-w-0 truncate" data-sha-label="">
+							{shaButtonLabel(headSha, copied)}
+						</span>
+						{copied ? (
+							<Check
+								className="size-3 shrink-0 animate-in zoom-in-50 duration-150 ease-out"
+								aria-hidden
+							/>
+						) : (
+							<Copy className="size-3 shrink-0" aria-hidden />
+						)}
+					</Button>
 					{approvalLabel !== null ? (
-						<span
-							className={`mr-status-pill mr-status-pill-${approved ? "approved" : "neutral"}`}
+						<Badge
+							variant="secondary"
+							className={
+								approved
+									? "inline-flex items-center leading-none bg-success/15 text-success"
+									: "inline-flex items-center leading-none"
+							}
+							data-approval={approved ? "approved" : "not-approved"}
 							title={
 								approval && approval.approvedBy.length > 0
 									? `Approved by ${approval.approvedBy.join(", ")}`
@@ -148,18 +195,18 @@ export function MrHeader({
 							}
 						>
 							{approvalLabel}
-						</span>
+						</Badge>
 					) : null}
 				</div>
 			</div>
-			<div className="mr-header-actions">
+			<div className="inline-flex shrink-0 items-center gap-2 leading-none">
 				<IconButton
 					label="Refresh merge request"
 					busy={refreshing}
 					disabled={refreshing || syncing || layerGenerating}
 					onClick={onRefresh}
 				>
-					<RefreshIcon />
+					<RefreshCw aria-hidden />
 				</IconButton>
 				{freshness?.stale ? (
 					<>
@@ -170,38 +217,37 @@ export function MrHeader({
 							disabled={syncing || layerGenerating}
 							onClick={onSync}
 						>
-							<SyncIcon />
+							<RefreshCcwDot aria-hidden />
 						</IconButton>
-						<label className="mr-regenerate">
-							<input
-								type="checkbox"
+						<label
+							className="flex shrink-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground"
+							htmlFor="regenerate-after-sync"
+						>
+							<Checkbox
+								id="regenerate-after-sync"
+								aria-label="Regenerate layers after sync"
 								checked={regenerateAfterSync}
 								disabled={syncing || layerGenerating}
-								onChange={(event) =>
-									onRegenerateAfterSyncChange(event.target.checked)
-								}
+								onCheckedChange={onRegenerateAfterSyncChange}
 							/>
 							Regenerate layers after sync
 						</label>
 					</>
 				) : null}
 				<IconButton href={mr.webUrl} label="Open in GitLab">
-					<ExternalLinkIcon />
+					<ExternalLink aria-hidden />
 				</IconButton>
-				<button
-					type="button"
-					className={`mr-approve mr-approve-${approved ? "danger" : "success"}`}
-					disabled={approveReason !== null}
-					title={approveTooltip(
-						approveReason,
-						freshness?.stale ?? false,
-						headSha,
-						approved,
-					)}
-					onClick={() => onApprovalAction(approved ? "unapprove" : "approve")}
-				>
-					{approved ? "Unapprove" : "Approve"}
-				</button>
+				<Tooltip>
+					<TooltipTrigger
+						render={<span className="inline-flex items-center leading-none" />}
+					>
+						{approvalButton}
+					</TooltipTrigger>
+					<TooltipContent>{approvalButtonTooltip}</TooltipContent>
+				</Tooltip>
+				<span id="approve-tooltip" className="sr-only">
+					{approvalButtonTooltip}
+				</span>
 			</div>
 		</header>
 	);

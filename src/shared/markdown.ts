@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { marked, Renderer } from "marked";
+import { marked, Renderer, type Tokens } from "marked";
 import { mapBlockSourceLines } from "./markdown-blocks";
 
 export function escapeHtml(value: string): string {
@@ -21,6 +21,9 @@ export function renderMarkdownHtml(
 	configureRenderer?: (renderer: Renderer) => void,
 ): string {
 	const renderer = new Renderer();
+	const defaultTable = renderer.table.bind(renderer);
+	renderer.table = (token: Tokens.Table) =>
+		`<div class="rendered-table-wrap min-w-0 max-w-full">${defaultTable(token)}</div>`;
 	configureRenderer?.(renderer);
 	const html = marked.parse(source, {
 		async: false,
