@@ -347,13 +347,15 @@ test("keeps white title and description classes for done and stale layers", () =
 	).toBeGreaterThanOrEqual(4);
 });
 
-test("renders layer coverage without BDD and exposes regenerate", () => {
+test("renders layer coverage on one row without BDD and exposes regenerate", () => {
 	const markup = renderLayerPane({
 		state: reviewState({ viewedFiles: ["src/routes/route.ts"] }),
 	});
 
 	expect(markup).toContain('aria-label="Regenerate layers"');
+	expect(markup).toContain('class="flex items-center gap-3 text-xs"');
 	expect(markup).toContain("File coverage");
+	expect(markup).toContain("flex-1");
 	expect(markup).toContain('style="width:50%"');
 	expect(markup).not.toContain("BDD");
 });
