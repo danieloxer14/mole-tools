@@ -174,10 +174,15 @@
 	.diff-table .find-match { background: var(--color-find-match); border-radius: var(--radius-sm); transition: background-color 150ms ease-out; }
 	.diff-table .find-match-current { background: var(--color-find-match-current); outline: 1px solid var(--color-primary); }
 
-	.diff-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 13px; line-height: 1.25rem; min-width: 100%; width: 100%; max-width: 100%; table-layout: fixed; }
-	.diff-table td { padding: 0 --spacing(2); white-space: pre-wrap; }
-	.diff-table .line-number { color: var(--color-muted-foreground); padding-right: --spacing(2); text-align: right; user-select: none; width: --spacing(12); }
-	.diff-table .line-text, .diff-table .side-line { overflow-wrap: anywhere; position: relative; text-align: left; width: auto; }
+.diff-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 13px; line-height: 1.25rem; min-width: 100%; width: 100%; max-width: 100%; table-layout: fixed; }
+.diff-table td { padding: 0 --spacing(2); white-space: pre-wrap; }
+.diff-table .line-number { color: var(--color-muted-foreground); padding-right: --spacing(2); text-align: right; user-select: none; width: --spacing(12); }
+.diff-table .line-text, .diff-table .side-line { overflow-wrap: anywhere; position: relative; text-align: left; width: auto; }
+.diff-table .diff-line-number-column { width: 3rem; }
+.diff-table.side-by-side .diff-line > td { padding: 0; }
+.diff-table.side-by-side .diff-side-column { width: calc(50% - 3rem); }
+.diff-table.side-by-side .diff-line > td.line-number { padding-right: 0.25rem; width: auto; }
+.diff-table.side-by-side .side-line { width: auto; }
 	.diff-table .line-prefix { color: var(--color-muted-foreground); display: inline-block; width: --spacing(4); }
 	.diff-table .diff-line-add, .diff-table .side-line.added { background: var(--color-diff-add-bg); color: var(--color-diff-add-fg); }
 	.diff-table .diff-line-del, .diff-table .side-line.removed { background: var(--color-diff-del-bg); color: var(--color-diff-del-fg); }

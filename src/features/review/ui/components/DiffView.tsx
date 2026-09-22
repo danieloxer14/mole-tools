@@ -1788,7 +1788,27 @@ function DiffTable({
 	const tail = gaps.find((gap) => gap.position === "tail");
 
 	return (
-		<table className={`diff-table ${mode} min-w-0 max-w-full`}>
+		<table
+			className={`diff-table ${
+				mode === "inline" ? "diff-inline" : "side-by-side"
+			} w-full max-w-full`}
+		>
+			<colgroup>
+				{mode === "side-by-side" ? (
+					<>
+						<col className="diff-line-number-column" />
+						<col className="diff-side-column" />
+						<col className="diff-line-number-column" />
+						<col className="diff-side-column" />
+					</>
+				) : (
+					<>
+						<col className="diff-line-number-column" />
+						<col className="diff-line-number-column" />
+						<col className="diff-inline-column" />
+					</>
+				)}
+			</colgroup>
 			<tbody>
 				{file.hunks.map((hunk, index) => {
 					const precedingGap =

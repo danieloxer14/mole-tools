@@ -370,18 +370,17 @@ export function LayerPane({
 										data-collapsed={collapsed ? "true" : "false"}
 									>
 										<p>{layer.tldr}</p>
-										<div className="space-y-1">
-											<div className="flex items-center justify-between text-xs">
-												<span>File coverage</span>
-												<span className="tabular-nums">
-													{layerViewedCount}/{layerFiles.length}
-												</span>
-											</div>
+										<div className="flex items-center gap-3 text-xs">
+											<span className="shrink-0">File coverage</span>
 											<ProgressBar
+												className="ml-0 min-w-0 max-w-none flex-1"
 												label={`${layer.title} file coverage`}
 												value={layerViewedCount}
 												max={layerFiles.length}
 											/>
+											<span className="shrink-0 tabular-nums">
+												{layerViewedCount}/{layerFiles.length}
+											</span>
 										</div>
 										<div className="flex min-w-0 flex-wrap gap-1.5">
 											{layerFiles.map((path) => (

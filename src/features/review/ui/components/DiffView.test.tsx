@@ -188,6 +188,32 @@ test("renders line actions without hunk actions", () => {
 	expect(markup).toContain('aria-label="Full file"');
 	expect(markup).toContain('aria-label="Diff only"');
 });
+test("defines fixed equal side-by-side diff columns", () => {
+	const markup = renderDiff({ mode: "side-by-side" });
+	const table = markup.match(/<table.*?>/)?.[0];
+	const colgroup = markup.match(/<colgroup>.*?<\/colgroup>/)?.[0];
+
+	expect(table).toBe(
+		'<table class="diff-table side-by-side w-full max-w-full">',
+	);
+	expect(colgroup).toBe(
+		'<colgroup><col class="diff-line-number-column"/><col class="diff-side-column"/><col class="diff-line-number-column"/><col class="diff-side-column"/></colgroup>',
+	);
+});
+
+test("avoids Tailwind inline utility when rendering full-width inline diff", () => {
+	const markup = renderDiff();
+	const table = markup.match(/<table.*?>/)?.[0];
+	const colgroup = markup.match(/<colgroup>.*?<\/colgroup>/)?.[0];
+
+	expect(table).toBe(
+		'<table class="diff-table diff-inline w-full max-w-full">',
+	);
+	expect(table).not.toContain('class="diff-table inline ');
+	expect(colgroup).toBe(
+		'<colgroup><col class="diff-line-number-column"/><col class="diff-line-number-column"/><col class="diff-inline-column"/></colgroup>',
+	);
+});
 
 const renamedFile = {
 	oldPath: "src/old.ts",
