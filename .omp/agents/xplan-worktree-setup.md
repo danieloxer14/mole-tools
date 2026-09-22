@@ -3,7 +3,7 @@ name: xplan-worktree-setup
 description: "Prepares an xplan worktree: installs dependencies and runs the repository's quality gates"
 tools: read, grep, glob, bash
 spawns: ""
-model: "@default"
+model: "@SMOL"
 output:
   properties:
     origin:
