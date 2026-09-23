@@ -10,17 +10,21 @@ import {
 	viewedFileCount,
 } from "./ChangedFilesHeader";
 
+const noop = () => {};
+
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const roots: Root[] = [];
 const defaultProps: ChangedFilesHeaderProps = {
 	viewedCount: 1,
 	total: 3,
+	mode: "list",
+	onModeChange: noop,
 	showWhitespaceChanges: true,
 	whitespaceChanging: false,
 	syncing: false,
 	refreshing: false,
-	onShowWhitespaceChangesChange: () => {},
+	onShowWhitespaceChangesChange: noop,
 };
 
 afterEach(() => {
@@ -101,6 +105,20 @@ test("keeps viewed count and progress values aligned", () => {
 	expect(html).toContain('style="width:50%"');
 });
 
+test("renders controlled list and tree layout items", () => {
+	const listMarkup = markup({ mode: "list" });
+	expect(listMarkup).toContain('aria-label="Changed files layout"');
+	expect(listMarkup).toContain('aria-label="List view"');
+	expect(listMarkup).toContain('aria-label="Tree view"');
+	expect(listMarkup).toContain('aria-pressed="true"');
+	expect(listMarkup).toContain('data-state="on"');
+
+	const treeMarkup = markup({ mode: "tree" });
+	expect(treeMarkup).toContain('aria-pressed="true"');
+	expect(treeMarkup).toContain('data-state="on"');
+	expect(treeMarkup).toContain('aria-label="Tree view"');
+});
+
 test("renders a controlled accessible whitespace checkbox", () => {
 	const checked = markup({ showWhitespaceChanges: true });
 	const unchecked = markup({ showWhitespaceChanges: false });
@@ -120,8 +138,17 @@ test("disables the whitespace checkbox while changing or syncing", () => {
 
 test("emits the next controlled boolean when toggled", async () => {
 	const changes: boolean[] = [];
-	const container = renderInteractive({
-		onShowWhitespaceChangesChange: (show) => changes.push(show),
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() => {
+		root.render(
+			<ChangedFilesHeader
+				{...defaultProps}
+				onShowWhitespaceChangesChange={(show) => changes.push(show)}
+			/>,
+		);
 	});
 	const checkbox = container.querySelector('[role="checkbox"]');
 

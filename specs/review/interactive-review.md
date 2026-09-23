@@ -153,11 +153,7 @@ The page has three working columns:
   manual Done checkboxes, per-layer file chips showing the shortest unique path
   suffix (usually the basename) with the full path in the accessible label and
   hover tooltip, per-layer file coverage, and a global Viewed-files progress bar.
-- **Centre — Changed files and diff.** The complete changed-file tree remains
-  available even when a layer does not mention a file. Each row shows insertion
-  and deletion counts plus a persisted Viewed checkbox. Selecting a file opens
-  its diff and scrolls its row into view; the scroll uses `nearest`, so an
-  already-visible row does not move.
+- **Centre — Changed files and diff.** The complete changed-file tree remains available even when a layer does not mention a file. Navigation starts in flat list mode by default, with one mutually exclusive segmented List view/Tree view control for switching layouts. Tree folders start expanded and can be collapsed or expanded independently. File rows preserve full-path selection, insertion and deletion statistics, and persisted Viewed state. Selecting a changed file from any surface expands its tree ancestors when needed and scrolls its row into view with `nearest`, so an already-visible row does not move.
 - **Right — Agent chat.** General discussions, Explain per discussion,
   restored transcript, streaming response/tool activity, context tags (diff
   line ranges, rendered-markdown block ranges, and whole files), composer,

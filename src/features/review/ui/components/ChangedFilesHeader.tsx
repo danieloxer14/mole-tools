@@ -1,5 +1,24 @@
+import { List, ListTree } from "lucide-react";
 import { ProgressBar } from "./ProgressBar";
 import { Checkbox } from "./ui/checkbox";
+import {
+	SegmentedToggleGroup,
+	SegmentedToggleGroupItem,
+} from "./ui/toggle-group";
+
+export type ChangedFilesMode = "list" | "tree";
+
+export interface ChangedFilesHeaderProps {
+	viewedCount: number;
+	total: number;
+	mode: ChangedFilesMode;
+	onModeChange: (mode: ChangedFilesMode) => void;
+	showWhitespaceChanges: boolean;
+	whitespaceChanging: boolean;
+	syncing: boolean;
+	refreshing: boolean;
+	onShowWhitespaceChangesChange: (show: boolean) => void;
+}
 
 export function viewedFileCount(
 	files: readonly string[],
@@ -24,19 +43,12 @@ export function diffLineTotals(
 	return { insertions, deletions };
 }
 
-export interface ChangedFilesHeaderProps {
-	viewedCount: number;
-	total: number;
-	showWhitespaceChanges: boolean;
-	whitespaceChanging: boolean;
-	syncing: boolean;
-	refreshing: boolean;
-	onShowWhitespaceChangesChange: (show: boolean) => void;
-}
 
 export function ChangedFilesHeader({
 	viewedCount,
 	total,
+	mode,
+	onModeChange,
 	showWhitespaceChanges,
 	whitespaceChanging,
 	syncing,
@@ -44,22 +56,52 @@ export function ChangedFilesHeader({
 	onShowWhitespaceChangesChange,
 }: ChangedFilesHeaderProps) {
 	const whitespaceDisabled = whitespaceChanging || syncing || refreshing;
-
 	return (
 		<div
 			data-region="changed-files"
-			className="flex items-center gap-3 border-t border-b px-4 py-2 text-xs text-muted-foreground"
+			className="flex min-w-0 items-center gap-3 border-t border-b px-4 py-2 text-xs text-muted-foreground"
 		>
 			<span className="shrink-0">Viewed files</span>
 			<ProgressBar
-				className="flex-1"
+				className="min-w-0 flex-1"
 				label="Viewed file coverage"
 				value={viewedCount}
 				max={total}
 			/>
-			<span className="tabular-nums">
+			<span className="shrink-0 tabular-nums">
 				{viewedCount}/{total} files
 			</span>
+			<SegmentedToggleGroup
+				className="shrink-0"
+				multiple={false}
+				value={[mode]}
+				onValueChange={(values) => {
+					const value = values[0];
+					if (value === "list" || value === "tree") onModeChange(value);
+				}}
+				aria-label="Changed files layout"
+			>
+				<SegmentedToggleGroupItem
+					value="list"
+					aria-label="List view"
+					title="List view"
+					aria-pressed={mode === "list"}
+					data-state={mode === "list" ? "on" : "off"}
+				>
+					<List aria-hidden />
+					<span className="sr-only">List view</span>
+				</SegmentedToggleGroupItem>
+				<SegmentedToggleGroupItem
+					value="tree"
+					aria-label="Tree view"
+					title="Tree view"
+					aria-pressed={mode === "tree"}
+					data-state={mode === "tree" ? "on" : "off"}
+				>
+					<ListTree aria-hidden />
+					<span className="sr-only">Tree view</span>
+				</SegmentedToggleGroupItem>
+			</SegmentedToggleGroup>
 			<div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
 				<Checkbox
 					id="show-whitespace-changes"
