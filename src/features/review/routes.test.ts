@@ -1803,6 +1803,430 @@ describe("review routes", () => {
 		}
 	});
 });
+describe("comment from chat routes", () => {
+	class CommentRouteAgent implements ReviewAgent {
+		readonly turns: AgentTurn[] = [];
+		readonly prompts: string[] = [];
+		readonly started = Promise.withResolvers<void>();
+
+		constructor(
+			private readonly output: string | null = "Generated comment\n",
+			private readonly hold = false,
+		) {}
+
+		async preflight(): Promise<void> {}
+
+		async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+			this.turns.push(turn);
+			this.prompts.push(await Bun.file(turn.systemPromptFile).text());
+			this.started.resolve();
+			if (this.hold) {
+				if (!turn.signal) return;
+				await new Promise<void>((resolve) => {
+					if (turn.signal?.aborted) {
+						resolve();
+						return;
+					}
+					turn.signal.addEventListener("abort", () => resolve(), {
+						once: true,
+					});
+				});
+				return;
+			}
+			if (this.output !== null) {
+				await Bun.write(join(turn.writeDir ?? ".", "comment.md"), this.output);
+			}
+			yield { kind: "turn_end" };
+		}
+	}
+
+	function commentDraft(
+		id: string,
+		status: ReviewState["drafts"][number]["status"] = "draft",
+		body = "",
+	): ReviewState["drafts"][number] {
+		return {
+			id,
+			body,
+			selection: commentSelection,
+			filePath: commentSelection.path,
+			status,
+			error: null,
+			postedDiscussionId: status === "posted" ? "discussion-1" : null,
+			staleSince: null,
+		};
+	}
+
+	function commentRequest(id: string, chatId = "chat-a"): Request {
+		return request(`/api/comments/${id}/from-chat?t=${token}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ chatId }),
+		});
+	}
+
+	function commentCancelRequest(id: string): Request {
+		return request(`/api/comments/${id}/from-chat/cancel?t=${token}`, {
+			method: "POST",
+		});
+	}
+
+	function eventData(body: string, event: string): unknown {
+		const block = body
+			.split("\n\n")
+			.find((candidate) => candidate.startsWith(`event: ${event}\n`));
+		const line = block
+			?.split("\n")
+			.find((candidate) => candidate.startsWith("data: "));
+		return line ? JSON.parse(line.slice("data: ".length)) : undefined;
+	}
+
+	async function writeCommentPrompt(dir: string, text: string): Promise<void> {
+		const promptDir = join(dir, "review-comment-from-chat", "default");
+		await mkdir(promptDir, { recursive: true });
+		await writeFile(join(promptDir, "001.md"), text, "utf8");
+	}
+
+	async function setupCommentFixture(
+		dir: string,
+		draft: ReviewState["drafts"][number],
+		assistant = true,
+	): Promise<ReviewStore> {
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		});
+		await store.write(ReviewStateSchema.parse({ ...state(), drafts: [draft] }));
+		if (assistant) {
+			await store.appendChat("chat-a", {
+				role: "assistant",
+				text: "Assistant conclusion",
+			});
+		}
+		return store;
+	}
+
+	test("from-chat appends generated text and persists draft", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-from-chat-"));
+		try {
+			await writeCommentPrompt(dir, "ACTIVE COMMENT SLOT PROMPT");
+			const draft = commentDraft("draft-from-chat", "draft", "Existing body");
+			const store = await setupCommentFixture(dir, draft);
+			const agent = new CommentRouteAgent(" Generated comment \n");
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				config: { review: { agent: "claude", model: "default-model" } },
+				createReviewAgent: () => agent,
+			});
+
+			const response = await routes(commentRequest(draft.id));
+			const body = await response.text();
+			const done = eventData(body, "done") as {
+				status: string;
+				draft?: { body: string };
+			};
+
+			expect(response.status).toBe(200);
+			expect(response.headers.get("content-type")).toContain(
+				"text/event-stream",
+			);
+			expect(done).toMatchObject({
+				status: "ok",
+				draft: { body: "Existing body\n\nGenerated comment" },
+			});
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				id: draft.id,
+				body: "Existing body\n\nGenerated comment",
+				status: "draft",
+				error: null,
+			});
+			expect(agent.prompts[0]).toContain("ACTIVE COMMENT SLOT PROMPT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("from-chat rejects busy chat, empty chat, posted draft, duplicate run", async () => {
+		const dirs: string[] = [];
+		const makeFixture = async (
+			draft: ReviewState["drafts"][number],
+			assistant: boolean,
+			agent?: ReviewAgent,
+		) => {
+			const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-guards-"));
+			dirs.push(dir);
+			const store = await setupCommentFixture(dir, draft, assistant);
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				promptText: "Chat prompt",
+				reviewAgent: agent,
+			});
+			return { dir, routes, store };
+		};
+
+		try {
+			const invalid = await makeFixture(commentDraft("invalid"), false);
+			const invalidResponse = await invalid.routes(
+				commentRequest("invalid", "../invalid"),
+			);
+			expect(invalidResponse.status).toBe(400);
+			expect(eventData(await invalidResponse.text(), "error")).toEqual({
+				message: "Chat id is invalid",
+			});
+
+			const unavailable = await makeFixture(commentDraft("unavailable"), true);
+			const unavailableResponse = await unavailable.routes(
+				commentRequest("unavailable"),
+			);
+			expect(unavailableResponse.status).toBe(503);
+			expect(eventData(await unavailableResponse.text(), "error")).toEqual({
+				message: "Review agent is unavailable",
+			});
+
+			const empty = await makeFixture(
+				commentDraft("empty"),
+				false,
+				new CommentRouteAgent(),
+			);
+			const emptyResponse = await empty.routes(commentRequest("empty"));
+			expect(emptyResponse.status).toBe(409);
+			expect(eventData(await emptyResponse.text(), "error")).toEqual({
+				message: "Selected chat has no replies yet",
+			});
+
+			const posted = await makeFixture(
+				commentDraft("posted", "posted"),
+				false,
+				new CommentRouteAgent(),
+			);
+			const postedResponse = await posted.routes(commentRequest("posted"));
+			expect(postedResponse.status).toBe(409);
+			expect(eventData(await postedResponse.text(), "error")).toEqual({
+				message: "Posted comments cannot be edited",
+			});
+
+			const busyAgent = new CommentRouteAgent(null, true);
+			const busy = await makeFixture(commentDraft("busy"), true, busyAgent);
+			const busyChat = await busy.routes(
+				chatRequest({ message: "keep this chat busy" }),
+			);
+			await busyAgent.started.promise;
+			const busyResponse = await busy.routes(commentRequest("busy"));
+			expect(busyResponse.status).toBe(409);
+			expect(eventData(await busyResponse.text(), "error")).toEqual({
+				message: "Wait for the chat reply to finish",
+			});
+			const busyCancel = await busy.routes(
+				request(`/api/chat/cancel?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ chatId: "chat-a" }),
+				}),
+			);
+			expect(busyCancel.status).toBe(204);
+			await busyChat.text();
+
+			const duplicateAgent = new CommentRouteAgent(null, true);
+			const duplicate = await makeFixture(
+				commentDraft("duplicate"),
+				true,
+				duplicateAgent,
+			);
+			const first = await duplicate.routes(commentRequest("duplicate"));
+			const duplicateResponse = await duplicate.routes(
+				commentRequest("duplicate"),
+			);
+			expect(duplicateResponse.status).toBe(409);
+			expect(eventData(await duplicateResponse.text(), "error")).toEqual({
+				message: "Comment is already generating",
+			});
+			const duplicateCancel = await duplicate.routes(
+				commentCancelRequest("duplicate"),
+			);
+			expect(duplicateCancel.status).toBe(204);
+			expect(eventData(await first.text(), "done")).toEqual({
+				status: "stopped",
+			});
+		} finally {
+			await Promise.all(
+				dirs.map((dir) => rm(dir, { recursive: true, force: true })),
+			);
+		}
+	});
+
+	test("from-chat cancel stops without writing", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-cancel-"));
+		try {
+			await writeCommentPrompt(dir, "CANCEL COMMENT SLOT PROMPT");
+			const draft = commentDraft("draft-cancel");
+			const store = await setupCommentFixture(dir, draft);
+			const agent = new CommentRouteAgent(null, true);
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				reviewAgent: agent,
+			});
+
+			const response = await routes(commentRequest(draft.id));
+			const bodyPromise = response.text();
+			await agent.started.promise;
+			const cancel = await routes(commentCancelRequest(draft.id));
+
+			expect(cancel.status).toBe(204);
+			expect(eventData(await bodyPromise, "done")).toEqual({
+				status: "stopped",
+			});
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				id: draft.id,
+				body: "",
+				status: "draft",
+				error: null,
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("delete during generation aborts and removes draft", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-delete-"));
+		try {
+			await writeCommentPrompt(dir, "DELETE COMMENT SLOT PROMPT");
+			const draft = commentDraft("draft-delete");
+			const store = await setupCommentFixture(dir, draft);
+			const agent = new CommentRouteAgent(null, true);
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				reviewAgent: agent,
+			});
+
+			const response = await routes(commentRequest(draft.id));
+			const bodyPromise = response.text();
+			await agent.started.promise;
+			const deleted = await routes(
+				request(`/api/comments/${draft.id}?t=${token}`, {
+					method: "DELETE",
+				}),
+			);
+
+			expect(deleted.status).toBe(204);
+			expect((await store.read())?.drafts).toEqual([]);
+			expect(eventData(await bodyPromise, "done")).toEqual({
+				status: "stopped",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("PUT and send reject while generating", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-busy-"));
+		try {
+			const draft = commentDraft("draft-busy", "draft", "Existing body");
+			const store = await setupCommentFixture(dir, draft);
+			const agent = new CommentRouteAgent(null, true);
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				reviewAgent: agent,
+			});
+
+			const response = await routes(commentRequest(draft.id));
+			const bodyPromise = response.text();
+			await agent.started.promise;
+
+			const update = await routes(
+				request(`/api/comments/${draft.id}?t=${token}`, {
+					method: "PUT",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ body: "Edited while generating" }),
+				}),
+			);
+			expect(update.status).toBe(409);
+			expect(await update.json()).toEqual({
+				error: "Comment is generating",
+			});
+
+			const send = await routes(
+				request(`/api/comments/${draft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			expect(send.status).toBe(409);
+			expect(eventData(await send.text(), "error")).toEqual({
+				message: "Comment is generating",
+			});
+
+			const cancel = await routes(commentCancelRequest(draft.id));
+			expect(cancel.status).toBe(204);
+			await bodyPromise;
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				id: draft.id,
+				body: "Existing body",
+				status: "draft",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("from-chat uses the comment slot version agent", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-agent-"));
+		try {
+			await writeCommentPrompt(
+				dir,
+				"---\nagent: omp\nmodel: slot-model\n---\nCOMMENT SLOT VERSION PROMPT",
+			);
+			const draft = commentDraft("draft-agent");
+			const store = await setupCommentFixture(dir, draft);
+			const agent = new CommentRouteAgent();
+			const factoryCalls: Array<{
+				agent?: "omp" | "claude";
+				model?: string;
+			}> = [];
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				config: { review: { agent: "claude", model: "default-model" } },
+				createReviewAgent: (override) => {
+					factoryCalls.push(override ?? {});
+					return agent;
+				},
+			});
+
+			const response = await routes(commentRequest(draft.id));
+			expect(response.status).toBe(200);
+			expect(eventData(await response.text(), "done")).toMatchObject({
+				status: "ok",
+			});
+			expect(factoryCalls).toEqual([{ agent: "omp", model: "slot-model" }]);
+			expect(agent.prompts[0]).toContain("COMMENT SLOT VERSION PROMPT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("chat review discussion context", () => {
 	const generalDiscussion: HostDiscussion = {
@@ -2143,6 +2567,45 @@ describe("review settings wiring", () => {
 		}
 	});
 
+	test("layer regeneration uses the active layer version agent", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-layer-agent-"));
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\nagent: omp\nmodel: m1\n---\nACTIVE LAYER PROMPT",
+				"utf8",
+			);
+			const agent = new RecordingLayerAgent();
+			const factoryCalls: Array<{
+				agent?: "omp" | "claude";
+				model?: string;
+			}> = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				paths: chatPaths(dir),
+				diff,
+				promptSourceDir: dir,
+				config: { review: { agent: "claude", model: "default-model" } },
+				createReviewAgent: (override) => {
+					factoryCalls.push(override ?? {});
+					return agent;
+				},
+			});
+
+			const response = await routes(
+				request(`/api/layers/regenerate?t=${token}`, { method: "POST" }),
+			);
+			expect(response.status).toBe(200);
+			await response.text();
+			expect(factoryCalls).toEqual([{ agent: "omp", model: "m1" }]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("uses configured chat preset at turn start", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-preset-"));
 		try {
@@ -2208,7 +2671,7 @@ describe("prompt settings read API", () => {
 			const response = await routes(request(`/api/settings?t=${token}`));
 			expect(response.status).toBe(200);
 			const body = await response.json();
-			expect(body.slots).toHaveLength(7);
+			expect(body.slots).toHaveLength(8);
 			expect(body.slots.map((slot: { slot: string }) => slot.slot)).toEqual([
 				"commit-system",
 				"mr-code",
@@ -2217,6 +2680,7 @@ describe("prompt settings read API", () => {
 				"review-layers-plan",
 				"review-chat",
 				"review-explain-comment",
+				"review-comment-from-chat",
 			]);
 			expect(body.slots).toContainEqual({
 				slot: "review-chat",
@@ -2275,6 +2739,8 @@ describe("prompt settings read API", () => {
 				text: DEFAULT_PROMPTS["review-chat"],
 				preset: "default",
 				version: 1,
+				agent: null,
+				model: null,
 				versions: [1],
 			});
 			expect(
@@ -2306,6 +2772,8 @@ describe("prompt settings read API", () => {
 				text: "first",
 				preset: "terse",
 				version: 1,
+				agent: null,
+				model: null,
 				versions: [1, 2],
 			});
 		} finally {
@@ -2380,6 +2848,8 @@ describe("prompt settings version write API", () => {
 				promptRequest("/api/prompts/commit-system", {
 					preset: "default",
 					text: changedText,
+					agent: "omp",
+					model: "sonnet",
 				}),
 			);
 			expect(saveResponse.status).toBe(200);
@@ -2389,12 +2859,14 @@ describe("prompt settings version write API", () => {
 			});
 			expect(
 				await Bun.file(join(dir, "commit-system", "default", "002.md")).text(),
-			).toBe(changedText);
+			).toBe(`---\nagent: omp\nmodel: sonnet\n---\n${changedText}`);
 
 			const duplicateResponse = await routes(
 				promptRequest("/api/prompts/commit-system", {
 					preset: "default",
 					text: `  ${changedText.trim()}  `,
+					agent: "omp",
+					model: "sonnet",
 				}),
 			);
 			expect(duplicateResponse.status).toBe(200);
@@ -2411,14 +2883,14 @@ describe("prompt settings version write API", () => {
 			const rollbackResponse = await routes(
 				promptRequest("/api/prompts/commit-system/rollback", {
 					preset: "default",
-					rev: 1,
+					rev: 2,
 				}),
 			);
 			expect(rollbackResponse.status).toBe(200);
 			expect(await rollbackResponse.json()).toEqual({ version: 3 });
 			expect(
 				await Bun.file(join(dir, "commit-system", "default", "003.md")).text(),
-			).toBe(DEFAULT_PROMPTS["commit-system"]);
+			).toBe(`---\nagent: omp\nmodel: sonnet\n---\n${changedText}`);
 
 			const resetResponse = await routes(
 				promptRequest("/api/prompts/commit-system/reset", {
@@ -2430,11 +2902,59 @@ describe("prompt settings version write API", () => {
 			expect(
 				await Bun.file(join(dir, "commit-system", "default", "004.md")).text(),
 			).toBe(DEFAULT_PROMPTS["commit-system"]);
+			const resetPrompt = await routes(
+				request(`/api/prompts/commit-system?t=${token}`),
+			);
+			expect(await resetPrompt.json()).toMatchObject({
+				agent: null,
+				model: null,
+			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
+	test("saves metadata changes as a new version", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-metadata-"));
+		try {
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+			});
+
+			const first = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: "Same prompt",
+				}),
+			);
+			expect(await first.json()).toEqual({ version: 2, saved: true });
+
+			const metadataChange = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: "Same prompt",
+					agent: "claude",
+				}),
+			);
+			expect(await metadataChange.json()).toEqual({
+				version: 3,
+				saved: true,
+			});
+
+			const latest = await routes(
+				request(`/api/prompts/commit-system?t=${token}`),
+			);
+			expect(await latest.json()).toMatchObject({
+				text: "Same prompt",
+				agent: "claude",
+				model: null,
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 	test("uses active preset when save omits preset", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-prompt-active-"));
 		try {
@@ -2479,6 +2999,17 @@ describe("prompt settings version write API", () => {
 				}),
 			);
 			expect(unknownSlot.status).toBe(404);
+			const invalidAgent = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: "x",
+					agent: "gpt",
+				}),
+			);
+			expect(invalidAgent.status).toBe(400);
+			expect(await invalidAgent.json()).toEqual({
+				error: "Prompt agent must be omp, claude, or null",
+			});
 
 			const missingPreset = await routes(
 				promptRequest("/api/prompts/commit-system/rollback", { rev: 1 }),
@@ -2541,6 +3072,8 @@ describe("prompt settings preset API", () => {
 				promptRequest("/api/prompts/commit-system", {
 					preset: "default",
 					text: latestText,
+					agent: "omp",
+					model: "sonnet",
 				}),
 			);
 
@@ -2561,10 +3094,19 @@ describe("prompt settings preset API", () => {
 				request(`/api/prompts/commit-system?t=${token}`),
 			);
 			expect(activeResponse.status).toBe(200);
-			const active = (await activeResponse.json()) as { text: string };
+			const active = (await activeResponse.json()) as {
+				text: string;
+				agent: "omp" | "claude" | null;
+				model: string | null;
+			};
+			expect(active).toMatchObject({
+				text: latestText,
+				agent: "omp",
+				model: "sonnet",
+			});
 			expect(
 				await Bun.file(join(dir, "commit-system", "terse", "001.md")).text(),
-			).toBe(active.text);
+			).toBe(`---\nagent: omp\nmodel: sonnet\n---\n${active.text}`);
 
 			const duplicateResponse = await routes(
 				promptRequest("/api/prompts/commit-system/presets", {
@@ -2747,6 +3289,7 @@ describe("review agent settings API", () => {
 				token,
 				store,
 				paths,
+				promptSourceDir: dir,
 				reviewAgent: original,
 				layerAgent: original,
 				config: { review: { agent: "omp" } },
@@ -2767,9 +3310,7 @@ describe("review agent settings API", () => {
 				agent: "claude",
 				model: "claude-model",
 			});
-			expect(factoryCalls).toEqual([
-				{ agent: "claude", model: "claude-model" },
-			]);
+			expect(factoryCalls).toEqual([]);
 			expect(persisted).toEqual([
 				{ review: { agent: "claude", model: "claude-model" } },
 			]);
@@ -2781,54 +3322,69 @@ describe("review agent settings API", () => {
 			await chatResponse.text();
 			expect(original.turns).toHaveLength(0);
 			expect(swapped.turns).toHaveLength(1);
+			expect(factoryCalls).toEqual([
+				{ agent: "claude", model: "claude-model" },
+			]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
 	test("omits a blank model from response, persistence, and factory override", async () => {
-		const persisted: unknown[] = [];
-		const factoryCalls: Array<{
-			agent?: "omp" | "claude";
-			model?: string;
-		}> = [];
-		const routes = createReviewRoutes({
-			token,
-			state: state(),
-			config: { review: { agent: "omp", model: "old-model" } },
-			createReviewAgent: (override) => {
-				factoryCalls.push(override ?? {});
-				return new StreamChatAgent();
-			},
-			persistConfig: async (partial) => {
-				persisted.push(partial);
-			},
-		});
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-blank-"));
+		try {
+			const persisted: unknown[] = [];
+			const factoryCalls: Array<{
+				agent?: "omp" | "claude";
+				model?: string;
+			}> = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: { review: { agent: "omp", model: "old-model" } },
+				createReviewAgent: (override) => {
+					factoryCalls.push(override ?? {});
+					return new StreamChatAgent();
+				},
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
 
-		const response = await routes(
-			reviewSettingsRequest({ agent: "claude", model: "   " }),
-		);
-		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ agent: "claude" });
-		expect(factoryCalls).toEqual([{ agent: "claude" }]);
-		expect(persisted).toEqual([{ review: { agent: "claude" } }]);
+			const response = await routes(
+				reviewSettingsRequest({ agent: "claude", model: "   " }),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual({ agent: "claude" });
+			expect(factoryCalls).toEqual([]);
+			expect(persisted).toEqual([{ review: { agent: "claude" } }]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("rejects an invalid review agent", async () => {
-		const factoryCalls: unknown[] = [];
-		const routes = createReviewRoutes({
-			token,
-			state: state(),
-			createReviewAgent: (override) => {
-				factoryCalls.push(override);
-				return new StreamChatAgent();
-			},
-		});
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-invalid-"));
+		try {
+			const factoryCalls: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				createReviewAgent: (override) => {
+					factoryCalls.push(override);
+					return new StreamChatAgent();
+				},
+			});
 
-		const response = await routes(reviewSettingsRequest({ agent: "gpt" }));
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: expect.any(String) });
-		expect(factoryCalls).toHaveLength(0);
+			const response = await routes(reviewSettingsRequest({ agent: "gpt" }));
+			expect(response.status).toBe(400);
+			expect(await response.json()).toEqual({ error: expect.any(String) });
+			expect(factoryCalls).toHaveLength(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("returns 501 when review agent factory is unavailable", async () => {
@@ -2875,6 +3431,194 @@ describe("review agent settings API", () => {
 				model: "new-model",
 				agents: ["omp", "claude"],
 			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("chat binding", () => {
+	async function setupBinding(dir: string) {
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		});
+		await store.write(state());
+		const agent = new StreamChatAgent();
+		const factoryCalls: Array<{
+			agent?: "omp" | "claude";
+			model?: string;
+		}> = [];
+		const routes = createReviewRoutes({
+			token,
+			store,
+			paths: chatPaths(dir),
+			promptSourceDir: dir,
+			config: { review: { agent: "claude", model: "default-model" } },
+			reviewAgent: agent,
+			discussions: [discussion],
+			explainPromptText: "Explain prefix.",
+			createReviewAgent: (override) => {
+				factoryCalls.push(override ?? {});
+				return agent;
+			},
+		});
+		return { store, routes, factoryCalls };
+	}
+
+	async function writeChatBindingPrompt(
+		dir: string,
+		agent: "omp" | "claude",
+		model: string,
+	): Promise<void> {
+		const promptDir = join(dir, "review-chat", "default");
+		await mkdir(promptDir, { recursive: true });
+		await writeFile(
+			join(promptDir, "001.md"),
+			`---\nagent: ${agent}\nmodel: ${model}\n---\nChat prompt`,
+			"utf8",
+		);
+	}
+
+	function explainRequest(body: unknown): Request {
+		return request(`/api/comments/explain?t=${token}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	}
+
+	test("new chat binds the chat version selection and keeps it after settings change", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-binding-new-"));
+		try {
+			await writeChatBindingPrompt(dir, "omp", "slot-model");
+			const { store, routes, factoryCalls } = await setupBinding(dir);
+
+			const createResponse = await routes(
+				request(`/api/chats?t=${token}`, { method: "POST" }),
+			);
+			expect(createResponse.status).toBe(201);
+			const created = (await createResponse.json()) as {
+				activeChatId: string;
+				chats: ReviewState["chats"];
+			};
+			const chatId = created.activeChatId;
+			expect(created.chats.find((chat) => chat.id === chatId)).toMatchObject({
+				agent: "omp",
+				model: "slot-model",
+			});
+
+			const settingsResponse = await routes(
+				reviewSettingsRequest({ agent: "claude", model: "changed-model" }),
+			);
+			expect(settingsResponse.status).toBe(200);
+
+			const turnResponse = await routes(
+				chatRequest({ chatId, message: "Keep the original binding" }),
+			);
+			await turnResponse.text();
+
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === chatId),
+			).toMatchObject({
+				agent: "omp",
+				model: "slot-model",
+			});
+			expect(factoryCalls).toEqual([{ agent: "omp", model: "slot-model" }]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("explain chat binds from the review-chat slot", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-binding-explain-"),
+		);
+		try {
+			await writeChatBindingPrompt(dir, "claude", "explain-model");
+			const { store, routes, factoryCalls } = await setupBinding(dir);
+
+			const response = await routes(
+				explainRequest({ discussionId: "discussion-1" }),
+			);
+			expect(response.status).toBe(201);
+			const body = (await response.json()) as {
+				chatId: string;
+				chats: ReviewState["chats"];
+				message: string;
+			};
+			expect(body.chats.find((chat) => chat.id === body.chatId)).toMatchObject({
+				agent: "claude",
+				model: "explain-model",
+			});
+
+			const turnResponse = await routes(
+				chatRequest({ chatId: body.chatId, message: body.message }),
+			);
+			await turnResponse.text();
+
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === body.chatId),
+			).toMatchObject({
+				agent: "claude",
+				model: "explain-model",
+			});
+			expect(factoryCalls).toEqual([
+				{ agent: "claude", model: "explain-model" },
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("unbound chat with transcript binds to default at next turn", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-binding-legacy-"),
+		);
+		try {
+			const { store, routes, factoryCalls } = await setupBinding(dir);
+			await store.appendChat("chat-a", {
+				role: "user",
+				text: "Existing transcript",
+			});
+
+			const response = await routes(
+				chatRequest({ message: "Continue the existing transcript" }),
+			);
+			await response.text();
+
+			expect((await store.read())?.chats[0]).toMatchObject({
+				agent: "claude",
+				model: "default-model",
+			});
+			expect(factoryCalls).toEqual([
+				{ agent: "claude", model: "default-model" },
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("unbound empty chat binds from slot at first turn", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-binding-empty-"),
+		);
+		try {
+			await writeChatBindingPrompt(dir, "omp", "first-turn-model");
+			const { store, routes, factoryCalls } = await setupBinding(dir);
+
+			const response = await routes(
+				chatRequest({ message: "Start this chat" }),
+			);
+			await response.text();
+
+			expect((await store.read())?.chats[0]).toMatchObject({
+				agent: "omp",
+				model: "first-turn-model",
+			});
+			expect(factoryCalls).toEqual([
+				{ agent: "omp", model: "first-turn-model" },
+			]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

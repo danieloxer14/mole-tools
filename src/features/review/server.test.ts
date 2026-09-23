@@ -62,6 +62,28 @@ describe("ReviewServer", () => {
 		}
 	});
 
+	test("serves the favicon linked from the page", async () => {
+		const server = createReviewServer({ state: state(), token: "icon-token" });
+		const address = server.start();
+		try {
+			const page = await fetch(`http://127.0.0.1:${address.port}/`);
+			const html = await page.text();
+			const match = html.match(/<link[^>]*rel="icon"[^>]*href="([^"]+)"/);
+			const href = match?.[1];
+			expect(href).toBeDefined();
+			if (href === undefined) {
+				throw new Error("Favicon link missing href");
+			}
+			const icon = await fetch(
+				new URL(href, `http://127.0.0.1:${address.port}/`),
+			);
+			expect(icon.status).toBe(200);
+			expect(icon.headers.get("content-type")).toStartWith("image/png");
+		} finally {
+			await server.stop();
+		}
+	});
+
 	test("mints a distinct token for each server run", () => {
 		const first = createReviewServer({ state: state() });
 		const second = createReviewServer({ state: state() });

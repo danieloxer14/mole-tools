@@ -65,6 +65,8 @@ export interface ChatSummary {
 	title: string;
 	createdAt: string;
 	busy: boolean;
+	agent: "omp" | "claude" | null;
+	model: string | null;
 }
 
 export interface ChatPaneProps {
@@ -203,7 +205,7 @@ function roleLabel(role: string): string {
 	if (role === "assistant") return "Assistant";
 	return role;
 }
-function chatLabel(chat: ChatSummary, index: number): string {
+export function chatLabel(chat: ChatSummary, index: number): string {
 	return chat.title || `New chat ${index + 1}`;
 }
 
@@ -479,7 +481,13 @@ export function ChatPane({
 												{chatLabel(chat, index)}
 											</span>
 											<span className="shrink-0 text-[11px] text-muted-foreground">
-												{new Date(chat.createdAt).toLocaleTimeString()}
+												{[
+													new Date(chat.createdAt).toLocaleTimeString(),
+													chat.agent,
+													chat.model,
+												]
+													.filter(Boolean)
+													.join(" · ")}
 											</span>
 										</span>
 										{active ? <Check className="size-4" aria-hidden /> : null}
