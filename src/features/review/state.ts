@@ -16,6 +16,8 @@ export const ChatMetaSchema = z.object({
 	title: z.string().default(""),
 	sessionId: z.string().min(1).nullable().default(null),
 	createdAt: z.string().min(1),
+	agent: z.enum(["omp", "claude"]).nullable().default(null),
+	model: z.string().min(1).nullable().default(null),
 });
 export type ChatMeta = z.infer<typeof ChatMetaSchema>;
 
@@ -140,12 +142,18 @@ export function deriveChatTitle(message: string): string {
 
 export function createChatMeta(
 	now: string = new Date().toISOString(),
+	binding: {
+		agent: "omp" | "claude" | null;
+		model: string | null;
+	} = { agent: null, model: null },
 ): ChatMeta {
 	return {
 		id: crypto.randomUUID(),
 		title: "",
 		sessionId: null,
 		createdAt: now,
+		agent: binding.agent,
+		model: binding.model,
 	};
 }
 
@@ -171,6 +179,8 @@ export function ensureChats(
 						title: "",
 						sessionId: legacySessionId,
 						createdAt: state.revision.syncedAt,
+						agent: null,
+						model: null,
 					},
 				];
 	const activeChatId = chats.some((chat) => chat.id === state.activeChatId)

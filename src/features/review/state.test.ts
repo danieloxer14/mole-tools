@@ -192,6 +192,31 @@ describe("ReviewState", () => {
 		expect(parsed.activeChatId).toBeNull();
 	});
 
+	test("parses chat meta without binding as null", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [
+				{
+					id: "legacy",
+					title: "",
+					sessionId: null,
+					createdAt: "2026-08-15T00:00:00.000Z",
+				},
+			],
+		});
+
+		expect(parsed.chats).toEqual([
+			{
+				id: "legacy",
+				title: "",
+				sessionId: null,
+				createdAt: "2026-08-15T00:00:00.000Z",
+				agent: null,
+				model: null,
+			},
+		]);
+	});
+
 	test("builds per-chat transcript paths while retaining legacy path", () => {
 		const paths = getReviewPaths(
 			{ host: "gitlab.example.com", projectPath: "group/api", iid: 42 },

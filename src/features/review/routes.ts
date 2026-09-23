@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import type { Config } from "../../adapters/config/schema";
 import {
@@ -9,6 +9,10 @@ import {
 	type PromptName,
 	PromptNameSchema,
 } from "../../adapters/prompts/defaults";
+import {
+	PROMPT_AGENT_NAMES,
+	type PromptAgentName,
+} from "../../adapters/prompts/frontmatter";
 import {
 	listPresets,
 	listVersions,
@@ -32,8 +36,17 @@ import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
+import {
+	type AgentSelection,
+	effectiveAgentSelection,
+} from "./agent-selection";
 import { runChatTurn, validateChatTags } from "./chat";
-import type { ChatTag } from "./chat-tags";
+import {
+	appendGeneratedBody,
+	buildCommentConversationMarkdown,
+	COMMENT_FROM_CHAT_TIMEOUT_MS,
+	runCommentFromChat,
+} from "./comment-from-chat";
 import { buildExplainMessage, explainChatTitle } from "./explain";
 import {
 	generateLayers,
@@ -122,6 +135,7 @@ export interface ReviewRoutesOptions {
 		  };
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
+	commentFromChatTimeoutMs?: number;
 	promptText?: string;
 	explainPromptText?: string;
 	persistConfig?: (partial: Partial<Config>) => Promise<void>;
@@ -520,8 +534,36 @@ export function createReviewRoutes(
 				?.review?.model,
 		},
 	};
-	let layerAgent = options.layerAgent ?? options.reviewAgent;
-	let chatAgent = options.reviewAgent;
+	const layerAgent = options.layerAgent ?? options.reviewAgent;
+	const chatAgent = options.reviewAgent;
+	function defaultSelection(): AgentSelection {
+		return {
+			agent: settings.review.agent,
+			model: settings.review.model ?? null,
+		};
+	}
+	async function slotSelection(slot: PromptName): Promise<AgentSelection> {
+		const version = await readPrompt(slot, {
+			preset: presetFor(slot),
+			dir: promptDirOption(),
+		});
+		return effectiveAgentSelection(version, defaultSelection());
+	}
+	function agentForSelection(
+		selection: AgentSelection,
+	): ReviewAgent | undefined {
+		return options.createReviewAgent?.({
+			agent: selection.agent,
+			model: selection.model ?? undefined,
+		});
+	}
+	async function agentForSlot(
+		slot: PromptName,
+		fallback: ReviewAgent | undefined,
+	): Promise<ReviewAgent | undefined> {
+		if (!options.createReviewAgent) return fallback;
+		return agentForSelection(await slotSelection(slot));
+	}
 	function presetFor(slot: PromptName): string {
 		return settings.prompts[slot] ?? "default";
 	}
@@ -603,9 +645,6 @@ export function createReviewRoutes(
 		};
 		await options.persistConfig?.({ review: review as Config["review"] });
 
-		const next = factory({ agent: parsed.data.agent, model });
-		layerAgent = next;
-		chatAgent = next;
 		return jsonResponse({ agent: parsed.data.agent, model });
 	}
 
@@ -637,6 +676,8 @@ export function createReviewRoutes(
 				text: prompt.text,
 				preset: prompt.preset,
 				version: prompt.version,
+				agent: prompt.agent,
+				model: prompt.model,
 				versions,
 			});
 		} catch (error) {
@@ -654,6 +695,33 @@ export function createReviewRoutes(
 			if (typeof body.text !== "string")
 				throw new PortError("Prompt text must be a string");
 
+			const rawAgent = body.agent;
+			if (
+				rawAgent !== undefined &&
+				rawAgent !== null &&
+				(typeof rawAgent !== "string" ||
+					!PROMPT_AGENT_NAMES.includes(rawAgent as PromptAgentName))
+			) {
+				return jsonResponse(
+					{ error: "Prompt agent must be omp, claude, or null" },
+					400,
+				);
+			}
+			const agent =
+				rawAgent === null || rawAgent === undefined
+					? null
+					: (rawAgent as PromptAgentName);
+			const rawModel = body.model;
+			if (
+				rawModel !== undefined &&
+				rawModel !== null &&
+				typeof rawModel !== "string"
+			) {
+				throw new PortError("Prompt model must be a string or null");
+			}
+			const model =
+				typeof rawModel === "string" ? rawModel.trim() || null : null;
+
 			const presetValue =
 				body.preset === undefined ? presetFor(slot) : body.preset;
 			if (typeof presetValue !== "string" || presetValue.length === 0)
@@ -663,12 +731,18 @@ export function createReviewRoutes(
 				preset,
 				dir: promptDirOption(),
 			});
-			if (body.text.trim() === latest.text.trim())
+			if (
+				body.text.trim() === latest.text.trim() &&
+				agent === latest.agent &&
+				model === latest.model
+			)
 				return jsonResponse({ version: latest.version, saved: false });
 
 			const version = await savePrompt(slot, {
 				preset,
 				text: body.text,
+				agent,
+				model,
 				dir: promptDirOption(),
 			});
 			return jsonResponse({ version, saved: true });
@@ -697,8 +771,14 @@ export function createReviewRoutes(
 			const source = body.from ?? settings.prompts[slot] ?? "default";
 			if (typeof source !== "string")
 				throw new PortError("Prompt preset must be a string");
-			const { text } = await readPrompt(slot, { preset: source, dir });
-			await savePrompt(slot, { preset: name, text, dir });
+			const prompt = await readPrompt(slot, { preset: source, dir });
+			await savePrompt(slot, {
+				preset: name,
+				text: prompt.text,
+				agent: prompt.agent,
+				model: prompt.model,
+				dir,
+			});
 			return jsonResponse({ presets: await listPresets(slot, dir) });
 		} catch (error) {
 			return promptErrorResponse(error);
@@ -753,6 +833,8 @@ export function createReviewRoutes(
 			const version = await savePrompt(slot, {
 				preset,
 				text: prompt.text,
+				agent: prompt.agent,
+				model: prompt.model,
 				dir: promptDirOption(),
 			});
 			return jsonResponse({ version });
@@ -775,6 +857,8 @@ export function createReviewRoutes(
 			const version = await savePrompt(slot, {
 				preset,
 				text: DEFAULT_PROMPTS[slot],
+				agent: null,
+				model: null,
 				dir: promptDirOption(),
 			});
 			return jsonResponse({ version });
@@ -866,6 +950,7 @@ export function createReviewRoutes(
 
 	/** One in-flight turn per chat. Different chats stream in parallel. */
 	const activeTurns = new Map<string, AbortController>();
+	const activeCommentGenerations = new Map<string, AbortController>();
 
 	async function mutateDrafts(
 		mutator: (drafts: Draft[]) => Draft[],
@@ -1069,14 +1154,18 @@ export function createReviewRoutes(
 	function startLayerGeneration(
 		force: boolean,
 	): Promise<LayerGenerationResult> | null {
-		const runAgent = layerAgent;
-		if (!runAgent) return null;
+		if (!options.createReviewAgent && !layerAgent) return null;
 		if (layerRun) return layerRun;
 		const run = (async (): Promise<LayerGenerationResult> => {
 			const state = await currentState();
 			if (!force && state.layerStatus !== "pending") {
 				return { state, doc: null, runId: "cached", attempts: 0 };
 			}
+			const runAgent = await agentForSlot(
+				reviewLayerPromptName(state.mode),
+				layerAgent,
+			);
+			if (!runAgent) throw new Error("Review layer agent is unavailable");
 			const generationRevision = state.revision;
 			const result = await generateLayers({
 				agent: runAgent,
@@ -1121,7 +1210,7 @@ export function createReviewRoutes(
 
 	async function layerStream(force: boolean): Promise<Response> {
 		async function* frames(): AsyncIterable<SseFrame> {
-			if (!layerAgent) {
+			if (!options.createReviewAgent && !layerAgent) {
 				yield {
 					event: "status",
 					data: { status: "unavailable" },
@@ -1184,8 +1273,8 @@ export function createReviewRoutes(
 
 		const store = options.store;
 		if (!store) return chatErrorStream("Review store is unavailable");
-		const agent = chatAgent;
-		if (!agent) return chatErrorStream("Review chat agent is unavailable");
+		if (!options.createReviewAgent && !chatAgent)
+			return chatErrorStream("Review chat agent is unavailable");
 		if (activeTurns.has(input.chatId))
 			return chatErrorStream("Chat turn already in progress");
 
@@ -1196,13 +1285,32 @@ export function createReviewRoutes(
 				activeTurns.delete(input.chatId);
 		};
 
+		let agent: ReviewAgent | undefined;
 		let chatState: ReviewState;
 		try {
 			chatState = await currentState();
-			const chat = requireChat(chatState, input.chatId);
+			let chat = requireChat(chatState, input.chatId);
 			if (!chat) {
 				release();
 				return chatErrorStream(`Unknown chat: ${input.chatId}`);
+			}
+			if (chat.agent === null && options.createReviewAgent) {
+				const entries = await store.readChat(input.chatId);
+				const binding =
+					entries.length === 0 && chat.sessionId === null
+						? await slotSelection("review-chat")
+						: defaultSelection();
+				chatState = await mutateState((base) => ({
+					...base,
+					chats: base.chats.map((entry) =>
+						entry.id === input.chatId ? { ...entry, ...binding } : entry,
+					),
+				}));
+				chat = requireChat(chatState, input.chatId);
+				if (!chat) {
+					release();
+					return chatErrorStream(`Unknown chat: ${input.chatId}`);
+				}
 			}
 			if (chat.title === "") {
 				const title = deriveChatTitle(input.message);
@@ -1212,15 +1320,37 @@ export function createReviewRoutes(
 						entry.id === input.chatId ? { ...entry, title } : entry,
 					),
 				}));
+				chat = requireChat(chatState, input.chatId);
+				if (!chat) {
+					release();
+					return chatErrorStream(`Unknown chat: ${input.chatId}`);
+				}
+			}
+			agent = options.createReviewAgent
+				? chat.agent === null
+					? undefined
+					: agentForSelection({
+							agent: chat.agent,
+							model: chat.model,
+						})
+				: chatAgent;
+			if (!agent) {
+				release();
+				return chatErrorStream("Review chat agent is unavailable");
 			}
 		} catch (error) {
 			release();
 			return chatErrorStream(errorMessage(error));
 		}
 
+		const runAgent = agent;
+		if (!runAgent) {
+			release();
+			return chatErrorStream("Review chat agent is unavailable");
+		}
 		const queue = createSseFrameQueue();
 		const run = runChatTurn({
-			agent,
+			agent: runAgent,
 			store,
 			state: chatState,
 			chatId: input.chatId,
@@ -1290,9 +1420,19 @@ export function createReviewRoutes(
 			options.store ? await options.store.readChat(chatId) : [],
 		);
 	}
-
+	async function cancelCommentFromChat(draftId: string): Promise<Response> {
+		const generation = activeCommentGenerations.get(draftId);
+		if (!generation) {
+			return jsonResponse({ error: "No comment generation in progress" }, 404);
+		}
+		generation.abort();
+		return emptyResponse(204);
+	}
 	async function createChat(): Promise<Response> {
-		const chat = createChatMeta();
+		const binding = options.createReviewAgent
+			? await slotSelection("review-chat")
+			: { agent: null, model: null };
+		const chat = createChatMeta(undefined, binding);
 		const next = await mutateState((base) => ({
 			...base,
 			chats: [...base.chats, chat],
@@ -1325,8 +1465,11 @@ export function createReviewRoutes(
 				}));
 			const diffs = [currentExpandedDiff ?? [], currentDiff];
 			const message = buildExplainMessage({ prefix, discussion, diffs });
+			const binding = options.createReviewAgent
+				? await slotSelection("review-chat")
+				: { agent: null, model: null };
 			const chat: ChatMeta = {
-				...createChatMeta(),
+				...createChatMeta(undefined, binding),
 				title: explainChatTitle(discussion),
 			};
 			const next = await mutateState((base) => ({
@@ -1382,6 +1525,173 @@ export function createReviewRoutes(
 		}
 	}
 
+	async function commentFromChat(
+		request: Request,
+		draftId: string,
+	): Promise<Response> {
+		const body = await parseBody(request);
+		const chatId = body?.chatId;
+		if (typeof chatId !== "string" || !CHAT_ID_PATTERN.test(chatId)) {
+			return commentSseError("Chat id is invalid", 400);
+		}
+
+		const store = options.store;
+		if (!store) return commentSseError("Review store is unavailable", 503);
+
+		const state = await currentState();
+		const draft = state.drafts.find((candidate) => candidate.id === draftId);
+		if (!draft) return commentSseError("Draft not found", 404);
+		if (draft.status === "posted") {
+			return commentSseError("Posted comments cannot be edited", 409);
+		}
+		if (draft.status === "sending") {
+			return commentSseError("Comment is sending", 409);
+		}
+		if (activeCommentGenerations.has(draftId)) {
+			return commentSseError("Comment is already generating", 409);
+		}
+
+		const chat = state.chats.find((candidate) => candidate.id === chatId);
+		if (!chat) return commentSseError(`Unknown chat: ${chatId}`, 404);
+		if (activeTurns.has(chatId)) {
+			return commentSseError("Wait for the chat reply to finish", 409);
+		}
+
+		const entries = await store.readChat(chatId);
+		if (
+			!entries.some(
+				(entry) => entry.role === "assistant" && entry.text.trim().length > 0,
+			)
+		) {
+			return commentSseError("Selected chat has no replies yet", 409);
+		}
+
+		let agent: ReviewAgent | undefined;
+		try {
+			agent = await agentForSlot(
+				"review-comment-from-chat",
+				options.reviewAgent,
+			);
+		} catch (error) {
+			return commentSseError(errorMessage(error), 500);
+		}
+		if (!agent) return commentSseError("Review agent is unavailable", 503);
+
+		const controller = new AbortController();
+		activeCommentGenerations.set(draftId, controller);
+		let removeDisconnectListener: (() => void) | undefined;
+		try {
+			const prompt = await readPrompt("review-comment-from-chat", {
+				preset: presetFor("review-comment-from-chat"),
+				dir: promptDirOption(),
+			});
+			const chatIndex = state.chats.findIndex(
+				(candidate) => candidate.id === chatId,
+			);
+			const chatLabel = chat.title || `New chat ${chatIndex + 1}`;
+			const conversationMarkdown = buildCommentConversationMarkdown({
+				draft,
+				chatLabel,
+				entries,
+				diffs: [currentExpandedDiff ?? [], currentDiff],
+			});
+			const promptRoot =
+				options.paths?.promptDir ??
+				join(dirname(state.worktreePath), "review-layers", "prompt");
+			const runDir = join(
+				promptRoot,
+				`comment-from-chat-${crypto.randomUUID()}`,
+			);
+			const abort = () => controller.abort();
+			if (request.signal.aborted) abort();
+			else {
+				request.signal.addEventListener("abort", abort, { once: true });
+				removeDisconnectListener = () =>
+					request.signal.removeEventListener("abort", abort);
+			}
+
+			async function* frames(): AsyncIterable<SseFrame> {
+				try {
+					const outcome = await runCommentFromChat({
+						agent,
+						worktreePath: state.worktreePath,
+						runDir,
+						promptText: prompt.text,
+						conversationMarkdown,
+						timeoutMs:
+							options.commentFromChatTimeoutMs ?? COMMENT_FROM_CHAT_TIMEOUT_MS,
+						signal: controller.signal,
+					});
+					if (outcome.status === "ok") {
+						const latest = await currentState();
+						const latestDraft = latest.drafts.find(
+							(candidate) => candidate.id === draftId,
+						);
+						if (
+							!latestDraft ||
+							latestDraft.status === "posted" ||
+							latestDraft.status === "sending"
+						) {
+							yield { event: "done", data: { status: "stopped" } };
+							return;
+						}
+						const persisted = await mutateDrafts((drafts) =>
+							drafts.map((candidate) =>
+								candidate.id === draftId &&
+								candidate.status !== "posted" &&
+								candidate.status !== "sending"
+									? {
+											...candidate,
+											body: appendGeneratedBody(candidate.body, outcome.text),
+											status: "draft",
+											error: null,
+										}
+									: candidate,
+							),
+						);
+						const updated = persisted.drafts.find(
+							(candidate) => candidate.id === draftId,
+						);
+						if (
+							!updated ||
+							updated.status === "posted" ||
+							updated.status === "sending"
+						) {
+							yield { event: "done", data: { status: "stopped" } };
+							return;
+						}
+						yield { event: "done", data: { status: "ok", draft: updated } };
+						return;
+					}
+					if (outcome.status === "failed") {
+						yield { event: "error", data: { message: outcome.error } };
+						yield {
+							event: "done",
+							data: { status: "failed", error: outcome.error },
+						};
+						return;
+					}
+					yield { event: "done", data: { status: "stopped" } };
+				} catch (error) {
+					const message = errorMessage(error);
+					yield { event: "error", data: { message } };
+					yield { event: "done", data: { status: "failed", error: message } };
+				} finally {
+					removeDisconnectListener?.();
+					if (activeCommentGenerations.get(draftId) === controller) {
+						activeCommentGenerations.delete(draftId);
+					}
+				}
+			}
+
+			return sseResponse(frames(), undefined, abort);
+		} catch (error) {
+			removeDisconnectListener?.();
+			activeCommentGenerations.delete(draftId);
+			controller.abort();
+			return commentSseError(errorMessage(error), 500);
+		}
+	}
 	async function updateComment(
 		request: Request,
 		draftId: string,
@@ -1394,6 +1704,8 @@ export function createReviewRoutes(
 		if (!existing) return jsonResponse({ error: "Draft not found" }, 404);
 		if (existing.status === "posted")
 			return jsonResponse({ error: "Posted comments cannot be edited" }, 409);
+		if (activeCommentGenerations.has(draftId))
+			return jsonResponse({ error: "Comment is generating" }, 409);
 		const next = await mutateDrafts((drafts) => {
 			const index = drafts.findIndex((draft) => draft.id === draftId);
 			if (index < 0) return drafts;
@@ -1411,6 +1723,9 @@ export function createReviewRoutes(
 	}
 
 	async function deleteComment(draftId: string): Promise<Response> {
+		const generation = activeCommentGenerations.get(draftId);
+		generation?.abort();
+		activeCommentGenerations.delete(draftId);
 		const state = await currentState();
 		if (!state.drafts.some((draft) => draft.id === draftId))
 			return jsonResponse({ error: "Draft not found" }, 404);
@@ -1455,6 +1770,8 @@ export function createReviewRoutes(
 			if (!draft) return fail("Draft not found", 404);
 			if (draft.status === "posted")
 				return fail("Comment is already posted", 409);
+			if (activeCommentGenerations.has(draftId))
+				return fail("Comment is generating", 409);
 
 			let discussionInput: CreateDiscussionInput;
 			if (isMarkdownSelection(draft.selection)) {
@@ -1565,7 +1882,7 @@ export function createReviewRoutes(
 		if (
 			initialLayerRunAllowed &&
 			state.layerStatus === "pending" &&
-			layerAgent &&
+			(options.createReviewAgent || layerAgent) &&
 			!layerRun
 		) {
 			initialLayerRunAllowed = false;
@@ -1790,19 +2107,44 @@ export function createReviewRoutes(
 			}
 			if (url.pathname.startsWith("/api/comments/")) {
 				const suffix = url.pathname.slice("/api/comments/".length);
-				const [encodedId, action] = suffix.split("/");
-				if (!encodedId || (action && action !== "send"))
+				const [encodedId, action, subaction] = suffix.split("/");
+				if (
+					!encodedId ||
+					(action !== undefined &&
+						action !== "send" &&
+						action !== "from-chat") ||
+					(action === "send" && subaction !== undefined) ||
+					(action === "from-chat" &&
+						subaction !== undefined &&
+						subaction !== "cancel")
+				) {
 					return emptyResponse(404);
+				}
 				let draftId: string;
 				try {
 					draftId = decodeURIComponent(encodedId);
 				} catch {
-					if (action === "send" && request.method === "POST")
+					if (
+						request.method === "POST" &&
+						(action === "send" ||
+							(action === "from-chat" &&
+								(subaction === undefined || subaction === "cancel")))
+					) {
 						return commentSseError("Invalid draft id", 400);
+					}
 					return jsonResponse({ error: "Invalid draft id" }, 400);
 				}
 				if (action === "send" && request.method === "POST")
 					return sendComment(draftId);
+				if (
+					action === "from-chat" &&
+					subaction === "cancel" &&
+					request.method === "POST"
+				) {
+					return cancelCommentFromChat(draftId);
+				}
+				if (action === "from-chat" && !subaction && request.method === "POST")
+					return commentFromChat(request, draftId);
 				if (!action && request.method === "PUT")
 					return updateComment(request, draftId);
 				if (!action && request.method === "DELETE")

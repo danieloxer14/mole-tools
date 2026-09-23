@@ -52,6 +52,24 @@ edits:
 - `review-layers-plan.md`
 - `review-chat.md`
 - `review-explain-comment.md`
+- `review-comment-from-chat.md`
+
+Prompt versions may begin with YAML-style frontmatter. The frontmatter stores
+optional per-version agent/model metadata and is removed before prompt text is
+sent to an agent:
+
+```text
+---
+agent: omp
+model: openai/gpt-5.2
+---
+Review the changed code for correctness and risk.
+```
+
+When `agent` is unset, the version inherits the global Review agent and model.
+When an agent is set with a blank model, the run sends no `--model` flag.
+Commit and MR prompt slots ignore frontmatter and continue to use their
+`models.*` LLM routes.
 
 ## 2. Repository and worktree lifecycle
 
@@ -121,6 +139,7 @@ Implemented HTTP surface:
 | `POST /api/chats/active`                             | Accept `{ chatId }`, persist the selection, and return `204` (`404` for an unknown chat).                                                                                                                                                                                                                                               |
 | `POST /api/comments/draft`                           | Accept `{ selection, filePath }`; persist and return an empty local draft.                                                                                                                                                                                                                                                              |
 | `POST /api/comments/explain`                         | Accept `{ discussionId }`; create and activate a chat titled after that published discussion and return `201` with `{ chatId, chats, activeChatId, message }`, where `message` is the first-turn text the browser then sends through `POST /api/chat`. `400` for a missing id, `404` for an unknown discussion; neither creates a chat. |
+| `POST /api/comments/:id/from-chat`                    | Accept `{ chatId }`; run the active chat transcript through the `review-comment-from-chat` prompt and stream generated comment status. |
 | `PUT /api/comments/:id`                              | Edit a local draft body. Posted comments return a conflict and cannot be edited.                                                                                                                                                                                                                                                        |
 | `DELETE /api/comments/:id`                           | Cancel/remove a local draft.                                                                                                                                                                                                                                                                                                            |
 | `POST /api/comments/:id/send`                        | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread.                                                                                                                       |
@@ -274,6 +293,17 @@ Turn construction is intentionally asymmetric:
   each chat owns its provider session id, stored in state and on each
   transcript entry.
 
+### Chat agent binding
+
+Each new chat, including an Explain chat, binds its agent/model from the
+effective selection of the active `review-chat` prompt version at creation.
+Every turn in that chat uses its binding, even after Review settings or prompt
+versions change. An unbound chat with no transcript and no session binds from
+the `review-chat` slot at its first turn. An unbound chat with a transcript or
+session (a legacy chat) binds to the default Review agent/model at its next
+turn. Either binding is persisted, and the chat switcher shows the binding for
+bound chats.
+
 Tag line adds one line to agent-chat context. Shift-selecting two lines in the
 same hunk creates an inclusive context range. Dragging from a line's Tag line
 button to another line in the same hunk on the same side adds that inclusive
@@ -333,6 +363,47 @@ failed drafts keep their error with Retry. While sending, the draft is persisted
 before `GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and
 Send, and keeps Cancel available. A post failure transitions the draft to
 `failed` with its error.
+
+### From chat
+
+Drafts can be generated from the chat currently selected in the agent pane.
+The **From chat** action is available for positioned diff-line drafts and
+rendered-Markdown block drafts when the selected chat has an assistant reply
+with non-blank text and is not busy. It snapshots that transcript, anchor,
+and any context tags at click time, then runs one fresh read-only agent session
+with the active `review-comment-from-chat` prompt version. The session reads a
+temporary conversation file containing the anchor and transcript and writes
+only the generated Markdown body to its run directory. On success, an empty
+draft is replaced; for a non-empty draft, generated text is appended below
+existing text with one blank line.
+
+The route rejects guards in this order:
+
+| Condition | Status | Message |
+|---|---:|---|
+| body `chatId` invalid (`CHAT_ID_PATTERN`) | 400 | `Chat id is invalid` |
+| no store | 503 | `Review store is unavailable` |
+| draft missing | 404 | `Draft not found` |
+| draft `posted` | 409 | `Posted comments cannot be edited` |
+| draft `sending` | 409 | `Comment is sending` |
+| generation already active for draft | 409 | `Comment is already generating` |
+| chat unknown | 404 | `Unknown chat: <chatId>` |
+| `activeTurns.has(chatId)` | 409 | `Wait for the chat reply to finish` |
+| no assistant entry with non-blank text | 409 | `Selected chat has no replies yet` |
+| agent unavailable (`agentForSlot("review-comment-from-chat", options.reviewAgent)` returns undefined) | 503 | `Review agent is unavailable` |
+
+The temporary conversation file and every other artifact in the
+`comment-from-chat-*` run directory are deleted after success, failure, stop,
+or timeout. A 600-second timeout reports
+`Comment generation timed out after 600 seconds`. Missing or blank output
+reports `Agent returned no comment text`; agent errors are surfaced inline and
+leave the draft body unchanged. Stop aborts the run without writing or showing
+an error. Cancel deletes the draft and aborts its run.
+
+The server listens for both request disconnect and SSE stream cancellation.
+Either disconnect aborts the agent run, removes its run directory, and prevents
+any draft write. A browser reload or tab close therefore leaves the draft body
+unchanged.
 
 Before Send, mole-tools validates the selection against the parsed diff and
 current `diff_refs`:

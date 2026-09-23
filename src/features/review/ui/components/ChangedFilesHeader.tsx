@@ -12,6 +12,17 @@ export function viewedFileCount(
 export function changedFileCount(files: readonly string[]): number {
 	return new Set(files).size;
 }
+export function diffLineTotals(
+	files: readonly { insertions: number; deletions: number }[],
+): { insertions: number; deletions: number } {
+	let insertions = 0;
+	let deletions = 0;
+	for (const file of files) {
+		insertions += file.insertions;
+		deletions += file.deletions;
+	}
+	return { insertions, deletions };
+}
 
 export interface ChangedFilesHeaderProps {
 	viewedCount: number;
@@ -19,6 +30,7 @@ export interface ChangedFilesHeaderProps {
 	showWhitespaceChanges: boolean;
 	whitespaceChanging: boolean;
 	syncing: boolean;
+	refreshing: boolean;
 	onShowWhitespaceChangesChange: (show: boolean) => void;
 }
 
@@ -28,9 +40,10 @@ export function ChangedFilesHeader({
 	showWhitespaceChanges,
 	whitespaceChanging,
 	syncing,
+	refreshing,
 	onShowWhitespaceChangesChange,
 }: ChangedFilesHeaderProps) {
-	const whitespaceDisabled = whitespaceChanging || syncing;
+	const whitespaceDisabled = whitespaceChanging || syncing || refreshing;
 
 	return (
 		<div

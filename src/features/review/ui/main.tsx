@@ -26,6 +26,7 @@ import {
 import {
 	ChangedFilesHeader,
 	changedFileCount,
+	diffLineTotals,
 	viewedFileCount,
 } from "./components/ChangedFilesHeader";
 import {
@@ -44,14 +45,9 @@ import {
 } from "./components/DiffView";
 import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
-import { type ApprovalAction, MrHeader } from "./components/MrHeader";
+import { type ApprovalAction, MrHeader, tabTitle } from "./components/MrHeader";
 import { SettingsPanel } from "./components/SettingsPanel";
-import {
-	errorToastMessage,
-	refreshResultToast,
-	type Toast,
-	Toasts,
-} from "./components/Toasts";
+import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
@@ -64,6 +60,12 @@ import {
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
+import {
+	type ReviewFreshnessResponse,
+	runReviewRefresh,
+} from "./review-refresh";
+import { type DraftGeneration, fromChatAvailability } from "./from-chat";
+import { generalDiscussions } from "./general-discussions";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -157,11 +159,6 @@ async function updateApproval(
 		throw new Error(`Approval request failed (${response.status})`);
 	const value: unknown = await response.json();
 	return value === null ? null : (value as MrApprovalState);
-}
-interface ReviewFreshnessResponse {
-	stale: boolean;
-	headSha: string;
-	newCommitCount: number;
 }
 
 async function fetchFreshness(token: string): Promise<ReviewFreshnessResponse> {
@@ -566,8 +563,6 @@ function ReviewApp() {
 	const [whitespaceChanging, setWhitespaceChanging] = useState(false);
 	const whitespaceChangingRef = useRef(false);
 	const syncingRef = useRef(false);
-
-	const [regenerateAfterSync, setRegenerateAfterSync] = useState(false);
 	const [layerAction, setLayerAction] = useState<LayerAction | null>(null);
 	const [progressError, setProgressError] = useState<string | null>(null);
 	const [chatRuntimes, setChatRuntimes] = useState<Record<string, ChatRuntime>>(
@@ -576,14 +571,17 @@ function ReviewApp() {
 	const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
 	const [creatingChat, setCreatingChat] = useState(false);
 	const [commentError, setCommentError] = useState<string | null>(null);
+	const [draftGenerations, setDraftGenerations] = useState<
+		Record<string, DraftGeneration>
+	>({});
 	const chatControllers = useRef(new Map<string, AbortController>());
+	const fromChatControllers = useRef(new Map<string, AbortController>());
 	const chatToolSequence = useRef(0);
 	const chatHistoryRequests = useRef(createRequestSequence());
 	const reviewStateRequests = useRef(createReviewStateRequestSequence());
 	const chatSelectionRequests = useRef(createRequestSequence());
 	const chatSelectionQueue = useRef(Promise.resolve());
 	const autoRunRequested = useRef(false);
-	const syncCompleted = useRef(false);
 	const draftEditSequence = useRef(new Map<string, number>());
 	const patchChat = useCallback((chatId: string, patch: ChatRuntimePatch) => {
 		setChatRuntimes((current) => {
@@ -720,7 +718,6 @@ function ReviewApp() {
 				if (
 					next.layerStatus === "pending" &&
 					!autoRunRequested.current &&
-					!syncCompleted.current &&
 					next.layers.every((layer) => !layer.stale)
 				) {
 					autoRunRequested.current = true;
@@ -793,6 +790,12 @@ function ReviewApp() {
 			active = false;
 		};
 	}, [token, reviewLoaded, pushToast]);
+	const mrProjectPath = data?.mr.projectPath;
+	const mrIid = data?.mr.iid;
+	useEffect(() => {
+		if (mrProjectPath === undefined || mrIid === undefined) return;
+		document.title = tabTitle(mrProjectPath, mrIid);
+	}, [mrProjectPath, mrIid]);
 	const activeChatId = selectedChatId ?? data?.activeChatId ?? null;
 	const activeChat = activeChatId
 		? (chatRuntimes[activeChatId] ?? EMPTY_CHAT_RUNTIME)
@@ -801,6 +804,8 @@ function ReviewApp() {
 		id: chat.id,
 		title: chat.title,
 		createdAt: chat.createdAt,
+		agent: chat.agent,
+		model: chat.model,
 		busy:
 			(chatRuntimes[chat.id]?.sending ?? false) ||
 			(data?.busyChatIds ?? []).includes(chat.id),
@@ -811,6 +816,17 @@ function ReviewApp() {
 	const activeChatBusy = activeChatSummary?.busy ?? false;
 	const activeChatLoaded =
 		activeChatId !== null && chatRuntimes[activeChatId]?.loaded === true;
+	const activeChatIndex =
+		activeChatId === null
+			? -1
+			: (data?.chats.findIndex((chat) => chat.id === activeChatId) ?? -1);
+	const activeFromChatAvailability = fromChatAvailability({
+		chat: activeChatSummary ?? null,
+		chatIndex: activeChatIndex,
+		busy: activeChatBusy,
+		loaded: activeChat.loaded,
+		entries: activeChat.entries,
+	});
 
 	useEffect(() => {
 		if (
@@ -1036,6 +1052,7 @@ function ReviewApp() {
 			whitespaceChangingRef.current ||
 			syncingRef.current ||
 			whitespaceChanging ||
+			refreshing ||
 			syncing
 		)
 			return;
@@ -1070,6 +1087,7 @@ function ReviewApp() {
 
 	const files = data.diff.map(filePath).filter((path) => path.length > 0);
 	const changedFileTotal = changedFileCount(files);
+	const lineTotals = diffLineTotals(data.diff);
 	const viewedCount = viewedFileCount(files, data.viewedFiles);
 	const selectFile = (path: string) => {
 		setSelectedPath(path);
@@ -1308,7 +1326,165 @@ function ReviewApp() {
 			});
 	};
 
+	const generateFromChat = (id: string) => {
+		const chatId = activeChatId;
+		if (!chatId) return;
+		const existing = fromChatControllers.current.get(id);
+		if (existing) {
+			if (draftGenerations[id]?.status !== "failed") return;
+			existing.abort();
+			fromChatControllers.current.delete(id);
+		}
+		const controller = new AbortController();
+		fromChatControllers.current.set(id, controller);
+		setDraftGenerations((current) => ({
+			...current,
+			[id]: { status: "running" },
+		}));
+
+		const isCurrent = () => fromChatControllers.current.get(id) === controller;
+		const clearGeneration = () => {
+			if (!isCurrent()) return;
+			setDraftGenerations((current) => {
+				if (!(id in current)) return current;
+				const next = { ...current };
+				delete next[id];
+				return next;
+			});
+		};
+		const failGeneration = (message: string) => {
+			if (!isCurrent()) return;
+			setDraftGenerations((current) => ({
+				...current,
+				[id]: { status: "failed", error: message },
+			}));
+		};
+
+		void (async () => {
+			let done = false;
+			let streamError: string | null = null;
+			try {
+				const response = await fetch(
+					apiUrl(`/api/comments/${encodeURIComponent(id)}/from-chat`, token),
+					{
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							"X-Mole-Token": token,
+							accept: "text/event-stream",
+						},
+						body: JSON.stringify({ chatId }),
+						signal: controller.signal,
+					},
+				);
+				await consumeSseResponse(response, (frame) => {
+					const frameData =
+						typeof frame.data === "object" && frame.data !== null
+							? (frame.data as Record<string, unknown>)
+							: null;
+					if (
+						frame.event === "error" &&
+						typeof frameData?.message === "string"
+					) {
+						streamError = frameData.message;
+						failGeneration(streamError);
+					}
+					if (frame.event !== "done" || !frameData) return;
+					done = true;
+					const status = frameData.status;
+					if (status === "ok") {
+						const nextDraft = frameData.draft;
+						if (
+							typeof nextDraft !== "object" ||
+							nextDraft === null ||
+							!isCurrent()
+						) {
+							if (isCurrent())
+								failGeneration("Comment generation returned no draft");
+							return;
+						}
+						draftEditSequence.current.set(
+							id,
+							(draftEditSequence.current.get(id) ?? 0) + 1,
+						);
+						setData((current) =>
+							current
+								? {
+										...current,
+										drafts: current.drafts.map((draft) =>
+											draft.id === id ? (nextDraft as Draft) : draft,
+										),
+									}
+								: current,
+						);
+						clearGeneration();
+					} else if (status === "failed") {
+						const message =
+							typeof frameData.error === "string"
+								? frameData.error
+								: (streamError ?? "Comment generation failed");
+						failGeneration(message);
+					} else if (status === "stopped") {
+						clearGeneration();
+					}
+				});
+				if (!done && isCurrent()) {
+					failGeneration(
+						streamError ?? `Comment generation failed (${response.status})`,
+					);
+				}
+			} catch (reason: unknown) {
+				if (!isCurrent()) return;
+				if (
+					controller.signal.aborted ||
+					(reason instanceof Error && reason.name === "AbortError")
+				) {
+					clearGeneration();
+				} else {
+					failGeneration(
+						reason instanceof Error ? reason.message : String(reason),
+					);
+				}
+			} finally {
+				if (fromChatControllers.current.get(id) === controller) {
+					fromChatControllers.current.delete(id);
+				}
+			}
+		})();
+	};
+
+	const stopFromChat = (id: string) => {
+		const controller = fromChatControllers.current.get(id);
+		if (!controller) return;
+		void fetch(
+			apiUrl(`/api/comments/${encodeURIComponent(id)}/from-chat/cancel`, token),
+			{
+				method: "POST",
+				headers: { "X-Mole-Token": token },
+			},
+		).catch(() => undefined);
+		controller.abort();
+		fromChatControllers.current.delete(id);
+		setDraftGenerations((current) => {
+			if (!(id in current)) return current;
+			const next = { ...current };
+			delete next[id];
+			return next;
+		});
+	};
+
 	const cancelCommentDraft = (id: string) => {
+		const controller = fromChatControllers.current.get(id);
+		if (controller) {
+			controller.abort();
+			fromChatControllers.current.delete(id);
+		}
+		setDraftGenerations((current) => {
+			if (!(id in current)) return current;
+			const next = { ...current };
+			delete next[id];
+			return next;
+		});
 		setData((current) =>
 			current
 				? {
@@ -1442,15 +1618,32 @@ function ReviewApp() {
 			.finally(() => setLayerAction(null))
 			.then(() => undefined);
 	};
-	const refreshHead = () => {
-		if (refreshing || syncing || layerAction !== null) return;
+	const refreshReview = () => {
+		if (
+			refreshing ||
+			syncing ||
+			syncingRef.current ||
+			whitespaceChanging ||
+			whitespaceChangingRef.current ||
+			layerAction !== null
+		)
+			return;
+		autoRunRequested.current = true;
 		setRefreshing(true);
-		void fetchFreshness(token)
-			.then((next) => {
-				setFreshness(next);
-				const toast = refreshResultToast(next.stale);
-				if (toast) pushToast(toast);
-			})
+		void runReviewRefresh({
+			checkFreshness: () => fetchFreshness(token),
+			sync: syncReviewState,
+			regenerate: () => runLayerAction("regenerate"),
+			applyFreshness: (next) => setFreshness(next),
+			applySyncedState: (next) => {
+				setData(next);
+				setFreshness({
+					stale: false,
+					headSha: next.revision.headSha,
+					newCommitCount: 0,
+				});
+			},
+		})
 			.catch((reason: unknown) => {
 				pushToast({
 					kind: "error",
@@ -1460,7 +1653,7 @@ function ReviewApp() {
 			.finally(() => setRefreshing(false));
 	};
 
-	const syncReviewState = () => {
+	const syncReviewState = async (): Promise<ReviewStateResponse> => {
 		if (
 			syncing ||
 			syncingRef.current ||
@@ -1468,41 +1661,23 @@ function ReviewApp() {
 			whitespaceChangingRef.current ||
 			layerAction !== null
 		)
-			return;
+			throw new Error("Review sync unavailable while another update is in progress");
 		const mutation = reviewStateRequests.current.beginMutation();
-		syncCompleted.current = true;
 		syncingRef.current = true;
-		void fetch(apiUrl("/api/sync", token), {
-			method: "POST",
-			headers: { "X-Mole-Token": token },
-		})
-			.then(async (response) => {
-				if (!response.ok)
-					throw new Error(`Sync request failed (${response.status})`);
-				return (await response.json()) as ReviewStateResponse;
-			})
-			.then(async (next) => {
-				if (!reviewStateRequests.current.canApplyMutation(mutation)) return;
-				setData(next);
-				setFreshness({
-					stale: false,
-					headSha: next.revision.headSha,
-					newCommitCount: 0,
-				});
-				reviewStateRequests.current.finishMutation(mutation);
-				if (regenerateAfterSync) await runLayerAction("regenerate");
-			})
-			.catch((reason: unknown) => {
-				pushToast({
-					kind: "error",
-					message: errorToastMessage(reason),
-				});
-			})
-			.finally(() => {
-				reviewStateRequests.current.finishMutation(mutation);
-				syncingRef.current = false;
-				setSyncing(false);
+		setSyncing(true);
+		try {
+			const response = await fetch(apiUrl("/api/sync", token), {
+				method: "POST",
+				headers: { "X-Mole-Token": token },
 			});
+			if (!response.ok)
+				throw new Error(`Sync request failed (${response.status})`);
+			return (await response.json()) as ReviewStateResponse;
+		} finally {
+			reviewStateRequests.current.finishMutation(mutation);
+			syncingRef.current = false;
+			setSyncing(false);
+		}
 	};
 
 	const selectLayer = (id: string) => {
@@ -1880,6 +2055,7 @@ function ReviewApp() {
 				onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
 				layerAction={layerAction}
 				actionError={progressError}
+				externallyDisabled={refreshing}
 				onRegenerate={() => runLayerAction("regenerate")}
 				onRetry={() => runLayerAction("retry")}
 			/>
@@ -1902,18 +2078,17 @@ function ReviewApp() {
 					<MrHeader
 						mr={data.mr}
 						headSha={data.revision.headSha}
+						filesChanged={changedFileTotal}
+						insertions={lineTotals.insertions}
+						deletions={lineTotals.deletions}
 						approval={data.approval ?? null}
 						approvalLoading={approvalLoading}
 						approvalAction={approvalAction}
 						onApprovalAction={handleApprovalAction}
 						freshness={freshness}
 						refreshing={refreshing}
-						syncing={syncing}
 						layerGenerating={layerAction !== null}
-						regenerateAfterSync={regenerateAfterSync}
-						onRegenerateAfterSyncChange={setRegenerateAfterSync}
-						onRefresh={refreshHead}
-						onSync={syncReviewState}
+						onRefresh={refreshReview}
 					/>
 					<Toasts toasts={toasts} onDismiss={dismissToast} />
 					<ChangedFilesHeader
@@ -1922,6 +2097,7 @@ function ReviewApp() {
 						showWhitespaceChanges={data.showWhitespaceChanges}
 						whitespaceChanging={whitespaceChanging}
 						syncing={syncing}
+						refreshing={refreshing}
 						onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
 					/>
 					<nav
@@ -2003,6 +2179,12 @@ function ReviewApp() {
 					onEditDraft={updateCommentDraft}
 					onSendDraft={sendCommentDraft}
 					onRetryDraft={retryCommentDraft}
+					fromChat={{
+						availability: activeFromChatAvailability,
+						generations: draftGenerations,
+						onGenerate: generateFromChat,
+						onStop: stopFromChat,
+					}}
 				/>
 			</section>
 			<hr
@@ -2022,9 +2204,7 @@ function ReviewApp() {
 			<ChatPane
 				transcript={activeChat.entries}
 				tags={activeChat.tags}
-				discussions={data.discussions.filter(
-					(discussion) => discussion.position === null,
-				)}
+				discussions={generalDiscussions(data.discussions)}
 				onExplainDiscussion={explainDiscussion}
 				explainDisabled={creatingChat}
 				streamingSegments={activeChat.streamingSegments}

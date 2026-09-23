@@ -7,6 +7,7 @@ import {
 	ChangedFilesHeader,
 	type ChangedFilesHeaderProps,
 	changedFileCount,
+	diffLineTotals,
 	viewedFileCount,
 } from "./ChangedFilesHeader";
 
@@ -28,6 +29,7 @@ const defaultProps: ChangedFilesHeaderProps = {
 	showWhitespaceChanges: true,
 	whitespaceChanging: false,
 	syncing: false,
+	refreshing: false,
 	onShowWhitespaceChangesChange: () => {},
 };
 
@@ -81,6 +83,15 @@ test("counts unique changed files that are viewed", () => {
 	expect(changedFileCount(["a.ts", "a.ts", "b.ts"])).toBe(2);
 });
 
+test("sums insertions and deletions across diff files", () => {
+	expect(diffLineTotals([])).toEqual({ insertions: 0, deletions: 0 });
+	expect(
+		diffLineTotals([
+			{ insertions: 1, deletions: 0 },
+			{ insertions: 3, deletions: 2 },
+		]),
+	).toEqual({ insertions: 4, deletions: 2 });
+});
 test("exposes one-pixel boundary borders around changed-files region", () => {
 	const html = markup();
 	const region = html.match(/<div data-region="changed-files"[^>]*>/)?.[0];
@@ -114,6 +125,7 @@ test("renders a controlled accessible whitespace checkbox", () => {
 test("disables the whitespace checkbox while changing or syncing", () => {
 	expect(markup({ whitespaceChanging: true })).toContain("disabled");
 	expect(markup({ syncing: true })).toContain("disabled");
+	expect(markup({ refreshing: true })).toContain("disabled");
 });
 
 test("emits the next controlled boolean when toggled", async () => {

@@ -136,7 +136,7 @@ export function resolveReviewAgentConfig(
 	const agent = override?.agent ?? configured;
 	const binary =
 		agent === configured ? (config.review?.binary ?? agent) : agent;
-	const model = override?.model ?? config.review?.model;
+	const model = override ? override.model : config.review?.model;
 	return { agent, binary, model };
 }
 
