@@ -6,6 +6,7 @@ import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import {
 	isSaveDisabled,
 	MODEL_QUICK_PICKS,
+	type PromptEditorValue,
 	type PromptSnapshot,
 	SettingsPanel,
 	type SettingsSnapshot,
@@ -39,8 +40,9 @@ const initialPrompt: PromptSnapshot = {
 	preset: "terse",
 	version: 3,
 	versions: [1, 2, 3],
+	agent: "omp",
+	model: "sonnet",
 };
-
 function render(prompt: PromptSnapshot = initialPrompt): string {
 	return renderToStaticMarkup(
 		createElement(SettingsPanel, {
@@ -63,6 +65,7 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-layers-plan",
 		"review-chat",
 		"review-explain-comment",
+		"review-comment-from-chat",
 	]);
 	const markup = render();
 	expect(markup).toContain('class="text-lg font-semibold">Settings</h2>');
@@ -124,14 +127,13 @@ test("description follows the selected slot, not the first visible one", () => {
 			onClose: () => {},
 			initialSettings: settings,
 			initialPrompt: {
-				text: "loaded prompt text",
+				...initialPrompt,
 				preset: "default",
 				version: 1,
 				versions: [1],
 			},
 		}),
 	);
-
 	expect(markup).toContain(escapedText(SLOT_DESCRIPTIONS["review-chat"]));
 	expect(markup).not.toContain(
 		escapedText(SLOT_DESCRIPTIONS["review-layers-code"]),
@@ -139,6 +141,162 @@ test("description follows the selected slot, not the first visible one", () => {
 	expect(markup).not.toContain(
 		escapedText(SLOT_DESCRIPTIONS["review-layers-plan"]),
 	);
+});
+test("isSaveDisabled covers unchanged, changed, and pending values", () => {
+	const loaded: PromptEditorValue = {
+		text: "same",
+		agent: "default",
+		model: "sonnet",
+	};
+	expect(isSaveDisabled(loaded, { ...loaded }, false)).toBe(true);
+	expect(isSaveDisabled(loaded, { ...loaded, agent: "omp" }, false)).toBe(
+		false,
+	);
+	expect(isSaveDisabled(loaded, { ...loaded, model: " opus " }, false)).toBe(
+		false,
+	);
+	expect(isSaveDisabled(loaded, { ...loaded, model: " sonnet " }, false)).toBe(
+		true,
+	);
+	expect(isSaveDisabled(loaded, { ...loaded, text: "changed" }, false)).toBe(
+		false,
+	);
+	expect(isSaveDisabled(loaded, { ...loaded, text: "changed" }, true)).toBe(
+		true,
+	);
+});
+test("renders version agent and model with default label", () => {
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: { ...initialSettings.review, agent: "claude" },
+	};
+	const markup = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings: settings,
+			initialPrompt: { ...initialPrompt, agent: "omp", model: "sonnet" },
+		}),
+	);
+
+	expect(markup).toContain('<option value="default">Default (claude)</option>');
+	expect(markup).toContain('<option value="omp" selected="">omp</option>');
+	expect(markup).toContain('id="settings-prompt-model"');
+	expect(markup).toContain('value="sonnet"');
+});
+test("save posts agent and model", async () => {
+	const originalFetch = globalThis.fetch;
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	const prompt = { ...initialPrompt, agent: null, model: null };
+	const jsonResponse = (value: unknown) =>
+		new Response(JSON.stringify(value), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		calls.push({ url: String(input), init });
+		if (init?.method === "POST") {
+			return jsonResponse({ version: 4, saved: true });
+		}
+		if (String(input).includes("/api/settings")) {
+			return jsonResponse(initialSettings);
+		}
+		return jsonResponse({
+			...prompt,
+			agent: "omp",
+			model: "sonnet",
+			version: 4,
+			versions: [1, 2, 3, 4],
+		});
+	}) as unknown as typeof fetch;
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const setValue = (
+		element: HTMLInputElement | HTMLSelectElement | null,
+		value: string,
+		eventName: "change" | "input",
+	) => {
+		if (!element) return;
+		if (element instanceof window.HTMLInputElement) {
+			Object.getOwnPropertyDescriptor(
+				window.HTMLInputElement.prototype,
+				"value",
+			)?.set?.call(element, value);
+		} else {
+			element.value = value;
+		}
+		element.dispatchEvent(new window.Event(eventName, { bubbles: true }));
+	};
+	const saveButton = () =>
+		Array.from(container.querySelectorAll("button")).find((button) =>
+			button.textContent?.includes("Save as new version"),
+		);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt: prompt,
+				}),
+			),
+		);
+		await act(async () => {
+			setValue(
+				container.querySelector("#settings-prompt-agent"),
+				"omp",
+				"change",
+			);
+			setValue(
+				container.querySelector("#settings-prompt-model"),
+				"sonnet",
+				"input",
+			);
+			await Bun.sleep(0);
+		});
+		await act(async () => {
+			saveButton()?.click();
+			await Bun.sleep(0);
+		});
+		const postRequests = () =>
+			calls.filter((call) => call.init?.method === "POST");
+		expect(JSON.parse(String(postRequests()[0]?.init?.body))).toEqual({
+			preset: "terse",
+			text: "loaded prompt text",
+			agent: "omp",
+			model: "sonnet",
+		});
+
+		await act(async () => {
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+			setValue(
+				container.querySelector("#settings-prompt-agent"),
+				"default",
+				"change",
+			);
+			setValue(container.querySelector("#settings-prompt-model"), "", "input");
+			await Bun.sleep(0);
+		});
+		await act(async () => {
+			saveButton()?.click();
+			await Bun.sleep(0);
+		});
+		expect(JSON.parse(String(postRequests()[1]?.init?.body))).toEqual({
+			preset: "terse",
+			text: "loaded prompt text",
+			agent: null,
+			model: null,
+		});
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
 });
 
 test("disables unchanged saves and renders review agent options and model", () => {
@@ -227,11 +385,6 @@ test("only renders rollback for a non-latest version", () => {
 	);
 });
 
-test("isSaveDisabled covers unchanged, changed, and pending text", () => {
-	expect(isSaveDisabled("same", "same", false)).toBe(true);
-	expect(isSaveDisabled("loaded", "changed", false)).toBe(false);
-	expect(isSaveDisabled("loaded", "changed", true)).toBe(true);
-});
 test("keeps settings controls reachable in responsive bounded layout", () => {
 	const markup = render();
 
@@ -242,11 +395,13 @@ test("keeps settings controls reachable in responsive bounded layout", () => {
 	expect(markup).toContain('<nav class="space-y-1" aria-label="Prompt slots">');
 	expect(
 		markup.match(/class="flex flex-wrap items-center gap-2"/g),
-	).toHaveLength(5);
+	).toHaveLength(7);
 
+	expect(markup).toContain('<input id="settings-prompt-model"');
 	for (const id of [
 		"settings-preset",
 		"settings-version",
+		"settings-prompt-agent",
 		"settings-agent",
 		"settings-model-quickpick",
 	]) {

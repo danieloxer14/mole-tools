@@ -31,6 +31,7 @@ const HEARTBEAT_FRAME = ": ping\n\n";
 export function sseResponse(
 	source: AsyncIterable<SseFrame>,
 	heartbeatMs: number = HEARTBEAT_MS,
+	onCancel?: () => void,
 ): Response {
 	const encoder = new TextEncoder();
 	let lastFrameWasDone = false;
@@ -78,6 +79,9 @@ export function sseResponse(
 				}
 				controller.close();
 			}
+		},
+		cancel() {
+			onCancel?.();
 		},
 	});
 

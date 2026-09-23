@@ -155,7 +155,7 @@ test("selects the configured review agent and accepts an override", () => {
 	expect(overriddenContext.createReviewAgent()).toBe(fake);
 	expect(overriddenContext.createReviewAgent({ agent: "omp" })).toBe(fake);
 });
-test("resolves review agent config with override precedence", () => {
+test("override decides the model without inheriting configured model", () => {
 	const configuredConfig = ConfigSchema.parse({
 		...config,
 		review: {
@@ -188,7 +188,7 @@ test("resolves review agent config with override precedence", () => {
 	).toEqual({
 		agent: "claude",
 		binary: "claude",
-		model: "configured-model",
+		model: undefined,
 	});
 });
 test("creates babysitter services without resolving Slack environment", () => {

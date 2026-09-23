@@ -11,6 +11,7 @@ export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-layers-plan",
 	"review-chat",
 	"review-explain-comment",
+	"review-comment-from-chat",
 ];
 export const MODEL_QUICK_PICKS: readonly string[] = ["sonnet", "opus", "fable"];
 
@@ -22,6 +23,7 @@ export const SLOT_LABELS: Record<PromptName, string> = {
 	"review-layers-plan": "Review layers (plan)",
 	"review-chat": "Review chat",
 	"review-explain-comment": "Explain review comment",
+	"review-comment-from-chat": "Comment from chat",
 };
 export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 	"commit-system":
@@ -38,9 +40,12 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Base system prompt for the review chat agent's replies to questions about the MR.",
 	"review-explain-comment":
 		"Prompt used by the review UI to explain a GitLab discussion in a new chat.",
+	"review-comment-from-chat":
+		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 };
 
 type ReviewAgent = "omp" | "claude";
+type PromptAgent = "default" | ReviewAgent;
 
 export interface SettingsSnapshot {
 	slots: Array<{
@@ -60,6 +65,8 @@ export interface PromptSnapshot {
 	preset: string;
 	version: number;
 	versions: number[];
+	agent: ReviewAgent | null;
+	model: string | null;
 }
 
 export interface SettingsPanelProps {
@@ -69,12 +76,23 @@ export interface SettingsPanelProps {
 	initialPrompt?: PromptSnapshot;
 }
 
+export interface PromptEditorValue {
+	text: string;
+	agent: PromptAgent;
+	model: string;
+}
+
 export function isSaveDisabled(
-	loadedText: string,
-	text: string,
+	loaded: PromptEditorValue,
+	current: PromptEditorValue,
 	pending: boolean,
 ): boolean {
-	return pending || text === loadedText;
+	return (
+		pending ||
+		(current.text === loaded.text &&
+			current.agent === loaded.agent &&
+			current.model.trim() === loaded.model.trim())
+	);
 }
 
 function apiUrl(path: string, token: string): string {
@@ -159,11 +177,19 @@ function clearPromptState(
 	setText: (value: string) => void,
 	setLoadedText: (value: string) => void,
 	setSelectedVersion: (value: number) => void,
+	setPromptAgent: (value: PromptAgent) => void,
+	setLoadedAgent: (value: PromptAgent) => void,
+	setPromptModel: (value: string) => void,
+	setLoadedModel: (value: string) => void,
 ): void {
 	setPrompt(null);
 	setText("");
 	setLoadedText("");
 	setSelectedVersion(0);
+	setPromptAgent("default");
+	setLoadedAgent("default");
+	setPromptModel("");
+	setLoadedModel("");
 }
 
 export function SettingsPanel({
@@ -194,6 +220,14 @@ export function SettingsPanel({
 	);
 	const [text, setText] = useState(initialPrompt?.text ?? "");
 	const [loadedText, setLoadedText] = useState(initialPrompt?.text ?? "");
+	const [promptAgent, setPromptAgent] = useState<PromptAgent>(
+		initialPrompt?.agent ?? "default",
+	);
+	const [promptModel, setPromptModel] = useState(initialPrompt?.model ?? "");
+	const [loadedAgent, setLoadedAgent] = useState<PromptAgent>(
+		initialPrompt?.agent ?? "default",
+	);
+	const [loadedModel, setLoadedModel] = useState(initialPrompt?.model ?? "");
 	const [newPreset, setNewPreset] = useState("");
 	const [reviewAgent, setReviewAgent] = useState<ReviewAgent>(
 		initialSettings?.review.agent ?? "claude",
@@ -223,6 +257,10 @@ export function SettingsPanel({
 			setSelectedVersion(snapshot.version);
 			setText(snapshot.text);
 			setLoadedText(snapshot.text);
+			setPromptAgent(snapshot.agent ?? "default");
+			setLoadedAgent(snapshot.agent ?? "default");
+			setPromptModel(snapshot.model ?? "");
+			setLoadedModel(snapshot.model ?? "");
 			return snapshot;
 		},
 		[token],
@@ -304,13 +342,31 @@ export function SettingsPanel({
 		const preset = slotSettings?.activePreset ?? "default";
 		setSelectedSlot(slot);
 		setSelectedPreset(preset);
-		clearPromptState(setPrompt, setText, setLoadedText, setSelectedVersion);
+		clearPromptState(
+			setPrompt,
+			setText,
+			setLoadedText,
+			setSelectedVersion,
+			setPromptAgent,
+			setLoadedAgent,
+			setPromptModel,
+			setLoadedModel,
+		);
 		void loadPromptWithPending(slot, preset);
 	};
 
 	const handlePresetChange = (value: string) => {
 		setSelectedPreset(value);
-		clearPromptState(setPrompt, setText, setLoadedText, setSelectedVersion);
+		clearPromptState(
+			setPrompt,
+			setText,
+			setLoadedText,
+			setSelectedVersion,
+			setPromptAgent,
+			setLoadedAgent,
+			setPromptModel,
+			setLoadedModel,
+		);
 		void loadPromptWithPending(selectedSlot, value);
 	};
 
@@ -322,14 +378,27 @@ export function SettingsPanel({
 	};
 
 	const handleSave = async () => {
-		if (!prompt || isSaveDisabled(loadedText, text, pending)) return;
+		if (
+			!prompt ||
+			isSaveDisabled(
+				{ text: loadedText, agent: loadedAgent, model: loadedModel },
+				{ text, agent: promptAgent, model: promptModel },
+				pending,
+			)
+		)
+			return;
 		setPending(true);
 		setStatus(null);
 		try {
 			const result = await postJson<{ version: number; saved: boolean }>(
 				token,
 				`/api/prompts/${encodeURIComponent(selectedSlot)}`,
-				{ preset: selectedPreset, text },
+				{
+					preset: selectedPreset,
+					text,
+					agent: promptAgent === "default" ? null : promptAgent,
+					model: promptModel.trim() || null,
+				},
 			);
 			await refreshSettings();
 			await loadPrompt(selectedSlot, selectedPreset);
@@ -613,6 +682,58 @@ export function SettingsPanel({
 									</Button>
 								</div>
 
+								<div className="flex flex-wrap items-center gap-2">
+									<label
+										className="w-24 shrink-0 text-xs font-medium"
+										htmlFor="settings-prompt-agent"
+									>
+										Agent
+									</label>
+									<NativeSelect
+										className="min-w-0 flex-1"
+										id="settings-prompt-agent"
+										size="sm"
+										value={promptAgent}
+										disabled={pending}
+										onChange={(event) => {
+											const value = controlValue(event);
+											setPromptAgent(
+												value === "omp" || value === "claude"
+													? value
+													: "default",
+											);
+										}}
+									>
+										<option value="default">
+											Default ({settings.review.agent})
+										</option>
+										<option value="omp">omp</option>
+										<option value="claude">claude</option>
+									</NativeSelect>
+								</div>
+
+								<div className="flex flex-wrap items-center gap-2">
+									<label
+										className="w-24 shrink-0 text-xs font-medium"
+										htmlFor="settings-prompt-model"
+									>
+										Model
+									</label>
+									<Input
+										id="settings-prompt-model"
+										type="text"
+										className="h-8 min-w-0 flex-1"
+										value={promptModel}
+										placeholder={
+											promptAgent === "default"
+												? `Default (${settings.review.model ?? "agent default"})`
+												: "Agent default"
+										}
+										disabled={pending}
+										onChange={(event) => setPromptModel(controlValue(event))}
+									/>
+								</div>
+
 								<div className="space-y-2">
 									<label
 										className="text-sm font-medium"
@@ -631,7 +752,15 @@ export function SettingsPanel({
 								</div>
 								<Button
 									size="sm"
-									disabled={isSaveDisabled(loadedText, text, pending)}
+									disabled={isSaveDisabled(
+										{
+											text: loadedText,
+											agent: loadedAgent,
+											model: loadedModel,
+										},
+										{ text, agent: promptAgent, model: promptModel },
+										pending,
+									)}
 									onClick={handleSave}
 								>
 									Save as new version
@@ -648,6 +777,9 @@ export function SettingsPanel({
 									>
 										Review agent
 									</h3>
+									<p className="text-xs text-muted-foreground">
+										Default for prompt versions whose agent is Default.
+									</p>
 									<div className="flex flex-wrap items-center gap-2">
 										<label
 											className="w-24 shrink-0 text-xs font-medium"
