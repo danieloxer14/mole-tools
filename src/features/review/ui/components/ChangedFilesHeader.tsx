@@ -1,4 +1,5 @@
 import { ProgressBar } from "./ProgressBar";
+import { Checkbox } from "./ui/checkbox";
 
 export function viewedFileCount(
 	files: readonly string[],
@@ -12,13 +13,25 @@ export function changedFileCount(files: readonly string[]): number {
 	return new Set(files).size;
 }
 
+export interface ChangedFilesHeaderProps {
+	viewedCount: number;
+	total: number;
+	showWhitespaceChanges: boolean;
+	whitespaceChanging: boolean;
+	syncing: boolean;
+	onShowWhitespaceChangesChange: (show: boolean) => void;
+}
+
 export function ChangedFilesHeader({
 	viewedCount,
 	total,
-}: {
-	viewedCount: number;
-	total: number;
-}) {
+	showWhitespaceChanges,
+	whitespaceChanging,
+	syncing,
+	onShowWhitespaceChangesChange,
+}: ChangedFilesHeaderProps) {
+	const whitespaceDisabled = whitespaceChanging || syncing;
+
 	return (
 		<div
 			data-region="changed-files"
@@ -34,6 +47,18 @@ export function ChangedFilesHeader({
 			<span className="tabular-nums">
 				{viewedCount}/{total} files
 			</span>
+			<div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+				<Checkbox
+					id="show-whitespace-changes"
+					aria-label="Show whitespace changes"
+					checked={showWhitespaceChanges}
+					disabled={whitespaceDisabled}
+					onCheckedChange={(checked) =>
+						onShowWhitespaceChangesChange(checked === true)
+					}
+				/>
+				<label htmlFor="show-whitespace-changes">Show whitespace changes</label>
+			</div>
 		</div>
 	);
 }

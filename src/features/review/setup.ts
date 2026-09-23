@@ -482,6 +482,7 @@ export async function setupReview(
 	const state = ReviewStateSchema.parse({
 		version: 1,
 		mode,
+		showWhitespaceChanges: previous?.showWhitespaceChanges ?? true,
 		mr: {
 			host: input.ref.host,
 			projectPath: input.ref.projectPath,

@@ -63,6 +63,7 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
+import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -107,6 +108,27 @@ async function fetchState(token: string): Promise<ReviewStateResponse> {
 	if (!response.ok)
 		throw new Error(`State request failed (${response.status})`);
 	return (await response.json()) as ReviewStateResponse;
+}
+interface WhitespaceDiffResponse {
+	showWhitespaceChanges: boolean;
+	diff: ParsedFileDiff[];
+}
+
+async function updateWhitespaceChanges(
+	token: string,
+	showWhitespaceChanges: boolean,
+): Promise<WhitespaceDiffResponse> {
+	const response = await fetch(apiUrl("/api/diff/whitespace", token), {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"X-Mole-Token": token,
+		},
+		body: JSON.stringify({ showWhitespaceChanges }),
+	});
+	if (!response.ok)
+		throw new Error(`Whitespace diff request failed (${response.status})`);
+	return (await response.json()) as WhitespaceDiffResponse;
 }
 
 async function fetchApproval(token: string): Promise<MrApprovalState | null> {
@@ -541,6 +563,10 @@ function ReviewApp() {
 	);
 	const [refreshing, setRefreshing] = useState(false);
 	const [syncing, setSyncing] = useState(false);
+	const [whitespaceChanging, setWhitespaceChanging] = useState(false);
+	const whitespaceChangingRef = useRef(false);
+	const syncingRef = useRef(false);
+
 	const [regenerateAfterSync, setRegenerateAfterSync] = useState(false);
 	const [layerAction, setLayerAction] = useState<LayerAction | null>(null);
 	const [progressError, setProgressError] = useState<string | null>(null);
@@ -553,7 +579,7 @@ function ReviewApp() {
 	const chatControllers = useRef(new Map<string, AbortController>());
 	const chatToolSequence = useRef(0);
 	const chatHistoryRequests = useRef(createRequestSequence());
-	const chatStateRequests = useRef(createRequestSequence());
+	const reviewStateRequests = useRef(createReviewStateRequestSequence());
 	const chatSelectionRequests = useRef(createRequestSequence());
 	const chatSelectionQueue = useRef(Promise.resolve());
 	const autoRunRequested = useRef(false);
@@ -569,6 +595,12 @@ function ReviewApp() {
 			};
 		});
 	}, []);
+	const fetchReviewState = useCallback(async () => {
+		const request = reviewStateRequests.current.beginFetch();
+		const next = await fetchState(token);
+		if (reviewStateRequests.current.canApplyFetch(request)) setData(next);
+		return next;
+	}, [token]);
 	const resizeColumn = (column: ReviewColumn, requestedWidth: number) => {
 		const shell = reviewShell.current;
 		if (!shell) return;
@@ -682,14 +714,9 @@ function ReviewApp() {
 					});
 				}
 			});
-		void fetchState(token)
+		fetchReviewState()
 			.then((next) => {
 				if (!active) return;
-				setData(next);
-				const first = next.diff[0];
-				if (first) {
-					setSelectedPath(filePath(first));
-				}
 				if (
 					next.layerStatus === "pending" &&
 					!autoRunRequested.current &&
@@ -699,10 +726,7 @@ function ReviewApp() {
 					autoRunRequested.current = true;
 					setLayerAction("regenerate");
 					void consumeLayerStream(token, "regenerate", applyFrame)
-						.then(() => fetchState(token))
-						.then((latest) => {
-							if (active) setData(latest);
-						})
+						.then(() => fetchReviewState())
 						.catch((reason: unknown) => {
 							if (!active) return;
 							const message =
@@ -729,7 +753,19 @@ function ReviewApp() {
 		return () => {
 			active = false;
 		};
-	}, [token, pushToast]);
+	}, [token, pushToast, fetchReviewState]);
+	useEffect(() => {
+		if (!data) return;
+		const visiblePaths = data.diff
+			.map(filePath)
+			.filter((path) => path.length > 0);
+		setSelectedPath((current) =>
+			current !== null && visiblePaths.includes(current)
+				? current
+				: (visiblePaths[0] ?? null),
+		);
+	}, [data]);
+
 	const reviewLoaded = data !== null;
 	useEffect(() => {
 		if (!token || !reviewLoaded) return;
@@ -817,9 +853,8 @@ function ReviewApp() {
 		let timer = 0;
 		const refresh = async () => {
 			if (!active) return;
-			const stateRequestId = chatStateRequests.current.next("state");
 			try {
-				const latest = await fetchState(token);
+				const latest = await fetchReviewState();
 				const chatIds = [
 					...new Set([...runningChatIds, ...latest.busyChatIds]),
 				];
@@ -841,12 +876,7 @@ function ReviewApp() {
 						}
 					}),
 				);
-				if (
-					!active ||
-					!chatStateRequests.current.isCurrent("state", stateRequestId)
-				)
-					return;
-				setData(latest);
+				if (!active) return;
 				if (latest.busyChatIds.length > 0)
 					timer = window.setTimeout(refresh, 750);
 			} catch {
@@ -858,7 +888,7 @@ function ReviewApp() {
 			active = false;
 			window.clearTimeout(timer);
 		};
-	}, [token, busyChatIds, patchChat]);
+	}, [token, busyChatIds, patchChat, fetchReviewState]);
 
 	const selectedFile =
 		data?.diff.find((file) => filePath(file) === selectedPath) ?? null;
@@ -999,6 +1029,43 @@ function ReviewApp() {
 				});
 			})
 			.finally(() => setApprovalAction(null));
+	};
+	const handleShowWhitespaceChangesChange = (show: boolean) => {
+		if (
+			!data ||
+			whitespaceChangingRef.current ||
+			syncingRef.current ||
+			whitespaceChanging ||
+			syncing
+		)
+			return;
+		const mutation = reviewStateRequests.current.beginMutation();
+		whitespaceChangingRef.current = true;
+		setWhitespaceChanging(true);
+		void updateWhitespaceChanges(token, show)
+			.then((next) => {
+				if (!reviewStateRequests.current.canApplyMutation(mutation)) return;
+				setData((current) =>
+					current
+						? {
+								...current,
+								showWhitespaceChanges: next.showWhitespaceChanges,
+								diff: next.diff,
+							}
+						: current,
+				);
+			})
+			.catch((reason: unknown) => {
+				pushToast({
+					kind: "error",
+					message: errorToastMessage(reason),
+				});
+			})
+			.finally(() => {
+				reviewStateRequests.current.finishMutation(mutation);
+				whitespaceChangingRef.current = false;
+				setWhitespaceChanging(false);
+			});
 	};
 
 	const files = data.diff.map(filePath).filter((path) => path.length > 0);
@@ -1262,9 +1329,7 @@ function ReviewApp() {
 				setCommentError(
 					reason instanceof Error ? reason.message : String(reason),
 				);
-				void fetchState(token)
-					.then(setData)
-					.catch(() => undefined);
+				void fetchReviewState().catch(() => undefined);
 			});
 	};
 
@@ -1317,16 +1382,20 @@ function ReviewApp() {
 							postedDiscussion = discussion as HostDiscussion;
 					}
 				});
-				const latest = await fetchState(token);
-				if (
-					postedDiscussion &&
-					!latest.discussions.some(
-						(discussion) => discussion.id === postedDiscussion?.id,
-					)
-				) {
-					latest.discussions = [...latest.discussions, postedDiscussion];
+				await fetchReviewState();
+				if (postedDiscussion) {
+					setData((current) =>
+						current &&
+						!current.discussions.some(
+							(discussion) => discussion.id === postedDiscussion?.id,
+						)
+							? {
+									...current,
+									discussions: [...current.discussions, postedDiscussion],
+								}
+							: current,
+					);
 				}
-				setData(latest);
 				if (!response.ok)
 					throw new Error(
 						streamError ?? `Comment send failed (${response.status})`,
@@ -1336,7 +1405,7 @@ function ReviewApp() {
 					reason instanceof Error ? reason.message : String(reason),
 				);
 				try {
-					setData(await fetchState(token));
+					await fetchReviewState();
 				} catch {
 					// Draft error from the route remains visible if refresh is unavailable.
 				}
@@ -1356,8 +1425,7 @@ function ReviewApp() {
 				current ? mergeLayerStreamFrame(current, frame) : current,
 			);
 		})
-			.then(() => fetchState(token))
-			.then(setData)
+			.then(() => fetchReviewState())
 			.catch((reason: unknown) => {
 				const message =
 					reason instanceof Error ? reason.message : String(reason);
@@ -1393,9 +1461,17 @@ function ReviewApp() {
 	};
 
 	const syncReviewState = () => {
-		if (syncing || layerAction !== null) return;
+		if (
+			syncing ||
+			syncingRef.current ||
+			whitespaceChanging ||
+			whitespaceChangingRef.current ||
+			layerAction !== null
+		)
+			return;
+		const mutation = reviewStateRequests.current.beginMutation();
 		syncCompleted.current = true;
-		setSyncing(true);
+		syncingRef.current = true;
 		void fetch(apiUrl("/api/sync", token), {
 			method: "POST",
 			headers: { "X-Mole-Token": token },
@@ -1406,12 +1482,14 @@ function ReviewApp() {
 				return (await response.json()) as ReviewStateResponse;
 			})
 			.then(async (next) => {
+				if (!reviewStateRequests.current.canApplyMutation(mutation)) return;
 				setData(next);
 				setFreshness({
 					stale: false,
 					headSha: next.revision.headSha,
 					newCommitCount: 0,
 				});
+				reviewStateRequests.current.finishMutation(mutation);
 				if (regenerateAfterSync) await runLayerAction("regenerate");
 			})
 			.catch((reason: unknown) => {
@@ -1420,7 +1498,11 @@ function ReviewApp() {
 					message: errorToastMessage(reason),
 				});
 			})
-			.finally(() => setSyncing(false));
+			.finally(() => {
+				reviewStateRequests.current.finishMutation(mutation);
+				syncingRef.current = false;
+				setSyncing(false);
+			});
 	};
 
 	const selectLayer = (id: string) => {
@@ -1552,10 +1634,9 @@ function ReviewApp() {
 		)
 			.then(async () => {
 				const historyRequestId = chatHistoryRequests.current.next(chatId);
-				const stateRequestId = chatStateRequests.current.next("state");
-				const [entries, latest] = await Promise.all([
+				const [entries] = await Promise.all([
 					fetchChatHistory(token, chatId),
-					fetchState(token),
+					fetchReviewState(),
 				]);
 				if (chatHistoryRequests.current.isCurrent(chatId, historyRequestId))
 					patchChat(chatId, {
@@ -1563,8 +1644,6 @@ function ReviewApp() {
 						loaded: true,
 						streamingSegments: [],
 					});
-				if (chatStateRequests.current.isCurrent("state", stateRequestId))
-					setData(latest);
 			})
 			.catch((reason: unknown) => {
 				if (controller.signal.aborted) return;
@@ -1606,8 +1685,7 @@ function ReviewApp() {
 			.then(async (response) => {
 				if (!response.ok)
 					throw new Error(`Chat cancel request failed (${response.status})`);
-				const latest = await fetchState(token);
-				setData(latest);
+				await fetchReviewState();
 				patchChat(chatId, { stopping: false });
 			})
 			.catch((reason: unknown) => {
@@ -1841,6 +1919,10 @@ function ReviewApp() {
 					<ChangedFilesHeader
 						viewedCount={viewedCount}
 						total={changedFileTotal}
+						showWhitespaceChanges={data.showWhitespaceChanges}
+						whitespaceChanging={whitespaceChanging}
+						syncing={syncing}
+						onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
 					/>
 					<nav
 						className="min-h-0 max-h-[40vh] flex-1 overflow-auto"
