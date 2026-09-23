@@ -1,6 +1,7 @@
 import type {
 	AddWorktreeInput,
 	CommitMeta,
+	DiffOptions,
 	FileDiff,
 	LogQuery,
 	TouchAuthor,
@@ -24,6 +25,7 @@ export interface FakeVcsOptions {
 	commitsAhead?: CommitMeta[];
 	rangeDiff?: FileDiff[];
 	diffRange?: FileDiff[];
+	diffRangeIgnoringWhitespace?: FileDiff[];
 	log?: CommitMeta[];
 	touchAuthors?: TouchAuthor[];
 	recentAuthors?: string[];
@@ -46,7 +48,12 @@ export class FakeVcs implements Vcs {
 	fetchRefCalls: { repoRoot: string; remote: string; ref: string }[] = [];
 	mergeBaseCalls: { repoRoot: string; a: string; b: string }[] = [];
 	addWorktreeCalls: AddWorktreeInput[] = [];
-	diffRangeCalls: { repoRoot: string; from: string; to: string }[] = [];
+	diffRangeCalls: {
+		repoRoot: string;
+		from: string;
+		to: string;
+		options?: DiffOptions;
+	}[] = [];
 	remoteUrlCalls: { repoRoot: string; remote: string }[] = [];
 	repoRootCalls: string[] = [];
 	logCalls: LogQuery[] = [];
@@ -146,9 +153,23 @@ export class FakeVcs implements Vcs {
 		repoRoot: string,
 		from: string,
 		to: string,
+		options?: DiffOptions,
 	): Promise<FileDiff[]> {
-		this.diffRangeCalls.push({ repoRoot, from, to });
+		const call = { repoRoot, from, to };
+		if (options === undefined) {
+			this.diffRangeCalls.push(call);
+		} else {
+			this.diffRangeCalls.push({ ...call, options });
+		}
 		if (this.opts.diffRangeError) throw this.opts.diffRangeError;
+		if (options?.ignoreWhitespace === true) {
+			return (
+				this.opts.diffRangeIgnoringWhitespace ??
+				this.opts.diffRange ??
+				this.opts.rangeDiff ??
+				[]
+			);
+		}
 		return this.opts.diffRange ?? this.opts.rangeDiff ?? [];
 	}
 

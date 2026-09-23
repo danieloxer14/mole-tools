@@ -2,6 +2,7 @@ import { PortError } from "../../core/errors";
 import type {
 	AddWorktreeInput,
 	CommitMeta,
+	DiffOptions,
 	FileDiff,
 	LogQuery,
 	TouchAuthor,
@@ -217,8 +218,9 @@ export class GitAdapter implements Vcs {
 		repoRoot: string,
 		from: string,
 		to: string,
+		options?: DiffOptions,
 	): Promise<FileDiff[]> {
-		return this.diffBetweenIn([from, to], repoRoot);
+		return this.diffBetweenIn([from, to], repoRoot, options);
 	}
 
 	async remoteUrl(repoRoot: string, remote: string): Promise<string | null> {
@@ -255,10 +257,16 @@ export class GitAdapter implements Vcs {
 	private async diffBetweenIn(
 		range: string[],
 		cwd: string,
+		options?: DiffOptions,
 	): Promise<FileDiff[]> {
+		const diffArgs = [
+			"diff",
+			...range,
+			...(options?.ignoreWhitespace === true ? ["--ignore-all-space"] : []),
+		];
 		const [numstat, patch] = await Promise.all([
-			this.runIn(["diff", ...range, "--numstat"], cwd),
-			this.runIn(["diff", ...range], cwd),
+			this.runIn([...diffArgs, "--numstat"], cwd),
+			this.runIn(diffArgs, cwd),
 		]);
 		const stats = parseNumstat(numstat);
 		const patches = parseUnifiedDiff(patch);

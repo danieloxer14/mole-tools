@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from "bun:test";
-import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -18,16 +17,7 @@ import {
 	tabTitle,
 } from "./MrHeader";
 
-const dom = new Window();
-Object.assign(globalThis, {
-	window: dom,
-	document: dom.document,
-	navigator: dom.navigator,
-	Node: dom.Node,
-	Element: dom.Element,
-	HTMLElement: dom.HTMLElement,
-	IS_REACT_ACT_ENVIRONMENT: true,
-});
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: Root[] = [];
 
 afterEach(() => {
@@ -113,7 +103,7 @@ function expectBefore(before: Element | null, after: Element | null): void {
 
 test("reports copied only after clipboard write succeeds", async () => {
 	let resolveCopy!: () => void;
-	Object.defineProperty(dom.navigator, "clipboard", {
+	Object.defineProperty(navigator, "clipboard", {
 		configurable: true,
 		value: {
 			writeText: () =>
@@ -140,7 +130,7 @@ test("reports copied only after clipboard write succeeds", async () => {
 });
 
 test("does not report copied when clipboard write fails", async () => {
-	Object.defineProperty(dom.navigator, "clipboard", {
+	Object.defineProperty(navigator, "clipboard", {
 		configurable: true,
 		value: {
 			writeText: () => Promise.reject(new Error("clipboard unavailable")),
@@ -336,7 +326,7 @@ test("covers pure display helpers", () => {
 	expect(filesChangedLabel(3)).toBe("3 files changed");
 });
 test("keeps SHA copy control centered with adjacent header controls", async () => {
-	Object.defineProperty(dom.navigator, "clipboard", {
+	Object.defineProperty(navigator, "clipboard", {
 		configurable: true,
 		value: {
 			writeText: () => Promise.resolve(),

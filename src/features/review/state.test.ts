@@ -93,6 +93,19 @@ test("normalizes legacy BDD fields without a version bump", () => {
 	]);
 });
 
+test("defaults the whitespace preference for legacy state", () => {
+	const legacy = { ...state() } as Record<string, unknown>;
+	delete legacy.showWhitespaceChanges;
+
+	expect(ReviewStateSchema.parse(legacy).showWhitespaceChanges).toBe(true);
+	expect(
+		ReviewStateSchema.parse({
+			...state(),
+			showWhitespaceChanges: false,
+		}).showWhitespaceChanges,
+	).toBe(false);
+});
+
 describe("ReviewState", () => {
 	test("migrates legacy session state at the store boundary", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-legacy-state-"));

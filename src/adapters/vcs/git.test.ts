@@ -272,6 +272,59 @@ describe("GitAdapter", () => {
 			},
 		]);
 	});
+	test("diffRange preserves existing git commands without options", async () => {
+		const calls: string[][] = [];
+		const git = new GitAdapter(
+			scriptedExec(
+				{
+					"diff base-sha head-sha --numstat": ok("1\t1\tsrc/file.ts\n"),
+					"diff base-sha head-sha": ok(""),
+				},
+				calls,
+			),
+		);
+
+		const diffs = await git.diffRange("/repo", "base-sha", "head-sha");
+
+		expect(diffs).toEqual([
+			{
+				path: "src/file.ts",
+				statOnly: false,
+				patch: null,
+				insertions: 1,
+				deletions: 1,
+			},
+		]);
+		expect(calls).toEqual([
+			["diff", "base-sha", "head-sha", "--numstat"],
+			["diff", "base-sha", "head-sha"],
+		]);
+	});
+
+	test("diffRange adds --ignore-all-space to stats and patch commands", async () => {
+		const calls: string[][] = [];
+		const git = new GitAdapter(
+			scriptedExec(
+				{
+					"diff base-sha head-sha --ignore-all-space --numstat": ok(
+						"1\t1\tsrc/file.ts\n",
+					),
+					"diff base-sha head-sha --ignore-all-space": ok(""),
+				},
+				calls,
+			),
+		);
+
+		const diffs = await git.diffRange("/repo", "base-sha", "head-sha", {
+			ignoreWhitespace: true,
+		});
+
+		expect(diffs).toHaveLength(1);
+		expect(calls).toEqual([
+			["diff", "base-sha", "head-sha", "--ignore-all-space", "--numstat"],
+			["diff", "base-sha", "head-sha", "--ignore-all-space"],
+		]);
+	});
 
 	test("log respects maxCount and base options", async () => {
 		const calls: string[][] = [];

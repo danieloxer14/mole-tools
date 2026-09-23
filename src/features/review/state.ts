@@ -91,6 +91,7 @@ export const LegacyChatSessionSchema = z.string().nullable().default(null);
 export const ReviewStateSchema = z.object({
 	version: z.literal(1),
 	mode: z.enum(["code", "plan"]),
+	showWhitespaceChanges: z.boolean().default(true),
 	mr: z.object({
 		host: z.string(),
 		projectPath: z.string(),

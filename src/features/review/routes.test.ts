@@ -18,6 +18,7 @@ import type {
 	AgentTurn,
 	ReviewAgent,
 } from "../../ports/review-agent";
+import type { DiffOptions, FileDiff } from "../../ports/vcs";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { createReviewRoutes, resolveReviewFilePath } from "./routes";
 import { sseResponse } from "./sse";
@@ -135,6 +136,67 @@ const commentDiff: ParsedFileDiff[] = [
 		],
 	},
 ];
+function rawDiff(
+	path: string,
+	patch: string,
+): {
+	path: string;
+	statOnly: boolean;
+	patch: string;
+	insertions: number;
+	deletions: number;
+} {
+	return {
+		path,
+		statOnly: false,
+		patch,
+		insertions: 1,
+		deletions: 1,
+	};
+}
+class RevisionDiffVcs extends FakeVcs {
+	constructor(
+		private readonly oldHidden: FileDiff[],
+		private readonly nextHidden: FileDiff[],
+		private readonly nextCanonical: FileDiff[],
+	) {
+		super({ worktrees: [] });
+	}
+
+	override async diffRange(
+		repoRoot: string,
+		from: string,
+		to: string,
+		options?: DiffOptions,
+	): Promise<FileDiff[]> {
+		const call = { repoRoot, from, to };
+		this.diffRangeCalls.push(
+			options === undefined ? call : { ...call, options },
+		);
+		if (options?.ignoreWhitespace) {
+			return from === "base" ? this.oldHidden : this.nextHidden;
+		}
+		return this.nextCanonical;
+	}
+}
+class DeferredHiddenVcs extends FakeVcs {
+	readonly hiddenStarted = Promise.withResolvers<void>();
+	readonly releaseHidden = Promise.withResolvers<void>();
+
+	override async diffRange(
+		repoRoot: string,
+		from: string,
+		to: string,
+		options?: DiffOptions,
+	): Promise<FileDiff[]> {
+		const result = await super.diffRange(repoRoot, from, to, options);
+		if (options?.ignoreWhitespace) {
+			this.hiddenStarted.resolve();
+			await this.releaseHidden.promise;
+		}
+		return result;
+	}
+}
 
 function chatPaths(dir: string) {
 	return {
@@ -317,6 +379,339 @@ describe("review routes", () => {
 			request("/api/state", { headers: { "X-Mole-Token": token } }),
 		);
 		expect(authorized.status).toBe(200);
+	});
+	test("serves canonical diffs by default and caches hidden toggles", async () => {
+		const canonical = [
+			rawDiff("src/whitespace.ts", "@@ -1 +1 @@\n-old  \n+new\n"),
+			rawDiff("src/substantive.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+		];
+		const hidden = canonical.slice(1);
+		const vcs = new FakeVcs({
+			repoRoot: state().repoRoot,
+			diffRangeIgnoringWhitespace: hidden,
+		});
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			diff: parseFileDiffs(canonical),
+			layerDiff: canonical,
+			expandedDiff: parseFileDiffs(canonical),
+			vcs,
+		});
+
+		const initial = await routes(request(`/api/state?t=${token}`));
+		expect(initial.status).toBe(200);
+		const initialBody = (await initial.json()) as { diff: ParsedFileDiff[] };
+		expect(initialBody.diff.map((file) => file.newPath)).toEqual([
+			"src/whitespace.ts",
+			"src/substantive.ts",
+		]);
+		expect(vcs.diffRangeCalls).toEqual([]);
+
+		const hide = await routes(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: false }),
+			}),
+		);
+		expect(hide.status).toBe(200);
+		expect(await hide.json()).toMatchObject({
+			showWhitespaceChanges: false,
+			diff: [{ newPath: "src/substantive.ts" }],
+		});
+		expect(vcs.diffRangeCalls).toEqual([
+			{
+				repoRoot: state().repoRoot,
+				from: "base",
+				to: "head",
+				options: { ignoreWhitespace: true },
+			},
+		]);
+
+		const polled = await routes(request(`/api/state?t=${token}`));
+		expect((await polled.json()).showWhitespaceChanges).toBe(false);
+		expect(vcs.diffRangeCalls).toHaveLength(1);
+
+		const show = await routes(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: true }),
+			}),
+		);
+		expect(show.status).toBe(200);
+		expect(await show.json()).toMatchObject({
+			showWhitespaceChanges: true,
+			diff: [
+				{ newPath: "src/whitespace.ts" },
+				{ newPath: "src/substantive.ts" },
+			],
+		});
+		expect(vcs.diffRangeCalls).toHaveLength(1);
+	});
+	test("serializes concurrent whitespace mutations", async () => {
+		const canonical = [
+			rawDiff("src/whitespace.ts", "@@ -1 +1 @@\n-old \n+new\n"),
+		];
+		const vcs = new DeferredHiddenVcs({
+			repoRoot: state().repoRoot,
+			diffRangeIgnoringWhitespace: [],
+		});
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			diff: parseFileDiffs(canonical),
+			layerDiff: canonical,
+			expandedDiff: parseFileDiffs(canonical),
+			vcs,
+		});
+
+		const hidePromise = routes(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: false }),
+			}),
+		);
+		await vcs.hiddenStarted.promise;
+
+		let showSettled = false;
+		const showPromise = routes(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: true }),
+			}),
+		).then((response) => {
+			showSettled = true;
+			return response;
+		});
+
+		await Promise.resolve();
+		expect(showSettled).toBe(false);
+		vcs.releaseHidden.resolve();
+
+		const [hide, show] = await Promise.all([hidePromise, showPromise]);
+		expect(hide.status).toBe(200);
+		expect(show.status).toBe(200);
+		expect((await show.json()).showWhitespaceChanges).toBe(true);
+		const finalState = await routes(request(`/api/state?t=${token}`));
+		expect((await finalState.json()).showWhitespaceChanges).toBe(true);
+	});
+
+	test("rejects malformed or unavailable toggles without mutation", async () => {
+		const unavailable = createReviewRoutes({ token, state: state() });
+		const malformed = await unavailable(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: "false" }),
+			}),
+		);
+		expect(malformed.status).toBe(400);
+
+		const missingVcs = await unavailable(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: false }),
+			}),
+		);
+		expect(missingVcs.status).toBe(503);
+		const unchanged = await unavailable(request(`/api/state?t=${token}`));
+		expect((await unchanged.json()).showWhitespaceChanges).toBe(true);
+
+		const failing = createReviewRoutes({
+			token,
+			state: state(),
+			diff: parseFileDiffs([
+				rawDiff("src/app.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+			]),
+			vcs: new FakeVcs({ diffRangeError: new Error("git failed") }),
+		});
+		const failed = await failing(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: false }),
+			}),
+		);
+		expect(failed.status).toBe(500);
+		const stillCanonical = await failing(request(`/api/state?t=${token}`));
+		expect((await stillCanonical.json()).showWhitespaceChanges).toBe(true);
+	});
+
+	test("expands configured-ignored files from the hidden full snapshot", async () => {
+		const canonical = [
+			rawDiff("generated/out.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+			rawDiff("src/whitespace.ts", "@@ -1 +1 @@\n-old  \n+new\n"),
+		];
+		const hidden = canonical.slice(0, 1);
+		const vcs = new FakeVcs({
+			repoRoot: state().repoRoot,
+			diffRangeIgnoringWhitespace: hidden,
+		});
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			diff: parseFileDiffs(canonical),
+			layerDiff: canonical,
+			expandedDiff: parseFileDiffs(canonical),
+			vcs,
+			config: { diff: { ignore: ["generated/**"] } },
+		});
+
+		const hide = await routes(
+			request(`/api/diff/whitespace?t=${token}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ showWhitespaceChanges: false }),
+			}),
+		);
+		expect(hide.status).toBe(200);
+		const stateResponse = await routes(request(`/api/state?t=${token}`));
+		const stateBody = await stateResponse.json();
+		expect(stateBody.diff).toHaveLength(1);
+		expect(stateBody.diff[0].newPath).toBe("generated/out.ts");
+		expect(stateBody.diff[0].hunks).toEqual([]);
+
+		const expanded = await routes(
+			request(`/api/diff?path=generated%2Fout.ts&t=${token}`),
+		);
+		expect((await expanded.json()).hunks).toHaveLength(1);
+
+		const omitted = await routes(
+			request(`/api/diff?path=src%2Fwhitespace.ts&t=${token}`),
+		);
+		expect(omitted.status).toBe(404);
+	});
+	test("persists the hidden choice across recreated routes", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-whitespace-reload-"));
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			const store = new ReviewStore(paths);
+			await store.write(state());
+			const canonical = [
+				rawDiff("src/whitespace.ts", "@@ -1 +1 @@\n-old  \n+new\n"),
+				rawDiff("src/app.ts", "@@ -1 +1 @@\n-old\n+new\n"),
+			];
+			const vcs = new FakeVcs({
+				repoRoot: state().repoRoot,
+				diffRangeIgnoringWhitespace: canonical.slice(1),
+			});
+			const create = () =>
+				createReviewRoutes({
+					token,
+					store,
+					diff: parseFileDiffs(canonical),
+					layerDiff: canonical,
+					expandedDiff: parseFileDiffs(canonical),
+					vcs,
+				});
+
+			const first = create();
+			const hide = await first(
+				request(`/api/diff/whitespace?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ showWhitespaceChanges: false }),
+				}),
+			);
+			expect(hide.status).toBe(200);
+			expect((await store.read())?.showWhitespaceChanges).toBe(false);
+
+			const second = create();
+			const reloaded = await second(request(`/api/state?t=${token}`));
+			expect((await reloaded.json()).showWhitespaceChanges).toBe(false);
+			expect(vcs.diffRangeCalls).toHaveLength(2);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("invalidates hidden data after syncing to a new revision", async () => {
+		const previous = ReviewStateSchema.parse({
+			...state(),
+			showWhitespaceChanges: false,
+		});
+		const oldCanonical = [
+			rawDiff("src/old.ts", "@@ -1 +1 @@\n-old\n+old-new\n"),
+		];
+		const oldHidden = [
+			rawDiff("src/old-visible.ts", "@@ -1 +1 @@\n-old\n+old-new\n"),
+		];
+		const nextCanonical = [
+			rawDiff("src/new.ts", "@@ -1 +1 @@\n-before\n+after\n"),
+		];
+		const nextHidden = [
+			rawDiff("src/new-visible.ts", "@@ -1 +1 @@\n-before\n+after\n"),
+		];
+		const vcs = new RevisionDiffVcs(oldHidden, nextHidden, nextCanonical);
+		const routes = createReviewRoutes({
+			token,
+			state: previous,
+			diff: parseFileDiffs(oldCanonical),
+			layerDiff: oldCanonical,
+			expandedDiff: parseFileDiffs(oldCanonical),
+			vcs,
+			ref: {
+				host: previous.mr.host,
+				projectPath: previous.mr.projectPath,
+				iid: previous.mr.iid,
+			},
+			fetchMr: async () => ({
+				iid: previous.mr.iid,
+				projectPath: previous.mr.projectPath,
+				title: previous.mr.title,
+				webUrl: previous.mr.webUrl,
+				sourceBranch: previous.mr.sourceBranch,
+				targetBranch: previous.mr.targetBranch,
+				headSha: "head-2",
+				diffRefs: {
+					baseSha: "base-2",
+					startSha: "base-2",
+					headSha: "head-2",
+				},
+			}),
+		});
+		const initial = await routes(request(`/api/state?t=${token}`));
+		const initialBody = (await initial.json()) as { diff: ParsedFileDiff[] };
+		expect(initialBody.diff[0]?.newPath).toBe("src/old-visible.ts");
+
+		const synced = await routes(
+			request(`/api/sync?t=${token}`, { method: "POST" }),
+		);
+		expect(synced.status).toBe(200);
+		const syncedBody = (await synced.json()) as {
+			showWhitespaceChanges: boolean;
+			diff: ParsedFileDiff[];
+		};
+		expect(syncedBody.showWhitespaceChanges).toBe(false);
+		expect(syncedBody.diff[0]?.newPath).toBe("src/new-visible.ts");
+		expect(vcs.diffRangeCalls).toEqual([
+			{
+				repoRoot: previous.repoRoot,
+				from: "base",
+				to: "head",
+				options: { ignoreWhitespace: true },
+			},
+			{
+				repoRoot: previous.repoRoot,
+				from: "base-2",
+				to: "head-2",
+			},
+			{
+				repoRoot: previous.repoRoot,
+				from: "base-2",
+				to: "head-2",
+				options: { ignoreWhitespace: true },
+			},
+		]);
 	});
 
 	test("uses review.largeFileLineThreshold when no route override is provided", async () => {

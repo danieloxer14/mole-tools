@@ -32,6 +32,7 @@ import type {
 import type { IssueTracker } from "../../ports/issue-tracker";
 import type { AgentEvent, ReviewAgent } from "../../ports/review-agent";
 import type { FileDiff, Vcs } from "../../ports/vcs";
+import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
@@ -120,8 +121,10 @@ export interface ReviewRoutesOptions {
 	vcs?: Vcs;
 	issues?: IssueTracker | null;
 	config?:
-		| (Pick<Config, "jira"> & Partial<Pick<Config, "review" | "prompts">>)
+		| (Pick<Config, "jira"> &
+				Partial<Pick<Config, "review" | "prompts" | "diff">>)
 		| {
+				diff?: { ignore?: string[] };
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
 					largeFileLineThreshold?: number;
@@ -149,6 +152,10 @@ export interface ReviewApiState extends ReviewState {
 	largeFileLineThreshold: number;
 	/** Chats with a turn running on the server right now. */
 	busyChatIds: string[];
+}
+interface DisplayDiffVariants {
+	display: ParsedFileDiff[];
+	full: ParsedFileDiff[];
 }
 
 /** State changed by the lightweight progress endpoint. */
@@ -483,6 +490,21 @@ export function createReviewRoutes(
 		? ReviewStateSchema.parse(options.state)
 		: null;
 	let currentDiff = options.diff ?? [];
+	let hiddenSnapshot: {
+		key: string;
+		promise: Promise<DisplayDiffVariants>;
+	} | null = null;
+	let displayMutationQueue = Promise.resolve();
+	function serializeDisplayMutation<T>(
+		operation: () => Promise<T>,
+	): Promise<T> {
+		const run = displayMutationQueue.then(operation, operation);
+		displayMutationQueue = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		return run;
+	}
 	let currentLayerDiff = options.layerDiff;
 	let currentExpandedDiff = options.expandedDiff;
 	let currentMr = options.mr;
@@ -844,6 +866,49 @@ export function createReviewRoutes(
 			return promptErrorResponse(error);
 		}
 	}
+	function hiddenRevisionKey(state: ReviewState): string {
+		return `${state.revision.mergeBaseSha}\u0000${state.revision.headSha}`;
+	}
+
+	async function hiddenDiffVariants(
+		state: ReviewState,
+	): Promise<DisplayDiffVariants> {
+		const key = hiddenRevisionKey(state);
+		if (hiddenSnapshot?.key === key) return hiddenSnapshot.promise;
+		if (!options.vcs) throw new Error("Whitespace diff is unavailable");
+
+		const load = options.vcs
+			.diffRange(
+				state.repoRoot,
+				state.revision.mergeBaseSha,
+				state.revision.headSha,
+				{ ignoreWhitespace: true },
+			)
+			.then((fullDiff) => ({
+				display: parseFileDiffs(
+					filterDiff(fullDiff, options.config?.diff?.ignore ?? []),
+				),
+				full: parseFileDiffs(fullDiff),
+			}));
+		const tracked = load.catch((error) => {
+			if (hiddenSnapshot?.promise === tracked) hiddenSnapshot = null;
+			throw error;
+		});
+		hiddenSnapshot = { key, promise: tracked };
+		return tracked;
+	}
+
+	async function diffVariants(
+		state: ReviewState,
+	): Promise<DisplayDiffVariants> {
+		if (state.showWhitespaceChanges) {
+			return {
+				display: currentDiff,
+				full: currentExpandedDiff ?? currentDiff,
+			};
+		}
+		return hiddenDiffVariants(state);
+	}
 
 	let layerRun: Promise<LayerGenerationResult> | null = null;
 
@@ -1053,8 +1118,7 @@ export function createReviewRoutes(
 			newCommits: freshness.newCommitCount,
 		});
 	}
-
-	async function sync(): Promise<Response> {
+	async function syncInternal(): Promise<Response> {
 		const state = await currentState();
 		const fetcher = reviewMrFetcher();
 		if (!options.vcs || !fetcher)
@@ -1076,11 +1140,15 @@ export function createReviewRoutes(
 		currentDiff = parseFileDiffs(result.diff);
 		currentLayerDiff = result.diff;
 		currentExpandedDiff = parseFileDiffs(result.fullDiff);
+		hiddenSnapshot = null;
 		currentMr = mr;
 		fallbackState = result.state;
 		initialLayerRunAllowed = false;
 		await refreshDiscussions();
 		return jsonResponse(await apiState());
+	}
+	async function sync(): Promise<Response> {
+		return serializeDisplayMutation(syncInternal);
 	}
 
 	function startLayerGeneration(
@@ -1781,8 +1849,36 @@ export function createReviewRoutes(
 		}
 	}
 
+	async function whitespaceInternal(request: Request): Promise<Response> {
+		const parsed = z
+			.object({ showWhitespaceChanges: z.boolean() })
+			.safeParse(await parseBody(request));
+		if (!parsed.success)
+			return jsonResponse({ error: parsed.error.message }, 400);
+
+		const showWhitespaceChanges = parsed.data.showWhitespaceChanges;
+		const state = await currentState();
+		if (!showWhitespaceChanges && !options.vcs)
+			return jsonResponse({ error: "Whitespace diff is unavailable" }, 503);
+		if (!showWhitespaceChanges) await hiddenDiffVariants(state);
+		const next = await mutateState((current) => ({
+			...current,
+			showWhitespaceChanges,
+		}));
+		const variants = await diffVariants(next);
+		return jsonResponse({
+			showWhitespaceChanges: next.showWhitespaceChanges,
+			diff: variants.display,
+		});
+	}
+
+	async function whitespace(request: Request): Promise<Response> {
+		return serializeDisplayMutation(() => whitespaceInternal(request));
+	}
+
 	async function apiState(): Promise<ReviewApiState> {
 		const state = await currentState();
+		const variants = await diffVariants(state);
 		if (
 			initialLayerRunAllowed &&
 			state.layerStatus === "pending" &&
@@ -1802,7 +1898,7 @@ export function createReviewRoutes(
 		const approvalState = await refreshApproval();
 		return {
 			...state,
-			diff: currentDiff,
+			diff: variants.display,
 			discussions: fallbackDiscussions,
 			approval: approvalState,
 			largeFileLineThreshold: threshold,
@@ -1920,13 +2016,15 @@ export function createReviewRoutes(
 	async function expandedFile(request: Request): Promise<Response> {
 		const requestedPath = new URL(request.url).searchParams.get("path");
 		if (!requestedPath) return jsonResponse({ error: "Missing path" }, 400);
-		const known = currentDiff.find(
+		const state = await currentState();
+		const variants = await diffVariants(state);
+		const known = variants.display.find(
 			(candidate) =>
 				candidate.oldPath === requestedPath ||
 				candidate.newPath === requestedPath,
 		);
 		if (!known) return jsonResponse({ error: "File not found" }, 404);
-		const expanded = currentExpandedDiff?.find(
+		const expanded = variants.full.find(
 			(candidate) =>
 				candidate.oldPath === requestedPath ||
 				candidate.newPath === requestedPath,
@@ -1945,6 +2043,12 @@ export function createReviewRoutes(
 		try {
 			if (request.method === "GET" && url.pathname === "/api/state") {
 				return jsonResponse(await apiState());
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/diff/whitespace"
+			) {
+				return await whitespace(request);
 			}
 			if (
 				(request.method === "GET" || request.method === "POST") &&
