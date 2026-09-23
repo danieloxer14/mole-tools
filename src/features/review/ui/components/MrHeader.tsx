@@ -18,6 +18,9 @@ export type ApprovalAction = "approve" | "unapprove";
 export interface MrHeaderProps {
 	mr: { iid: number; title: string; webUrl: string };
 	headSha: string;
+	filesChanged: number;
+	insertions: number;
+	deletions: number;
 	approval: MrApprovalState | null;
 	approvalLoading: boolean;
 	approvalAction: ApprovalAction | null;
@@ -46,6 +49,10 @@ export function shortSha(sha: string): string {
 
 export function shaButtonLabel(sha: string, copied: boolean): string {
 	return copied ? "Copied" : shortSha(sha);
+}
+
+export function filesChangedLabel(count: number): string {
+	return `${count} file${count === 1 ? "" : "s"} changed`;
 }
 
 export function approvalPillLabel(
@@ -90,6 +97,9 @@ export function syncTooltip(newCommitCount: number): string {
 export function MrHeader({
 	mr,
 	headSha,
+	filesChanged,
+	insertions,
+	deletions,
 	approval,
 	approvalLoading,
 	approvalAction,
@@ -201,6 +211,20 @@ export function MrHeader({
 							{approvalLabel}
 						</Badge>
 					) : null}
+					<span
+						className="inline-flex items-center gap-3 text-xs leading-none tabular-nums text-muted-foreground"
+						data-diff-stats=""
+					>
+						<span data-files-changed="">{filesChangedLabel(filesChanged)}</span>
+						<span className="inline-flex gap-1">
+							<span className="text-success" data-insertions="">
+								+{insertions}
+							</span>
+							<span className="text-destructive" data-deletions="">
+								−{deletions}
+							</span>
+						</span>
+					</span>
 				</div>
 			</div>
 			<div className="inline-flex shrink-0 items-center gap-2 leading-none">

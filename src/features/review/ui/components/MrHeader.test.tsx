@@ -8,6 +8,7 @@ import {
 	approvalPillLabel,
 	approveDisabledReason,
 	approveTooltip,
+	filesChangedLabel,
 	headerTitle,
 	MrHeader,
 	type MrHeaderProps,
@@ -58,6 +59,9 @@ const base: MrHeaderProps = {
 		webUrl: "https://gitlab.example.test/group/project/-/merge_requests/42",
 	},
 	headSha: "1234567890abcdef1234567890abcdef12345678",
+	filesChanged: 3,
+	insertions: 12,
+	deletions: 4,
 	approval,
 	approvalLoading: false,
 	approvalAction: null,
@@ -179,6 +183,32 @@ test("renders title, sha identity, approved pill, and GitLab link", () => {
 	expect(link?.getAttribute("href")).toBe(base.mr.webUrl);
 	expect(link?.getAttribute("target")).toBe("_blank");
 	expect(link?.getAttribute("title")).toBeNull();
+});
+test("renders diff totals right of approval pill with diff colours", () => {
+	const container = render();
+	const stats = container.querySelector("[data-diff-stats]");
+	const sha = container.querySelector('button[aria-label="Copy commit sha"]');
+
+	expectBefore(container.querySelector('[data-approval="approved"]'), stats);
+	expect(container.querySelector("[data-files-changed]")?.textContent).toBe(
+		"3 files changed",
+	);
+	const insertions = container.querySelector("[data-insertions]");
+	expect(insertions?.textContent).toBe("+12");
+	expect(insertions?.className).toContain("text-success");
+	const deletions = container.querySelector("[data-deletions]");
+	expect(deletions?.textContent).toBe("−4");
+	expect(deletions?.className).toContain("text-destructive");
+	expect(stats?.parentElement).toBe(sha?.parentElement);
+});
+
+test("renders diff totals without approval pill", () => {
+	for (const overrides of [{ approval: null }, { approvalLoading: true }]) {
+		const container = render(overrides);
+
+		expect(container.querySelector("[data-approval]")).toBeNull();
+		expect(container.querySelector("[data-diff-stats]")).not.toBeNull();
+	}
 });
 
 test("falls back to IID when title is empty", () => {
@@ -306,6 +336,9 @@ test("covers pure display helpers", () => {
 	expect(approveTooltip(null, false, base.headSha, true)).toBe("Unapprove");
 	expect(syncTooltip(1)).toBe("Sync to latest — 1 new commit");
 	expect(syncTooltip(2)).toBe("Sync to latest — 2 new commits");
+	expect(filesChangedLabel(0)).toBe("0 files changed");
+	expect(filesChangedLabel(1)).toBe("1 file changed");
+	expect(filesChangedLabel(3)).toBe("3 files changed");
 });
 test("keeps SHA copy control centered with adjacent header controls", async () => {
 	Object.defineProperty(dom.navigator, "clipboard", {
