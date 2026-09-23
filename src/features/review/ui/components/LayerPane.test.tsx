@@ -87,6 +87,7 @@ function renderLayerPane(
 			onSelectLayer={() => {}}
 			onToggleDone={() => {}}
 			layerAction={null}
+			externallyDisabled={false}
 			actionError={null}
 			onRegenerate={() => {}}
 			onRetry={() => {}}
@@ -194,6 +195,17 @@ test("covers layer action state precedence across statuses", () => {
 	const failedAction = layersActionState("failed", null);
 	expect(failedAction.mode).toBe("retry");
 	expect(failedAction.tooltip).toBe("Retry layer generation");
+});
+
+test("blocks the layer action during refresh without showing generation busy", () => {
+	const action = layersActionState("ready", null, true);
+	expect(action.disabled).toBe(true);
+	expect(action.tooltip).toBe("Refresh in progress…");
+	const markup = renderLayerPane({ externallyDisabled: true });
+
+	expect(markup).toContain('data-slot="tooltip-trigger"');
+	expect(markup).toContain('tabindex="0"');
+	expect(markup).not.toContain('aria-busy="true"');
 });
 
 test("renders layer action errors as alerts in the sticky header", () => {
