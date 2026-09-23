@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
 	ChangedFilesHeader,
 	changedFileCount,
+	diffLineTotals,
 	viewedFileCount,
 } from "./ChangedFilesHeader";
 
@@ -32,6 +33,16 @@ test("counts unique changed files that are viewed", () => {
 		1,
 	);
 	expect(changedFileCount(["a.ts", "a.ts", "b.ts"])).toBe(2);
+});
+
+test("sums insertions and deletions across diff files", () => {
+	expect(diffLineTotals([])).toEqual({ insertions: 0, deletions: 0 });
+	expect(
+		diffLineTotals([
+			{ insertions: 1, deletions: 0 },
+			{ insertions: 3, deletions: 2 },
+		]),
+	).toEqual({ insertions: 4, deletions: 2 });
 });
 test("exposes one-pixel boundary borders around changed-files region", () => {
 	const html = renderToStaticMarkup(

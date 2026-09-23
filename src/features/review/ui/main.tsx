@@ -26,6 +26,7 @@ import {
 import {
 	ChangedFilesHeader,
 	changedFileCount,
+	diffLineTotals,
 	viewedFileCount,
 } from "./components/ChangedFilesHeader";
 import {
@@ -1010,6 +1011,7 @@ function ReviewApp() {
 
 	const files = data.diff.map(filePath).filter((path) => path.length > 0);
 	const changedFileTotal = changedFileCount(files);
+	const lineTotals = diffLineTotals(data.diff);
 	const viewedCount = viewedFileCount(files, data.viewedFiles);
 	const selectFile = (path: string) => {
 		setSelectedPath(path);
@@ -1831,6 +1833,9 @@ function ReviewApp() {
 					<MrHeader
 						mr={data.mr}
 						headSha={data.revision.headSha}
+						filesChanged={changedFileTotal}
+						insertions={lineTotals.insertions}
+						deletions={lineTotals.deletions}
 						approval={data.approval ?? null}
 						approvalLoading={approvalLoading}
 						approvalAction={approvalAction}
