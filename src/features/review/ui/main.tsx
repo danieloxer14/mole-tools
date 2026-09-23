@@ -44,7 +44,7 @@ import {
 } from "./components/DiffView";
 import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
-import { type ApprovalAction, MrHeader } from "./components/MrHeader";
+import { type ApprovalAction, MrHeader, tabTitle } from "./components/MrHeader";
 import { SettingsPanel } from "./components/SettingsPanel";
 import {
 	errorToastMessage,
@@ -757,6 +757,12 @@ function ReviewApp() {
 			active = false;
 		};
 	}, [token, reviewLoaded, pushToast]);
+	const mrProjectPath = data?.mr.projectPath;
+	const mrIid = data?.mr.iid;
+	useEffect(() => {
+		if (mrProjectPath === undefined || mrIid === undefined) return;
+		document.title = tabTitle(mrProjectPath, mrIid);
+	}, [mrProjectPath, mrIid]);
 	const activeChatId = selectedChatId ?? data?.activeChatId ?? null;
 	const activeChat = activeChatId
 		? (chatRuntimes[activeChatId] ?? EMPTY_CHAT_RUNTIME)
