@@ -63,6 +63,7 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
+import { generalDiscussions } from "./general-discussions";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -1940,9 +1941,7 @@ function ReviewApp() {
 			<ChatPane
 				transcript={activeChat.entries}
 				tags={activeChat.tags}
-				discussions={data.discussions.filter(
-					(discussion) => discussion.position === null,
-				)}
+				discussions={generalDiscussions(data.discussions)}
 				onExplainDiscussion={explainDiscussion}
 				explainDisabled={creatingChat}
 				streamingSegments={activeChat.streamingSegments}
