@@ -36,6 +36,10 @@ export function headerTitle(title: string, iid: number): string {
 	return title.trim() ? title : `!${iid}`;
 }
 
+export function tabTitle(projectPath: string, iid: number): string {
+	return `${projectPath.slice(projectPath.lastIndexOf("/") + 1)}!${iid}`;
+}
+
 export function shortSha(sha: string): string {
 	return sha.slice(0, 8);
 }

@@ -14,6 +14,7 @@ import {
 	shaButtonLabel,
 	shortSha,
 	syncTooltip,
+	tabTitle,
 } from "./MrHeader";
 
 const dom = new Window();
@@ -290,6 +291,9 @@ test("covers approval helper matrix", () => {
 test("covers pure display helpers", () => {
 	expect(headerTitle("  Title  ", 42)).toBe("  Title  ");
 	expect(headerTitle("", 42)).toBe("!42");
+	expect(tabTitle("group/project", 42)).toBe("project!42");
+	expect(tabTitle("group/sub/project", 7)).toBe("project!7");
+	expect(tabTitle("project", 1)).toBe("project!1");
 	expect(shortSha(base.headSha)).toBe("12345678");
 	expect(shaButtonLabel(base.headSha, false)).toBe("12345678");
 	expect(shaButtonLabel(base.headSha, true)).toBe("Copied");
