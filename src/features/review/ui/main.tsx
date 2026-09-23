@@ -47,12 +47,7 @@ import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
 import { type ApprovalAction, MrHeader, tabTitle } from "./components/MrHeader";
 import { SettingsPanel } from "./components/SettingsPanel";
-import {
-	errorToastMessage,
-	refreshResultToast,
-	type Toast,
-	Toasts,
-} from "./components/Toasts";
+import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
@@ -64,6 +59,10 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
+import {
+	type ReviewFreshnessResponse,
+	runReviewRefresh,
+} from "./review-refresh";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import "./app.css";
@@ -138,11 +137,6 @@ async function updateApproval(
 		throw new Error(`Approval request failed (${response.status})`);
 	const value: unknown = await response.json();
 	return value === null ? null : (value as MrApprovalState);
-}
-interface ReviewFreshnessResponse {
-	stale: boolean;
-	headSha: string;
-	newCommitCount: number;
 }
 
 async function fetchFreshness(token: string): Promise<ReviewFreshnessResponse> {
@@ -543,8 +537,6 @@ function ReviewApp() {
 		null,
 	);
 	const [refreshing, setRefreshing] = useState(false);
-	const [syncing, setSyncing] = useState(false);
-	const [regenerateAfterSync, setRegenerateAfterSync] = useState(false);
 	const [layerAction, setLayerAction] = useState<LayerAction | null>(null);
 	const [progressError, setProgressError] = useState<string | null>(null);
 	const [chatRuntimes, setChatRuntimes] = useState<Record<string, ChatRuntime>>(
@@ -564,7 +556,6 @@ function ReviewApp() {
 	const chatSelectionRequests = useRef(createRequestSequence());
 	const chatSelectionQueue = useRef(Promise.resolve());
 	const autoRunRequested = useRef(false);
-	const syncCompleted = useRef(false);
 	const draftEditSequence = useRef(new Map<string, number>());
 	const patchChat = useCallback((chatId: string, patch: ChatRuntimePatch) => {
 		setChatRuntimes((current) => {
@@ -700,7 +691,6 @@ function ReviewApp() {
 				if (
 					next.layerStatus === "pending" &&
 					!autoRunRequested.current &&
-					!syncCompleted.current &&
 					next.layers.every((layer) => !layer.stale)
 				) {
 					autoRunRequested.current = true;
@@ -1559,15 +1549,24 @@ function ReviewApp() {
 			.finally(() => setLayerAction(null))
 			.then(() => undefined);
 	};
-	const refreshHead = () => {
-		if (refreshing || syncing || layerAction !== null) return;
+	const refreshReview = () => {
+		if (refreshing || layerAction !== null) return;
+		autoRunRequested.current = true;
 		setRefreshing(true);
-		void fetchFreshness(token)
-			.then((next) => {
-				setFreshness(next);
-				const toast = refreshResultToast(next.stale);
-				if (toast) pushToast(toast);
-			})
+		void runReviewRefresh({
+			checkFreshness: () => fetchFreshness(token),
+			sync: syncReviewState,
+			regenerate: () => runLayerAction("regenerate"),
+			applyFreshness: (next) => setFreshness(next),
+			applySyncedState: (next) => {
+				setData(next);
+				setFreshness({
+					stale: false,
+					headSha: next.revision.headSha,
+					newCommitCount: 0,
+				});
+			},
+		})
 			.catch((reason: unknown) => {
 				pushToast({
 					kind: "error",
@@ -1577,35 +1576,14 @@ function ReviewApp() {
 			.finally(() => setRefreshing(false));
 	};
 
-	const syncReviewState = () => {
-		if (syncing || layerAction !== null) return;
-		syncCompleted.current = true;
-		setSyncing(true);
-		void fetch(apiUrl("/api/sync", token), {
+	const syncReviewState = async (): Promise<ReviewStateResponse> => {
+		const response = await fetch(apiUrl("/api/sync", token), {
 			method: "POST",
 			headers: { "X-Mole-Token": token },
-		})
-			.then(async (response) => {
-				if (!response.ok)
-					throw new Error(`Sync request failed (${response.status})`);
-				return (await response.json()) as ReviewStateResponse;
-			})
-			.then(async (next) => {
-				setData(next);
-				setFreshness({
-					stale: false,
-					headSha: next.revision.headSha,
-					newCommitCount: 0,
-				});
-				if (regenerateAfterSync) await runLayerAction("regenerate");
-			})
-			.catch((reason: unknown) => {
-				pushToast({
-					kind: "error",
-					message: errorToastMessage(reason),
-				});
-			})
-			.finally(() => setSyncing(false));
+		});
+		if (!response.ok)
+			throw new Error(`Sync request failed (${response.status})`);
+		return (await response.json()) as ReviewStateResponse;
 	};
 
 	const selectLayer = (id: string) => {
@@ -1987,6 +1965,7 @@ function ReviewApp() {
 				onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
 				layerAction={layerAction}
 				actionError={progressError}
+				externallyDisabled={refreshing}
 				onRegenerate={() => runLayerAction("regenerate")}
 				onRetry={() => runLayerAction("retry")}
 			/>
@@ -2018,12 +1997,8 @@ function ReviewApp() {
 						onApprovalAction={handleApprovalAction}
 						freshness={freshness}
 						refreshing={refreshing}
-						syncing={syncing}
 						layerGenerating={layerAction !== null}
-						regenerateAfterSync={regenerateAfterSync}
-						onRegenerateAfterSyncChange={setRegenerateAfterSync}
-						onRefresh={refreshHead}
-						onSync={syncReviewState}
+						onRefresh={refreshReview}
 					/>
 					<Toasts toasts={toasts} onDismiss={dismissToast} />
 					<ChangedFilesHeader

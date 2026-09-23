@@ -1,16 +1,9 @@
-import {
-	Check,
-	Copy,
-	ExternalLink,
-	RefreshCcwDot,
-	RefreshCw,
-} from "lucide-react";
+import { Check, Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../../ports/git-host";
 import { IconButton } from "./IconButton";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type ApprovalAction = "approve" | "unapprove";
@@ -25,14 +18,10 @@ export interface MrHeaderProps {
 	approvalLoading: boolean;
 	approvalAction: ApprovalAction | null;
 	onApprovalAction: (action: ApprovalAction) => void;
-	freshness: { stale: boolean; newCommitCount: number } | null;
+	freshness: { stale: boolean } | null;
 	refreshing: boolean;
-	syncing: boolean;
 	layerGenerating: boolean;
-	regenerateAfterSync: boolean;
-	onRegenerateAfterSyncChange: (value: boolean) => void;
 	onRefresh: () => void;
-	onSync: () => void;
 }
 
 export function headerTitle(title: string, iid: number): string {
@@ -88,12 +77,6 @@ export function approveTooltip(
 	return approved ? "Unapprove" : "Approve";
 }
 
-export function syncTooltip(newCommitCount: number): string {
-	return `Sync to latest — ${newCommitCount} new commit${
-		newCommitCount === 1 ? "" : "s"
-	}`;
-}
-
 export function MrHeader({
 	mr,
 	headSha,
@@ -106,12 +89,8 @@ export function MrHeader({
 	onApprovalAction,
 	freshness,
 	refreshing,
-	syncing,
 	layerGenerating,
-	regenerateAfterSync,
-	onRegenerateAfterSyncChange,
 	onRefresh,
-	onSync,
 }: MrHeaderProps) {
 	const [copied, setCopied] = useState(false);
 	const copyTimer = useRef<Timer | undefined>(undefined);
@@ -193,6 +172,14 @@ export function MrHeader({
 							<Copy className="size-3 shrink-0" aria-hidden />
 						)}
 					</Button>
+					{freshness?.stale ? (
+						<Badge
+							className="inline-flex items-center leading-none bg-warning/15 text-warning"
+							data-freshness="stale"
+						>
+							Out of sync
+						</Badge>
+					) : null}
 					{approvalLabel !== null ? (
 						<Badge
 							variant="secondary"
@@ -229,39 +216,14 @@ export function MrHeader({
 			</div>
 			<div className="inline-flex shrink-0 items-center gap-2 leading-none">
 				<IconButton
-					label="Refresh merge request"
+					label="Refresh review and layers"
+					tooltip="Fetch latest MR state, sync when needed, and regenerate layers"
 					busy={refreshing}
-					disabled={refreshing || syncing || layerGenerating}
+					disabled={refreshing || layerGenerating}
 					onClick={onRefresh}
 				>
 					<RefreshCw aria-hidden />
 				</IconButton>
-				{freshness?.stale ? (
-					<>
-						<IconButton
-							label="Sync to latest"
-							tooltip={syncTooltip(freshness.newCommitCount)}
-							badge
-							disabled={syncing || layerGenerating}
-							onClick={onSync}
-						>
-							<RefreshCcwDot aria-hidden />
-						</IconButton>
-						<label
-							className="flex shrink-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground"
-							htmlFor="regenerate-after-sync"
-						>
-							<Checkbox
-								id="regenerate-after-sync"
-								aria-label="Regenerate layers after sync"
-								checked={regenerateAfterSync}
-								disabled={syncing || layerGenerating}
-								onCheckedChange={onRegenerateAfterSyncChange}
-							/>
-							Regenerate layers after sync
-						</label>
-					</>
-				) : null}
 				<IconButton href={mr.webUrl} label="Open in GitLab">
 					<ExternalLink aria-hidden />
 				</IconButton>

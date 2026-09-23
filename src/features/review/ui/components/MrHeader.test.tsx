@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { MrApprovalState } from "../../../../ports/git-host";
 import {
+	type ApprovalAction,
 	approvalPillLabel,
 	approveDisabledReason,
 	approveTooltip,
@@ -14,7 +15,6 @@ import {
 	type MrHeaderProps,
 	shaButtonLabel,
 	shortSha,
-	syncTooltip,
 	tabTitle,
 } from "./MrHeader";
 
@@ -68,12 +68,8 @@ const base: MrHeaderProps = {
 	onApprovalAction: () => {},
 	freshness: null,
 	refreshing: false,
-	syncing: false,
 	layerGenerating: false,
-	regenerateAfterSync: false,
-	onRegenerateAfterSyncChange: () => {},
 	onRefresh: () => {},
-	onSync: () => {},
 };
 
 function render(overrides: Partial<MrHeaderProps> = {}): HTMLDivElement {
@@ -232,54 +228,55 @@ test("hides approval pill while loading or unavailable", () => {
 	expect(notApproved?.textContent).toBe("Not approved");
 });
 
-test("renders stale controls between refresh and GitLab link", () => {
+test("renders one combined refresh control and stale warning", () => {
 	const container = render({
-		freshness: { stale: true, newCommitCount: 1 },
+		freshness: { stale: true },
 	});
 	const refresh = container.querySelector(
-		'button[aria-label="Refresh merge request"]',
+		'button[aria-label="Refresh review and layers"]',
 	);
-	const sync = container.querySelector('button[aria-label="Sync to latest"]');
-	const regenerate = [...container.querySelectorAll("label")].find((label) =>
-		label.textContent?.includes("Regenerate layers after sync"),
-	);
+	const sha = container.querySelector("[data-sha-control]");
+	const warning = container.querySelector('[data-freshness="stale"]');
 	const open = container.querySelector('a[target="_blank"]');
 
-	expectBefore(refresh, sync);
-	expectBefore(sync, regenerate ?? null);
-	expectBefore(regenerate ?? null, open);
-	expect(container.querySelector("[data-badge]")).not.toBeNull();
+	expect(
+		container.querySelectorAll('button[aria-label*="Refresh"]'),
+	).toHaveLength(1);
+	expect(refresh).not.toBeNull();
+	expectBefore(sha, warning);
+	expectBefore(warning, open);
+	expect(warning?.textContent).toBe("Out of sync");
+	expect(warning?.className).toContain("bg-warning/15");
+	expect(warning?.className).toContain("text-warning");
 	expect(
 		container.querySelector('button[aria-label="Sync to latest"]'),
-	).not.toBeNull();
-	const freshContainer = render({ freshness: null });
-	expect(
-		freshContainer.querySelector('button[aria-label="Sync to latest"]'),
 	).toBeNull();
-	expect(freshContainer.textContent).not.toContain(
-		"Regenerate layers after sync",
-	);
+	expect(container.textContent).not.toContain("Regenerate layers after sync");
+
+	expect(
+		render({ freshness: { stale: false } }).querySelector(
+			'[data-freshness="stale"]',
+		),
+	).toBeNull();
+	expect(
+		render({ freshness: null }).querySelector('[data-freshness="stale"]'),
+	).toBeNull();
 });
 
-test("refresh busy and disabled states reflect ongoing work", () => {
-	const refreshing = render({
-		refreshing: true,
-	}).querySelector<HTMLButtonElement>(
-		'button[aria-label="Refresh merge request"]',
+test("refresh busy and disabled states reflect combined work", () => {
+	const refreshingContainer = render({ refreshing: true });
+	const refreshing = refreshingContainer.querySelector<HTMLButtonElement>(
+		'button[aria-label="Refresh review and layers"]',
 	);
 	expect(refreshing?.getAttribute("aria-busy")).toBe("true");
 	expect(refreshing?.disabled).toBe(true);
 
-	const syncing = render({ syncing: true }).querySelector<HTMLButtonElement>(
-		'button[aria-label="Refresh merge request"]',
-	);
-	expect(syncing?.disabled).toBe(true);
-
 	const layerGenerating = render({
 		layerGenerating: true,
 	}).querySelector<HTMLButtonElement>(
-		'button[aria-label="Refresh merge request"]',
+		'button[aria-label="Refresh review and layers"]',
 	);
+	expect(layerGenerating?.getAttribute("aria-busy")).toBeNull();
 	expect(layerGenerating?.disabled).toBe(true);
 });
 
@@ -297,7 +294,7 @@ test("approve action uses state variant and disabled tooltip precedence", () => 
 	expect(notApproved?.disabled).toBe(false);
 
 	const stale = render({
-		freshness: { stale: true, newCommitCount: 2 },
+		freshness: { stale: true },
 	}).querySelector<HTMLButtonElement>('button[aria-label="Unapprove"]');
 	expect(stale?.getAttribute("title")).toBeNull();
 });
@@ -334,8 +331,6 @@ test("covers pure display helpers", () => {
 		"MR out of date — approves 12345678",
 	);
 	expect(approveTooltip(null, false, base.headSha, true)).toBe("Unapprove");
-	expect(syncTooltip(1)).toBe("Sync to latest — 1 new commit");
-	expect(syncTooltip(2)).toBe("Sync to latest — 2 new commits");
 	expect(filesChangedLabel(0)).toBe("0 files changed");
 	expect(filesChangedLabel(1)).toBe("1 file changed");
 	expect(filesChangedLabel(3)).toBe("3 files changed");
@@ -353,7 +348,7 @@ test("keeps SHA copy control centered with adjacent header controls", async () =
 	);
 	const metadata = sha?.parentElement;
 	const actions = rendered.container.querySelector<HTMLButtonElement>(
-		'button[aria-label="Refresh merge request"]',
+		'button[aria-label="Refresh review and layers"]',
 	)?.parentElement;
 
 	expect(metadata?.className).toContain("inline-flex");

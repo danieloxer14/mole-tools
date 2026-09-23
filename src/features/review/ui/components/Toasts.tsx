@@ -46,12 +46,6 @@ export function Toasts({
 	);
 }
 
-export function refreshResultToast(
-	stale: boolean,
-): { kind: ToastKind; message: string } | null {
-	return stale ? null : { kind: "info", message: "Up to date" };
-}
-
 export function errorToastMessage(reason: unknown): string {
 	return reason instanceof Error ? reason.message : String(reason);
 }

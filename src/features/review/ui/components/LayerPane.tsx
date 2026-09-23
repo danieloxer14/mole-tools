@@ -15,6 +15,11 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "./ui/tooltip";
+import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
@@ -31,6 +36,7 @@ interface LayerPaneProps {
 	onToggleDone: (id: string, done: boolean) => void;
 	layerAction: LayerAction | null;
 	actionError: string | null;
+	externallyDisabled: boolean;
 	onRegenerate: () => void;
 	onRetry: () => void;
 }
@@ -49,10 +55,10 @@ export function layersStatusMessage(
 			return "Completed layers";
 	}
 }
-
 export function layersActionState(
 	status: ReviewState["layerStatus"],
 	layerAction: LayerAction | null,
+	externallyDisabled = false,
 ): {
 	mode: LayerAction;
 	disabled: boolean;
@@ -60,15 +66,18 @@ export function layersActionState(
 	label: string;
 } {
 	const mode = status === "failed" ? "retry" : "regenerate";
-	const disabled = status === "running" || layerAction !== null;
+	const disabled =
+		externallyDisabled || status === "running" || layerAction !== null;
 	return {
 		mode,
 		disabled,
-		tooltip: disabled
-			? "Generating layers…"
-			: mode === "retry"
-				? "Retry layer generation"
-				: "Regenerate layers (resets completed)",
+		tooltip: externallyDisabled
+			? "Refresh in progress…"
+			: disabled
+				? "Generating layers…"
+				: mode === "retry"
+					? "Retry layer generation"
+					: "Regenerate layers (resets completed)",
 		label: mode === "retry" ? "Retry layer generation" : "Regenerate layers",
 	};
 }
@@ -151,6 +160,7 @@ export function LayerPane({
 	onToggleDone,
 	layerAction,
 	actionError,
+	externallyDisabled,
 	onRegenerate,
 	onRetry,
 }: LayerPaneProps) {
@@ -189,10 +199,32 @@ export function LayerPane({
 	const changedFiles = new Set(files);
 	const changedFilePaths = [...new Set(files)];
 	const viewed = new Set(state.viewedFiles);
-	const action = layersActionState(state.layerStatus, layerAction);
+	const action = layersActionState(
+		state.layerStatus,
+		layerAction,
+		externallyDisabled,
+	);
 	const completed = completedLayerCount(state.layers);
 	const actionRunning = layerAction !== null;
 	const running = state.layerStatus === "running";
+	const actionBusy = running || actionRunning;
+	const actionIcon =
+		action.mode === "retry" ? (
+			<RefreshCw aria-hidden />
+		) : (
+			<Sparkles aria-hidden />
+		);
+	const layerActionButton = (
+		<IconButton
+			label={action.label}
+			tooltip={action.tooltip}
+			disabled={action.disabled}
+			busy={actionBusy}
+			onClick={action.mode === "retry" ? onRetry : onRegenerate}
+		>
+			{actionIcon}
+		</IconButton>
+	);
 	return (
 		<aside className="flex h-full min-h-0 flex-col border-r bg-sidebar">
 			<header className="sticky top-0 z-10 border-b bg-card/95 backdrop-blur">
@@ -200,19 +232,40 @@ export function LayerPane({
 					<h2 className="min-w-0 truncate text-base font-semibold text-foreground">
 						Review layers
 					</h2>
-					<IconButton
-						label={action.label}
-						tooltip={action.tooltip}
-						disabled={action.disabled}
-						busy={running || actionRunning}
-						onClick={action.mode === "retry" ? onRetry : onRegenerate}
-					>
-						{action.mode === "retry" ? (
-							<RefreshCw aria-hidden />
-						) : (
-							<Sparkles aria-hidden />
-						)}
-					</IconButton>
+					{externallyDisabled ? (
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<span
+										className="inline-flex items-center leading-none"
+										tabIndex={0}
+									/>
+								}
+							>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									className="relative"
+									aria-label={action.label}
+									disabled={action.disabled}
+									aria-busy={actionBusy ? "true" : undefined}
+									onClick={
+										action.mode === "retry" ? onRetry : onRegenerate
+									}
+								>
+									{actionBusy ? (
+										<Loader2 className="animate-spin" aria-hidden />
+									) : (
+										actionIcon
+									)}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>{action.tooltip}</TooltipContent>
+						</Tooltip>
+					) : (
+						layerActionButton
+					)}
 				</div>
 				{state.layerStatus === "ready" ? (
 					<div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(3rem,1fr)_auto] items-center gap-2 px-4 pb-3 text-xs leading-none text-muted-foreground">
