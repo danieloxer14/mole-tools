@@ -8,6 +8,11 @@ import {
 	PresetNameSchema,
 	type PromptName,
 } from "./defaults";
+import {
+	type PromptAgentName,
+	parsePromptFile,
+	serializePromptFile,
+} from "./frontmatter";
 
 export type { PromptName } from "./defaults";
 
@@ -97,7 +102,13 @@ export async function listVersions(
 export async function readPrompt(
 	name: PromptName,
 	options: { preset?: string; version?: number; dir?: string } = {},
-): Promise<{ text: string; preset: string; version: number }> {
+): Promise<{
+	text: string;
+	preset: string;
+	version: number;
+	agent: PromptAgentName | null;
+	model: string | null;
+}> {
 	const dir = options.dir ?? promptsDir();
 	const slotDir = await ensureSlotDir(name, dir);
 	const preset = options.preset ?? DEFAULT_PRESET;
@@ -121,10 +132,16 @@ export async function readPrompt(
 			`Prompt version ${version} not found for ${name}/${preset}`,
 		);
 	}
+	const parsed = parsePromptFile(
+		await Bun.file(versionPath(slotDir, preset, version)).text(),
+		`${name}/${preset}/${String(version).padStart(3, "0")}.md`,
+	);
 	return {
-		text: await Bun.file(versionPath(slotDir, preset, version)).text(),
+		text: parsed.text,
 		preset,
 		version,
+		agent: parsed.agent,
+		model: parsed.model,
 	};
 }
 
@@ -137,7 +154,13 @@ export async function loadPrompt(
 
 export async function savePrompt(
 	name: PromptName,
-	options: { preset: string; text: string; dir?: string },
+	options: {
+		preset: string;
+		text: string;
+		agent?: PromptAgentName | null;
+		model?: string | null;
+		dir?: string;
+	},
 ): Promise<number> {
 	const preset = PresetNameSchema.parse(options.preset);
 	const dir = options.dir ?? promptsDir();
@@ -153,6 +176,13 @@ export async function savePrompt(
 		versions = [1];
 	}
 	const version = (versions[versions.length - 1] ?? 0) + 1;
-	await Bun.write(versionPath(slotDir, preset, version), options.text);
+	await Bun.write(
+		versionPath(slotDir, preset, version),
+		serializePromptFile({
+			text: options.text,
+			agent: options.agent ?? null,
+			model: options.model?.trim() || null,
+		}),
+	);
 	return version;
 }

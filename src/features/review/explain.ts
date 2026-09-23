@@ -1,5 +1,6 @@
 import type { HostDiscussion } from "../../ports/git-host";
 import type { DiffLine, ParsedFileDiff } from "../../shared/diff-parse";
+import type { LineSelection } from "./state";
 import { deriveChatTitle } from "./state";
 
 /** Lines kept on each side of the anchored line in the diff excerpt. */
@@ -78,6 +79,42 @@ export function discussionDiffExcerpt(
 					continue;
 				}
 				rows.push(renderExcerptLine(line, sideLine === anchorLine));
+			}
+		}
+		if (rows.length > 0) return rows.join("\n");
+	}
+	return null;
+}
+export const NO_SELECTION_EXCERPT =
+	"No diff excerpt available for this selection.";
+
+export function draftDiffExcerpt(
+	selection: LineSelection,
+	diffs: readonly (readonly ParsedFileDiff[])[],
+	radius: number = EXPLAIN_CONTEXT_RADIUS,
+): string | null {
+	const start = selection.startLine - radius;
+	const end = selection.endLine + radius;
+	for (const set of diffs) {
+		const file = set.find((candidate) =>
+			selection.side === "new"
+				? candidate.newPath === selection.path
+				: candidate.oldPath === selection.path,
+		);
+		if (!file) continue;
+		const rows: string[] = [];
+		for (const hunk of file.hunks) {
+			for (const line of hunk.lines) {
+				const sideLine = selection.side === "new" ? line.newLine : line.oldLine;
+				if (sideLine === null || sideLine < start || sideLine > end) {
+					continue;
+				}
+				rows.push(
+					renderExcerptLine(
+						line,
+						sideLine >= selection.startLine && sideLine <= selection.endLine,
+					),
+				);
 			}
 		}
 		if (rows.length > 0) return rows.join("\n");

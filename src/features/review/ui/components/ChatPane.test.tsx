@@ -1,24 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatPane } from "./ChatPane";
 
-const dom = new Window();
-Object.assign(globalThis, {
-	window: dom,
-	document: dom.document,
-	navigator: dom.navigator,
-	Node: dom.Node,
-	Element: dom.Element,
-	HTMLElement: dom.HTMLElement,
-	MutationObserver: dom.MutationObserver,
-	getComputedStyle: dom.getComputedStyle.bind(dom),
-	requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
-	cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
-	IS_REACT_ACT_ENVIRONMENT: true,
-});
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const interactiveRoots: Root[] = [];
 
@@ -45,6 +31,8 @@ test("renders general discussions collapsed by default", () => {
 					title: "First chat",
 					createdAt: "2026-08-24T00:00:00Z",
 					busy: false,
+					agent: null,
+					model: null,
 				},
 			]}
 			activeChatId="chat-1"
@@ -95,6 +83,8 @@ test("renders one switcher item per chat with active and busy state", async () =
 			{
 				id: "chat-1",
 				title: "",
+				agent: null,
+				model: null,
 				createdAt: "2026-08-24T00:00:00Z",
 				busy: false,
 			},
@@ -103,6 +93,8 @@ test("renders one switcher item per chat with active and busy state", async () =
 				title: "Investigate API",
 				createdAt: "2026-08-24T01:00:00Z",
 				busy: true,
+				agent: "claude",
+				model: "opus",
 			},
 		],
 		activeChatId: "chat-2",
@@ -126,6 +118,8 @@ test("renders one switcher item per chat with active and busy state", async () =
 	];
 	expect(menuItems).toHaveLength(2);
 	expect(menuItems[0]?.className).toContain("text-xs");
+	expect(menuItems[0]?.textContent).not.toContain("· claude");
+	expect(menuItems[1]?.textContent).toContain("· claude · opus");
 	expect(menuItems[0]?.querySelector("span span")?.className).toContain(
 		"[overflow-wrap:anywhere]",
 	);
@@ -202,6 +196,8 @@ test("renders parent-owned composer draft", () => {
 					title: "First chat",
 					createdAt: "2026-08-24T00:00:00Z",
 					busy: false,
+					agent: null,
+					model: null,
 				},
 			]}
 			activeChatId="chat-1"
@@ -330,6 +326,8 @@ function renderComposer(
 					title: "First chat",
 					createdAt: "2026-08-24T00:00:00Z",
 					busy: false,
+					agent: null,
+					model: null,
 				},
 			]}
 			activeChatId="chat-1"
@@ -374,6 +372,8 @@ function renderInteractive(
 						title: "First chat",
 						createdAt: "2026-08-24T00:00:00Z",
 						busy: false,
+						agent: null,
+						model: null,
 					},
 				]}
 				activeChatId="chat-1"
@@ -429,7 +429,7 @@ test("renders Thinking state without disabling the editable composer", () => {
 	expect(markup).toContain("Thinking");
 	const container = parseMarkup(markup);
 	const busyIcon = container.querySelector('button[aria-busy="true"] svg');
-	expect(busyIcon?.className).toContain("animate-spin");
+	expect(busyIcon?.getAttribute("class")).toContain("animate-spin");
 	expect(busyIcon?.getAttribute("aria-hidden")).toBe("true");
 	expect(markup).not.toContain("Agent is reading the review worktree…");
 	expect(markup).toContain(">Stop</button>");
@@ -509,11 +509,11 @@ test("does not submit Enter while busy but submits plain Enter while idle", () =
 	});
 	const busyTextarea = busyRender.container.querySelector("textarea");
 	expect(busyTextarea).not.toBeNull();
-	const busyEnter = new dom.window.KeyboardEvent("keydown", {
+	const busyEnter = new window.KeyboardEvent("keydown", {
 		bubbles: true,
 		key: "Enter",
 	});
-	const busyShiftEnter = new dom.window.KeyboardEvent("keydown", {
+	const busyShiftEnter = new window.KeyboardEvent("keydown", {
 		bubbles: true,
 		key: "Enter",
 		shiftKey: true,
@@ -533,7 +533,7 @@ test("does not submit Enter while busy but submits plain Enter while idle", () =
 		},
 	});
 	const idleTextarea = idleRender.container.querySelector("textarea");
-	const idleEnter = new dom.window.KeyboardEvent("keydown", {
+	const idleEnter = new window.KeyboardEvent("keydown", {
 		bubbles: true,
 		key: "Enter",
 	});
@@ -555,7 +555,7 @@ test("leaves parent-owned draft clearing to the accepted send path", () => {
 	const textarea = rendered.container.querySelector("textarea");
 	expect(textarea).not.toBeNull();
 	textarea?.dispatchEvent(
-		new dom.window.KeyboardEvent("keydown", {
+		new window.KeyboardEvent("keydown", {
 			bubbles: true,
 			key: "Enter",
 		}),
@@ -663,6 +663,8 @@ function renderGeneralDiscussions(
 					title: "First chat",
 					createdAt: "2026-08-24T00:00:00Z",
 					busy: false,
+					agent: null,
+					model: null,
 				},
 			]}
 			activeChatId="chat-1"

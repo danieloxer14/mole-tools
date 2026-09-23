@@ -11,6 +11,10 @@ export interface FileDiff {
 	deletions: number;
 }
 
+export interface DiffOptions {
+	ignoreWhitespace?: boolean;
+}
+
 export interface CommitMeta {
 	sha: string;
 	subject: string;
@@ -61,7 +65,12 @@ export interface Vcs {
 	fetchRef(repoRoot: string, remote: string, ref: string): Promise<void>;
 	mergeBase(repoRoot: string, a: string, b: string): Promise<string>;
 	addWorktree(input: AddWorktreeInput): Promise<void>;
-	diffRange(repoRoot: string, from: string, to: string): Promise<FileDiff[]>;
+	diffRange(
+		repoRoot: string,
+		from: string,
+		to: string,
+		options?: DiffOptions,
+	): Promise<FileDiff[]>;
 	remoteUrl(repoRoot: string, remote: string): Promise<string | null>;
 	/** Read a path from a git revision when its worktree-side copy is absent. */
 	readFileAtRevision?(

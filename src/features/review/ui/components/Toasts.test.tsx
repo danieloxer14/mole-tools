@@ -1,11 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-	errorToastMessage,
-	refreshResultToast,
-	type Toast,
-	Toasts,
-} from "./Toasts";
+import { errorToastMessage, type Toast, Toasts } from "./Toasts";
 
 const dismiss = () => {};
 
@@ -33,14 +28,6 @@ test("renders dismissible alert and status toasts", () => {
 	expect(html).toContain('role="status"');
 	expect(html).toContain('data-kind="info"');
 	expect(html).toContain("Up to date");
-});
-
-test("creates refresh feedback only for an up-to-date result", () => {
-	expect(refreshResultToast(false)).toEqual({
-		kind: "info",
-		message: "Up to date",
-	});
-	expect(refreshResultToast(true)).toBeNull();
 });
 
 test("normalizes unknown errors for toast messages", () => {

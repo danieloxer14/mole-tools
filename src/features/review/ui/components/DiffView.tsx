@@ -54,6 +54,7 @@ import {
 	wrapMarkdownBlocksWithActions,
 } from "../../../../shared/markdown";
 import { type Draft, isMarkdownSelection } from "../../state";
+import type { FromChatContext } from "../from-chat";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 import { CommentMarkdown } from "./CommentMarkdown";
 import {
@@ -155,9 +156,28 @@ interface DiffViewProps {
 	onEditDraft?: CommentDraftProps["onEdit"];
 	onSendDraft?: CommentDraftProps["onSend"];
 	onRetryDraft?: CommentDraftProps["onRetry"];
+	fromChat?: FromChatContext;
 	commentsCollapsed?: boolean;
 	findQuery?: string;
 	onFindQueryChange?: (query: string) => void;
+}
+
+type CommentDraftCallbacks = Pick<
+	CommentDraftProps,
+	"onCancel" | "onEdit" | "onSend" | "onRetry"
+>;
+
+function draftFromChat(
+	fromChat: FromChatContext | undefined,
+	draftId: string,
+): CommentDraftProps["fromChat"] {
+	if (!fromChat) return undefined;
+	return {
+		availability: fromChat.availability,
+		generation: fromChat.generations[draftId],
+		onGenerate: fromChat.onGenerate,
+		onStop: fromChat.onStop,
+	};
 }
 
 export function isMarkdownPath(path: string): boolean {
@@ -443,16 +463,15 @@ function RenderedMarkdown({
 	path,
 	drafts,
 	commentDraftProps,
+	fromChat,
 	onTagBlock,
 	onCommentBlock,
 }: {
 	source: string;
 	path: string;
 	drafts: readonly Draft[];
-	commentDraftProps: Pick<
-		CommentDraftProps,
-		"onCancel" | "onEdit" | "onSend" | "onRetry"
-	>;
+	commentDraftProps: CommentDraftCallbacks;
+	fromChat?: FromChatContext;
 	onTagBlock?: (selection: MarkdownBlockSelection) => void;
 	onCommentBlock?: (selection: MarkdownBlockSelection) => void;
 }) {
@@ -783,7 +802,12 @@ function RenderedMarkdown({
 			{markdownDrafts.length > 0 ? (
 				<div>
 					{markdownDrafts.map((draft) => (
-						<CommentDraft key={draft.id} draft={draft} {...commentDraftProps} />
+						<CommentDraft
+							key={draft.id}
+							draft={draft}
+							{...commentDraftProps}
+							fromChat={draftFromChat(fromChat, draft.id)}
+						/>
 					))}
 				</div>
 			) : null}
@@ -798,6 +822,7 @@ function MarkdownView({
 	path,
 	drafts,
 	commentDraftProps,
+	fromChat,
 	onTagBlock,
 	onCommentBlock,
 }: {
@@ -805,10 +830,8 @@ function MarkdownView({
 	fileContentsError: string | null;
 	path: string;
 	drafts: readonly Draft[];
-	commentDraftProps: Pick<
-		CommentDraftProps,
-		"onCancel" | "onEdit" | "onSend" | "onRetry"
-	>;
+	commentDraftProps: CommentDraftCallbacks;
+	fromChat?: FromChatContext;
 	onTagBlock?: (selection: MarkdownBlockSelection) => void;
 	onCommentBlock?: (selection: MarkdownBlockSelection) => void;
 }) {
@@ -823,6 +846,7 @@ function MarkdownView({
 			drafts={drafts}
 			commentDraftProps={commentDraftProps}
 			onTagBlock={onTagBlock}
+			fromChat={fromChat}
 			onCommentBlock={onCommentBlock}
 		/>
 	);
@@ -1031,6 +1055,7 @@ function InlineCommentRows({
 	explainDisabled,
 	drafts,
 	commentDraftProps,
+	fromChat,
 }: {
 	file: ParsedFileDiff;
 	line: DiffLine;
@@ -1041,10 +1066,8 @@ function InlineCommentRows({
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	drafts: readonly Draft[];
-	commentDraftProps: Pick<
-		CommentDraftProps,
-		"onCancel" | "onEdit" | "onSend" | "onRetry"
-	>;
+	commentDraftProps: CommentDraftCallbacks;
+	fromChat?: FromChatContext;
 }) {
 	const lineDiscussions = discussions.filter((discussion) =>
 		discussionMatchesLine(discussion, file, line),
@@ -1070,7 +1093,12 @@ function InlineCommentRows({
 					/>
 				))}
 				{lineDrafts.map((draft) => (
-					<CommentDraft key={draft.id} draft={draft} {...commentDraftProps} />
+					<CommentDraft
+						key={draft.id}
+						draft={draft}
+						{...commentDraftProps}
+						fromChat={draftFromChat(fromChat, draft.id)}
+					/>
 				))}
 			</td>
 		</tr>
@@ -1476,6 +1504,7 @@ function HunkRows({
 	explainDisabled,
 	drafts,
 	commentDraftProps,
+	fromChat,
 	onLineClick,
 	onTagHunk,
 	onCommentSelection,
@@ -1500,10 +1529,8 @@ function HunkRows({
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	drafts: readonly Draft[];
-	commentDraftProps: Pick<
-		CommentDraftProps,
-		"onCancel" | "onEdit" | "onSend" | "onRetry"
-	>;
+	commentDraftProps: CommentDraftCallbacks;
+	fromChat?: FromChatContext;
 	onLineClick?: (
 		line: DiffLine,
 		hunkHeader: string,
@@ -1594,6 +1621,7 @@ function HunkRows({
 							onToggleDiscussionCollapse={onToggleDiscussionCollapse}
 							onExplainDiscussion={onExplainDiscussion}
 							explainDisabled={explainDisabled}
+							fromChat={fromChat}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
 						/>
@@ -1637,6 +1665,7 @@ function DiffTable({
 	explainDisabled,
 	drafts,
 	commentDraftProps,
+	fromChat,
 	onLineSelection,
 	onCommentSelection,
 	collapsedDiscussionIds,
@@ -1651,10 +1680,8 @@ function DiffTable({
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	drafts: readonly Draft[];
-	commentDraftProps: Pick<
-		CommentDraftProps,
-		"onCancel" | "onEdit" | "onSend" | "onRetry"
-	>;
+	commentDraftProps: CommentDraftCallbacks;
+	fromChat?: FromChatContext;
 	onLineSelection?: (selection: DiffLineSelection) => void;
 	onCommentSelection?: (selection: DiffLineSelection) => void;
 	collapsedDiscussionIds: ReadonlySet<string>;
@@ -1848,6 +1875,7 @@ function DiffTable({
 								explainDisabled={explainDisabled}
 								drafts={visibleDrafts}
 								commentDraftProps={commentDraftProps}
+								fromChat={fromChat}
 								onLineClick={onLineSelection ? selectLine : undefined}
 								onTagHunk={tagLine}
 								onCommentSelection={onCommentSelection}
@@ -1899,6 +1927,7 @@ export function DiffView({
 	onEditDraft,
 	onSendDraft,
 	onRetryDraft,
+	fromChat,
 	commentsCollapsed,
 	findQuery: findQueryProp,
 	onFindQueryChange,
@@ -1977,6 +2006,26 @@ export function DiffView({
 		(selection: MarkdownBlockSelection) => {
 			onMarkdownCommentRef.current?.(selection);
 		},
+		[],
+	);
+	const fromChatRef = useRef(fromChat);
+	fromChatRef.current = fromChat;
+	const stableFromChat = useMemo<FromChatContext>(
+		() => ({
+			get availability() {
+				return (
+					fromChatRef.current?.availability ?? {
+						kind: "disabled",
+						reason: "Loading chat…",
+					}
+				);
+			},
+			get generations() {
+				return fromChatRef.current?.generations ?? {};
+			},
+			onGenerate: (id) => fromChatRef.current?.onGenerate(id),
+			onStop: (id) => fromChatRef.current?.onStop(id),
+		}),
 		[],
 	);
 	const onCancelDraftRef = useRef(onCancelDraft);
@@ -2325,6 +2374,7 @@ export function DiffView({
 					path={path}
 					drafts={drafts}
 					commentDraftProps={commentDraftProps}
+					fromChat={fromChat}
 					onTagBlock={stableOnMarkdownTag}
 					onCommentBlock={stableOnMarkdownComment}
 				/>
@@ -2376,6 +2426,7 @@ export function DiffView({
 							explainDisabled={explainDisabled}
 							drafts={drafts}
 							commentDraftProps={commentDraftProps}
+							fromChat={fromChat ? stableFromChat : undefined}
 							onLineSelection={onLineSelection}
 							onCommentSelection={onCommentSelection}
 							find={find}

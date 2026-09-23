@@ -93,6 +93,19 @@ test("normalizes legacy BDD fields without a version bump", () => {
 	]);
 });
 
+test("defaults the whitespace preference for legacy state", () => {
+	const legacy = { ...state() } as Record<string, unknown>;
+	delete legacy.showWhitespaceChanges;
+
+	expect(ReviewStateSchema.parse(legacy).showWhitespaceChanges).toBe(true);
+	expect(
+		ReviewStateSchema.parse({
+			...state(),
+			showWhitespaceChanges: false,
+		}).showWhitespaceChanges,
+	).toBe(false);
+});
+
 describe("ReviewState", () => {
 	test("migrates legacy session state at the store boundary", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-legacy-state-"));
@@ -177,6 +190,31 @@ describe("ReviewState", () => {
 
 		expect(parsed.chats).toEqual([]);
 		expect(parsed.activeChatId).toBeNull();
+	});
+
+	test("parses chat meta without binding as null", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [
+				{
+					id: "legacy",
+					title: "",
+					sessionId: null,
+					createdAt: "2026-08-15T00:00:00.000Z",
+				},
+			],
+		});
+
+		expect(parsed.chats).toEqual([
+			{
+				id: "legacy",
+				title: "",
+				sessionId: null,
+				createdAt: "2026-08-15T00:00:00.000Z",
+				agent: null,
+				model: null,
+			},
+		]);
 	});
 
 	test("builds per-chat transcript paths while retaining legacy path", () => {

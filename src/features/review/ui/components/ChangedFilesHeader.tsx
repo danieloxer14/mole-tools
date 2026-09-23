@@ -1,5 +1,6 @@
 import { List, ListTree } from "lucide-react";
 import { ProgressBar } from "./ProgressBar";
+import { Checkbox } from "./ui/checkbox";
 import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
@@ -12,6 +13,11 @@ export interface ChangedFilesHeaderProps {
 	total: number;
 	mode: ChangedFilesMode;
 	onModeChange: (mode: ChangedFilesMode) => void;
+	showWhitespaceChanges: boolean;
+	whitespaceChanging: boolean;
+	syncing: boolean;
+	refreshing: boolean;
+	onShowWhitespaceChangesChange: (show: boolean) => void;
 }
 
 export function viewedFileCount(
@@ -25,13 +31,31 @@ export function viewedFileCount(
 export function changedFileCount(files: readonly string[]): number {
 	return new Set(files).size;
 }
+export function diffLineTotals(
+	files: readonly { insertions: number; deletions: number }[],
+): { insertions: number; deletions: number } {
+	let insertions = 0;
+	let deletions = 0;
+	for (const file of files) {
+		insertions += file.insertions;
+		deletions += file.deletions;
+	}
+	return { insertions, deletions };
+}
+
 
 export function ChangedFilesHeader({
 	viewedCount,
 	total,
 	mode,
 	onModeChange,
+	showWhitespaceChanges,
+	whitespaceChanging,
+	syncing,
+	refreshing,
+	onShowWhitespaceChangesChange,
 }: ChangedFilesHeaderProps) {
+	const whitespaceDisabled = whitespaceChanging || syncing || refreshing;
 	return (
 		<div
 			data-region="changed-files"
@@ -78,6 +102,18 @@ export function ChangedFilesHeader({
 					<span className="sr-only">Tree view</span>
 				</SegmentedToggleGroupItem>
 			</SegmentedToggleGroup>
+			<div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+				<Checkbox
+					id="show-whitespace-changes"
+					aria-label="Show whitespace changes"
+					checked={showWhitespaceChanges}
+					disabled={whitespaceDisabled}
+					onCheckedChange={(checked) =>
+						onShowWhitespaceChangesChange(checked === true)
+					}
+				/>
+				<label htmlFor="show-whitespace-changes">Show whitespace changes</label>
+			</div>
 		</div>
 	);
 }

@@ -121,6 +121,14 @@ cannot grant write access to code under review.
 Review agent and model can also be selected from the review UI's **Prompts &
 Models** panel. Changes apply to the next layer run or chat turn; use
 **Regenerate** to rebuild cached layers.
+Prompt versions can select an agent and model independently. A version whose
+agent is **Default** inherits the global Review agent/model above; a version
+with an explicit agent uses that agent and its version model (or no `--model`
+flag when that model is blank). Chats keep the agent/model they were bound to
+when created, even after the global setting or prompt version changes. For a
+non-default agent kind, mole-tools uses the `omp` or `claude` binary from
+`PATH`; `review.binary` applies only when the selected agent is the configured
+default.
 
 
 #### Optional Sections
@@ -211,13 +219,14 @@ Prompt presets and their version history live beside `config.json`:
             └── NNN.md
 ```
 
-The seven prompt slots are `commit-system`, `mr-code`, `mr-plan`,
-`review-layers-code`, `review-layers-plan`, `review-chat`, and `review-explain-comment`. Each slot can
+The eight prompt slots are `commit-system`, `mr-code`, `mr-plan`,
+`review-layers-code`, `review-layers-plan`, `review-chat`,
+`review-explain-comment`, and `review-comment-from-chat`. Each slot can
 have multiple named presets. The active text is the highest-numbered version
 of the active preset. The shipped default seeds `default/001.md` on first
 access, and `config.prompts` records the active preset per slot (a missing
 entry means `default`).
-The four review prompt slots are managed from the review UI's **Prompts &
+The five review prompt slots are managed from the review UI's **Prompts &
 Models** overlay. Saving creates a new version, **Roll back** copies an older
 version forward as a new latest version, and **Reset** writes the shipped
 default as a new version. This history is append-only: mole-tools never
@@ -235,6 +244,22 @@ Activating a preset or changing review-agent settings in the overlay persists
 the choice with `updateConfig`. That helper rewrites `config.json` and does
 not preserve comments, so keep important notes outside the generated config.
 
+Each version file may begin with YAML-style frontmatter containing optional
+agent/model metadata:
+
+```text
+---
+agent: omp
+model: openai/gpt-5.2
+---
+Review the changed code for correctness and risk.
+```
+
+When `agent` is unset, the version inherits the global Review agent and model.
+When an agent is set with a blank model, the run sends no `--model` flag.
+Frontmatter is ignored by the commit and MR prompts; those slots continue to
+use their `models.*` LLM routes.
+
 | Slot | Used by | Customise for |
 |---|---|---|
 | `commit-system` | `commit` | Commit-message tone and repository conventions. |
@@ -244,6 +269,7 @@ not preserve comments, so keep important notes outside the generated config.
 | `review-layers-plan` | `review` default `--mode plan` | Requirements, risks, assumptions, and acceptance-criteria review. |
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
 | `review-explain-comment` | Review UI **Explain** on a GitLab discussion | Prompt for explaining a review comment in a new chat. |
+| `review-comment-from-chat` | "Comment from chat" | Review UI |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -287,7 +313,7 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 
 **How it works.** Fetches staged diff → optionally fetches Jira issue details from branch name → sends everything (diff + context + active prompt preset) to the configured model → formats the message → you accept / edit / reject → committed locally → optional push. If your branch name matches the configured Jira pattern, issue title and description are included in the generation prompt automatically.
 
-**Configuration.** Uses the `commit` model route from config.json. The active `commit-system` prompt preset supplies the system prompt; set it in `config.json`'s `prompts` map, since the review UI's **Prompts & Models** overlay only manages the four review slots.
+**Configuration.** Uses the `commit` model route from config.json. The active `commit-system` prompt preset supplies the system prompt; set it in `config.json`'s `prompts` map, since the review UI's **Prompts & Models** overlay manages the five review slots.
 
 
 ---
@@ -308,8 +334,7 @@ mole-tools merge-request --context "migration risk"   # extra inline guidance
 | `--context <text>` | Extra guidance for both the commit-phase and MR-description generation. |
 
 **How it works.** Preflight GitLab connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
-
-**Configuration.** Uses the `mergeRequest` model route. The active `mr-code` or `mr-plan` prompt preset supplies the description prompt; set it in `config.json`'s `prompts` map, since the overlay only manages the four review slots. Requires `glab` to be installed and authenticated for the GitLab host in the MR URL.
+**Configuration.** Uses the `mergeRequest` model route. The active `mr-code` or `mr-plan` prompt preset supplies the description prompt; set it in `config.json`'s `prompts` map, since the overlay manages the five review slots. Requires `glab` to be installed and authenticated for the GitLab host in the MR URL.
 
 
 ---
@@ -332,9 +357,9 @@ Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
 
-The **Prompts & Models** overlay manages the four review prompt slots
+The **Prompts & Models** overlay manages the five review prompt slots
 (`review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`), their presets and
+`review-explain-comment`, `review-comment-from-chat`), their presets and
 versions, plus the review agent and model. Changes apply to the next layer run
 or chat turn; use **Regenerate** to rebuild cached layers.
 

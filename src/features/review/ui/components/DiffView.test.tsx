@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { HostDiscussion } from "../../../../ports/git-host";
+import type { Draft } from "../../state";
 import { DiffView } from "./DiffView";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1287,6 +1288,88 @@ test("keeps rendered markdown DOM intact during unrelated parent updates", () =>
 		act(() => {
 			root.unmount();
 		});
+		container.remove();
+	}
+});
+
+test("updates rendered Markdown From chat controls when generation state changes", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	const draft: Draft = {
+		id: "markdown-draft",
+		body: "",
+		selection: {
+			kind: "markdown",
+			path: "README.md",
+			startLine: 1,
+			endLine: 1,
+			quote: "# Review guide",
+		},
+		filePath: "README.md",
+		status: "draft",
+		error: null,
+		postedDiscussionId: null,
+		staleSince: null,
+	};
+	let generation:
+		| { status: "running" }
+		| { status: "failed"; error: string }
+		| undefined;
+	const availability:
+		| { kind: "ready"; chatLabel: string }
+		| { kind: "disabled"; reason: string } = {
+		kind: "ready",
+		chatLabel: "Review chat",
+	};
+	const render = () => {
+		root.render(
+			<DiffView
+				file={markdownFile}
+				mode="inline"
+				viewMode="rendered"
+				largeFileLineThreshold={800}
+				fileContents="# Review guide"
+				fileContentsError={null}
+				drafts={[draft]}
+				onModeChange={() => {}}
+				onLineSelection={() => {}}
+				onCommentSelection={() => {}}
+				fromChat={{
+					availability,
+					generations: generation ? { [draft.id]: generation } : {},
+					onGenerate: () => {},
+					onStop: () => {},
+				}}
+			/>,
+		);
+	};
+
+	try {
+		act(render);
+		let button = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="From chat"]',
+		);
+		expect(button?.disabled).toBe(false);
+
+		generation = { status: "running" };
+		act(render);
+		button = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Generating comment"]',
+		);
+		expect(button?.disabled).toBe(true);
+		expect(container.textContent).toContain("Stop");
+
+		generation = { status: "failed", error: "Generation failed" };
+		act(render);
+		expect(
+			container.querySelector<HTMLButtonElement>(
+				'button[aria-label="From chat"]',
+			),
+		).not.toBeNull();
+		expect(container.textContent).toContain("Generation failed");
+	} finally {
+		act(() => root.unmount());
 		container.remove();
 	}
 });

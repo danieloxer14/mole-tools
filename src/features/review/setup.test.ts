@@ -371,6 +371,49 @@ describe("syncReview viewed files", () => {
 		}
 	});
 });
+test("defaults new state and preserves an explicit hidden choice through sync", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "mole-review-whitespace-state-"));
+	try {
+		const paths = pathsFor(dir);
+		const store = new ReviewStore(paths);
+		const fresh = await runSetup(paths);
+		expect(fresh.state.showWhitespaceChanges).toBe(true);
+
+		const existing = stateFor(paths, { showWhitespaceChanges: false });
+		await store.write(existing);
+
+		const reopened = await runSetup(paths);
+		expect(reopened.state.showWhitespaceChanges).toBe(false);
+
+		const synced = await syncReview({
+			vcs: new FakeVcs({
+				repoRoot: paths.repoPath,
+				worktrees: [],
+				mergeBase: "base-2",
+				diffRange: [],
+			}),
+			ref,
+			mr: {
+				...mergeRequest(),
+				headSha: "head-2",
+				diffRefs: {
+					baseSha: "base-2",
+					startSha: "base-2",
+					headSha: "head-2",
+				},
+			},
+			state: reopened.state,
+			store,
+			paths,
+		});
+
+		expect(synced.state.showWhitespaceChanges).toBe(false);
+		const persisted = await store.read();
+		expect(persisted?.showWhitespaceChanges).toBe(false);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
 
 describe("reviewRemoteUrl", () => {
 	test("builds an SSH remote so cloning doesn't require HTTPS git credentials", () => {
