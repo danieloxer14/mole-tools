@@ -6,9 +6,16 @@ import {
 	viewedFileCount,
 } from "./ChangedFilesHeader";
 
+const noop = () => {};
+
 test("renders viewed files progress header", () => {
 	const html = renderToStaticMarkup(
-		<ChangedFilesHeader viewedCount={1} total={3} />,
+		<ChangedFilesHeader
+			viewedCount={1}
+			total={3}
+			mode="list"
+			onModeChange={noop}
+		/>,
 	);
 
 	expect(html).toContain("Viewed files");
@@ -19,7 +26,12 @@ test("renders viewed files progress header", () => {
 
 test("renders empty viewed files progress", () => {
 	const html = renderToStaticMarkup(
-		<ChangedFilesHeader viewedCount={0} total={1} />,
+		<ChangedFilesHeader
+			viewedCount={0}
+			total={1}
+			mode="list"
+			onModeChange={noop}
+		/>,
 	);
 
 	expect(html).toContain("0/1 files");
@@ -33,9 +45,15 @@ test("counts unique changed files that are viewed", () => {
 	);
 	expect(changedFileCount(["a.ts", "a.ts", "b.ts"])).toBe(2);
 });
+
 test("exposes one-pixel boundary borders around changed-files region", () => {
 	const html = renderToStaticMarkup(
-		<ChangedFilesHeader viewedCount={1} total={3} />,
+		<ChangedFilesHeader
+			viewedCount={1}
+			total={3}
+			mode="list"
+			onModeChange={noop}
+		/>,
 	);
 	const region = html.match(/<div data-region="changed-files"[^>]*>/)?.[0];
 
@@ -47,11 +65,44 @@ test("exposes one-pixel boundary borders around changed-files region", () => {
 
 test("keeps viewed count and progress values aligned", () => {
 	const html = renderToStaticMarkup(
-		<ChangedFilesHeader viewedCount={2} total={4} />,
+		<ChangedFilesHeader
+			viewedCount={2}
+			total={4}
+			mode="list"
+			onModeChange={noop}
+		/>,
 	);
 
 	expect(html).toContain("2/4 files");
 	expect(html).toContain('aria-valuemax="4"');
 	expect(html).toContain('aria-valuenow="2"');
 	expect(html).toContain('style="width:50%"');
+});
+
+test("renders controlled list and tree layout items", () => {
+	const listMarkup = renderToStaticMarkup(
+		<ChangedFilesHeader
+			viewedCount={1}
+			total={2}
+			mode="list"
+			onModeChange={noop}
+		/>,
+	);
+	expect(listMarkup).toContain('aria-label="Changed files layout"');
+	expect(listMarkup).toContain('aria-label="List view"');
+	expect(listMarkup).toContain('aria-label="Tree view"');
+	expect(listMarkup).toContain('aria-pressed="true"');
+	expect(listMarkup).toContain('data-state="on"');
+
+	const treeMarkup = renderToStaticMarkup(
+		<ChangedFilesHeader
+			viewedCount={1}
+			total={2}
+			mode="tree"
+			onModeChange={noop}
+		/>,
+	);
+	expect(treeMarkup).toContain('aria-pressed="true"');
+	expect(treeMarkup).toContain('data-state="on"');
+	expect(treeMarkup).toContain('aria-label="Tree view"');
 });

@@ -23,11 +23,7 @@ import {
 	initialColumnWidth,
 	type ReviewColumn,
 } from "./column-resize";
-import {
-	ChangedFilesHeader,
-	changedFileCount,
-	viewedFileCount,
-} from "./components/ChangedFilesHeader";
+import { ChangedFiles } from "./components/ChangedFiles";
 import {
 	ChatPane,
 	type ChatSummary,
@@ -42,7 +38,6 @@ import {
 	isMarkdownPath,
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
-import { scrollSelectedFileRow } from "./components/file-tree-scroll";
 import { LayerPane } from "./components/LayerPane";
 import { type ApprovalAction, MrHeader } from "./components/MrHeader";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -54,7 +49,6 @@ import {
 } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";
 import { Button } from "./components/ui/button";
-import { Checkbox } from "./components/ui/checkbox";
 import {
 	Dialog,
 	DialogClose,
@@ -501,15 +495,6 @@ function ReviewApp() {
 	const resizeSession = useRef<ResizeSession | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
-	const fileTreeRows = useRef<Map<string, HTMLElement>>(new Map());
-	const registerFileTreeRow = useCallback(
-		(path: string, el: HTMLElement | null) => {
-			const rows = fileTreeRows.current;
-			if (el) rows.set(path, el);
-			else rows.delete(path);
-		},
-		[],
-	);
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
 	const [fileViewModes, setFileViewModes] = useState<
 		Record<string, FileViewMode>
@@ -959,13 +944,6 @@ function ReviewApp() {
 		confirmedWholeFilePaths,
 	]);
 
-	// Scroll the selected Changed-files row into view. Only `selectedPath`
-	// drives this: row registrations stay current via `registerFileTreeRow`,
-	// and a file-list refresh must not re-jump the tree's scroll position.
-	useEffect(() => {
-		scrollSelectedFileRow(fileTreeRows.current, selectedPath);
-	}, [selectedPath]);
-
 	if (error)
 		return (
 			<main className="flex h-screen items-center justify-center gap-2 text-sm text-destructive">
@@ -1002,8 +980,6 @@ function ReviewApp() {
 	};
 
 	const files = data.diff.map(filePath).filter((path) => path.length > 0);
-	const changedFileTotal = changedFileCount(files);
-	const viewedCount = viewedFileCount(files, data.viewedFiles);
 	const selectFile = (path: string) => {
 		setSelectedPath(path);
 	};
@@ -1838,53 +1814,17 @@ function ReviewApp() {
 						onSync={syncReviewState}
 					/>
 					<Toasts toasts={toasts} onDismiss={dismissToast} />
-					<ChangedFilesHeader
-						viewedCount={viewedCount}
-						total={changedFileTotal}
+					<ChangedFiles
+						files={data.diff}
+						viewedFiles={data.viewedFiles}
+						selectedPath={selectedPath}
+						onSelectFile={selectFile}
+						onViewedChange={(path, viewed) => {
+							saveProgress({
+								viewedFile: { path, viewed },
+							});
+						}}
 					/>
-					<nav
-						className="min-h-0 max-h-[40vh] flex-1 overflow-auto"
-						aria-label="Changed files"
-					>
-						{data.diff.map((file) => {
-							const path = filePath(file);
-							return (
-								<div
-									className="group flex items-center gap-2 px-4 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/60 data-[state=selected]:bg-accent"
-									key={path}
-									ref={(el) => registerFileTreeRow(path, el)}
-									data-state={path === selectedPath ? "selected" : "idle"}
-								>
-									<button
-										type="button"
-										className="min-w-0 flex-1 truncate text-left font-mono text-xs"
-										onClick={() => selectFile(path)}
-									>
-										{path}
-									</button>
-									<span className="flex shrink-0 gap-1 text-xs tabular-nums">
-										<span className="text-success">+{file.insertions}</span>
-										<span className="text-destructive">−{file.deletions}</span>
-									</span>
-									<div
-										className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
-										title="Mark file viewed"
-									>
-										<Checkbox
-											checked={data.viewedFiles.includes(path)}
-											aria-label={`Viewed ${path}`}
-											onCheckedChange={(checked) =>
-												saveProgress({
-													viewedFile: { path, viewed: checked === true },
-												})
-											}
-										/>
-										<span>Viewed</span>
-									</div>
-								</div>
-							);
-						})}
-					</nav>
 				</div>
 				<DiffView
 					key={selectedPath ?? "empty"}
