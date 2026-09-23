@@ -4,6 +4,7 @@ import type { DiffLine, ParsedFileDiff } from "../../shared/diff-parse";
 import {
 	buildExplainMessage,
 	discussionDiffExcerpt,
+	draftDiffExcerpt,
 	explainChatTitle,
 	NO_EXCERPT,
 } from "./explain";
@@ -260,6 +261,39 @@ describe("discussionDiffExcerpt", () => {
 	});
 });
 
+describe("draftDiffExcerpt", () => {
+	test("marks the selected range with context", () => {
+		const excerpt = draftDiffExcerpt(
+			{
+				path: "src/a.ts",
+				side: "new",
+				startLine: 15,
+				endLine: 16,
+			},
+			[[fileDiff()]],
+			1,
+		);
+		expect(excerpt).not.toBeNull();
+		expect(excerpt?.includes("> ")).toBe(true);
+		expect(excerpt?.includes("line new 15")).toBe(true);
+		expect(excerpt?.includes("line 16")).toBe(true);
+		expect(excerpt?.includes("line 14")).toBe(true);
+	});
+
+	test("returns null for an unknown path", () => {
+		expect(
+			draftDiffExcerpt(
+				{
+					path: "src/missing.ts",
+					side: "new",
+					startLine: 1,
+					endLine: 1,
+				},
+				[[fileDiff()]],
+			),
+		).toBeNull();
+	});
+});
 describe("buildExplainMessage", () => {
 	test("joins the trimmed prefix, comment block, and diff excerpt block", () => {
 		const message = buildExplainMessage({

@@ -93,6 +93,8 @@ describe("prompt store", () => {
 
 		expect(prompt.text).toBe(text);
 		expect(prompt.version).toBe(1);
+		expect(prompt.agent).toBeNull();
+		expect(prompt.model).toBeNull();
 	});
 
 	test("seeds shipped default before appending an edited version", async () => {
@@ -138,7 +140,64 @@ describe("prompt store", () => {
 			dir: root,
 		});
 
-		expect(prompt).toEqual({ text: "first", preset: "default", version: 1 });
+		expect(prompt).toEqual({
+			text: "first",
+			preset: "default",
+			version: 1,
+			agent: null,
+			model: null,
+		});
+	});
+
+	test("saves and reads version metadata", async () => {
+		const root = await promptsDir();
+		const version = await savePrompt("review-chat", {
+			preset: "default",
+			text: "Metadata prompt",
+			agent: "omp",
+			model: "sonnet",
+			dir: root,
+		});
+
+		expect(version).toBe(2);
+		expect(
+			await Bun.file(join(root, "review-chat", "default", "002.md")).text(),
+		).toBe("---\nagent: omp\nmodel: sonnet\n---\nMetadata prompt");
+		expect(
+			await readPrompt("review-chat", {
+				preset: "default",
+				version,
+				dir: root,
+			}),
+		).toEqual({
+			text: "Metadata prompt",
+			preset: "default",
+			version: 2,
+			agent: "omp",
+			model: "sonnet",
+		});
+	});
+
+	test("loadPrompt strips frontmatter", async () => {
+		const root = await promptsDir();
+		await savePrompt("review-chat", {
+			preset: "default",
+			text: "  Prompt body  \n",
+			agent: "claude",
+			model: "haiku",
+			dir: root,
+		});
+
+		expect(await loadPrompt("review-chat", { dir: root })).toBe("Prompt body");
+	});
+
+	test("files without frontmatter inherit", async () => {
+		const root = await promptsDir();
+		await writeVersion(root, "review-chat", "default", "001.md", "Prompt body");
+
+		const prompt = await readPrompt("review-chat", { dir: root });
+		expect(prompt.agent).toBeNull();
+		expect(prompt.model).toBeNull();
 	});
 
 	test("lists default and extra presets in sorted order", async () => {
@@ -244,6 +303,7 @@ describe("prompt store", () => {
 			"mr-code",
 			"mr-plan",
 			"review-chat",
+			"review-comment-from-chat",
 			"review-explain-comment",
 			"review-layers-code",
 			"review-layers-plan",

@@ -64,6 +64,7 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
+import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import "./app.css";
 
@@ -552,7 +553,11 @@ function ReviewApp() {
 	const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
 	const [creatingChat, setCreatingChat] = useState(false);
 	const [commentError, setCommentError] = useState<string | null>(null);
+	const [draftGenerations, setDraftGenerations] = useState<
+		Record<string, DraftGeneration>
+	>({});
 	const chatControllers = useRef(new Map<string, AbortController>());
+	const fromChatControllers = useRef(new Map<string, AbortController>());
 	const chatToolSequence = useRef(0);
 	const chatHistoryRequests = useRef(createRequestSequence());
 	const chatStateRequests = useRef(createRequestSequence());
@@ -773,6 +778,8 @@ function ReviewApp() {
 		id: chat.id,
 		title: chat.title,
 		createdAt: chat.createdAt,
+		agent: chat.agent,
+		model: chat.model,
 		busy:
 			(chatRuntimes[chat.id]?.sending ?? false) ||
 			(data?.busyChatIds ?? []).includes(chat.id),
@@ -783,6 +790,17 @@ function ReviewApp() {
 	const activeChatBusy = activeChatSummary?.busy ?? false;
 	const activeChatLoaded =
 		activeChatId !== null && chatRuntimes[activeChatId]?.loaded === true;
+	const activeChatIndex =
+		activeChatId === null
+			? -1
+			: (data?.chats.findIndex((chat) => chat.id === activeChatId) ?? -1);
+	const activeFromChatAvailability = fromChatAvailability({
+		chat: activeChatSummary ?? null,
+		chatIndex: activeChatIndex,
+		busy: activeChatBusy,
+		loaded: activeChat.loaded,
+		entries: activeChat.entries,
+	});
 
 	useEffect(() => {
 		if (
@@ -1250,7 +1268,165 @@ function ReviewApp() {
 			});
 	};
 
+	const generateFromChat = (id: string) => {
+		const chatId = activeChatId;
+		if (!chatId) return;
+		const existing = fromChatControllers.current.get(id);
+		if (existing) {
+			if (draftGenerations[id]?.status !== "failed") return;
+			existing.abort();
+			fromChatControllers.current.delete(id);
+		}
+		const controller = new AbortController();
+		fromChatControllers.current.set(id, controller);
+		setDraftGenerations((current) => ({
+			...current,
+			[id]: { status: "running" },
+		}));
+
+		const isCurrent = () => fromChatControllers.current.get(id) === controller;
+		const clearGeneration = () => {
+			if (!isCurrent()) return;
+			setDraftGenerations((current) => {
+				if (!(id in current)) return current;
+				const next = { ...current };
+				delete next[id];
+				return next;
+			});
+		};
+		const failGeneration = (message: string) => {
+			if (!isCurrent()) return;
+			setDraftGenerations((current) => ({
+				...current,
+				[id]: { status: "failed", error: message },
+			}));
+		};
+
+		void (async () => {
+			let done = false;
+			let streamError: string | null = null;
+			try {
+				const response = await fetch(
+					apiUrl(`/api/comments/${encodeURIComponent(id)}/from-chat`, token),
+					{
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							"X-Mole-Token": token,
+							accept: "text/event-stream",
+						},
+						body: JSON.stringify({ chatId }),
+						signal: controller.signal,
+					},
+				);
+				await consumeSseResponse(response, (frame) => {
+					const frameData =
+						typeof frame.data === "object" && frame.data !== null
+							? (frame.data as Record<string, unknown>)
+							: null;
+					if (
+						frame.event === "error" &&
+						typeof frameData?.message === "string"
+					) {
+						streamError = frameData.message;
+						failGeneration(streamError);
+					}
+					if (frame.event !== "done" || !frameData) return;
+					done = true;
+					const status = frameData.status;
+					if (status === "ok") {
+						const nextDraft = frameData.draft;
+						if (
+							typeof nextDraft !== "object" ||
+							nextDraft === null ||
+							!isCurrent()
+						) {
+							if (isCurrent())
+								failGeneration("Comment generation returned no draft");
+							return;
+						}
+						draftEditSequence.current.set(
+							id,
+							(draftEditSequence.current.get(id) ?? 0) + 1,
+						);
+						setData((current) =>
+							current
+								? {
+										...current,
+										drafts: current.drafts.map((draft) =>
+											draft.id === id ? (nextDraft as Draft) : draft,
+										),
+									}
+								: current,
+						);
+						clearGeneration();
+					} else if (status === "failed") {
+						const message =
+							typeof frameData.error === "string"
+								? frameData.error
+								: (streamError ?? "Comment generation failed");
+						failGeneration(message);
+					} else if (status === "stopped") {
+						clearGeneration();
+					}
+				});
+				if (!done && isCurrent()) {
+					failGeneration(
+						streamError ?? `Comment generation failed (${response.status})`,
+					);
+				}
+			} catch (reason: unknown) {
+				if (!isCurrent()) return;
+				if (
+					controller.signal.aborted ||
+					(reason instanceof Error && reason.name === "AbortError")
+				) {
+					clearGeneration();
+				} else {
+					failGeneration(
+						reason instanceof Error ? reason.message : String(reason),
+					);
+				}
+			} finally {
+				if (fromChatControllers.current.get(id) === controller) {
+					fromChatControllers.current.delete(id);
+				}
+			}
+		})();
+	};
+
+	const stopFromChat = (id: string) => {
+		const controller = fromChatControllers.current.get(id);
+		if (!controller) return;
+		void fetch(
+			apiUrl(`/api/comments/${encodeURIComponent(id)}/from-chat/cancel`, token),
+			{
+				method: "POST",
+				headers: { "X-Mole-Token": token },
+			},
+		).catch(() => undefined);
+		controller.abort();
+		fromChatControllers.current.delete(id);
+		setDraftGenerations((current) => {
+			if (!(id in current)) return current;
+			const next = { ...current };
+			delete next[id];
+			return next;
+		});
+	};
+
 	const cancelCommentDraft = (id: string) => {
+		const controller = fromChatControllers.current.get(id);
+		if (controller) {
+			controller.abort();
+			fromChatControllers.current.delete(id);
+		}
+		setDraftGenerations((current) => {
+			if (!(id in current)) return current;
+			const next = { ...current };
+			delete next[id];
+			return next;
+		});
 		setData((current) =>
 			current
 				? {
@@ -1933,6 +2109,12 @@ function ReviewApp() {
 					onEditDraft={updateCommentDraft}
 					onSendDraft={sendCommentDraft}
 					onRetryDraft={retryCommentDraft}
+					fromChat={{
+						availability: activeFromChatAvailability,
+						generations: draftGenerations,
+						onGenerate: generateFromChat,
+						onStop: stopFromChat,
+					}}
 				/>
 			</section>
 			<hr

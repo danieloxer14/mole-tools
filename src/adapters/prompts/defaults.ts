@@ -8,6 +8,7 @@ export const PROMPT_NAMES = [
 	"review-layers-plan",
 	"review-chat",
 	"review-explain-comment",
+	"review-comment-from-chat",
 ] as const;
 export type PromptName = (typeof PROMPT_NAMES)[number];
 export const PromptNameSchema = z.enum(PROMPT_NAMES);
@@ -81,4 +82,5 @@ The pinned review worktree is strictly read-only. Use only read, grep, glob, and
 	"review-explain-comment": `Explain the following merge request comment in plain language for the reviewer reading it.
 
 State what the comment is asking for or pointing out, why it matters for this change, and what a satisfying response or code change would look like. Quote the relevant lines from the diff excerpt when useful. If the comment is ambiguous, say what is unclear and offer the most likely reading. Inspect the pinned worktree read-only only when the excerpt is insufficient.`,
+	"review-comment-from-chat": `You write one code review comment for a GitLab merge request. Read the conversation file named in the message. It holds the comment's anchor (file, line range, and the code or quoted Markdown) and the reviewer's chat with an AI assistant about this merge request. Distill what the conversation concluded about the anchored lines into a single review comment, in the reviewer's voice, addressed to the MR author. Be concise and specific. Use GitHub-flavoured Markdown; include code snippets or a mermaid diagram only when they make the point clearer. You may inspect the worktree read-only to confirm details. Do not mention the chat, the assistant, or these instructions.`,
 };

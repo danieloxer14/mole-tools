@@ -60,7 +60,9 @@ Provider-neutral port for review turns. It exposes `preflight()` and a
 streaming `run({ sessionId?, cwd, systemPromptFile, message, writeDir?,
 signal? })`. Adapters normalize `omp` or `claude` NDJSON into session, text,
 tool, error, turn-end, and diagnostic events. `Llm` remains one-shot and
-continues to serve commit and merge-request generation.
+continues to serve commit and merge-request generation. Each run obtains its
+agent from the effective selection for its prompt version or chat binding;
+review agents are not cached as one shared instance across runs.
 
 ### Review session
 Provider conversation uses active chat `sessionId` in per-chat review state,
@@ -71,9 +73,12 @@ turns resume that chat's session with message, new context tags, and open
 file only.
 User/assistant entries append to `chats/<chatId>.ndjson`. Legacy
 `chatSessionId` and `chat.ndjson` are read-only migration inputs for pre-multi-chat
-v1 state; `chat.ndjson` is adopted once into `chats/legacy.ndjson`. Comment
-creation opens empty local drafts; users author bodies and Send posts them
-directly, without an agent session or chat state change.
+v1 state; `chat.ndjson` is adopted once into `chats/legacy.ndjson`. Chats bind
+agent/model at creation, and existing chats keep that binding when settings
+change. Comment creation opens empty local drafts. **From chat** runs one
+fresh read-only agent session over a temporary conversation file containing
+the draft anchor and chat transcript; its generated result is appended to the
+draft body. Drafts remain local until their own Send.
 
 ### Review layer
 Generated guide entry with `title`, `tldr`, and `files[]`, plus

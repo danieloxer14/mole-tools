@@ -1,6 +1,7 @@
-import { Loader2, RefreshCw, SendHorizontal } from "lucide-react";
+import { Loader2, RefreshCw, SendHorizontal, Sparkles } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { type Draft, isMarkdownSelection } from "../../state";
+import type { DraftGeneration, FromChatAvailability } from "../from-chat";
 import { CommentMarkdown } from "./CommentMarkdown";
 import { composerEnterAction } from "./composer-keydown";
 import { Alert } from "./ui/alert";
@@ -8,6 +9,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export interface CommentDraftProps {
 	draft: Draft;
@@ -15,6 +17,12 @@ export interface CommentDraftProps {
 	onEdit: (id: string, body: string) => void;
 	onSend: (id: string) => void;
 	onRetry: (id: string) => void;
+	fromChat?: {
+		availability: FromChatAvailability;
+		generation: DraftGeneration | undefined;
+		onGenerate: (id: string) => void;
+		onStop: (id: string) => void;
+	};
 }
 
 function statusLabel(status: Draft["status"]): string {
@@ -35,6 +43,7 @@ export function CommentDraft({
 	onEdit,
 	onSend,
 	onRetry,
+	fromChat,
 }: CommentDraftProps) {
 	const [editing, setEditing] = useState(draft.body.trim().length === 0);
 	const [body, setBody] = useState(draft.body);
@@ -46,7 +55,19 @@ export function CommentDraft({
 			: draft.status === "failed"
 				? "failed"
 				: "draft";
+	const generation = fromChat?.generation;
+	const generationRunning = generation?.status === "running";
 	const editorRef = useRef<HTMLTextAreaElement>(null);
+	const previousDraftBody = useRef(draft.body);
+
+	useEffect(() => {
+		if (draft.body !== previousDraftBody.current) {
+			previousDraftBody.current = draft.body;
+			setBody(draft.body);
+		} else if (!editing) {
+			setBody(draft.body);
+		}
+	}, [draft.body, editing]);
 
 	useEffect(() => {
 		if (editing && canEdit && draft.body.trim().length === 0)
@@ -71,7 +92,7 @@ export function CommentDraft({
 			composing: event.nativeEvent.isComposing,
 		});
 		if (action.prevent) event.preventDefault();
-		if (action.send && hasBody) onSend(draft.id);
+		if (action.send && hasBody && !generationRunning) onSend(draft.id);
 	};
 
 	return (
@@ -105,6 +126,7 @@ export function CommentDraft({
 					onChange={(event) => updateBody(event.target.value)}
 					onKeyDown={handleEditorKeyDown}
 					rows={4}
+					disabled={generationRunning}
 				/>
 			) : (
 				<div className="mt-2 min-w-0 max-w-full">
@@ -114,6 +136,11 @@ export function CommentDraft({
 			{draft.error ? (
 				<Alert className="mt-2 min-w-0 max-w-full" variant="destructive">
 					{draft.error}
+				</Alert>
+			) : null}
+			{generation?.status === "failed" ? (
+				<Alert className="mt-2 min-w-0 max-w-full" variant="destructive">
+					Couldn't generate comment: {generation.error}
 				</Alert>
 			) : null}
 			<div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -152,12 +179,57 @@ export function CommentDraft({
 						</ToggleGroupItem>
 					</ToggleGroup>
 				) : null}
+				{canEdit && fromChat ? (
+					<>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										aria-label={
+											generationRunning ? "Generating comment" : "From chat"
+										}
+										onClick={() => fromChat.onGenerate(draft.id)}
+										disabled={
+											generationRunning ||
+											fromChat.availability.kind === "disabled"
+										}
+									>
+										{generationRunning ? (
+											<Loader2 className="animate-spin" aria-hidden />
+										) : (
+											<Sparkles aria-hidden />
+										)}
+										{generationRunning ? "Generating…" : "From chat"}
+									</Button>
+								}
+							/>
+							<TooltipContent>
+								{fromChat.availability.kind === "disabled"
+									? fromChat.availability.reason
+									: `Generate comment from ${fromChat.availability.chatLabel}`}
+							</TooltipContent>
+						</Tooltip>
+						{generationRunning ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onClick={() => fromChat.onStop(draft.id)}
+							>
+								Stop
+							</Button>
+						) : null}
+					</>
+				) : null}
 				{status === "draft" ? (
 					<Button
 						type="button"
 						size="sm"
 						onClick={() => onSend(draft.id)}
-						disabled={!hasBody}
+						disabled={!hasBody || generationRunning}
 					>
 						<SendHorizontal aria-hidden />
 						Send
