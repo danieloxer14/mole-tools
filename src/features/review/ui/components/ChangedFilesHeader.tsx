@@ -7,7 +7,6 @@ import {
 } from "./ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-
 export type ChangedFilesMode = "list" | "tree";
 
 export interface ChangedFilesHeaderProps {
@@ -44,7 +43,6 @@ export function diffLineTotals(
 	}
 	return { insertions, deletions };
 }
-
 
 export function ChangedFilesHeader({
 	viewedCount,

@@ -1,9 +1,12 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import mermaid, { type RenderResult } from "mermaid";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { HostDiscussion } from "../../../../ports/git-host";
+import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { Draft } from "../../state";
+import { applyColorTheme } from "../color-theme";
 import { DiffView } from "./DiffView";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,7 +90,7 @@ const multiHunkSource = [
 	"second change",
 ].join("\n");
 
-const markdownFile = {
+const markdownFile: ParsedFileDiff = {
 	oldPath: "README.md",
 	newPath: "README.md",
 	status: "modified",
@@ -111,7 +114,7 @@ const markdownFile = {
 			],
 		},
 	],
-} as const;
+};
 
 const note = {
 	id: "note-1",
@@ -1242,6 +1245,87 @@ test("highlights multiline source comments with shared grammar state", {
 		container.remove();
 	}
 });
+test(
+	"keeps github-dark inline colours and exposes github-light variables",
+	async () => {
+		const keywordFile: ParsedFileDiff = {
+			oldPath: "src/example.ts",
+			newPath: "src/example.ts",
+			status: "added",
+			binary: false,
+			insertions: 1,
+			deletions: 0,
+			hunks: [
+				{
+					header: "@@ -0,0 +1 @@",
+					oldStart: 0,
+					oldLines: 0,
+					newStart: 1,
+					newLines: 1,
+					lines: [
+						{
+							kind: "add",
+							oldLine: null,
+							newLine: 1,
+							text: "const value = 1;",
+						},
+					],
+				},
+			],
+		};
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+
+		try {
+			act(() => {
+				root.render(
+					<DiffView
+						file={keywordFile}
+						mode="inline"
+						largeFileLineThreshold={800}
+						fileContents={null}
+						fileContentsError={null}
+						onModeChange={() => {}}
+						onLineSelection={() => {}}
+						onCommentSelection={() => {}}
+					/>,
+				);
+			});
+			for (let attempt = 0; attempt < 500; attempt++) {
+				const firstToken = container.querySelector<HTMLElement>(
+					".line-text > span.shiki > span",
+				);
+				if (
+					firstToken?.style.color === "rgb(249, 117, 131)" &&
+					firstToken?.style.getPropertyValue("--shiki-light") === "#D73A49"
+				) {
+					break;
+				}
+				await act(async () => {
+					const { promise, resolve } = Promise.withResolvers<void>();
+					setTimeout(resolve, 10);
+					await promise;
+				});
+			}
+
+			const firstToken = container.querySelector<HTMLElement>(
+				".line-text > span.shiki > span",
+			);
+			expect(firstToken?.style.color).toBe("rgb(249, 117, 131)");
+			expect(firstToken?.style.getPropertyValue("--shiki-light")).toBe(
+				"#D73A49",
+			);
+		} finally {
+			act(() => {
+				root.unmount();
+			});
+			container.remove();
+			document.documentElement.className = "";
+		}
+	},
+	{ timeout: 30_000 },
+);
 
 test("keeps rendered markdown DOM intact during unrelated parent updates", () => {
 	const container = document.createElement("div");
@@ -1501,3 +1585,326 @@ test("marks inline Explain as busy while disabled", () => {
 	expect(button?.getAttribute("aria-busy")).toBe("true");
 	expect(button?.querySelector("svg.animate-spin")).not.toBeNull();
 });
+test(
+	"re-renders mermaid with the light theme when the colour theme switches",
+	async () => {
+		applyColorTheme("default");
+		const initSpy = spyOn(mermaid, "initialize");
+		const renderSpy = spyOn(mermaid, "render").mockImplementation(
+			async () =>
+				({
+					svg: `<svg data-theme="${String(
+						initSpy.mock.calls.at(-1)?.[0]?.theme ?? "dark",
+					)}"></svg>`,
+					diagramType: "flowchart",
+				}) satisfies RenderResult,
+		);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const fileContents = `\`\`\`mermaid\ngraph TD; A${Date.now()}-->B\n\`\`\``;
+
+		try {
+			act(() => {
+				root.render(
+					<DiffView
+						file={markdownFile}
+						mode="inline"
+						viewMode="rendered"
+						largeFileLineThreshold={800}
+						fileContents={fileContents}
+						fileContentsError={null}
+						drafts={[]}
+						onModeChange={() => {}}
+						onLineSelection={() => {}}
+						onCommentSelection={() => {}}
+						onMarkdownTag={() => {}}
+						onMarkdownComment={() => {}}
+					/>,
+				);
+			});
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (container.querySelector('[data-mermaid-id] svg[data-theme="dark"]'))
+					break;
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="dark"]'),
+			).not.toBeNull();
+
+			act(() => applyColorTheme("light"));
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (
+					container.querySelector('[data-mermaid-id] svg[data-theme="default"]')
+				)
+					break;
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="default"]'),
+			).not.toBeNull();
+			expect(initSpy.mock.calls.at(-1)?.[0]).toMatchObject({
+				theme: "default",
+				securityLevel: "strict",
+			});
+			act(() => applyColorTheme("default"));
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (container.querySelector('[data-mermaid-id] svg[data-theme="dark"]'))
+					break;
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="dark"]'),
+			).not.toBeNull();
+			expect(initSpy.mock.calls.at(-1)?.[0]).toMatchObject({
+				theme: "dark",
+				securityLevel: "strict",
+			});
+		} finally {
+			act(() => {
+				root.unmount();
+			});
+			container.remove();
+			renderSpy.mockRestore();
+			initSpy.mockRestore();
+			document.documentElement.className = "";
+		}
+	},
+	{ timeout: 30_000 },
+);
+
+test(
+	"ignores a stale dark mermaid render that finishes after switching to light",
+	async () => {
+		applyColorTheme("default");
+		const initSpy = spyOn(mermaid, "initialize");
+		let resolveDark: (() => void) | undefined;
+		let darkRenderCount = 0;
+		const renderSpy = spyOn(mermaid, "render").mockImplementation(async () => {
+			const theme = String(initSpy.mock.calls.at(-1)?.[0]?.theme ?? "dark");
+			if (theme === "dark") {
+				darkRenderCount += 1;
+				if (darkRenderCount === 1) {
+					await new Promise<void>((resolve) => {
+						resolveDark = () => resolve();
+					});
+					return {
+						svg: '<svg data-theme="dark" data-render="stale"></svg>',
+						diagramType: "flowchart",
+					} satisfies RenderResult;
+				}
+				return {
+					svg: '<svg data-theme="dark" data-render="fresh"></svg>',
+					diagramType: "flowchart",
+				} satisfies RenderResult;
+			}
+			return {
+				svg: '<svg data-theme="default"></svg>',
+				diagramType: "flowchart",
+			} satisfies RenderResult;
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const fileContents = `\`\`\`mermaid\ngraph TD; C${Date.now()}-->D\n\`\`\``;
+
+		try {
+			act(() => {
+				root.render(
+					<DiffView
+						file={markdownFile}
+						mode="inline"
+						viewMode="rendered"
+						largeFileLineThreshold={800}
+						fileContents={fileContents}
+						fileContentsError={null}
+						drafts={[]}
+						onModeChange={() => {}}
+						onLineSelection={() => {}}
+						onCommentSelection={() => {}}
+						onMarkdownTag={() => {}}
+						onMarkdownComment={() => {}}
+					/>,
+				);
+			});
+			for (let attempt = 0; attempt < 500 && !resolveDark; attempt++) {
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(resolveDark).toBeDefined();
+
+			act(() => applyColorTheme("light"));
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (
+					container.querySelector('[data-mermaid-id] svg[data-theme="default"]')
+				)
+					break;
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="default"]'),
+			).not.toBeNull();
+			await act(async () => {
+				resolveDark?.();
+				await Bun.sleep(10);
+			});
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="default"]'),
+			).not.toBeNull();
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="dark"]'),
+			).toBeNull();
+			act(() => applyColorTheme("default"));
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (
+					container.querySelector('[data-mermaid-id] svg[data-render="fresh"]')
+				)
+					break;
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-render="fresh"]'),
+			).not.toBeNull();
+			expect(darkRenderCount).toBe(2);
+		} finally {
+			act(() => {
+				root.unmount();
+			});
+			container.remove();
+			renderSpy.mockRestore();
+			initSpy.mockRestore();
+			document.documentElement.className = "";
+		}
+	},
+	{ timeout: 30_000 },
+);
+
+test(
+	"preserves Markdown emphasis and code-block identity while Mermaid theme changes",
+	async () => {
+		const fileContents = [
+			"```markdown",
+			"**bold** and *italic*",
+			"```",
+			"",
+			"```mermaid",
+			`graph TD; A${Date.now()}-->B`,
+			"```",
+		].join("\n");
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const initSpy = spyOn(mermaid, "initialize");
+		const renderSpy = spyOn(mermaid, "render").mockImplementation(
+			async () =>
+				({
+					svg: `<svg data-theme="${String(
+						initSpy.mock.calls.at(-1)?.[0]?.theme ?? "dark",
+					)}"></svg>`,
+					diagramType: "flowchart",
+				}) satisfies RenderResult,
+		);
+		const tokenWithThemeStyle = (
+			theme: "dark" | "light",
+			property: "font-weight" | "font-style",
+			value: string,
+		) =>
+			Array.from(
+				container.querySelectorAll<HTMLElement>(".code-block .shiki span"),
+			).find(
+				(token) =>
+					token.style.getPropertyValue(`--shiki-${theme}-${property}`) ===
+					value,
+			);
+
+		try {
+			act(() => {
+				applyColorTheme("default");
+				root.render(
+					<DiffView
+						file={markdownFile}
+						mode="inline"
+						viewMode="rendered"
+						largeFileLineThreshold={800}
+						fileContents={fileContents}
+						fileContentsError={null}
+						onModeChange={() => {}}
+						onLineSelection={() => {}}
+						onCommentSelection={() => {}}
+					/>,
+				);
+			});
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (
+					tokenWithThemeStyle("dark", "font-weight", "bold") &&
+					tokenWithThemeStyle("dark", "font-style", "italic") &&
+					container.querySelector('[data-mermaid-id] svg[data-theme="dark"]')
+				) {
+					break;
+				}
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="dark"]'),
+			).not.toBeNull();
+
+			const codeBlock = container.querySelector<HTMLElement>(".code-block");
+			const boldToken = tokenWithThemeStyle("dark", "font-weight", "bold");
+			const italicToken = tokenWithThemeStyle("dark", "font-style", "italic");
+			expect(document.documentElement.classList.contains("dark")).toBe(true);
+			expect(codeBlock).not.toBeNull();
+			expect(boldToken).toBeDefined();
+			expect(italicToken).toBeDefined();
+			expect(
+				boldToken?.style.getPropertyValue("--shiki-light-font-weight"),
+			).toBe("bold");
+			expect(
+				italicToken?.style.getPropertyValue("--shiki-light-font-style"),
+			).toBe("italic");
+
+			act(() => applyColorTheme("light"));
+			expect(document.documentElement.classList.contains("dark")).toBe(false);
+			for (let attempt = 0; attempt < 500; attempt++) {
+				if (
+					container.querySelector('[data-mermaid-id] svg[data-theme="default"]')
+				)
+					break;
+				await act(async () => {
+					await Bun.sleep(10);
+				});
+			}
+			expect(
+				container.querySelector('[data-mermaid-id] svg[data-theme="default"]'),
+			).not.toBeNull();
+			expect(container.querySelector(".code-block")).toBe(codeBlock);
+			expect(tokenWithThemeStyle("light", "font-weight", "bold")).toBe(
+				boldToken,
+			);
+			expect(tokenWithThemeStyle("light", "font-style", "italic")).toBe(
+				italicToken,
+			);
+		} finally {
+			act(() => {
+				root.unmount();
+			});
+			container.remove();
+			renderSpy.mockRestore();
+			initSpy.mockRestore();
+			document.documentElement.className = "";
+		}
+	},
+	{ timeout: 30_000 },
+);

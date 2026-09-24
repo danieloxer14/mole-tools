@@ -152,6 +152,7 @@ function normalizeConfig(raw: unknown): unknown {
 		worktreePrune: input.worktreePrune,
 		review: input.review,
 		prompts: input.prompts,
+		appearance: input.appearance,
 		reviewBabysitter: input.reviewBabysitter,
 	};
 	if (input.ollama) {

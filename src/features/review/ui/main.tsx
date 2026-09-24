@@ -18,6 +18,7 @@ import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
 import type { ChatEntry } from "../store";
 import { createRequestSequence } from "./chat-request-sequence";
+import { bootColorTheme } from "./color-theme";
 import {
 	clampColumnWidth,
 	initialColumnWidth,
@@ -56,13 +57,14 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
-import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
 	type ReviewFreshnessResponse,
 	runReviewRefresh,
 } from "./review-refresh";
+import { createReviewStateRequestSequence } from "./review-state-request-sequence";
+
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -1641,7 +1643,9 @@ function ReviewApp() {
 			whitespaceChangingRef.current ||
 			layerAction !== null
 		)
-			throw new Error("Review sync unavailable while another update is in progress");
+			throw new Error(
+				"Review sync unavailable while another update is in progress",
+			);
 		const mutation = reviewStateRequests.current.beginMutation();
 		syncingRef.current = true;
 		setSyncing(true);
@@ -2243,4 +2247,7 @@ function ReviewApp() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Review UI root is missing");
-createRoot(root).render(<ReviewApp />);
+const reviewRoot = root;
+void bootColorTheme(tokenFromLocation(), () => {
+	createRoot(reviewRoot).render(<ReviewApp />);
+});

@@ -15,15 +15,11 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "./ui/tooltip";
-import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "./ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 type LayerAction = "regenerate" | "retry";
 
@@ -236,10 +232,7 @@ export function LayerPane({
 						<Tooltip>
 							<TooltipTrigger
 								render={
-									<span
-										className="inline-flex items-center leading-none"
-										tabIndex={0}
-									/>
+									<span className="inline-flex items-center leading-none" />
 								}
 							>
 								<Button
@@ -249,10 +242,9 @@ export function LayerPane({
 									className="relative"
 									aria-label={action.label}
 									disabled={action.disabled}
+									focusableWhenDisabled
 									aria-busy={actionBusy ? "true" : undefined}
-									onClick={
-										action.mode === "retry" ? onRetry : onRegenerate
-									}
+									onClick={action.mode === "retry" ? onRetry : onRegenerate}
 								>
 									{actionBusy ? (
 										<Loader2 className="animate-spin" aria-hidden />
