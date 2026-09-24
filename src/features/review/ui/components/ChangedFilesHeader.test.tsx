@@ -40,19 +40,6 @@ function markup(overrides: Partial<ChangedFilesHeaderProps> = {}): string {
 	);
 }
 
-function renderInteractive(
-	overrides: Partial<ChangedFilesHeaderProps> = {},
-): HTMLDivElement {
-	const container = document.createElement("div");
-	document.body.append(container);
-	const root = createRoot(container);
-	roots.push(root);
-	act(() => {
-		root.render(<ChangedFilesHeader {...defaultProps} {...overrides} />);
-	});
-	return container;
-}
-
 test("renders viewed files progress header", () => {
 	const html = markup();
 

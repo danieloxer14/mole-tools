@@ -56,13 +56,13 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
-import { createReviewStateRequestSequence } from "./review-state-request-sequence";
+import { type DraftGeneration, fromChatAvailability } from "./from-chat";
+import { generalDiscussions } from "./general-discussions";
 import {
 	type ReviewFreshnessResponse,
 	runReviewRefresh,
 } from "./review-refresh";
-import { type DraftGeneration, fromChatAvailability } from "./from-chat";
-import { generalDiscussions } from "./general-discussions";
+import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -1641,7 +1641,9 @@ function ReviewApp() {
 			whitespaceChangingRef.current ||
 			layerAction !== null
 		)
-			throw new Error("Review sync unavailable while another update is in progress");
+			throw new Error(
+				"Review sync unavailable while another update is in progress",
+			);
 		const mutation = reviewStateRequests.current.beginMutation();
 		syncingRef.current = true;
 		setSyncing(true);

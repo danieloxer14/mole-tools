@@ -43,7 +43,6 @@ export function diffLineTotals(
 	return { insertions, deletions };
 }
 
-
 export function ChangedFilesHeader({
 	viewedCount,
 	total,
