@@ -233,6 +233,13 @@ function reviewSettingsRequest(body: unknown): Request {
 		body: JSON.stringify(body),
 	});
 }
+function appearanceSettingsRequest(body: unknown): Request {
+	return request(`/api/settings/appearance?t=${token}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
+}
 
 class StreamChatAgent implements ReviewAgent {
 	readonly turns: AgentTurn[] = [];
@@ -4070,5 +4077,99 @@ describe("chat binding", () => {
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
+	});
+});
+describe("appearance settings API", () => {
+	test("reads default and configured color themes", async () => {
+		const defaultRoutes = createReviewRoutes({ token, state: state() });
+		const defaultResponse = await defaultRoutes(
+			request(`/api/settings/appearance?t=${token}`),
+		);
+		expect(defaultResponse.status).toBe(200);
+		expect(await defaultResponse.json()).toEqual({ colorTheme: "default" });
+
+		const lightRoutes = createReviewRoutes({
+			token,
+			state: state(),
+			config: {
+				jira: { enabled: false },
+				appearance: { colorTheme: "light" },
+			},
+		});
+		const lightResponse = await lightRoutes(
+			request(`/api/settings/appearance?t=${token}`),
+		);
+		expect(lightResponse.status).toBe(200);
+		expect(await lightResponse.json()).toEqual({ colorTheme: "light" });
+	});
+
+	test("persists light theme and returns it on subsequent GET", async () => {
+		const persisted: Partial<Config>[] = [];
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			persistConfig: async (partial) => {
+				persisted.push(partial);
+			},
+		});
+
+		const response = await routes(
+			appearanceSettingsRequest({ colorTheme: "light" }),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ colorTheme: "light" });
+		expect(persisted).toEqual([{ appearance: { colorTheme: "light" } }]);
+
+		const getResponse = await routes(
+			request(`/api/settings/appearance?t=${token}`),
+		);
+		expect(getResponse.status).toBe(200);
+		expect(await getResponse.json()).toEqual({ colorTheme: "light" });
+	});
+
+	test("rejects invalid theme without persisting or changing GET", async () => {
+		const persisted: Partial<Config>[] = [];
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			persistConfig: async (partial) => {
+				persisted.push(partial);
+			},
+		});
+
+		const response = await routes(
+			appearanceSettingsRequest({ colorTheme: "dark" }),
+		);
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: expect.any(String) });
+		expect(persisted).toEqual([]);
+
+		const getResponse = await routes(
+			request(`/api/settings/appearance?t=${token}`),
+		);
+		expect(getResponse.status).toBe(200);
+		expect(await getResponse.json()).toEqual({ colorTheme: "default" });
+	});
+
+	test("restores previous theme when persistence fails", async () => {
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			persistConfig: async () => {
+				throw new Error("persist failed");
+			},
+		});
+
+		const response = await routes(
+			appearanceSettingsRequest({ colorTheme: "light" }),
+		);
+		expect(response.status).toBe(500);
+		expect(await response.json()).toEqual({ error: "persist failed" });
+
+		const getResponse = await routes(
+			request(`/api/settings/appearance?t=${token}`),
+		);
+		expect(getResponse.status).toBe(200);
+		expect(await getResponse.json()).toEqual({ colorTheme: "default" });
 	});
 });

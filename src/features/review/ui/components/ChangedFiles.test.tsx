@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from "bun:test";
-import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -12,20 +11,7 @@ import {
 	type FileTreeNode,
 } from "./ChangedFiles";
 
-const dom = new Window();
-Object.assign(globalThis, {
-	window: dom,
-	document: dom.document,
-	navigator: dom.navigator,
-	Node: dom.Node,
-	Element: dom.Element,
-	HTMLElement: dom.HTMLElement,
-	MutationObserver: dom.MutationObserver,
-	getComputedStyle: dom.getComputedStyle.bind(dom),
-	requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
-	cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
-	IS_REACT_ACT_ENVIRONMENT: true,
-});
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: Root[] = [];
 
 afterEach(() => {

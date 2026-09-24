@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { Alert } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { NativeSelect } from "./ui/native-select";
 import { Separator } from "./ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
 export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-layers-code",
@@ -528,343 +530,366 @@ export function SettingsPanel({
 					<h2 className="text-lg font-semibold">Settings</h2>
 				</div>
 			</header>
-			{status ? (
-				<Alert role="status" aria-live="polite" className="mx-6 mt-4">
-					{status}
-				</Alert>
-			) : null}
-			{!settings ? (
-				<div className="flex-1 overflow-auto p-6">
-					<Alert variant={settingsLoadFailed ? "destructive" : undefined}>
-						{settingsLoadFailed ? "Settings unavailable." : "Loading settings…"}
-					</Alert>
-				</div>
-			) : (
-				<div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-6">
-					<nav className="space-y-1" aria-label="Prompt slots">
-						{settings.slots
-							.filter((slot) => VISIBLE_SLOTS.includes(slot.slot))
-							.map((slot) => (
-								<button
-									key={slot.slot}
-									type="button"
-									className="w-full rounded-md px-3 py-2 text-left transition-colors duration-150 ease-out hover:bg-muted/60 data-[active=true]:bg-accent"
-									data-active={selectedSlot === slot.slot ? "true" : "false"}
-									aria-current={selectedSlot === slot.slot ? "true" : undefined}
-									disabled={pending}
-									onClick={() => handleSlotSelect(slot.slot)}
-								>
-									<span className="block text-sm font-medium">
-										{SLOT_LABELS[slot.slot]}
-									</span>
-									<span className="block text-xs text-muted-foreground">
-										{slot.activePreset} · v{slotLatest(slot)}
-									</span>
-								</button>
-							))}
-					</nav>
-					<section
-						className="min-w-0 space-y-4"
-						aria-label={SLOT_LABELS[selectedSlot]}
-					>
-						<p className="text-sm text-muted-foreground">
-							{SLOT_DESCRIPTIONS[selectedSlot]}
-						</p>
-						{!prompt ? (
-							<Alert>Loading prompt…</Alert>
-						) : (
-							<>
-								<div className="flex flex-wrap items-center gap-2">
-									<label
-										className="w-24 shrink-0 text-xs font-medium"
-										htmlFor="settings-preset"
-									>
-										Preset
-									</label>
-									<NativeSelect
-										className="min-w-0 flex-1"
-										id="settings-preset"
-										size="sm"
-										value={selectedPreset}
-										disabled={pending}
-										onChange={(event) =>
-											handlePresetChange(controlValue(event))
-										}
-									>
-										{(selectedSlotSettings?.presets ?? []).map((preset) => (
-											<option key={preset.name} value={preset.name}>
-												{preset.name}
-												{preset.name === selectedSlotSettings?.activePreset
-													? " (active)"
-													: ""}
-											</option>
-										))}
-									</NativeSelect>
-									<Button
-										size="sm"
-										variant="secondary"
-										disabled={
-											pending ||
-											selectedPreset === selectedSlotSettings?.activePreset
-										}
-										onClick={handleActivate}
-									>
-										Activate
-									</Button>
-								</div>
+			<Tabs defaultValue="prompts" className="min-h-0 flex-1 gap-0">
+				<TabsList aria-label="Settings sections" className="mx-6 mt-4">
+					<TabsTrigger value="prompts">Prompts</TabsTrigger>
+					<TabsTrigger value="appearance">Appearance</TabsTrigger>
+				</TabsList>
+				<TabsContent value="prompts" className="flex flex-col">
+					{status ? (
+						<Alert role="status" aria-live="polite" className="mx-6 mt-4">
+							{status}
+						</Alert>
+					) : null}
+					{!settings ? (
+						<div className="flex-1 overflow-auto p-6">
+							<Alert variant={settingsLoadFailed ? "destructive" : undefined}>
+								{settingsLoadFailed
+									? "Settings unavailable."
+									: "Loading settings…"}
+							</Alert>
+						</div>
+					) : (
+						<div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-6">
+							<nav className="space-y-1" aria-label="Prompt slots">
+								{settings.slots
+									.filter((slot) => VISIBLE_SLOTS.includes(slot.slot))
+									.map((slot) => (
+										<button
+											key={slot.slot}
+											type="button"
+											className="w-full rounded-md px-3 py-2 text-left transition-colors duration-150 ease-out hover:bg-muted/60 data-[active=true]:bg-accent"
+											data-active={
+												selectedSlot === slot.slot ? "true" : "false"
+											}
+											aria-current={
+												selectedSlot === slot.slot ? "true" : undefined
+											}
+											disabled={pending}
+											onClick={() => handleSlotSelect(slot.slot)}
+										>
+											<span className="block text-sm font-medium">
+												{SLOT_LABELS[slot.slot]}
+											</span>
+											<span className="block text-xs text-muted-foreground">
+												{slot.activePreset} · v{slotLatest(slot)}
+											</span>
+										</button>
+									))}
+							</nav>
+							<section
+								className="min-w-0 space-y-4"
+								aria-label={SLOT_LABELS[selectedSlot]}
+							>
+								<p className="text-sm text-muted-foreground">
+									{SLOT_DESCRIPTIONS[selectedSlot]}
+								</p>
+								{!prompt ? (
+									<Alert>Loading prompt…</Alert>
+								) : (
+									<>
+										<div className="flex flex-wrap items-center gap-2">
+											<label
+												className="w-24 shrink-0 text-xs font-medium"
+												htmlFor="settings-preset"
+											>
+												Preset
+											</label>
+											<NativeSelect
+												className="min-w-0 flex-1"
+												id="settings-preset"
+												size="sm"
+												value={selectedPreset}
+												disabled={pending}
+												onChange={(event) =>
+													handlePresetChange(controlValue(event))
+												}
+											>
+												{(selectedSlotSettings?.presets ?? []).map((preset) => (
+													<option key={preset.name} value={preset.name}>
+														{preset.name}
+														{preset.name === selectedSlotSettings?.activePreset
+															? " (active)"
+															: ""}
+													</option>
+												))}
+											</NativeSelect>
+											<Button
+												size="sm"
+												variant="secondary"
+												disabled={
+													pending ||
+													selectedPreset === selectedSlotSettings?.activePreset
+												}
+												onClick={handleActivate}
+											>
+												Activate
+											</Button>
+										</div>
 
-								<div className="flex flex-wrap items-center gap-2">
-									<label
-										className="w-24 shrink-0 text-xs font-medium"
-										htmlFor="settings-new-preset"
-									>
-										New preset…
-									</label>
-									<Input
-										id="settings-new-preset"
-										className="h-8 min-w-0 flex-1"
-										value={newPreset}
-										disabled={pending}
-										onChange={(event) => setNewPreset(controlValue(event))}
-									/>
-									<Button
-										size="sm"
-										variant="secondary"
-										disabled={pending || newPreset.trim().length === 0}
-										onClick={handleCreatePreset}
-									>
-										Create preset
-									</Button>
-								</div>
+										<div className="flex flex-wrap items-center gap-2">
+											<label
+												className="w-24 shrink-0 text-xs font-medium"
+												htmlFor="settings-new-preset"
+											>
+												New preset…
+											</label>
+											<Input
+												id="settings-new-preset"
+												className="h-8 min-w-0 flex-1"
+												value={newPreset}
+												disabled={pending}
+												onChange={(event) => setNewPreset(controlValue(event))}
+											/>
+											<Button
+												size="sm"
+												variant="secondary"
+												disabled={pending || newPreset.trim().length === 0}
+												onClick={handleCreatePreset}
+											>
+												Create preset
+											</Button>
+										</div>
 
-								<div className="flex flex-wrap items-center gap-2">
-									<label
-										className="w-24 shrink-0 text-xs font-medium"
-										htmlFor="settings-version"
-									>
-										Version
-									</label>
-									<NativeSelect
-										className="min-w-0 flex-1"
-										id="settings-version"
-										size="sm"
-										value={String(selectedVersion)}
-										disabled={pending}
-										onChange={(event) =>
-											handleVersionChange(controlValue(event))
-										}
-									>
-										{[...prompt.versions]
-											.sort((left, right) => right - left)
-											.map((version) => (
-												<option key={version} value={String(version)}>
-													v{version}
+										<div className="flex flex-wrap items-center gap-2">
+											<label
+												className="w-24 shrink-0 text-xs font-medium"
+												htmlFor="settings-version"
+											>
+												Version
+											</label>
+											<NativeSelect
+												className="min-w-0 flex-1"
+												id="settings-version"
+												size="sm"
+												value={String(selectedVersion)}
+												disabled={pending}
+												onChange={(event) =>
+													handleVersionChange(controlValue(event))
+												}
+											>
+												{[...prompt.versions]
+													.sort((left, right) => right - left)
+													.map((version) => (
+														<option key={version} value={String(version)}>
+															v{version}
+														</option>
+													))}
+											</NativeSelect>
+											{selectedVersion !== latestVersion ? (
+												<Button
+													size="sm"
+													variant="outline"
+													disabled={pending}
+													onClick={handleRollback}
+												>
+													Roll back to this version
+												</Button>
+											) : null}
+											<Button
+												size="sm"
+												variant="outline"
+												disabled={pending}
+												onClick={handleReset}
+											>
+												Reset to shipped default
+											</Button>
+										</div>
+
+										<div className="flex flex-wrap items-center gap-2">
+											<label
+												className="w-24 shrink-0 text-xs font-medium"
+												htmlFor="settings-prompt-agent"
+											>
+												Agent
+											</label>
+											<NativeSelect
+												className="min-w-0 flex-1"
+												id="settings-prompt-agent"
+												size="sm"
+												value={promptAgent}
+												disabled={pending}
+												onChange={(event) => {
+													const value = controlValue(event);
+													setPromptAgent(
+														value === "omp" || value === "claude"
+															? value
+															: "default",
+													);
+												}}
+											>
+												<option value="default">
+													Default ({settings.review.agent})
 												</option>
-											))}
-									</NativeSelect>
-									{selectedVersion !== latestVersion ? (
+												<option value="omp">omp</option>
+												<option value="claude">claude</option>
+											</NativeSelect>
+										</div>
+
+										<div className="flex flex-wrap items-center gap-2">
+											<label
+												className="w-24 shrink-0 text-xs font-medium"
+												htmlFor="settings-prompt-model"
+											>
+												Model
+											</label>
+											<Input
+												id="settings-prompt-model"
+												type="text"
+												className="h-8 min-w-0 flex-1"
+												value={promptModel}
+												placeholder={
+													promptAgent === "default"
+														? `Default (${settings.review.model ?? "agent default"})`
+														: "Agent default"
+												}
+												disabled={pending}
+												onChange={(event) =>
+													setPromptModel(controlValue(event))
+												}
+											/>
+										</div>
+
+										<div className="space-y-2">
+											<label
+												className="text-sm font-medium"
+												htmlFor="settings-prompt"
+											>
+												Prompt text
+											</label>
+											<Textarea
+												id="settings-prompt"
+												className="min-h-64 font-mono text-sm"
+												value={text}
+												disabled={pending}
+												onChange={(event) => setText(controlValue(event))}
+												rows={15}
+											/>
+										</div>
 										<Button
 											size="sm"
-											variant="outline"
-											disabled={pending}
-											onClick={handleRollback}
+											disabled={isSaveDisabled(
+												{
+													text: loadedText,
+													agent: loadedAgent,
+													model: loadedModel,
+												},
+												{ text, agent: promptAgent, model: promptModel },
+												pending,
+											)}
+											onClick={handleSave}
 										>
-											Roll back to this version
+											Save as new version
 										</Button>
-									) : null}
-									<Button
-										size="sm"
-										variant="outline"
-										disabled={pending}
-										onClick={handleReset}
-									>
-										Reset to shipped default
-									</Button>
-								</div>
 
-								<div className="flex flex-wrap items-center gap-2">
-									<label
-										className="w-24 shrink-0 text-xs font-medium"
-										htmlFor="settings-prompt-agent"
-									>
-										Agent
-									</label>
-									<NativeSelect
-										className="min-w-0 flex-1"
-										id="settings-prompt-agent"
-										size="sm"
-										value={promptAgent}
-										disabled={pending}
-										onChange={(event) => {
-											const value = controlValue(event);
-											setPromptAgent(
-												value === "omp" || value === "claude"
-													? value
-													: "default",
-											);
-										}}
-									>
-										<option value="default">
-											Default ({settings.review.agent})
-										</option>
-										<option value="omp">omp</option>
-										<option value="claude">claude</option>
-									</NativeSelect>
-								</div>
-
-								<div className="flex flex-wrap items-center gap-2">
-									<label
-										className="w-24 shrink-0 text-xs font-medium"
-										htmlFor="settings-prompt-model"
-									>
-										Model
-									</label>
-									<Input
-										id="settings-prompt-model"
-										type="text"
-										className="h-8 min-w-0 flex-1"
-										value={promptModel}
-										placeholder={
-											promptAgent === "default"
-												? `Default (${settings.review.model ?? "agent default"})`
-												: "Agent default"
-										}
-										disabled={pending}
-										onChange={(event) => setPromptModel(controlValue(event))}
-									/>
-								</div>
-
-								<div className="space-y-2">
-									<label
-										className="text-sm font-medium"
-										htmlFor="settings-prompt"
-									>
-										Prompt text
-									</label>
-									<Textarea
-										id="settings-prompt"
-										className="min-h-64 font-mono text-sm"
-										value={text}
-										disabled={pending}
-										onChange={(event) => setText(controlValue(event))}
-										rows={15}
-									/>
-								</div>
-								<Button
-									size="sm"
-									disabled={isSaveDisabled(
-										{
-											text: loadedText,
-											agent: loadedAgent,
-											model: loadedModel,
-										},
-										{ text, agent: promptAgent, model: promptModel },
-										pending,
-									)}
-									onClick={handleSave}
-								>
-									Save as new version
-								</Button>
-
-								<section
-									className="space-y-3"
-									aria-labelledby="settings-review-agent-heading"
-								>
-									<Separator />
-									<h3
-										id="settings-review-agent-heading"
-										className="text-sm font-medium"
-									>
-										Review agent
-									</h3>
-									<p className="text-xs text-muted-foreground">
-										Default for prompt versions whose agent is Default.
-									</p>
-									<div className="flex flex-wrap items-center gap-2">
-										<label
-											className="w-24 shrink-0 text-xs font-medium"
-											htmlFor="settings-agent"
+										<section
+											className="space-y-3"
+											aria-labelledby="settings-review-agent-heading"
 										>
-											Agent
-										</label>
-										<NativeSelect
-											className="min-w-0 flex-1"
-											id="settings-agent"
-											size="sm"
-											value={reviewAgent}
-											disabled={pending}
-											onChange={(event) =>
-												setReviewAgent(
-													controlValue(event) === "claude" ? "claude" : "omp",
-												)
-											}
-										>
-											{settings.review.agents.map((agent) => (
-												<option key={agent} value={agent}>
-													{agent}
-												</option>
-											))}
-										</NativeSelect>
-									</div>
-									<div className="flex flex-wrap items-center gap-2">
-										<label
-											className="w-24 shrink-0 text-xs font-medium"
-											htmlFor="settings-model"
-										>
-											Model
-										</label>
-										<Input
-											id="settings-model"
-											type="text"
-											className="h-8 min-w-0 flex-1"
-											value={reviewModel}
-											disabled={pending}
-											onChange={(event) => setReviewModel(controlValue(event))}
-										/>
-										<NativeSelect
-											className="max-w-full shrink-0"
-											id="settings-model-quickpick"
-											aria-label="Model quick pick"
-											size="sm"
-											value={
-												MODEL_QUICK_PICKS.includes(reviewModel)
-													? reviewModel
-													: ""
-											}
-											disabled={pending}
-											onChange={(event) => {
-												const value = controlValue(event);
-												if (value !== "") setReviewModel(value);
-											}}
-										>
-											<option value="">Custom…</option>
-											{MODEL_QUICK_PICKS.map((model) => (
-												<option key={model} value={model}>
-													{model}
-												</option>
-											))}
-										</NativeSelect>
-									</div>
-									<Button
-										size="sm"
-										disabled={pending}
-										onClick={handleSaveReview}
-									>
-										Save review agent
-									</Button>
-									<p className="text-xs text-muted-foreground">
-										Applies to the next layer run or chat turn. Use Regenerate
-										to rebuild cached layers.
-									</p>
-									<p className="text-xs text-muted-foreground">
-										Switching agents may restart existing chat sessions.
-									</p>
-								</section>
-							</>
-						)}
-					</section>
-				</div>
-			)}
+											<Separator />
+											<h3
+												id="settings-review-agent-heading"
+												className="text-sm font-medium"
+											>
+												Review agent
+											</h3>
+											<p className="text-xs text-muted-foreground">
+												Default for prompt versions whose agent is Default.
+											</p>
+											<div className="flex flex-wrap items-center gap-2">
+												<label
+													className="w-24 shrink-0 text-xs font-medium"
+													htmlFor="settings-agent"
+												>
+													Agent
+												</label>
+												<NativeSelect
+													className="min-w-0 flex-1"
+													id="settings-agent"
+													size="sm"
+													value={reviewAgent}
+													disabled={pending}
+													onChange={(event) =>
+														setReviewAgent(
+															controlValue(event) === "claude"
+																? "claude"
+																: "omp",
+														)
+													}
+												>
+													{settings.review.agents.map((agent) => (
+														<option key={agent} value={agent}>
+															{agent}
+														</option>
+													))}
+												</NativeSelect>
+											</div>
+											<div className="flex flex-wrap items-center gap-2">
+												<label
+													className="w-24 shrink-0 text-xs font-medium"
+													htmlFor="settings-model"
+												>
+													Model
+												</label>
+												<Input
+													id="settings-model"
+													type="text"
+													className="h-8 min-w-0 flex-1"
+													value={reviewModel}
+													disabled={pending}
+													onChange={(event) =>
+														setReviewModel(controlValue(event))
+													}
+												/>
+												<NativeSelect
+													className="max-w-full shrink-0"
+													id="settings-model-quickpick"
+													aria-label="Model quick pick"
+													size="sm"
+													value={
+														MODEL_QUICK_PICKS.includes(reviewModel)
+															? reviewModel
+															: ""
+													}
+													disabled={pending}
+													onChange={(event) => {
+														const value = controlValue(event);
+														if (value !== "") setReviewModel(value);
+													}}
+												>
+													<option value="">Custom…</option>
+													{MODEL_QUICK_PICKS.map((model) => (
+														<option key={model} value={model}>
+															{model}
+														</option>
+													))}
+												</NativeSelect>
+											</div>
+											<Button
+												size="sm"
+												disabled={pending}
+												onClick={handleSaveReview}
+											>
+												Save review agent
+											</Button>
+											<p className="text-xs text-muted-foreground">
+												Applies to the next layer run or chat turn. Use
+												Regenerate to rebuild cached layers.
+											</p>
+											<p className="text-xs text-muted-foreground">
+												Switching agents may restart existing chat sessions.
+											</p>
+										</section>
+									</>
+								)}
+							</section>
+						</div>
+					)}
+				</TabsContent>
+				<TabsContent value="appearance" className="overflow-auto p-6">
+					<AppearanceSettings token={token} />
+				</TabsContent>
+			</Tabs>
 		</section>
 	);
 }

@@ -75,6 +75,12 @@ export const ReviewConfigSchema = z
 		maxLayerPromptBytes: 100_000,
 	});
 
+export const ColorThemeSchema = z.enum(["default", "light"]);
+export type ColorTheme = z.infer<typeof ColorThemeSchema>;
+export const AppearanceConfigSchema = z.object({
+	colorTheme: ColorThemeSchema.default("default"),
+});
+
 /** Unknown config keys are stripped for forward compatibility across feature branches. */
 export const ConfigSchema = z.object({
 	providers: z.record(z.string().min(1), ProviderProfileSchema),
@@ -93,6 +99,7 @@ export const ConfigSchema = z.object({
 	worktreePrune: z.object({ baseDir: z.string().min(1) }).optional(),
 	review: ReviewConfigSchema,
 	prompts: z.partialRecord(PromptNameSchema, PresetNameSchema).default({}),
+	appearance: AppearanceConfigSchema.optional(),
 	reviewBabysitter: ReviewBabysitterConfigSchema.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;

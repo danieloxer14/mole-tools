@@ -1,7 +1,11 @@
 import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
-import type { Config } from "../../adapters/config/schema";
+import {
+	type ColorTheme,
+	ColorThemeSchema,
+	type Config,
+} from "../../adapters/config/schema";
 import {
 	DEFAULT_PROMPTS,
 	PROMPT_NAMES,
@@ -122,7 +126,7 @@ export interface ReviewRoutesOptions {
 	issues?: IssueTracker | null;
 	config?:
 		| (Pick<Config, "jira"> &
-				Partial<Pick<Config, "review" | "prompts" | "diff">>)
+				Partial<Pick<Config, "review" | "prompts" | "diff" | "appearance">>)
 		| {
 				diff?: { ignore?: string[] };
 				jira?: { enabled?: boolean; branchPattern?: string };
@@ -132,6 +136,7 @@ export interface ReviewRoutesOptions {
 					model?: string;
 				};
 				prompts?: Record<string, string>;
+				appearance?: { colorTheme?: ColorTheme };
 		  };
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
@@ -533,6 +538,10 @@ export function createReviewRoutes(
 			model: (options.config as { review?: { model?: string } } | undefined)
 				?.review?.model,
 		},
+		appearance: {
+			colorTheme: (options.config?.appearance?.colorTheme ??
+				"default") as ColorTheme,
+		},
 	};
 	const layerAgent = options.layerAgent ?? options.reviewAgent;
 	const chatAgent = options.reviewAgent;
@@ -646,6 +655,25 @@ export function createReviewRoutes(
 		await options.persistConfig?.({ review: review as Config["review"] });
 
 		return jsonResponse({ agent: parsed.data.agent, model });
+	}
+
+	async function updateAppearanceSettings(request: Request): Promise<Response> {
+		const parsed = z
+			.object({ colorTheme: ColorThemeSchema })
+			.safeParse(await parseBody(request));
+		if (!parsed.success)
+			return jsonResponse({ error: parsed.error.message }, 400);
+		const previous = settings.appearance;
+		settings.appearance = { colorTheme: parsed.data.colorTheme };
+		try {
+			await options.persistConfig?.({
+				appearance: { colorTheme: parsed.data.colorTheme },
+			});
+		} catch (error) {
+			settings.appearance = previous;
+			throw error;
+		}
+		return jsonResponse({ colorTheme: parsed.data.colorTheme });
 	}
 
 	async function promptRead(url: URL, slot: PromptName): Promise<Response> {
@@ -2187,6 +2215,18 @@ export function createReviewRoutes(
 				url.pathname === "/api/settings/review"
 			) {
 				return updateReviewSettings(request);
+			}
+			if (
+				request.method === "GET" &&
+				url.pathname === "/api/settings/appearance"
+			) {
+				return jsonResponse({ colorTheme: settings.appearance.colorTheme });
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/settings/appearance"
+			) {
+				return await updateAppearanceSettings(request);
 			}
 			if (url.pathname.startsWith("/api/prompts/")) {
 				const suffix = url.pathname.slice("/api/prompts/".length);

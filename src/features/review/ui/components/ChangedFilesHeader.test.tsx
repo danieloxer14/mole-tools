@@ -40,16 +40,12 @@ function markup(overrides: Partial<ChangedFilesHeaderProps> = {}): string {
 	);
 }
 
-function renderInteractive(
-	overrides: Partial<ChangedFilesHeaderProps> = {},
-): HTMLDivElement {
+function renderInteractive(): HTMLDivElement {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
 	roots.push(root);
-	act(() => {
-		root.render(<ChangedFilesHeader {...defaultProps} {...overrides} />);
-	});
+	act(() => root.render(<ChangedFilesHeader {...defaultProps} />));
 	return container;
 }
 
@@ -130,9 +126,13 @@ test("shows a custom tooltip on focus instead of a native title", async () => {
 	expect(listButton?.getAttribute("title")).toBeNull();
 
 	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
 		listButton?.focus();
 		await Bun.sleep(0);
 	});
+	expect(document.activeElement).toBe(listButton);
 
 	const tooltips = document.body.querySelectorAll(
 		'[data-slot="tooltip-content"]',
