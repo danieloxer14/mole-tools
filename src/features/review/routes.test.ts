@@ -1521,6 +1521,59 @@ describe("review routes", () => {
 		}
 	});
 
+	test("persists batch viewed-file toggles in one progress mutation", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-routes-"));
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			const store = new ReviewStore(paths);
+			await store.write({
+				...state(),
+				viewedFiles: ["src/keep.ts", "src/a.ts"],
+			});
+			const routes = createReviewRoutes({ token, store, diff });
+			const mark = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						viewedFiles: {
+							paths: ["src/a.ts", "src/b.ts", "src/b.ts"],
+							viewed: true,
+						},
+					}),
+				}),
+			);
+			expect(mark.status).toBe(200);
+			expect((await mark.json()).viewedFiles).toEqual([
+				"src/keep.ts",
+				"src/a.ts",
+				"src/b.ts",
+			]);
+
+			const unmark = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						viewedFiles: {
+							paths: ["src/a.ts", "src/b.ts"],
+							viewed: false,
+						},
+					}),
+				}),
+			);
+			expect(unmark.status).toBe(200);
+			expect((await unmark.json()).viewedFiles).toEqual(["src/keep.ts"]);
+			expect((await store.read())?.viewedFiles).toEqual(["src/keep.ts"]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("returns lightweight progress without refreshing host state", async () => {
 		let discussionCalls = 0;
 		let approvalCalls = 0;

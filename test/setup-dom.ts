@@ -7,6 +7,13 @@ import { JSDOM } from "jsdom";
  * captures the global `window` at module load time.
  */
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
+
+// jsdom does not implement scrolling; UI components call this on focused rows.
+Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", {
+	configurable: true,
+	writable: true,
+	value() {},
+});
 (globalThis as Record<string, unknown>).window = dom.window;
 (globalThis as Record<string, unknown>).document = dom.window.document;
 (globalThis as Record<string, unknown>).Node = dom.window.Node;

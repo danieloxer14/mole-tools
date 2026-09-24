@@ -207,6 +207,12 @@
 	:is(.rendered-markdown, .comment-markdown) :is(h4, h5, h6) { font-size: var(--text-base); }
 	:is(.rendered-markdown, .comment-markdown) :is(p, ul, ol) { font-size: var(--text-sm); line-height: 1.5rem; margin: --spacing(3) 0; }
 	:is(.rendered-markdown, .comment-markdown) :is(ul, ol) { padding-left: --spacing(6); }
+	.comment-markdown :is(p, ul, ol) { margin: 0.75rem 0; }
+	.comment-markdown { white-space: normal; }
+	.comment-markdown li > p { margin: 0; }
+	.comment-markdown li + li { margin-block-start: 0.25rem; }
+	.comment-markdown ul { list-style-type: disc; }
+	.comment-markdown ol { list-style-type: decimal; }
 	:is(.rendered-markdown, .comment-markdown) blockquote { border-left: 2px solid color-mix(in oklch, var(--color-primary) 50%, transparent); color: var(--color-muted-foreground); margin: --spacing(3) 0; padding-left: --spacing(3); }
 	:is(.rendered-markdown, .comment-markdown) a { color: var(--color-primary); text-underline-offset: 4px; transition: color 150ms ease-out; }
 	:is(.rendered-markdown, .comment-markdown) code { background: var(--color-muted); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--text-xs); padding: 0.1em 0.3em; }

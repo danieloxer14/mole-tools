@@ -1966,6 +1966,34 @@ export function createReviewRoutes(
 					next.viewedFiles.push(path);
 				}
 			}
+			const viewedFilesChange = body.viewedFiles;
+			if (
+				viewedFilesChange !== null &&
+				typeof viewedFilesChange === "object" &&
+				!Array.isArray(viewedFilesChange)
+			) {
+				const viewed = viewedFilesChange as Record<string, unknown>;
+				if (Array.isArray(viewed.paths) && typeof viewed.viewed === "boolean") {
+					const paths = new Set(
+						viewed.paths.filter(
+							(path): path is string =>
+								typeof path === "string" && path.length > 0,
+						),
+					);
+					if (viewed.viewed) {
+						const existing = new Set(next.viewedFiles);
+						for (const path of paths) {
+							if (existing.has(path)) continue;
+							next.viewedFiles.push(path);
+							existing.add(path);
+						}
+					} else {
+						next.viewedFiles = next.viewedFiles.filter(
+							(path) => !paths.has(path),
+						);
+					}
+				}
+			}
 			return next;
 		};
 

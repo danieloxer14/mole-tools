@@ -57,6 +57,7 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
+
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
@@ -2079,9 +2080,9 @@ function ReviewApp() {
 						viewedFiles={data.viewedFiles}
 						selectedPath={selectedPath}
 						onSelectFile={selectFile}
-						onViewedChange={(path, viewed) => {
+						onViewedChange={(paths, viewed) => {
 							saveProgress({
-								viewedFile: { path, viewed },
+								viewedFiles: { paths, viewed },
 							});
 						}}
 						showWhitespaceChanges={data.showWhitespaceChanges}

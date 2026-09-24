@@ -40,6 +40,15 @@ function markup(overrides: Partial<ChangedFilesHeaderProps> = {}): string {
 	);
 }
 
+function renderInteractive(): HTMLDivElement {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() => root.render(<ChangedFilesHeader {...defaultProps} />));
+	return container;
+}
+
 test("renders viewed files progress header", () => {
 	const html = markup();
 
@@ -104,6 +113,32 @@ test("renders controlled list and tree layout items", () => {
 	expect(treeMarkup).toContain('aria-pressed="true"');
 	expect(treeMarkup).toContain('data-state="on"');
 	expect(treeMarkup).toContain('aria-label="Tree view"');
+	expect(listMarkup).not.toContain('title="List view"');
+	expect(listMarkup).not.toContain('title="Tree view"');
+});
+
+test("shows a custom tooltip on focus instead of a native title", async () => {
+	const container = renderInteractive();
+	const listButton = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="List view"]',
+	);
+	expect(listButton).not.toBeNull();
+	expect(listButton?.getAttribute("title")).toBeNull();
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		listButton?.focus();
+		await Bun.sleep(0);
+	});
+	expect(document.activeElement).toBe(listButton);
+
+	const tooltips = document.body.querySelectorAll(
+		'[data-slot="tooltip-content"]',
+	);
+	expect(tooltips).toHaveLength(1);
+	expect(tooltips[0]?.textContent).toBe("List view");
 });
 
 test("renders a controlled accessible whitespace checkbox", () => {

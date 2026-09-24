@@ -5,6 +5,7 @@ import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
 } from "./ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type ChangedFilesMode = "list" | "tree";
 
@@ -80,26 +81,38 @@ export function ChangedFilesHeader({
 				}}
 				aria-label="Changed files layout"
 			>
-				<SegmentedToggleGroupItem
-					value="list"
-					aria-label="List view"
-					title="List view"
-					aria-pressed={mode === "list"}
-					data-state={mode === "list" ? "on" : "off"}
-				>
-					<List aria-hidden />
-					<span className="sr-only">List view</span>
-				</SegmentedToggleGroupItem>
-				<SegmentedToggleGroupItem
-					value="tree"
-					aria-label="Tree view"
-					title="Tree view"
-					aria-pressed={mode === "tree"}
-					data-state={mode === "tree" ? "on" : "off"}
-				>
-					<ListTree aria-hidden />
-					<span className="sr-only">Tree view</span>
-				</SegmentedToggleGroupItem>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<SegmentedToggleGroupItem
+								value="list"
+								aria-label="List view"
+								aria-pressed={mode === "list"}
+								data-state={mode === "list" ? "on" : "off"}
+							>
+								<List aria-hidden />
+								<span className="sr-only">List view</span>
+							</SegmentedToggleGroupItem>
+						}
+					/>
+					<TooltipContent>List view</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<SegmentedToggleGroupItem
+								value="tree"
+								aria-label="Tree view"
+								aria-pressed={mode === "tree"}
+								data-state={mode === "tree" ? "on" : "off"}
+							>
+								<ListTree aria-hidden />
+								<span className="sr-only">Tree view</span>
+							</SegmentedToggleGroupItem>
+						}
+					/>
+					<TooltipContent>Tree view</TooltipContent>
+				</Tooltip>
 			</SegmentedToggleGroup>
 			<div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
 				<Checkbox
