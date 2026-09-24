@@ -57,12 +57,12 @@ import {
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
+import { type DraftGeneration, fromChatAvailability } from "./from-chat";
+import { generalDiscussions } from "./general-discussions";
 import {
 	type ReviewFreshnessResponse,
 	runReviewRefresh,
 } from "./review-refresh";
-import { type DraftGeneration, fromChatAvailability } from "./from-chat";
-import { generalDiscussions } from "./general-discussions";
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -2076,9 +2076,9 @@ function ReviewApp() {
 						viewedFiles={data.viewedFiles}
 						selectedPath={selectedPath}
 						onSelectFile={selectFile}
-						onViewedChange={(path, viewed) => {
+						onViewedChange={(paths, viewed) => {
 							saveProgress({
-								viewedFile: { path, viewed },
+								viewedFiles: { paths, viewed },
 							});
 						}}
 						showWhitespaceChanges={data.showWhitespaceChanges}

@@ -193,15 +193,41 @@ test("renders the default list with encounter order, full labels, stats, and sel
 
 test("switches to tree leaves with full-path identity and shared callbacks", () => {
 	const selected: string[] = [];
-	const viewed: Array<[string, boolean]> = [];
+	const viewed: Array<[readonly string[], boolean]> = [];
 	const rendered = renderInteractive({
 		files: [parsedFile("src/a.ts"), parsedFile("src/nested/a.ts")],
 		onSelectFile: (path) => selected.push(path),
-		onViewedChange: (path, isViewed) => viewed.push([path, isViewed]),
+		onViewedChange: (paths, isViewed) => viewed.push([paths, isViewed]),
 	});
 
 	act(() => modeButton(rendered.container, "Tree view").click());
 	const nav = changedFilesNav(rendered.container);
+	const srcFolder = nav.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse src"]',
+	);
+	if (!srcFolder) throw new Error("Tree folder is missing");
+	expect(srcFolder.className.split(/\s+/)).toContain("justify-start");
+	expect(srcFolder.className.split(/\s+/)).toContain("h-7");
+	const srcRow = nav.querySelector<HTMLElement>('[data-folder-row="src"]');
+	if (!srcRow) throw new Error("Tree folder row is missing");
+	expect(srcRow.className.split(/\s+/)).toContain("hover:bg-muted/60");
+	expect(srcFolder.className.split(/\s+/)).toContain(
+		"aria-expanded:bg-transparent",
+	);
+	expect(srcFolder.querySelectorAll("svg")).toHaveLength(1);
+	expect(srcFolder.querySelector("svg")?.getAttribute("class")).toContain(
+		"size-3",
+	);
+	const nestedFolder = nav.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse src/nested"]',
+	);
+	if (!nestedFolder) throw new Error("Nested folder is missing");
+	const nestedRow = nav.querySelector<HTMLElement>(
+		'[data-folder-row="src/nested"]',
+	);
+	if (!nestedRow) throw new Error("Nested folder row is missing");
+	expect(srcRow.style.paddingInlineStart).toBe("0.5rem");
+	expect(nestedRow.style.paddingInlineStart).toBe("1.75rem");
 	const leaf = nav.querySelector<HTMLButtonElement>(
 		'button[aria-label="src/a.ts"]',
 	);
@@ -209,6 +235,13 @@ test("switches to tree leaves with full-path identity and shared callbacks", () 
 		'button[aria-label="src/nested/a.ts"]',
 	);
 	if (!leaf || !nestedLeaf) throw new Error("Tree leaves are missing");
+	const leafRow = leaf.closest<HTMLElement>("[data-file-path]");
+	const nestedLeafRow = nestedLeaf.closest<HTMLElement>("[data-file-path]");
+	if (!leafRow || !nestedLeafRow) throw new Error("Tree file rows are missing");
+	expect(leafRow.style.paddingInlineStart).toBe(
+		nestedRow.style.paddingInlineStart,
+	);
+	expect(nestedLeafRow.style.paddingInlineStart).toBe("3rem");
 	expect(leaf.textContent).toBe("a.ts");
 	expect(leaf.title).toBe("src/a.ts");
 	expect(nestedLeaf.textContent).toBe("a.ts");
@@ -221,11 +254,97 @@ test("switches to tree leaves with full-path identity and shared callbacks", () 
 	);
 	if (!viewedCheckbox) throw new Error("Tree Viewed control is missing");
 	act(() => viewedCheckbox.click());
-	expect(viewed).toEqual([["src/a.ts", true]]);
+	expect(viewed).toEqual([[["src/a.ts"], true]]);
 	expect(
 		nav.querySelector('[role="checkbox"][aria-label^="Viewed "]'),
 	).not.toBeNull();
 	expect(nav.querySelector('button[aria-label^="Collapse "]')).not.toBeNull();
+});
+
+test("shows recursive change totals and folder viewed state", () => {
+	const rendered = renderInteractive({
+		files: [
+			parsedFile("src/a.ts", { insertions: 2, deletions: 1 }),
+			parsedFile("src/nested/b.ts", { insertions: 3, deletions: 4 }),
+			parsedFile("lib/c.ts", { insertions: 7, deletions: 2 }),
+		],
+		viewedFiles: ["src/a.ts"],
+	});
+	act(() => modeButton(rendered.container, "Tree view").click());
+	const nav = changedFilesNav(rendered.container);
+	const srcRow = nav.querySelector<HTMLElement>('[data-folder-row="src"]');
+	const nestedRow = nav.querySelector<HTMLElement>(
+		'[data-folder-row="src/nested"]',
+	);
+	if (!srcRow || !nestedRow) throw new Error("Folder rows are missing");
+
+	expect(srcRow.querySelector(".text-success")?.textContent).toBe("+5");
+	expect(srcRow.querySelector(".text-destructive")?.textContent).toBe("−5");
+	expect(nestedRow.querySelector(".text-success")?.textContent).toBe("+3");
+	expect(nestedRow.querySelector(".text-destructive")?.textContent).toBe("−4");
+	expect(
+		srcRow.querySelector('[role="checkbox"]')?.getAttribute("aria-checked"),
+	).toBe("false");
+	expect(
+		nestedRow.querySelector('[role="checkbox"]')?.getAttribute("aria-checked"),
+	).toBe("false");
+});
+
+test("folder Viewed controls toggle all recursive descendants only", () => {
+	const viewed: Array<[readonly string[], boolean]> = [];
+	const rendered = renderInteractive({
+		files: [
+			parsedFile("src/a.ts"),
+			parsedFile("src/nested/b.ts"),
+			parsedFile("lib/c.ts"),
+		],
+		viewedFiles: ["src/a.ts", "lib/c.ts"],
+		onViewedChange: (paths, isViewed) => viewed.push([paths, isViewed]),
+	});
+	act(() => modeButton(rendered.container, "Tree view").click());
+
+	const folderCheckbox = (path: string) =>
+		changedFilesNav(rendered.container).querySelector<HTMLElement>(
+			`[role="checkbox"][aria-label="Viewed folder ${path}"]`,
+		);
+	const srcCheckbox = folderCheckbox("src");
+	if (!srcCheckbox || !folderCheckbox("src/nested")) {
+		throw new Error("Folder Viewed controls are missing");
+	}
+
+	expect(srcCheckbox.getAttribute("aria-checked")).toBe("false");
+	act(() => srcCheckbox.click());
+	expect(viewed).toEqual([[["src/a.ts", "src/nested/b.ts"], true]]);
+
+	rendered.rerender({
+		viewedFiles: ["src/a.ts", "src/nested/b.ts", "lib/c.ts"],
+	});
+	expect(folderCheckbox("src")?.getAttribute("aria-checked")).toBe("true");
+	expect(folderCheckbox("src/nested")?.getAttribute("aria-checked")).toBe(
+		"true",
+	);
+
+	viewed.length = 0;
+	const checkedSrcCheckbox = folderCheckbox("src");
+	if (!checkedSrcCheckbox) throw new Error("Root Viewed control is missing");
+	act(() => checkedSrcCheckbox.click());
+	expect(viewed).toEqual([[["src/a.ts", "src/nested/b.ts"], false]]);
+
+	rendered.rerender({
+		viewedFiles: ["src/a.ts", "src/nested/b.ts", "lib/c.ts"],
+	});
+	viewed.length = 0;
+	const checkedNestedCheckbox = folderCheckbox("src/nested");
+	if (!checkedNestedCheckbox)
+		throw new Error("Nested Viewed control is missing");
+	act(() => checkedNestedCheckbox.click());
+	expect(viewed).toEqual([[["src/nested/b.ts"], false]]);
+
+	rendered.rerender({ viewedFiles: ["src/a.ts", "lib/c.ts"] });
+	expect(folderCheckbox("src")?.getAttribute("aria-checked")).toBe("false");
+	expect(folderCheckbox("src/nested")?.getAttribute("aria-checked")).toBe(
+		"false",
+	);
 });
 
 test("collapses folders independently and retains the state across mode switches", () => {
@@ -364,13 +483,13 @@ test("keeps selected and Viewed state while switching back to list", () => {
 		),
 	).not.toBeNull();
 });
-test("uses full-path callbacks in list mode and keeps Viewed off folders", () => {
+test("uses full-path callbacks in list mode", () => {
 	const selected: string[] = [];
-	const viewed: Array<[string, boolean]> = [];
+	const viewed: Array<[readonly string[], boolean]> = [];
 	const rendered = renderInteractive({
 		files: [parsedFile("src/a.ts")],
 		onSelectFile: (path) => selected.push(path),
-		onViewedChange: (path, isViewed) => viewed.push([path, isViewed]),
+		onViewedChange: (paths, isViewed) => viewed.push([paths, isViewed]),
 	});
 
 	const listNav = changedFilesNav(rendered.container);
@@ -385,12 +504,5 @@ test("uses full-path callbacks in list mode and keeps Viewed off folders", () =>
 	act(() => listLeaf.click());
 	act(() => listViewed.click());
 	expect(selected).toEqual(["src/a.ts"]);
-	expect(viewed).toEqual([["src/a.ts", true]]);
-
-	act(() => modeButton(rendered.container, "Tree view").click());
-	const folder = rendered.container.querySelector<HTMLButtonElement>(
-		'button[aria-label="Collapse src"]',
-	);
-	if (!folder) throw new Error("Tree folder is missing");
-	expect(folder.querySelector('[role="checkbox"]')).toBeNull();
+	expect(viewed).toEqual([[["src/a.ts"], true]]);
 });
