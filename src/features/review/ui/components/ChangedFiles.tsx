@@ -1,4 +1,4 @@
-import { ChevronDown, Folder, FolderOpen } from "lucide-react";
+import { Folder } from "lucide-react";
 import {
 	type Dispatch,
 	type ReactElement,
@@ -25,12 +25,20 @@ import {
 	CollapsibleTrigger,
 } from "./ui/collapsible";
 
+const TREE_ROOT_INDENT_REM = 0.5;
+// Gap and folder icon width; each child starts under parent label.
+const TREE_INDENT_STEP_REM = 1.25;
+
+function treeRowIndent(depth: number): string {
+	return `${TREE_ROOT_INDENT_REM + depth * TREE_INDENT_STEP_REM}rem`;
+}
+
 export interface ChangedFilesProps {
 	files: readonly ParsedFileDiff[];
 	viewedFiles: readonly string[];
 	selectedPath: string | null;
 	onSelectFile: (path: string) => void;
-	onViewedChange: (path: string, viewed: boolean) => void;
+	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	showWhitespaceChanges?: boolean;
 	whitespaceChanging?: boolean;
 	syncing?: boolean;
@@ -147,6 +155,61 @@ function treeContainsFile(
 	}
 	return false;
 }
+interface FileTreeSummary {
+	insertions: number;
+	deletions: number;
+	fileCount: number;
+	viewedCount: number;
+}
+
+function summarizeFileTree(
+	nodes: readonly FileTreeNode[],
+	viewedPaths: ReadonlySet<string>,
+): Map<string, FileTreeSummary> {
+	const summaries = new Map<string, FileTreeSummary>();
+
+	function summarizeDirectory(directory: FileTreeDirectory): FileTreeSummary {
+		const summary: FileTreeSummary = {
+			insertions: 0,
+			deletions: 0,
+			fileCount: 0,
+			viewedCount: 0,
+		};
+		for (const child of directory.children) {
+			if (child.kind === "directory") {
+				const nested = summarizeDirectory(child);
+				summary.insertions += nested.insertions;
+				summary.deletions += nested.deletions;
+				summary.fileCount += nested.fileCount;
+				summary.viewedCount += nested.viewedCount;
+				continue;
+			}
+			summary.insertions += child.entry.file.insertions;
+			summary.deletions += child.entry.file.deletions;
+			summary.fileCount += 1;
+			if (viewedPaths.has(child.path)) summary.viewedCount += 1;
+		}
+		summaries.set(directory.path, summary);
+		return summary;
+	}
+
+	for (const node of nodes) {
+		if (node.kind === "directory") summarizeDirectory(node);
+	}
+	return summaries;
+}
+
+function directoryFilePaths(directory: FileTreeDirectory): string[] {
+	const paths = new Set<string>();
+	function collect(nodes: readonly FileTreeNode[]) {
+		for (const node of nodes) {
+			if (node.kind === "directory") collect(node.children);
+			else paths.add(node.path);
+		}
+	}
+	collect(directory.children);
+	return [...paths];
+}
 
 interface ChangedFileRowProps {
 	entry: ChangedFileEntry;
@@ -155,7 +218,7 @@ interface ChangedFileRowProps {
 	selectedPath: string | null;
 	viewedFiles: readonly string[];
 	onSelectFile: (path: string) => void;
-	onViewedChange: (path: string, viewed: boolean) => void;
+	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	registerRow: (path: string, element: HTMLElement | null) => void;
 }
 
@@ -176,7 +239,7 @@ function ChangedFileRow({
 			className="group flex items-center gap-2 px-4 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/60 data-[state=selected]:bg-accent"
 			data-file-path={entry.path}
 			data-state={selected ? "selected" : "idle"}
-			style={{ paddingInlineStart: `${1 + depth}rem` }}
+			style={{ paddingInlineStart: treeRowIndent(depth) }}
 		>
 			<button
 				type="button"
@@ -199,7 +262,7 @@ function ChangedFileRow({
 					checked={viewedFiles.includes(entry.path)}
 					aria-label={`Viewed ${entry.path}`}
 					onCheckedChange={(checked) =>
-						onViewedChange(entry.path, checked === true)
+						onViewedChange([entry.path], checked === true)
 					}
 				/>
 				<span>Viewed</span>
@@ -215,8 +278,9 @@ interface ChangedFilesFolderProps {
 	setCollapsedFolderPaths: Dispatch<SetStateAction<Set<string>>>;
 	selectedPath: string | null;
 	viewedFiles: readonly string[];
+	summaries: ReadonlyMap<string, FileTreeSummary>;
 	onSelectFile: (path: string) => void;
-	onViewedChange: (path: string, viewed: boolean) => void;
+	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	registerRow: (path: string, element: HTMLElement | null) => void;
 }
 
@@ -227,6 +291,7 @@ function ChangedFilesFolder({
 	setCollapsedFolderPaths,
 	selectedPath,
 	viewedFiles,
+	summaries,
 	onSelectFile,
 	onViewedChange,
 	registerRow,
@@ -235,6 +300,11 @@ function ChangedFilesFolder({
 	const open = !collapsed;
 	const controlsId = `changed-files-directory-${encodeURIComponent(node.path)}`;
 	const triggerLabel = `${open ? "Collapse" : "Expand"} ${node.path}`;
+	const summary = summaries.get(node.path);
+	if (!summary)
+		throw new Error(`Missing changed-file summary for ${node.path}`);
+	const allViewed =
+		summary.fileCount > 0 && summary.viewedCount === summary.fileCount;
 
 	return (
 		<Collapsible
@@ -253,34 +323,44 @@ function ChangedFilesFolder({
 			}}
 			data-directory-path={node.path}
 		>
-			<CollapsibleTrigger
-				aria-label={triggerLabel}
-				aria-controls={controlsId}
-				aria-expanded={open}
-				title={triggerLabel}
-				render={
-					<Button
-						type="button"
-						variant="ghost"
-						className="group flex w-full min-w-0 items-center gap-2 rounded-none px-4 py-1.5 text-left text-sm"
-						style={{ paddingInlineStart: `${1 + depth}rem` }}
-					>
-						<ChevronDown
-							className="size-4 shrink-0 -rotate-90 transition-transform duration-200 ease-out group-data-[panel-open]:rotate-0"
-							data-collapsed={collapsed ? "true" : "false"}
-							aria-hidden
-						/>
-						{open ? (
-							<FolderOpen className="size-4 shrink-0" aria-hidden />
-						) : (
-							<Folder className="size-4 shrink-0" aria-hidden />
-						)}
-						<span className="min-w-0 truncate font-mono text-xs">
-							{node.name}
-						</span>
-					</Button>
-				}
-			/>
+			<div
+				data-folder-row={node.path}
+				className="group flex h-7 w-full items-center gap-2 px-4 text-sm transition-colors duration-150 hover:bg-muted/60"
+				style={{ paddingInlineStart: treeRowIndent(depth) }}
+			>
+				<CollapsibleTrigger
+					aria-label={triggerLabel}
+					aria-controls={controlsId}
+					aria-expanded={open}
+					title={triggerLabel}
+					render={
+						<Button
+							type="button"
+							variant="ghost"
+							className="flex h-7 min-w-0 flex-1 shrink items-center justify-start gap-2 rounded-none px-0 text-left text-sm hover:bg-transparent hover:text-inherit aria-expanded:bg-transparent aria-expanded:text-inherit"
+						>
+							<Folder className="size-3 shrink-0" aria-hidden />
+							<span className="min-w-0 truncate font-mono text-xs">
+								{node.name}
+							</span>
+						</Button>
+					}
+				/>
+				<span className="flex shrink-0 gap-1 text-xs tabular-nums">
+					<span className="text-success">+{summary.insertions}</span>
+					<span className="text-destructive">−{summary.deletions}</span>
+				</span>
+				<div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+					<Checkbox
+						checked={allViewed}
+						aria-label={`Viewed folder ${node.path}`}
+						onCheckedChange={(checked) =>
+							onViewedChange(directoryFilePaths(node), checked === true)
+						}
+					/>
+					<span>Viewed</span>
+				</div>
+			</div>
 			<CollapsibleContent id={controlsId} keepMounted className="min-w-0">
 				{node.children.map((child) =>
 					child.kind === "directory" ? (
@@ -292,6 +372,7 @@ function ChangedFilesFolder({
 							setCollapsedFolderPaths={setCollapsedFolderPaths}
 							selectedPath={selectedPath}
 							viewedFiles={viewedFiles}
+							summaries={summaries}
 							onSelectFile={onSelectFile}
 							onViewedChange={onViewedChange}
 							registerRow={registerRow}
@@ -339,6 +420,10 @@ export function ChangedFiles({
 		[files],
 	);
 	const tree = useMemo(() => buildChangedFileTree(entries), [entries]);
+	const folderSummaries = useMemo(
+		() => summarizeFileTree(tree, new Set(viewedFiles)),
+		[tree, viewedFiles],
+	);
 	const rowRegistry = useRef<Map<string, HTMLElement>>(new Map());
 	const registerRow = useCallback(
 		(path: string, element: HTMLElement | null) => {
@@ -399,6 +484,7 @@ export function ChangedFiles({
 					collapsedFolderPaths={collapsedFolderPaths}
 					setCollapsedFolderPaths={setCollapsedFolderPaths}
 					selectedPath={selectedPath}
+					summaries={folderSummaries}
 					viewedFiles={viewedFiles}
 					onSelectFile={onSelectFile}
 					onViewedChange={onViewedChange}

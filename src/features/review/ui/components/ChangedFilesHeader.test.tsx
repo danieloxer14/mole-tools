@@ -117,6 +117,28 @@ test("renders controlled list and tree layout items", () => {
 	expect(treeMarkup).toContain('aria-pressed="true"');
 	expect(treeMarkup).toContain('data-state="on"');
 	expect(treeMarkup).toContain('aria-label="Tree view"');
+	expect(listMarkup).not.toContain('title="List view"');
+	expect(listMarkup).not.toContain('title="Tree view"');
+});
+
+test("shows a custom tooltip on focus instead of a native title", async () => {
+	const container = renderInteractive();
+	const listButton = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="List view"]',
+	);
+	expect(listButton).not.toBeNull();
+	expect(listButton?.getAttribute("title")).toBeNull();
+
+	await act(async () => {
+		listButton?.focus();
+		await Bun.sleep(0);
+	});
+
+	const tooltips = document.body.querySelectorAll(
+		'[data-slot="tooltip-content"]',
+	);
+	expect(tooltips).toHaveLength(1);
+	expect(tooltips[0]?.textContent).toBe("List view");
 });
 
 test("renders a controlled accessible whitespace checkbox", () => {
