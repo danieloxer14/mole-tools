@@ -18,6 +18,7 @@ import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
 import type { ChatEntry } from "../store";
 import { createRequestSequence } from "./chat-request-sequence";
+import { bootColorTheme } from "./color-theme";
 import {
 	clampColumnWidth,
 	initialColumnWidth,
@@ -2245,4 +2246,7 @@ function ReviewApp() {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Review UI root is missing");
-createRoot(root).render(<ReviewApp />);
+const reviewRoot = root;
+void bootColorTheme(tokenFromLocation(), () => {
+	createRoot(reviewRoot).render(<ReviewApp />);
+});

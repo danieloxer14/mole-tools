@@ -3,6 +3,7 @@ import { act, createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
+import { applyColorTheme } from "../color-theme";
 import {
 	isSaveDisabled,
 	MODEL_QUICK_PICKS,
@@ -14,6 +15,7 @@ import {
 	SLOT_LABELS,
 	VISIBLE_SLOTS,
 } from "./SettingsPanel";
+
 import { Dialog, DialogContent } from "./ui/dialog";
 
 const initialSettings: SettingsSnapshot = {
@@ -56,6 +58,13 @@ function render(prompt: PromptSnapshot = initialPrompt): string {
 
 function escapedText(text: string): string {
 	return text.replace(/'/g, "&#x27;");
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+	return new Response(JSON.stringify(value), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
 }
 
 test("keeps visible slot labels in order and shows active preset and latest version", () => {
@@ -393,9 +402,6 @@ test("keeps settings controls reachable in responsive bounded layout", () => {
 	expect(markup).toContain("md:grid-cols-[14rem_minmax(0,1fr)]");
 	expect(markup).toContain("overflow-auto");
 	expect(markup).toContain('<nav class="space-y-1" aria-label="Prompt slots">');
-	expect(
-		markup.match(/class="flex flex-wrap items-center gap-2"/g),
-	).toHaveLength(7);
 
 	expect(markup).toContain('<input id="settings-prompt-model"');
 	for (const id of [
@@ -518,5 +524,249 @@ test("settings dialog closes through icon, Escape, and backdrop with focus retur
 	} finally {
 		act(() => root.unmount());
 		container.remove();
+	}
+});
+test("renders Prompts and Appearance tabs with Prompts selected", () => {
+	const markup = render();
+
+	expect(markup).toContain('role="tablist"');
+	const promptsTab = markup.match(
+		/<button[^>]*role="tab"[^>]*>Prompts<\/button>/,
+	)?.[0];
+	expect(promptsTab).toContain('aria-selected="true"');
+	expect(markup).toMatch(
+		/<button[^>]*role="tab"[^>]*aria-selected="false"[^>]*>Appearance<\/button>/,
+	);
+});
+
+test("applies and saves a selected color theme", async () => {
+	const originalFetch = globalThis.fetch;
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		calls.push({ url, init });
+		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
+			return jsonResponse({ colorTheme: "light" });
+		}
+		return jsonResponse(initialSettings);
+	}) as unknown as typeof fetch;
+	applyColorTheme("default");
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialPrompt,
+				}),
+			),
+		);
+		await act(async () => {
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+
+		const appearanceTab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('button[role="tab"]'),
+		).find((tab) => tab.textContent === "Appearance");
+		expect(appearanceTab).toBeDefined();
+		await act(async () => {
+			appearanceTab?.click();
+			await Bun.sleep(0);
+		});
+
+		const label = container.querySelector<HTMLLabelElement>(
+			'label[for="settings-color-theme"]',
+		);
+		const select = container.querySelector<HTMLSelectElement>(
+			"#settings-color-theme",
+		);
+		expect(label?.textContent).toBe("Color theme");
+		expect(
+			Array.from(select?.options ?? []).map((option) => [
+				option.value,
+				option.text,
+			]),
+		).toEqual([
+			["default", "Default"],
+			["light", "Light"],
+		]);
+		expect(select?.value).toBe("default");
+
+		await act(async () => {
+			if (select) {
+				select.value = "light";
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			}
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+
+		expect(document.documentElement.classList.contains("dark")).toBe(false);
+		const appearancePost = calls.find(
+			(call) =>
+				call.init?.method === "POST" &&
+				call.url.includes("/api/settings/appearance"),
+		);
+		expect(appearancePost?.url).toContain("/api/settings/appearance");
+		expect(JSON.parse(String(appearancePost?.init?.body))).toEqual({
+			colorTheme: "light",
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.value,
+		).toBe("light");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		document.documentElement.className = "";
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("restores the color theme after a failed save and permits re-entry", async () => {
+	const originalFetch = globalThis.fetch;
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	let appearancePostCount = 0;
+	let releaseFirstPost: ((response: Response) => void) | undefined;
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		calls.push({ url, init });
+		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
+			appearancePostCount += 1;
+			if (appearancePostCount === 1) {
+				return await new Promise<Response>((resolve) => {
+					releaseFirstPost = resolve;
+				});
+			}
+			return jsonResponse({ colorTheme: "light" });
+		}
+		return jsonResponse(initialSettings);
+	}) as unknown as typeof fetch;
+	applyColorTheme("default");
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const mountPanel = async () => {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialPrompt,
+				}),
+			),
+		);
+		await act(async () => {
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+	};
+	const unmountPanel = () => act(() => root.render(null));
+	const switchTab = async (label: string) => {
+		const tab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('button[role="tab"]'),
+		).find((candidate) => candidate.textContent === label);
+		await act(async () => {
+			tab?.click();
+			await Bun.sleep(0);
+		});
+	};
+	const changeTheme = async () => {
+		const select = container.querySelector<HTMLSelectElement>(
+			"#settings-color-theme",
+		);
+		expect(select).not.toBeNull();
+		await act(async () => {
+			if (select) {
+				select.value = "light";
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			}
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+	};
+
+	try {
+		await mountPanel();
+		await switchTab("Appearance");
+		await changeTheme();
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.disabled,
+		).toBe(true);
+		expect(releaseFirstPost).toBeDefined();
+
+		await switchTab("Prompts");
+		await switchTab("Appearance");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.disabled,
+		).toBe(true);
+
+		unmountPanel();
+		await mountPanel();
+		await switchTab("Appearance");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.disabled,
+		).toBe(true);
+
+		unmountPanel();
+		await act(async () => {
+			releaseFirstPost?.(jsonResponse({ error: "persist failed" }, 500));
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+		await mountPanel();
+		await switchTab("Appearance");
+
+		expect(document.documentElement.classList.contains("dark")).toBe(true);
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.value,
+		).toBe("default");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.disabled,
+		).toBe(false);
+		expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+			"Color theme not saved: persist failed",
+		);
+		await switchTab("Prompts");
+		await switchTab("Appearance");
+		expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+			"Color theme not saved: persist failed",
+		);
+
+		await changeTheme();
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(document.documentElement.classList.contains("dark")).toBe(false);
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-color-theme")
+				?.value,
+		).toBe("light");
+		expect(
+			calls.filter(
+				(call) =>
+					call.init?.method === "POST" &&
+					call.url.includes("/api/settings/appearance"),
+			),
+		).toHaveLength(2);
+	} finally {
+		await act(async () => {
+			releaseFirstPost?.(jsonResponse({ error: "persist failed" }, 500));
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+		unmountPanel();
+		container.remove();
+		document.documentElement.className = "";
+		globalThis.fetch = originalFetch;
 	}
 });

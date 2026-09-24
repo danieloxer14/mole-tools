@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -12,19 +12,49 @@ import {
 	type FileTreeNode,
 } from "./ChangedFiles";
 
+const replacedGlobalNames = [
+	"window",
+	"document",
+	"navigator",
+	"Node",
+	"Element",
+	"HTMLElement",
+	"MutationObserver",
+	"getComputedStyle",
+	"requestAnimationFrame",
+	"cancelAnimationFrame",
+	"IS_REACT_ACT_ENVIRONMENT",
+] as const;
+let originalGlobalDescriptors: Record<string, PropertyDescriptor | undefined>;
+
 const dom = new Window();
-Object.assign(globalThis, {
-	window: dom,
-	document: dom.document,
-	navigator: dom.navigator,
-	Node: dom.Node,
-	Element: dom.Element,
-	HTMLElement: dom.HTMLElement,
-	MutationObserver: dom.MutationObserver,
-	getComputedStyle: dom.getComputedStyle.bind(dom),
-	requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
-	cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
-	IS_REACT_ACT_ENVIRONMENT: true,
+beforeAll(() => {
+	originalGlobalDescriptors = Object.fromEntries(
+		replacedGlobalNames.map((name) => [
+			name,
+			Object.getOwnPropertyDescriptor(globalThis, name),
+		]),
+	);
+	Object.assign(globalThis, {
+		window: dom,
+		document: dom.document,
+		navigator: dom.navigator,
+		Node: dom.Node,
+		Element: dom.Element,
+		HTMLElement: dom.HTMLElement,
+		MutationObserver: dom.MutationObserver,
+		getComputedStyle: dom.getComputedStyle.bind(dom),
+		requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+		cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
+		IS_REACT_ACT_ENVIRONMENT: true,
+	});
+});
+afterAll(() => {
+	for (const name of replacedGlobalNames) {
+		const descriptor = originalGlobalDescriptors[name];
+		if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+		else Reflect.deleteProperty(globalThis, name);
+	}
 });
 const roots: Root[] = [];
 

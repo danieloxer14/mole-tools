@@ -125,6 +125,23 @@ describe("loadConfig", () => {
 
 		expect(config.prompts).toEqual({ "commit-system": "terse" });
 	});
+	test("preserves appearance through legacy normalization", async () => {
+		const path = await configPath();
+		const legacy = {
+			ollama: {
+				commitModel: "custom-model",
+				baseUrl: "http://localhost:11434",
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			appearance: { colorTheme: "light" },
+		};
+		await Bun.write(path, JSON.stringify(legacy));
+
+		const config = await loadConfig(path);
+
+		expect(config.appearance).toEqual({ colorTheme: "light" });
+	});
 	test("preserves babysitter settings through legacy normalization", async () => {
 		const path = await configPath();
 		const reviewBabysitter = {

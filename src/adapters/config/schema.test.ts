@@ -46,6 +46,24 @@ describe("config schema", () => {
 		});
 		expect(configured.prompts).toEqual({ "commit-system": "terse" });
 	});
+	test("accepts appearance color themes and defaults", () => {
+		expect(
+			ConfigSchema.parse({
+				...baseConfig,
+				appearance: { colorTheme: "light" },
+			}).appearance,
+		).toEqual({ colorTheme: "light" });
+		expect(
+			ConfigSchema.parse({ ...baseConfig, appearance: {} }).appearance,
+		).toEqual({ colorTheme: "default" });
+		expect(ConfigSchema.parse(baseConfig).appearance).toBeUndefined();
+		expect(
+			ConfigSchema.safeParse({
+				...baseConfig,
+				appearance: { colorTheme: "dark" },
+			}).success,
+		).toBe(false);
+	});
 
 	test("defaults the review agent to Claude with no forced model", () => {
 		const defaults = ConfigSchema.parse(baseConfig);

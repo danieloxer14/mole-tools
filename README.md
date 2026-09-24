@@ -118,8 +118,8 @@ are started with read-only inspection tools (`read`, `grep`, `glob`, `bash`) for
 chat; Bash is limited by prompt policy to read-only commands, and prompt edits
 cannot grant write access to code under review.
 
-Review agent and model can also be selected from the review UI's **Prompts &
-Models** panel. Changes apply to the next layer run or chat turn; use
+Review agent and model can also be selected from the **Settings** dialog's
+**Prompts** tab. Changes apply to the next layer run or chat turn; use
 **Regenerate** to rebuild cached layers.
 Prompt versions can select an agent and model independently. A version whose
 agent is **Default** inherits the global Review agent/model above; a version
@@ -240,9 +240,10 @@ Existing flat prompt files migrate lazily, once on first access of their slot:
 `mr-code.md` is absent. Do not move these files manually; the first read
 preserves their text in the new layout. `mr-system` is no longer a prompt slot.
 
-Activating a preset or changing review-agent settings in the overlay persists
-the choice with `updateConfig`. That helper rewrites `config.json` and does
-not preserve comments, so keep important notes outside the generated config.
+Activating a preset, changing review-agent settings, or changing the color
+theme persists the choice with `updateConfig`. That helper rewrites
+`config.json` and does not preserve comments, so keep important notes outside
+the generated config.
 
 Each version file may begin with YAML-style frontmatter containing optional
 agent/model metadata:
@@ -357,11 +358,17 @@ Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
 
-The **Prompts & Models** overlay manages the five review prompt slots
-(`review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`), their presets and
-versions, plus the review agent and model. Changes apply to the next layer run
-or chat turn; use **Regenerate** to rebuild cached layers.
+The **Settings** dialog has two tabs. The **Prompts** tab manages the five
+review prompt slots (`review-layers-code`, `review-layers-plan`,
+`review-chat`, `review-explain-comment`, `review-comment-from-chat`), their
+presets and versions, plus the review agent and model. Changes apply to the
+next layer run or chat turn; use **Regenerate** to rebuild cached layers.
+
+The **Appearance** tab has a **Color theme** dropdown: **Default** (dark) or
+**Light** (light-grey background, dark-grey text, orange accents slightly
+lighter than in Default). The
+choice applies immediately and is saved as `appearance.colorTheme`
+(`"default"` or `"light"`) in `config.json`.
 
 
 ```bash
@@ -627,5 +634,5 @@ Bumps `package.json`, builds the binary, commits and tags `v<version>`, pushes t
 | `src/core/` | Context, error handling, feature interface |
 | `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
-| `src/features/review/ui/components/SettingsPanel.tsx` | Review UI Prompts & Models overlay for prompt presets, versions, and review-agent settings |
+| `src/features/review/ui/components/SettingsPanel.tsx` | Review UI Settings dialog (Prompts and Appearance tabs) for prompt presets, versions, review-agent settings, and color theme |
 | `specs/` | Design docs and architecture notes |

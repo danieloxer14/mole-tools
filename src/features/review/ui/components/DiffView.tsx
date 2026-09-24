@@ -21,7 +21,6 @@ import {
 import type { Tokens } from "marked";
 import mermaid from "mermaid";
 import {
-	type CSSProperties,
 	Fragment,
 	type KeyboardEvent,
 	type MouseEvent,
@@ -54,6 +53,7 @@ import {
 	wrapMarkdownBlocksWithActions,
 } from "../../../../shared/markdown";
 import { type Draft, isMarkdownSelection } from "../../state";
+import { type ColorTheme, useColorTheme } from "../color-theme";
 import type { FromChatContext } from "../from-chat";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 import { CommentMarkdown } from "./CommentMarkdown";
@@ -190,26 +190,13 @@ export function defaultFileViewMode(file: ParsedFileDiff): FileViewMode {
 		: "diff";
 }
 
+const SHIKI_THEMES = { dark: "github-dark", light: "github-light" } as const;
+
 interface CodeHighlightProps {
 	text: string;
 	language: string;
 	tokens?: readonly ThemedToken[];
 	tokenized?: boolean;
-}
-
-function tokenStyle(token: ThemedToken): CSSProperties {
-	if (token.htmlStyle) return token.htmlStyle as CSSProperties;
-	const style: CSSProperties = {};
-	if (token.color) style.color = token.color;
-	if (token.bgColor) style.backgroundColor = token.bgColor;
-	const fontStyle = token.fontStyle ?? 0;
-	if ((fontStyle & 1) !== 0) style.fontStyle = "italic";
-	if ((fontStyle & 2) !== 0) style.fontWeight = "bold";
-	const decorations: string[] = [];
-	if ((fontStyle & 4) !== 0) decorations.push("underline");
-	if ((fontStyle & 8) !== 0) decorations.push("line-through");
-	if (decorations.length > 0) style.textDecoration = decorations.join(" ");
-	return style;
 }
 
 interface HighlightSource {
@@ -276,7 +263,8 @@ function useCodeHighlights(
 				try {
 					const result = await codeToTokens(source.source, {
 						lang: language || "text",
-						theme: "github-dark",
+						themes: SHIKI_THEMES,
+						defaultColor: "dark",
 					});
 					return { source, tokens: result.tokens };
 				} catch {
@@ -333,7 +321,8 @@ function CodeHighlight({
 		void codeToHtml(text, {
 			lang: language || "text",
 			structure: "inline",
-			theme: "github-dark",
+			themes: SHIKI_THEMES,
+			defaultColor: "dark",
 		})
 			.then((result) => {
 				if (active) setHtml(result);
@@ -348,9 +337,9 @@ function CodeHighlight({
 
 	if (tokenized) {
 		return tokens ? (
-			<span>
+			<span className="shiki">
 				{tokens.map((token) => (
-					<span key={token.offset} style={tokenStyle(token)}>
+					<span key={token.offset} style={token.htmlStyle}>
 						{token.content}
 					</span>
 				))}
@@ -361,14 +350,27 @@ function CodeHighlight({
 	}
 	if (html) {
 		// Shiki returns escaped HTML; this is the only rendering path for its output.
-		// biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki escapes highlighted source.
-		return <span dangerouslySetInnerHTML={{ __html: html }} />;
+		return (
+			<span
+				className="shiki"
+				// biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki escapes highlighted source.
+				dangerouslySetInnerHTML={{ __html: html }}
+			/>
+		);
 	}
 	return <>{text}</>;
 }
 let nextMermaidId = 0;
 let nextCodeBlockId = 0;
-let mermaidConfigured = false;
+type MermaidTheme = "dark" | "default";
+function mermaidThemeFor(colorTheme: ColorTheme): MermaidTheme {
+	return colorTheme === "light" ? "default" : "dark";
+}
+function mermaidCacheKey(theme: MermaidTheme, source: string): string {
+	return `${theme}\u0000${source}`;
+}
+let mermaidConfiguredTheme: MermaidTheme | null = null;
+let mermaidConfigurationGeneration = 0;
 const mermaidRenderCache = new Map<
 	string,
 	{ svg: string; bindFunctions?: (element: Element) => void }
@@ -418,6 +420,121 @@ function renderMarkdown(source: string): RenderedMarkdown {
 		FORBID_TAGS: ["embed", "iframe", "object", "script", "style"],
 	});
 	return { html, mermaidSources, codeSources, blockRanges };
+}
+
+function MermaidThemeRenderer({
+	rendered,
+	containerRef,
+}: {
+	rendered: RenderedMarkdown | null;
+	containerRef: { current: HTMLDivElement | null };
+}) {
+	const mermaidTheme = mermaidThemeFor(useColorTheme());
+
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!rendered || !container) return;
+		let active = true;
+		const tasks: Promise<void>[] = [];
+		if (rendered.mermaidSources.size > 0) {
+			if (mermaidConfiguredTheme !== mermaidTheme) {
+				mermaid.initialize({
+					securityLevel: "strict",
+					startOnLoad: false,
+					theme: mermaidTheme,
+					htmlLabels: false,
+				});
+				mermaidConfiguredTheme = mermaidTheme;
+				mermaidConfigurationGeneration += 1;
+			}
+			const mermaidGeneration = mermaidConfigurationGeneration;
+			const mermaidPlaceholders = [
+				...container.querySelectorAll<HTMLElement>("[data-mermaid-id]"),
+			];
+			tasks.push(
+				...mermaidPlaceholders.map(async (placeholder, index) => {
+					const id = placeholder.dataset.mermaidId;
+					const mermaidSource = id
+						? rendered.mermaidSources.get(id)
+						: undefined;
+					if (mermaidSource === undefined) return;
+					// A prior (possibly interrupted) render of this exact diagram may
+					// have already completed; reuse it instead of re-racing mermaid.
+					const cached = mermaidRenderCache.get(
+						mermaidCacheKey(mermaidTheme, mermaidSource),
+					);
+					if (cached) {
+						placeholder.replaceChildren();
+						placeholder.innerHTML = DOMPurify.sanitize(cached.svg, {
+							USE_PROFILES: { svg: true, svgFilters: true },
+						});
+						cached.bindFunctions?.(placeholder);
+						placeholder.dataset.moleApplied = mermaidTheme;
+						return;
+					}
+					try {
+						const result = await mermaid.render(
+							`mole-mermaid-render-${index}-${id ?? "unknown"}`,
+							mermaidSource,
+						);
+						if (mermaidGeneration === mermaidConfigurationGeneration) {
+							mermaidRenderCache.set(
+								mermaidCacheKey(mermaidTheme, mermaidSource),
+								result,
+							);
+						}
+						if (!active || !placeholder.isConnected) return;
+						placeholder.replaceChildren();
+						placeholder.innerHTML = DOMPurify.sanitize(result.svg, {
+							USE_PROFILES: { svg: true, svgFilters: true },
+						});
+						result.bindFunctions?.(placeholder);
+						placeholder.dataset.moleApplied = mermaidTheme;
+					} catch (reason: unknown) {
+						if (!active || !placeholder.isConnected) return;
+						const error = document.createElement("p");
+						error.className = "mermaid-error";
+						error.textContent = `Mermaid render failed: ${
+							reason instanceof Error ? reason.message : String(reason)
+						}`;
+						const sourceBlock = document.createElement("pre");
+						sourceBlock.className = "mermaid-source";
+						sourceBlock.textContent = mermaidSource;
+						placeholder.replaceChildren(error, sourceBlock);
+					}
+				}),
+			);
+		}
+		void Promise.all(tasks);
+		return () => {
+			active = false;
+		};
+	}, [containerRef, rendered, mermaidTheme]);
+
+	useEffect(() => {
+		if (!rendered) return;
+		const container = containerRef.current;
+		for (const placeholder of container?.querySelectorAll<HTMLElement>(
+			"[data-mermaid-id]",
+		) ?? []) {
+			if (placeholder.dataset.moleApplied === mermaidTheme) continue;
+			const mermaidSource = placeholder.dataset.mermaidId
+				? rendered.mermaidSources.get(placeholder.dataset.mermaidId)
+				: undefined;
+			const cached = mermaidSource
+				? mermaidRenderCache.get(mermaidCacheKey(mermaidTheme, mermaidSource))
+				: undefined;
+			if (!cached) continue;
+			placeholder.replaceChildren();
+			placeholder.innerHTML = DOMPurify.sanitize(cached.svg, {
+				USE_PROFILES: { svg: true, svgFilters: true },
+			});
+			cached.bindFunctions?.(placeholder);
+			placeholder.dataset.moleApplied = mermaidTheme;
+		}
+	});
+
+	return null;
 }
 
 /**
@@ -492,136 +609,52 @@ function RenderedMarkdown({
 	useEffect(() => {
 		const rendered = parsed.value;
 		const container = containerRef.current;
-		if (
-			!rendered ||
-			!container ||
-			(rendered.mermaidSources.size === 0 && rendered.codeSources.size === 0)
-		) {
-			return;
-		}
-		const tasks: Promise<void>[] = [];
-		if (rendered.mermaidSources.size > 0) {
-			if (!mermaidConfigured) {
-				mermaid.initialize({
-					securityLevel: "strict",
-					startOnLoad: false,
-					theme: "dark",
-					htmlLabels: false,
-				});
-				mermaidConfigured = true;
+		if (!rendered || !container || rendered.codeSources.size === 0) return;
+		let active = true;
+		const tasks = [
+			...container.querySelectorAll<HTMLElement>("[data-code-block-id]"),
+		].map(async (placeholder) => {
+			const id = placeholder.dataset.codeBlockId;
+			const entry = id ? rendered.codeSources.get(id) : undefined;
+			if (entry === undefined) return;
+			const cacheKey = `${entry.lang}\u0000${entry.code}`;
+			// A prior (possibly interrupted) highlight of this exact snippet may
+			// have already completed; reuse it instead of re-racing Shiki.
+			const cached = codeHighlightCache.get(cacheKey);
+			if (cached !== undefined) {
+				placeholder.replaceChildren();
+				placeholder.innerHTML = DOMPurify.sanitize(cached);
+				placeholder.dataset.moleApplied = "1";
+				return;
 			}
-			const mermaidPlaceholders = [
-				...container.querySelectorAll<HTMLElement>("[data-mermaid-id]"),
-			];
-			tasks.push(
-				...mermaidPlaceholders.map(async (placeholder, index) => {
-					const id = placeholder.dataset.mermaidId;
-					const mermaidSource = id
-						? rendered.mermaidSources.get(id)
-						: undefined;
-					if (mermaidSource === undefined) return;
-					// A prior (possibly interrupted) render of this exact diagram may
-					// have already completed; reuse it instead of re-racing mermaid.
-					const cached = mermaidRenderCache.get(mermaidSource);
-					if (cached) {
-						placeholder.replaceChildren();
-						placeholder.innerHTML = DOMPurify.sanitize(cached.svg, {
-							USE_PROFILES: { svg: true, svgFilters: true },
-						});
-						cached.bindFunctions?.(placeholder);
-						return;
-					}
-					try {
-						const result = await mermaid.render(
-							`mole-mermaid-render-${index}-${id ?? "unknown"}`,
-							mermaidSource,
-						);
-						mermaidRenderCache.set(mermaidSource, result);
-						if (!placeholder.isConnected) return;
-						placeholder.replaceChildren();
-						placeholder.innerHTML = DOMPurify.sanitize(result.svg, {
-							USE_PROFILES: { svg: true, svgFilters: true },
-						});
-						result.bindFunctions?.(placeholder);
-					} catch (reason: unknown) {
-						if (!placeholder.isConnected) return;
-						const error = document.createElement("p");
-						error.className = "mermaid-error";
-						error.textContent = `Mermaid render failed: ${
-							reason instanceof Error ? reason.message : String(reason)
-						}`;
-						const sourceBlock = document.createElement("pre");
-						sourceBlock.className = "mermaid-source";
-						sourceBlock.textContent = mermaidSource;
-						placeholder.replaceChildren(error, sourceBlock);
-					}
-				}),
-			);
-		}
-		if (rendered.codeSources.size > 0) {
-			const codePlaceholders = [
-				...container.querySelectorAll<HTMLElement>("[data-code-block-id]"),
-			];
-			tasks.push(
-				...codePlaceholders.map(async (placeholder) => {
-					const id = placeholder.dataset.codeBlockId;
-					const entry = id ? rendered.codeSources.get(id) : undefined;
-					if (entry === undefined) return;
-					const cacheKey = `${entry.lang}\u0000${entry.code}`;
-					// A prior (possibly interrupted) highlight of this exact snippet may
-					// have already completed; reuse it instead of re-racing Shiki.
-					const cached = codeHighlightCache.get(cacheKey);
-					if (cached !== undefined) {
-						placeholder.replaceChildren();
-						placeholder.innerHTML = DOMPurify.sanitize(cached);
-						return;
-					}
-					try {
-						const highlighted = await codeToHtml(entry.code, {
-							lang: entry.lang || "text",
-							theme: "github-dark",
-						});
-						codeHighlightCache.set(cacheKey, highlighted);
-						if (!placeholder.isConnected) return;
-						placeholder.replaceChildren();
-						placeholder.innerHTML = DOMPurify.sanitize(highlighted);
-					} catch {
-						// Unknown language to Shiki: keep the escaped plain-text fallback.
-					}
-				}),
-			);
-		}
+			try {
+				const highlighted = await codeToHtml(entry.code, {
+					lang: entry.lang || "text",
+					themes: SHIKI_THEMES,
+					defaultColor: "dark",
+				});
+				codeHighlightCache.set(cacheKey, highlighted);
+				if (!active || !placeholder.isConnected) return;
+				placeholder.replaceChildren();
+				placeholder.innerHTML = DOMPurify.sanitize(highlighted);
+				placeholder.dataset.moleApplied = "1";
+			} catch {
+				// Unknown language to Shiki: keep the escaped plain-text fallback.
+			}
+		});
 		void Promise.all(tasks);
+		return () => {
+			active = false;
+		};
 	}, [parsed.value]);
 
-	// React can reset this container's innerHTML back to the placeholder markup
-	// on a later re-render even when `source`/`parsed.value` haven't changed
-	// (e.g. a sibling state update from unrelated polling). Re-applying any
-	// already-resolved mermaid/Shiki result after every render closes that
-	// window immediately instead of leaving the placeholder stuck until an
-	// unrelated remount (e.g. toggling view mode) happens to retrigger it.
+	// React can reset this container's innerHTML on a later parent render even
+	// when the parsed Markdown is unchanged. Restore cached Shiki output after
+	// each render so code blocks do not remain at their plain-text fallback.
 	useEffect(() => {
 		const rendered = parsed.value;
 		const container = containerRef.current;
 		if (!rendered) return;
-		for (const placeholder of container?.querySelectorAll<HTMLElement>(
-			"[data-mermaid-id]",
-		) ?? []) {
-			if (placeholder.dataset.moleApplied === "1") continue;
-			const mermaidSource = placeholder.dataset.mermaidId
-				? rendered.mermaidSources.get(placeholder.dataset.mermaidId)
-				: undefined;
-			const cached = mermaidSource
-				? mermaidRenderCache.get(mermaidSource)
-				: undefined;
-			if (!cached) continue;
-			placeholder.replaceChildren();
-			placeholder.innerHTML = DOMPurify.sanitize(cached.svg, {
-				USE_PROFILES: { svg: true, svgFilters: true },
-			});
-			cached.bindFunctions?.(placeholder);
-			placeholder.dataset.moleApplied = "1";
-		}
 		for (const placeholder of container?.querySelectorAll<HTMLElement>(
 			"[data-code-block-id]",
 		) ?? []) {
@@ -793,6 +826,10 @@ function RenderedMarkdown({
 	);
 	return (
 		<div className="min-w-0 max-w-full">
+			<MermaidThemeRenderer
+				rendered={parsed.value}
+				containerRef={containerRef}
+			/>
 			<div
 				className="rendered-markdown min-w-0 max-w-full [overflow-wrap:anywhere]"
 				ref={containerRef}
