@@ -1,10 +1,10 @@
-type Bump = "major" | "minor" | "patch";
+import { resolve } from "node:path";
 
-const [bump] = Bun.argv.slice(2);
-const validBumps = new Set<Bump>(["major", "minor", "patch"]);
-const packagePath = "package.json";
-const binaryPath = "mole-tools";
+const repositoryRoot = resolve(import.meta.dir, "..");
+const packagePath = resolve(repositoryRoot, "package.json");
+const binaryPath = resolve(repositoryRoot, "mole-tools");
 const assetName = "mole-tools-darwin-arm64";
+const usage = "Usage: bun run release publish --notes-file <path>";
 
 function fail(message: string): never {
 	throw new Error(message);
@@ -13,6 +13,7 @@ function fail(message: string): never {
 function commandOutput(command: string[]): string {
 	const result = Bun.spawnSync({
 		cmd: command,
+		cwd: repositoryRoot,
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -27,87 +28,153 @@ function commandOutput(command: string[]): string {
 async function run(command: string[]): Promise<void> {
 	const child = Bun.spawn({
 		cmd: command,
+		cwd: repositoryRoot,
 		stdout: "inherit",
 		stderr: "inherit",
 	});
-	if ((await child.exited) !== 0) fail(`${command[0]} failed.`);
+	if ((await child.exited) !== 0) fail(`${command.join(" ")} failed.`);
 }
 
-function nextVersion(version: string, type: Bump): string {
-	const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-	if (!match)
-		fail(`package.json version must be MAJOR.MINOR.PATCH; found ${version}.`);
-
-	const [major, minor, patch] = match.slice(1).map(Number);
-
-	if (major === undefined || minor === undefined || patch === undefined) {
-		fail(`package.json version must be MAJOR.MINOR.PATCH; found ${version}.`);
+function parseNotesFile(argv: string[]): string {
+	if (
+		argv.length !== 3 ||
+		argv[0] !== "publish" ||
+		argv[1] !== "--notes-file" ||
+		!argv[2]
+	) {
+		fail(usage);
 	}
+	return resolve(repositoryRoot, argv[2]);
+}
 
-	switch (type) {
-		case "major":
-			return `${major + 1}.0.0`;
-		case "minor":
-			return `${major}.${minor + 1}.0`;
-		case "patch":
-			return `${major}.${minor}.${patch + 1}`;
+function readPackageVersion(contents: string): string {
+	const packageJson = JSON.parse(contents) as { version?: unknown };
+	if (typeof packageJson.version !== "string")
+		fail("package.json has no string version.");
+	if (!/^\d+\.\d+\.\d+$/.test(packageJson.version)) {
+		fail(
+			`package.json version must be MAJOR.MINOR.PATCH; found ${packageJson.version}.`,
+		);
+	}
+	return packageJson.version;
+}
+
+function assertNoExistingRelease(tag: string): void {
+	const releases = JSON.parse(
+		commandOutput([
+			"gh",
+			"release",
+			"list",
+			"--limit",
+			"1000",
+			"--json",
+			"tagName",
+		]),
+	) as unknown;
+	if (!Array.isArray(releases)) fail("Could not inspect GitHub releases.");
+
+	const releaseTags = (releases as unknown[]).map((release) => {
+		if (
+			typeof release !== "object" ||
+			release === null ||
+			!("tagName" in release) ||
+			typeof release.tagName !== "string"
+		) {
+			fail("Could not inspect GitHub releases.");
+		}
+		return release.tagName;
+	});
+	if (releaseTags.includes(tag)) fail(`GitHub release ${tag} already exists.`);
+}
+
+function assertCleanWorkingTree(): void {
+	if (
+		commandOutput([
+			"git",
+			"status",
+			"--porcelain",
+			"--untracked-files=all",
+		]).trim()
+	) {
+		fail("Refusing to publish from a dirty working tree.");
 	}
 }
 
 async function main(): Promise<void> {
-	if (!validBumps.has(bump as Bump)) {
-		fail("Usage: bun run release <major|minor|patch>");
-	}
+	const notesPath = parseNotesFile(Bun.argv.slice(2));
+	const notes = Bun.file(notesPath);
+	if (!(await notes.exists()))
+		fail(`Release notes file does not exist: ${notesPath}`);
+	if (!(await notes.text()).trim())
+		fail("Release notes file must not be empty.");
 	if (!Bun.which("gh")) {
 		fail(
 			"GitHub CLI is required. Install it with 'brew install gh', then run 'gh auth login'.",
 		);
 	}
-	if (commandOutput(["git", "status", "--porcelain"]).trim()) {
+
+	if (commandOutput(["git", "branch", "--show-current"]).trim() !== "main") {
+		fail("Refusing to publish unless the current branch is main.");
+	}
+	assertCleanWorkingTree();
+	await run([
+		"git",
+		"fetch",
+		"--tags",
+		"origin",
+		"refs/heads/main:refs/remotes/origin/main",
+	]);
+	assertCleanWorkingTree();
+
+	const head = commandOutput(["git", "rev-parse", "HEAD"]).trim();
+	const originMain = commandOutput([
+		"git",
+		"rev-parse",
+		"refs/remotes/origin/main",
+	]).trim();
+	if (!head || head !== originMain) {
 		fail(
-			"Refusing to release from a dirty working tree. Commit or stash your changes first.",
+			"Refusing to publish: main does not match origin/main. Fetch and fast-forward main first.",
 		);
 	}
 
 	await run(["gh", "auth", "status"]);
 
-	const originalPackage = await Bun.file(packagePath).text();
-	const packageJson = JSON.parse(originalPackage) as { version?: unknown };
-	if (typeof packageJson.version !== "string")
-		fail("package.json has no string version.");
-
-	const version = nextVersion(packageJson.version, bump as Bump);
-	const updatedPackage = originalPackage.replace(
-		/("version"\s*:\s*")[^"]+(")/,
-		`$1${version}$2`,
-	);
-	if (updatedPackage === originalPackage)
-		fail("Could not update package.json version.");
-
-	let committed = false;
-	try {
-		await Bun.write(packagePath, updatedPackage);
-		await run([process.execPath, "run", "build"]);
-		await run(["git", "add", packagePath]);
-		await run(["git", "commit", "-m", `chore(release): v${version}`]);
-		committed = true;
-		await run(["git", "tag", "-a", `v${version}`, "-m", `v${version}`]);
-		await run(["git", "push", "origin", "HEAD", `v${version}`]);
-		await run([
-			"gh",
-			"release",
-			"create",
-			`v${version}`,
-			`${binaryPath}#${assetName}`,
-			"--title",
-			`v${version}`,
-			"--generate-notes",
-		]);
-		console.log(`Published v${version}: ${assetName}`);
-	} catch (error) {
-		if (!committed) await Bun.write(packagePath, originalPackage);
-		throw error;
+	const packageContents = await Bun.file(packagePath).text();
+	const version = readPackageVersion(packageContents);
+	const tag = `v${version}`;
+	if (commandOutput(["git", "tag", "--list", tag]).trim()) {
+		fail(`Git tag ${tag} already exists.`);
 	}
+	assertNoExistingRelease(tag);
+
+	await run([process.execPath, "run", "build"]);
+	assertCleanWorkingTree();
+	if ((await Bun.file(packagePath).text()) !== packageContents) {
+		fail("Build changed package.json; refusing to publish.");
+	}
+	if (commandOutput(["git", "rev-parse", "HEAD"]).trim() !== head) {
+		fail("Build changed HEAD; refusing to publish.");
+	}
+	if (!(await Bun.file(binaryPath).exists())) {
+		fail(`Build did not produce ${binaryPath}.`);
+	}
+
+	await run(["git", "tag", "-a", tag, "-m", tag]);
+	await run(["git", "push", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
+	await run([
+		"gh",
+		"release",
+		"create",
+		tag,
+		`${binaryPath}#${assetName}`,
+		"--verify-tag",
+		"--title",
+		tag,
+		"--notes-file",
+		notesPath,
+	]);
+	console.log(`Published ${tag}: ${assetName}`);
 }
 
 main().catch((error: unknown) => {

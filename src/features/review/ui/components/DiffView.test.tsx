@@ -1355,9 +1355,11 @@ test("updates rendered Markdown From chat controls when generation state changes
 		generation = { status: "running" };
 		act(render);
 		button = container.querySelector<HTMLButtonElement>(
-			'button[aria-label="Generating comment"]',
+			'button[aria-label="Stop generating comment"]',
 		);
-		expect(button?.disabled).toBe(true);
+		expect(button?.disabled).toBe(false);
+		expect(button?.getAttribute("aria-busy")).toBe("true");
+		expect(container.textContent).toContain("Generating…");
 		expect(container.textContent).toContain("Stop");
 
 		generation = { status: "failed", error: "Generation failed" };
