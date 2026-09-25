@@ -513,7 +513,7 @@ export function SettingsPanel({
 									))}
 							</nav>
 							<section
-								className="min-w-0 space-y-4"
+								className="min-w-0 space-y-4 md:border-l md:pl-6"
 								aria-label={SLOT_LABELS[selectedSlot]}
 							>
 								<p className="text-sm text-muted-foreground">
@@ -687,7 +687,7 @@ export function SettingsPanel({
 
 										<div className="space-y-2">
 											<label
-												className="text-sm font-medium"
+												className="block text-sm font-medium"
 												htmlFor="settings-prompt"
 											>
 												Prompt text
