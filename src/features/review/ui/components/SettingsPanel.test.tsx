@@ -203,11 +203,13 @@ test("save posts agent and model", async () => {
 			headers: { "content-type": "application/json" },
 		});
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
-		calls.push({ url: String(input), init });
+		const url = String(input);
+		calls.push({ url, init });
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST") {
 			return jsonResponse({ version: 4, saved: true });
 		}
-		if (String(input).includes("/api/settings")) {
+		if (url.includes("/api/settings")) {
 			return jsonResponse(initialSettings);
 		}
 		return jsonResponse({
@@ -526,17 +528,21 @@ test("settings dialog closes through icon, Escape, and backdrop with focus retur
 		container.remove();
 	}
 });
-test("renders Prompts and Appearance tabs with Prompts selected", () => {
+test("renders Prompts, Skills and Appearance tabs with Prompts selected", () => {
 	const markup = render();
 
-	expect(markup).toContain('role="tablist"');
-	const promptsTab = markup.match(
-		/<button[^>]*role="tab"[^>]*>Prompts<\/button>/,
-	)?.[0];
-	expect(promptsTab).toContain('aria-selected="true"');
-	expect(markup).toMatch(
-		/<button[^>]*role="tab"[^>]*aria-selected="false"[^>]*>Appearance<\/button>/,
+	const tabs = Array.from(
+		markup.matchAll(/<button[^>]*role="tab"[^>]*>([^<]+)<\/button>/g),
 	);
+	expect(tabs.map((tab) => tab[1])).toEqual([
+		"Prompts",
+		"Skills",
+		"Appearance",
+	]);
+	expect(tabs[0]?.[0]).toContain('aria-selected="true"');
+	expect(
+		tabs.slice(1).every((tab) => tab[0]?.includes('aria-selected="false"')),
+	).toBe(true);
 });
 
 test("applies and saves a selected color theme", async () => {
@@ -545,6 +551,7 @@ test("applies and saves a selected color theme", async () => {
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
 		const url = String(input);
 		calls.push({ url, init });
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
 			return jsonResponse({ colorTheme: "light" });
 		}
@@ -636,6 +643,7 @@ test("restores the color theme after a failed save and permits re-entry", async 
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
 		const url = String(input);
 		calls.push({ url, init });
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
 			appearancePostCount += 1;
 			if (appearancePostCount === 1) {

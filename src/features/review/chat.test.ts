@@ -942,4 +942,43 @@ describe("persistent chat turns", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
+	test("defaults skill refs for legacy NDJSON chat entries", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-legacy-skills-"),
+		);
+		try {
+			const chatsDir = join(dir, "chats");
+			await mkdir(chatsDir, { recursive: true });
+			await Bun.write(
+				join(chatsDir, "legacy.ndjson"),
+				`${JSON.stringify({
+					role: "user",
+					text: "Legacy message",
+					tags: [],
+					at: "2026-08-15T00:00:00.000Z",
+					sessionId: null,
+					partial: false,
+				})}\n`,
+			);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir,
+			});
+
+			await expect(store.readChat("legacy")).resolves.toEqual([
+				{
+					role: "user",
+					text: "Legacy message",
+					tags: [],
+					skills: [],
+					at: "2026-08-15T00:00:00.000Z",
+					sessionId: null,
+					partial: false,
+				},
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 });

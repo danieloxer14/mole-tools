@@ -245,6 +245,19 @@ theme persists the choice with `updateConfig`. That helper rewrites
 `config.json` and does not preserve comments, so keep important notes outside
 the generated config.
 
+User-authored review skills are stored separately under
+`~/.config/mole-tools/skills/<name>/`:
+
+```text
+~/.config/mole-tools/
+└── skills/<name>/
+    ├── skill.json
+    └── NNN.md
+```
+
+`skill.json` records the active version and most recent use; each `NNN.md`
+file contains one version of the skill text.
+
 Each version file may begin with YAML-style frontmatter containing optional
 agent/model metadata:
 
@@ -358,11 +371,36 @@ Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
 
-The **Settings** dialog has two tabs. The **Prompts** tab manages the five
-review prompt slots (`review-layers-code`, `review-layers-plan`,
-`review-chat`, `review-explain-comment`, `review-comment-from-chat`), their
-presets and versions, plus the review agent and model. Changes apply to the
-next layer run or chat turn; use **Regenerate** to rebuild cached layers.
+The **Settings** dialog has three tabs: **Prompts**, **Skills**, and
+**Appearance**. The **Prompts** tab manages the five review prompt slots
+(`review-layers-code`, `review-layers-plan`, `review-chat`,
+`review-explain-comment`, `review-comment-from-chat`), their presets and
+versions, plus the review agent and model. Changes apply to the next layer
+run or chat turn; use **Regenerate** to rebuild cached layers.
+
+### Skills
+
+The **Skills** tab lists each skill and its active version in a scrollable
+column; **New skill** stays pinned at the top while that list scrolls.
+**New skill** opens a cancellable name dialog. The dialog shows `Name is
+required`, `Use only letters, numbers, _ and -`, `Name must be more than 3
+characters`, `Name must be 64 characters or fewer`, or `A skill with this name
+already exists` inline as applicable. **Create** stays disabled until the name
+is valid. Skills cannot be renamed. Choose a version from the version dropdown.
+**Activate** makes a selected inactive version active; **New version** copies
+the editor text into the next version and activates it. **Save** overwrites the
+active version, while inactive versions are read-only. **Delete** asks for
+confirmation and removes the skill and all its versions.
+
+In chat, type `/` at the start of the message or after whitespace to open a
+popover above the slash with up to three most-recently-used skills; continue
+typing to filter by name prefix, use the arrow keys to move, and press Enter to
+select. The composer placeholder also explains how to open this menu. When no
+skills match, **No matches** appears with a plus button that opens Settings
+directly to the Skills tab. A selected skill appears as a highlighted
+`/<name>` tag, and Backspace or Delete removes the whole tag. When sent, the
+server replaces tags with their skills' active text; the transcript shows the
+tags instead of that text.
 
 The **Appearance** tab has a **Color theme** dropdown: **Default** (dark) or
 **Light** (light-grey background, dark-grey text, orange accents slightly
@@ -660,5 +698,5 @@ The publish command does not bump `package.json`, commit, or push `HEAD`. It ref
 | `src/core/` | Context, error handling, feature interface |
 | `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
-| `src/features/review/ui/components/SettingsPanel.tsx` | Review UI Settings dialog (Prompts and Appearance tabs) for prompt presets, versions, review-agent settings, and color theme |
+| `src/features/review/ui/components/SettingsPanel.tsx` | Review UI Settings dialog (Prompts, Skills, and Appearance tabs) for prompt presets, versions, review-agent settings, and color theme |
 | `specs/` | Design docs and architecture notes |

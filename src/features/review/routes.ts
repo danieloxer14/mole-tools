@@ -25,7 +25,9 @@ import {
 	readPrompt,
 	savePrompt,
 } from "../../adapters/prompts/loader";
+import { type SkillStore, SkillStoreError } from "../../adapters/skills/store";
 import { PortError } from "../../core/errors";
+import { logger } from "../../core/logger";
 import type {
 	CreateDiscussionInput,
 	GitHost,
@@ -40,6 +42,13 @@ import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
+import {
+	expandSkillTokens,
+	findSkillTokenCandidates,
+	SKILL_NAME_PATTERN,
+	type SkillRef,
+	type SkillToken,
+} from "../../shared/skills";
 import {
 	type AgentSelection,
 	effectiveAgentSelection,
@@ -95,6 +104,7 @@ export interface ReviewRoutesOptions {
 	token: string;
 	state?: ReviewState;
 	store?: ReviewStore;
+	skillStore?: SkillStore;
 	paths?: Pick<
 		ReviewPaths,
 		"layersDir" | "promptDir" | "layerPath" | "promptPath"
@@ -294,6 +304,15 @@ function errorMessage(error: unknown): string {
 function promptErrorResponse(error: unknown): Response {
 	if (error instanceof PortError || error instanceof z.ZodError) {
 		return jsonResponse({ error: errorMessage(error) }, 400);
+	}
+	return jsonResponse({ error: errorMessage(error) }, 500);
+}
+
+function skillErrorResponse(error: unknown): Response {
+	if (error instanceof SkillStoreError) {
+		const status =
+			error.code === "invalid" ? 400 : error.code === "conflict" ? 409 : 404;
+		return jsonResponse({ error: error.message }, status);
 	}
 	return jsonResponse({ error: errorMessage(error) }, 500);
 }
@@ -894,6 +913,119 @@ export function createReviewRoutes(
 			return promptErrorResponse(error);
 		}
 	}
+
+	async function skillList(store: SkillStore): Promise<Response> {
+		try {
+			return jsonResponse({ skills: await store.list() });
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
+
+	async function skillCreate(
+		request: Request,
+		store: SkillStore,
+	): Promise<Response> {
+		const body = await parseBody(request);
+		if (!body) return jsonResponse({ error: "Expected a JSON object" }, 400);
+		if (typeof body.name !== "string")
+			return jsonResponse({ error: "Name is required" }, 400);
+
+		try {
+			return jsonResponse({ skill: await store.create(body.name) }, 201);
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
+
+	async function skillRead(
+		url: URL,
+		name: string,
+		store: SkillStore,
+	): Promise<Response> {
+		const rawVersion = url.searchParams.get("version");
+		if (rawVersion !== null && !/^[1-9]\d*$/.test(rawVersion)) {
+			return jsonResponse({ error: "Invalid skill version" }, 400);
+		}
+		const version = rawVersion === null ? undefined : Number(rawVersion);
+		try {
+			return jsonResponse(await store.read(name, version));
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
+
+	async function skillSave(
+		request: Request,
+		name: string,
+		store: SkillStore,
+	): Promise<Response> {
+		const body = await parseBody(request);
+		if (!body) return jsonResponse({ error: "Expected a JSON object" }, 400);
+		if (typeof body.text !== "string")
+			return jsonResponse({ error: "Skill text must be a string" }, 400);
+
+		try {
+			return jsonResponse({ version: await store.saveActive(name, body.text) });
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
+
+	async function skillCreateVersion(
+		request: Request,
+		name: string,
+		store: SkillStore,
+	): Promise<Response> {
+		const body = await parseBody(request);
+		if (!body) return jsonResponse({ error: "Expected a JSON object" }, 400);
+		if (typeof body.text !== "string")
+			return jsonResponse({ error: "Skill text must be a string" }, 400);
+
+		try {
+			return jsonResponse({
+				version: await store.createVersion(name, body.text),
+			});
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
+
+	async function skillActivate(
+		request: Request,
+		name: string,
+		store: SkillStore,
+	): Promise<Response> {
+		const body = await parseBody(request);
+		if (!body) return jsonResponse({ error: "Expected a JSON object" }, 400);
+		if (
+			typeof body.version !== "number" ||
+			!Number.isSafeInteger(body.version) ||
+			body.version <= 0
+		) {
+			return jsonResponse({ error: "Invalid skill version" }, 400);
+		}
+
+		try {
+			return jsonResponse({
+				activeVersion: await store.activate(name, body.version),
+			});
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
+
+	async function skillDelete(
+		name: string,
+		store: SkillStore,
+	): Promise<Response> {
+		try {
+			await store.delete(name);
+			return jsonResponse({ deleted: true });
+		} catch (error) {
+			return skillErrorResponse(error);
+		}
+	}
 	function hiddenRevisionKey(state: ReviewState): string {
 		return `${state.revision.mergeBaseSha}\u0000${state.revision.headSha}`;
 	}
@@ -1305,13 +1437,38 @@ export function createReviewRoutes(
 			return chatErrorStream("Review chat agent is unavailable");
 		if (activeTurns.has(input.chatId))
 			return chatErrorStream("Chat turn already in progress");
-
 		const controller = new AbortController();
 		activeTurns.set(input.chatId, controller);
 		const release = () => {
 			if (activeTurns.get(input.chatId) === controller)
 				activeTurns.delete(input.chatId);
 		};
+
+		let expanded: {
+			message: string;
+			skills: SkillRef[];
+			invocations: SkillToken[];
+		};
+		try {
+			const candidates = findSkillTokenCandidates(input.message);
+			const names = [
+				...new Set(candidates.map((candidate) => candidate.name)),
+			].filter((name) => SKILL_NAME_PATTERN.test(name));
+			expanded =
+				options.skillStore && names.length > 0
+					? expandSkillTokens(
+							input.message,
+							await options.skillStore.expansions(names),
+						)
+					: { message: input.message, skills: [], invocations: [] };
+		} catch (error) {
+			release();
+			return chatErrorStream(errorMessage(error));
+		}
+		if (expanded.message.trim() === "") {
+			release();
+			return chatErrorStream("Chat message must not be empty");
+		}
 
 		let agent: ReviewAgent | undefined;
 		let chatState: ReviewState;
@@ -1376,6 +1533,17 @@ export function createReviewRoutes(
 			release();
 			return chatErrorStream("Review chat agent is unavailable");
 		}
+		if (options.skillStore && expanded.skills.length > 0) {
+			try {
+				await options.skillStore.touch(
+					expanded.skills.map((skill) => skill.name),
+				);
+			} catch (error) {
+				logger.warn("review.skills.touch-failed", {
+					error: errorMessage(error),
+				});
+			}
+		}
 		const queue = createSseFrameQueue();
 		const run = runChatTurn({
 			agent: runAgent,
@@ -1386,8 +1554,11 @@ export function createReviewRoutes(
 			promptSourceDir: options.promptSourceDir,
 			promptText: options.promptText,
 			promptPreset: presetFor("review-chat"),
-			message: input.message,
 			tags: input.tags,
+			message: expanded.message,
+			sourceText: input.message,
+			skillInvocations: expanded.invocations,
+			skills: expanded.skills,
 			openFile: input.openFile,
 			discussions: fallbackDiscussions,
 			signal: controller.signal,
@@ -2247,6 +2418,48 @@ export function createReviewRoutes(
 					return promptRollback(request, slot);
 				if (action === "reset" && request.method === "POST")
 					return promptReset(request, slot);
+				return emptyResponse(404);
+			}
+
+			if (
+				url.pathname === "/api/skills" ||
+				url.pathname.startsWith("/api/skills/")
+			) {
+				const skillStore = options.skillStore;
+				if (!skillStore) {
+					return jsonResponse({ error: "Skills are unavailable" }, 503);
+				}
+
+				if (url.pathname === "/api/skills") {
+					if (request.method === "GET") return skillList(skillStore);
+					if (request.method === "POST")
+						return skillCreate(request, skillStore);
+					return emptyResponse(404);
+				}
+
+				const segments = url.pathname.slice("/api/skills/".length).split("/");
+				if (segments.length > 2) return emptyResponse(404);
+				const encodedName = segments[0] ?? "";
+				const action = segments[1];
+				let name: string;
+				try {
+					name = decodeURIComponent(encodedName);
+				} catch {
+					return jsonResponse({ error: "Invalid skill name" }, 400);
+				}
+
+				if (!action) {
+					if (request.method === "GET") return skillRead(url, name, skillStore);
+					if (request.method === "POST")
+						return skillSave(request, name, skillStore);
+					if (request.method === "DELETE") return skillDelete(name, skillStore);
+				}
+				if (action === "versions" && request.method === "POST") {
+					return skillCreateVersion(request, name, skillStore);
+				}
+				if (action === "active" && request.method === "POST") {
+					return skillActivate(request, name, skillStore);
+				}
 				return emptyResponse(404);
 			}
 

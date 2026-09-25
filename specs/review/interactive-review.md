@@ -289,6 +289,60 @@ Turn construction is intentionally asymmetric:
   each chat owns its provider session id, stored in state and on each
   transcript entry.
 
+### Skills
+
+Skills are managed in Settings and are available through the token-protected
+`/api/skills*` endpoints.
+
+| Method | Path | Body | 2xx | Errors |
+|---|---|---|---|---|
+| GET | `/api/skills` | — | 200 `{skills: SkillSummary[]}` | — |
+| POST | `/api/skills` | `{name}` | 201 `{skill: SkillSummary}` | 400 D4 name-validation error; 409 conflict |
+| GET | `/api/skills/<name>?version=N` | — | 200 `SkillDetail` | 400 `Invalid skill version` (must match `^[1-9]\d*$`); 404 |
+| POST | `/api/skills/<name>` | `{text}` | 200 `{version}` | 400 `Skill text must be a string`; 404 |
+| POST | `/api/skills/<name>/versions` | `{text}` | 200 `{version}` | 400 `Skill text must be a string`; 404 |
+| POST | `/api/skills/<name>/active` | `{version}` | 200 `{activeVersion}` | 400 `Invalid skill version` (not a positive safe integer); 404 |
+| DELETE | `/api/skills/<name>` | — | 200 `{deleted: true}` | 404 |
+
+Invalid names return the D4 message in validation order: `Name is required`,
+`Use only letters, numbers, _ and -`, `Name must be more than 3 characters`,
+`Name must be 64 characters or fewer`, then `A skill with this name already
+exists` for a case-insensitive duplicate.
+
+Skill names are URL-decoded; a decode failure returns 400 `Invalid skill
+name`. Non-object JSON bodies return 400 `Expected a JSON object`, and other
+method/action combinations return 404. Store errors map to 400 (invalid), 409
+(conflict), or 404 (not found); unexpected errors return 500. If no skill store
+is injected, skill routes return 503 `Skills are unavailable`.
+
+In Settings, the Skills tab shows each skill with its active version. Its
+scrollable skill column keeps **New skill** pinned at the top. **New skill**
+opens a cancellable dialog; the name field shows inline validation while typing
+and Create remains disabled until valid. Names must use only letters, numbers,
+`_`, and `-`, be 4–64 characters long, and be unique case-insensitively. The
+exact validation messages are `Name is required`, `Use only letters, numbers,
+_ and -`, `Name must be more than 3 characters`, `Name must be 64 characters
+or fewer`, and `A skill with this name already exists`.
+
+Typing `/` at the start of a chat message or after whitespace opens a popover
+above the slash with up to three most-recently-used skills. Typing filters by
+name prefix; ArrowUp/ArrowDown navigate and Enter selects. When no skills
+match, **No matches** appears beside a plus button that opens Settings on the
+Skills tab. The composer placeholder tells users to type `/` to open the
+skills menu.
+
+The client sends the raw chat draft unchanged. Before registering the turn,
+the server expands recognized tokens to the corresponding active skill text;
+unknown names stay literal. If the expanded message is blank, the server
+returns `Chat message must not be empty`; no title is written and no transcript
+entry is stored. Chat titles use the raw message.
+
+Persisted user entries contain expanded text and `skills` references with each
+skill's name, version, and exact text; entries without skill references use
+`skills: []`. The transcript collapses referenced skill text back to its
+`/<name>` token and renders it as a tag, including for optimistic entries.
+Assistant entries are unchanged.
+
 ### Chat agent binding
 
 Each new chat, including an Explain chat, binds its agent/model from the

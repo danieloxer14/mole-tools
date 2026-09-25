@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { logger } from "../../core/logger";
+import { SkillRefSchema, SkillTokenSchema } from "../../shared/skills";
 import { ChatTagSchema } from "./chat-tags";
 import type { ReviewPaths } from "./paths";
 import {
@@ -19,12 +20,16 @@ export const ChatEntrySchema = z
 		role: z.string().min(1),
 		text: z.string(),
 		tags: z.array(ChatTagSchema),
+		skills: z.array(SkillRefSchema).default([]),
+		sourceText: z.string().optional(),
+		skillInvocations: z.array(SkillTokenSchema).optional(),
 		at: z.string().min(1),
 		sessionId: z.string().min(1).nullable(),
 		partial: z.boolean().default(false),
 	})
 	.strict();
 export type ChatEntry = z.infer<typeof ChatEntrySchema>;
+export type ChatEntryWithOptimistic = ChatEntry & { optimistic?: true };
 
 export interface ReviewStorePaths {
 	statePath: string;
@@ -108,14 +113,23 @@ export class ReviewStore {
 
 	async appendChat(
 		chatId: string,
-		entry: Omit<ChatEntry, "tags" | "at" | "sessionId" | "partial"> &
-			Partial<Pick<ChatEntry, "tags" | "at" | "sessionId" | "partial">>,
+		entry: Omit<ChatEntry, "tags" | "skills" | "at" | "sessionId" | "partial"> &
+			Partial<
+				Pick<ChatEntry, "tags" | "skills" | "at" | "sessionId" | "partial">
+			>,
 	): Promise<void> {
 		const transcriptPath = this.transcriptPath(chatId);
 		const normalized = ChatEntrySchema.parse({
 			role: entry.role,
 			text: entry.text,
 			tags: entry.tags ?? [],
+			skills: entry.skills ?? [],
+			...(entry.sourceText === undefined
+				? {}
+				: { sourceText: entry.sourceText }),
+			...(entry.skillInvocations === undefined
+				? {}
+				: { skillInvocations: entry.skillInvocations }),
 			at: entry.at ?? new Date().toISOString(),
 			sessionId: entry.sessionId ?? null,
 			partial: entry.partial ?? false,

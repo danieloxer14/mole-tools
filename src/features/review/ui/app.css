@@ -216,6 +216,7 @@
 	:is(.rendered-markdown, .comment-markdown) blockquote { border-left: 2px solid color-mix(in oklch, var(--color-primary) 50%, transparent); color: var(--color-muted-foreground); margin: --spacing(3) 0; padding-left: --spacing(3); }
 	:is(.rendered-markdown, .comment-markdown) a { color: var(--color-primary); text-underline-offset: 4px; transition: color 150ms ease-out; }
 	:is(.rendered-markdown, .comment-markdown) code { background: var(--color-muted); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--text-xs); padding: 0.1em 0.3em; }
+	.skill-tag { display: inline-flex; border-radius: 0.25rem; padding: 0 0.25rem; font-family: var(--font-mono); background: color-mix(in oklab, var(--primary) 20%, transparent); }
 	:is(.rendered-markdown, .comment-markdown) :not(pre) > code { display: inline-block; height: auto; max-width: 100%; min-height: 1.25rem; overflow-wrap: anywhere; white-space: normal; word-break: break-word; line-height: 1.25rem; }
 	:is(.rendered-markdown, .comment-markdown) pre, .mermaid-source { background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 13px; margin: --spacing(3) 0; max-width: 100%; overflow: auto; padding: --spacing(3); white-space: pre; }
 	:is(.rendered-markdown, .comment-markdown) pre code { background: transparent; font-size: 13px; padding: 0; }
