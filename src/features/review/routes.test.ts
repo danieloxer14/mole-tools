@@ -2406,6 +2406,52 @@ describe("comment from chat routes", () => {
 		}
 	});
 
+	test("clearing a generated comment prevents old text from returning on next run", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-clear-"));
+		try {
+			await writeCommentPrompt(dir, "CLEAR COMMENT SLOT PROMPT");
+			const draft = commentDraft("draft-clear");
+			const store = await setupCommentFixture(dir, draft);
+			const agent = new CommentRouteAgent("First block\n");
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				promptSourceDir: dir,
+				reviewAgent: agent,
+			});
+
+			const firstRun = await routes(commentRequest(draft.id));
+			expect(eventData(await firstRun.text(), "done")).toMatchObject({
+				status: "ok",
+				draft: { body: "First block" },
+			});
+
+			const cleared = await routes(
+				request(`/api/comments/${draft.id}?t=${token}`, {
+					method: "PUT",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ body: "" }),
+				}),
+			);
+			expect(cleared.status).toBe(200);
+			expect(await cleared.json()).toMatchObject({ id: draft.id, body: "" });
+
+			const secondRun = await routes(commentRequest(draft.id));
+			expect(eventData(await secondRun.text(), "done")).toMatchObject({
+				status: "ok",
+				draft: { body: "First block" },
+			});
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				id: draft.id,
+				body: "First block",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("from-chat rejects busy chat, empty chat, posted draft, duplicate run", async () => {
 		const dirs: string[] = [];
 		const makeFixture = async (

@@ -265,7 +265,7 @@ test("disables From chat with its availability reason", () => {
 	expect(button?.hasAttribute("disabled")).toBe(true);
 });
 
-test("running generation shows stop and disables editing actions", () => {
+test("running generation turns its control into a hoverable stop action", () => {
 	const markup = renderToStaticMarkup(
 		<CommentDraft
 			draft={draftFor()}
@@ -279,12 +279,89 @@ test("running generation shows stop and disables editing actions", () => {
 	const container = document.createElement("div");
 	container.innerHTML = markup;
 	expect(container.textContent).toContain("Generating…");
-	expect(container.textContent).toContain("Stop");
+	expect(
+		container.querySelectorAll('button[aria-label="Stop generating comment"]'),
+	).toHaveLength(1);
+	const generatingButton = container.querySelector(
+		'button[aria-label="Stop generating comment"]',
+	);
+	expect(generatingButton?.getAttribute("aria-busy")).toBe("true");
+	expect(generatingButton?.className).toContain("group");
+	expect(generatingButton?.className).toContain("w-36");
+	expect(generatingButton?.querySelectorAll("svg")).toHaveLength(2);
+	expect(container.querySelectorAll("button")).toHaveLength(5);
+	expect(
+		[...container.querySelectorAll("button")].some(
+			(button) => button.textContent?.trim() === "Stop",
+		),
+	).toBe(false);
 	expect(container.querySelector("textarea")?.disabled).toBe(true);
 	const send = [...container.querySelectorAll("button")].find((candidate) =>
 		candidate.textContent?.includes("Send"),
 	);
 	expect(send?.hasAttribute("disabled")).toBe(true);
+});
+
+test("centers Preview and Write and groups From chat beside Send", () => {
+	const markup = renderToStaticMarkup(
+		<CommentDraft
+			draft={draftFor()}
+			onCancel={() => {}}
+			onEdit={() => {}}
+			onSend={() => {}}
+			onRetry={() => {}}
+			fromChat={fromChat()}
+		/>,
+	);
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	const footer = container.querySelector("article > div.mt-2.grid");
+	const toggle = container.querySelector('[aria-label="Draft editor mode"]');
+	const fromChatButton = container.querySelector(
+		'button[aria-label="From chat"]',
+	);
+	const sendButton = [...container.querySelectorAll("button")].find((button) =>
+		button.textContent?.includes("Send"),
+	);
+	expect(footer?.children[1]).toBe(toggle);
+	expect(fromChatButton?.closest(".flex")).toBe(sendButton?.parentElement);
+});
+
+test("clicking the generating control stops generation", () => {
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	let stopped: string | null = null;
+	try {
+		act(() => {
+			root.render(
+				<CommentDraft
+					draft={draftFor()}
+					onCancel={() => {}}
+					onEdit={() => {}}
+					onSend={() => {}}
+					onRetry={() => {}}
+					fromChat={{
+						...fromChat({ status: "running" }),
+						onStop: (id) => {
+							stopped = id;
+						},
+					}}
+				/>,
+			);
+		});
+		act(() =>
+			container
+				.querySelector<HTMLButtonElement>(
+					'button[aria-label="Stop generating comment"]',
+				)
+				?.click(),
+		);
+		expect(stopped).toBe("draft-from-chat");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
 });
 
 test("failed generation shows a prefixed destructive alert", () => {

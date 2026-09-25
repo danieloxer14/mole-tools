@@ -1725,8 +1725,6 @@ export function createReviewRoutes(
 		draftId: string,
 	): Promise<Response> {
 		const body = await parseBody(request);
-		if (!body || typeof body.body !== "string" || body.body.trim().length === 0)
-			return jsonResponse({ error: "Comment body must not be empty" }, 400);
 		const state = await currentState();
 		const existing = state.drafts.find((draft) => draft.id === draftId);
 		if (!existing) return jsonResponse({ error: "Draft not found" }, 404);

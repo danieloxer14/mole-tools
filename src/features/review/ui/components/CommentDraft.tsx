@@ -1,4 +1,10 @@
-import { Loader2, RefreshCw, SendHorizontal, Sparkles } from "lucide-react";
+import {
+	Loader2,
+	RefreshCw,
+	SendHorizontal,
+	Sparkles,
+	Square,
+} from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { type Draft, isMarkdownSelection } from "../../state";
 import type { DraftGeneration, FromChatAvailability } from "../from-chat";
@@ -143,15 +149,17 @@ export function CommentDraft({
 					Couldn't generate comment: {generation.error}
 				</Alert>
 			) : null}
-			<div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					onClick={() => onCancel(draft.id)}
-				>
-					Cancel
-				</Button>
+			<div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+				<div className="min-w-0 justify-self-start">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onClick={() => onCancel(draft.id)}
+					>
+						Cancel
+					</Button>
+				</div>
 				{canEdit ? (
 					<ToggleGroup
 						aria-label="Draft editor mode"
@@ -178,9 +186,11 @@ export function CommentDraft({
 							Write
 						</ToggleGroupItem>
 					</ToggleGroup>
-				) : null}
-				{canEdit && fromChat ? (
-					<>
+				) : (
+					<span />
+				)}
+				<div className="flex min-w-0 flex-wrap items-center justify-self-end gap-2">
+					{canEdit && fromChat ? (
 						<Tooltip>
 							<TooltipTrigger
 								render={
@@ -188,64 +198,81 @@ export function CommentDraft({
 										type="button"
 										variant="outline"
 										size="sm"
+										className={generationRunning ? "group w-36" : undefined}
 										aria-label={
-											generationRunning ? "Generating comment" : "From chat"
+											generationRunning
+												? "Stop generating comment"
+												: "From chat"
 										}
-										onClick={() => fromChat.onGenerate(draft.id)}
+										aria-busy={generationRunning}
+										onClick={() =>
+											generationRunning
+												? fromChat.onStop(draft.id)
+												: fromChat.onGenerate(draft.id)
+										}
 										disabled={
-											generationRunning ||
+											!generationRunning &&
 											fromChat.availability.kind === "disabled"
 										}
 									>
 										{generationRunning ? (
-											<Loader2 className="animate-spin" aria-hidden />
+											<>
+												<Loader2
+													className="animate-spin group-hover:hidden group-focus-visible:hidden"
+													aria-hidden
+												/>
+												<Square
+													className="hidden group-hover:inline group-focus-visible:inline"
+													aria-hidden
+												/>
+												<span className="group-hover:hidden group-focus-visible:hidden">
+													Generating…
+												</span>
+												<span className="hidden group-hover:inline group-focus-visible:inline">
+													Stop
+												</span>
+											</>
 										) : (
-											<Sparkles aria-hidden />
+											<>
+												<Sparkles aria-hidden />
+												From chat
+											</>
 										)}
-										{generationRunning ? "Generating…" : "From chat"}
 									</Button>
 								}
 							/>
 							<TooltipContent>
-								{fromChat.availability.kind === "disabled"
-									? fromChat.availability.reason
-									: `Generate comment from ${fromChat.availability.chatLabel}`}
+								{generationRunning
+									? "Stop generating comment"
+									: fromChat.availability.kind === "disabled"
+										? fromChat.availability.reason
+										: `Generate comment from ${fromChat.availability.chatLabel}`}
 							</TooltipContent>
 						</Tooltip>
-						{generationRunning ? (
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								onClick={() => fromChat.onStop(draft.id)}
-							>
-								Stop
-							</Button>
-						) : null}
-					</>
-				) : null}
-				{status === "draft" ? (
-					<Button
-						type="button"
-						size="sm"
-						onClick={() => onSend(draft.id)}
-						disabled={!hasBody || generationRunning}
-					>
-						<SendHorizontal aria-hidden />
-						Send
-					</Button>
-				) : null}
-				{status === "failed" ? (
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						onClick={() => onRetry(draft.id)}
-					>
-						<RefreshCw aria-hidden />
-						Retry
-					</Button>
-				) : null}
+					) : null}
+					{status === "draft" ? (
+						<Button
+							type="button"
+							size="sm"
+							onClick={() => onSend(draft.id)}
+							disabled={!hasBody || generationRunning}
+						>
+							<SendHorizontal aria-hidden />
+							Send
+						</Button>
+					) : null}
+					{status === "failed" ? (
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							onClick={() => onRetry(draft.id)}
+						>
+							<RefreshCw aria-hidden />
+							Retry
+						</Button>
+					) : null}
+				</div>
 			</div>
 		</article>
 	);
