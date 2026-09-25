@@ -77,7 +77,8 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-comment-from-chat",
 	]);
 	const markup = render();
-	expect(markup).toContain('class="text-lg font-semibold">Settings</h2>');
+	expect(markup).toContain('class="text-2xl font-semibold">Settings</h2>');
+	expect(markup).not.toContain("Review settings");
 
 	const visibleLabels = VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]);
 	const indexes = visibleLabels.map((label) => markup.indexOf(label));
