@@ -202,9 +202,11 @@ Published discussion notes render GitHub-flavoured Markdown through the shared
 sanitized comment-rendering boundary, for both positioned notes in the diff
 and general notes in chat. Collapsed discussion summaries remain plain-text
 previews rather than rendered Markdown. Local comment drafts start in Write
-mode when empty and Preview mode when they already contain text; switching
-modes changes only local editor state and does not alter draft persistence or
-comment posting transport.
+mode when empty and Preview mode when they already contain text. Editable
+drafts, including failed drafts, expose a compact segmented Preview/Write icon
+selector in the header beside the status badge; sending drafts have no selector.
+Switching modes changes only local editor state and does not alter draft
+persistence or comment posting transport.
 While the diff is hidden behind the large-diff placeholder, both controls stay
 hidden until the table expands.
 

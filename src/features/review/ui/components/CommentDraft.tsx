@@ -1,5 +1,7 @@
 import {
+	Diff,
 	Loader2,
+	Pilcrow,
 	RefreshCw,
 	SendHorizontal,
 	Sparkles,
@@ -14,7 +16,10 @@ import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import {
+	SegmentedToggleGroup,
+	SegmentedToggleGroupItem,
+} from "./ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export interface CommentDraftProps {
@@ -112,16 +117,63 @@ export function CommentDraft({
 				<span className="min-w-0 flex-1 break-words whitespace-normal font-mono text-muted-foreground [overflow-wrap:anywhere]">
 					{draftPositionLabel(draft)}
 				</span>
-				{status === "sending" ? (
-					<Badge variant="outline">
-						<Loader2 className="size-3.5 animate-spin" aria-hidden />
-						{statusLabel(status)}
-					</Badge>
-				) : status === "failed" ? (
-					<Badge variant="destructive">{statusLabel(status)}</Badge>
-				) : (
-					<Badge variant="secondary">{statusLabel(status)}</Badge>
-				)}
+				<div className="flex shrink-0 items-center gap-1">
+					{status === "sending" ? (
+						<Badge variant="outline">
+							<Loader2 className="size-3.5 animate-spin" aria-hidden />
+							{statusLabel(status)}
+						</Badge>
+					) : status === "failed" ? (
+						<Badge variant="destructive">{statusLabel(status)}</Badge>
+					) : (
+						<Badge variant="secondary">{statusLabel(status)}</Badge>
+					)}
+					{canEdit ? (
+						<SegmentedToggleGroup
+							aria-label="Draft editor mode"
+							multiple={false}
+							value={[editing ? "write" : "preview"]}
+							onValueChange={(values) => {
+								const next = values[0];
+								if (next === "preview") setEditing(false);
+								if (next === "write") setEditing(true);
+							}}
+						>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<SegmentedToggleGroupItem
+											value="preview"
+											aria-label="Preview"
+											aria-pressed={!editing}
+											data-state={!editing ? "on" : "off"}
+										>
+											<Pilcrow aria-hidden />
+											<span className="sr-only">Preview</span>
+										</SegmentedToggleGroupItem>
+									}
+								/>
+								<TooltipContent>Preview</TooltipContent>
+							</Tooltip>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<SegmentedToggleGroupItem
+											value="write"
+											aria-label="Write"
+											aria-pressed={editing}
+											data-state={editing ? "on" : "off"}
+										>
+											<Diff aria-hidden />
+											<span className="sr-only">Write</span>
+										</SegmentedToggleGroupItem>
+									}
+								/>
+								<TooltipContent>Write</TooltipContent>
+							</Tooltip>
+						</SegmentedToggleGroup>
+					) : null}
+				</div>
 			</header>
 			{editing && canEdit ? (
 				<Textarea
@@ -149,8 +201,8 @@ export function CommentDraft({
 					Couldn't generate comment: {generation.error}
 				</Alert>
 			) : null}
-			<div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
-				<div className="min-w-0 justify-self-start">
+			<div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+				<div className="min-w-0">
 					<Button
 						type="button"
 						variant="outline"
@@ -160,36 +212,7 @@ export function CommentDraft({
 						Cancel
 					</Button>
 				</div>
-				{canEdit ? (
-					<ToggleGroup
-						aria-label="Draft editor mode"
-						multiple={false}
-						value={[editing ? "write" : "preview"]}
-						onValueChange={(values) => {
-							const next = values[0];
-							if (next === "preview") setEditing(false);
-							if (next === "write") setEditing(true);
-						}}
-					>
-						<ToggleGroupItem
-							value="preview"
-							aria-pressed={!editing}
-							data-state={!editing ? "on" : "off"}
-						>
-							Preview
-						</ToggleGroupItem>
-						<ToggleGroupItem
-							value="write"
-							aria-pressed={editing}
-							data-state={editing ? "on" : "off"}
-						>
-							Write
-						</ToggleGroupItem>
-					</ToggleGroup>
-				) : (
-					<span />
-				)}
-				<div className="flex min-w-0 flex-wrap items-center justify-self-end gap-2">
+				<div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
 					{canEdit && fromChat ? (
 						<Tooltip>
 							<TooltipTrigger
