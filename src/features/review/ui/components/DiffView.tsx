@@ -831,7 +831,7 @@ function RenderedMarkdown({
 				containerRef={containerRef}
 			/>
 			<div
-				className="rendered-markdown min-w-0 max-w-full [overflow-wrap:anywhere]"
+				className="rendered-markdown min-w-0 max-w-full pl-4 [overflow-wrap:anywhere]"
 				ref={containerRef}
 				// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
 				dangerouslySetInnerHTML={{ __html: parsed.value.html }}
