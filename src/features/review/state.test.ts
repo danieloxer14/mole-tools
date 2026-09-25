@@ -106,6 +106,22 @@ test("defaults the whitespace preference for legacy state", () => {
 	).toBe(false);
 });
 
+test("defaults collapsed discussion IDs for legacy v1 state without a version bump", () => {
+	const legacy = { ...state() } as Record<string, unknown>;
+	delete legacy.collapsedDiscussionIds;
+
+	const resumed = ReviewStateSchema.parse(legacy);
+	expect(resumed.version).toBe(1);
+	expect(resumed.collapsedDiscussionIds).toEqual([]);
+
+	const saved = ReviewStateSchema.parse({
+		...resumed,
+		collapsedDiscussionIds: ["discussion-1"],
+	});
+	expect(saved.version).toBe(1);
+	expect(saved.collapsedDiscussionIds).toEqual(["discussion-1"]);
+});
+
 describe("ReviewState", () => {
 	test("migrates legacy session state at the store boundary", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-legacy-state-"));
@@ -245,9 +261,17 @@ describe("ReviewStore", () => {
 				chatsDir: join(dir, "nested", "chats"),
 			});
 			await store.write(state());
+			const statePath = join(dir, "nested", "review.json");
+			const legacy = (await Bun.file(statePath).json()) as Record<
+				string,
+				unknown
+			>;
+			delete legacy.collapsedDiscussionIds;
+			await Bun.write(statePath, JSON.stringify(legacy));
 			expect(await store.read()).toMatchObject({
 				version: 1,
 				viewedFiles: [],
+				collapsedDiscussionIds: [],
 				drafts: [],
 				activeChatId: LEGACY_CHAT_ID,
 				chats: [{ id: LEGACY_CHAT_ID, sessionId: null }],

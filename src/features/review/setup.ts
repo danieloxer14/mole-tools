@@ -504,6 +504,7 @@ export async function setupReview(
 		layerError: modeChanged ? null : (previous?.layerError ?? null),
 		layers: modeChanged ? [] : (previous?.layers ?? []),
 		viewedFiles: previous?.viewedFiles ?? [],
+		collapsedDiscussionIds: previous?.collapsedDiscussionIds ?? [],
 		chatSessionId: null,
 		chats,
 		activeChatId: previous ? previous.activeChatId : (chats[0]?.id ?? null),

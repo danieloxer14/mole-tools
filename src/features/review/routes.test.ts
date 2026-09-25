@@ -1470,7 +1470,7 @@ describe("review routes", () => {
 		}
 	});
 
-	test("persists viewed progress through ReviewStore", async () => {
+	test("persists collapsed and unrelated progress through ReviewStore", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-routes-"));
 		try {
 			const paths = {
@@ -1479,20 +1479,121 @@ describe("review routes", () => {
 				chatsDir: join(dir, "chats"),
 			};
 			const store = new ReviewStore(paths);
-			await store.write(state());
+			await store.write({
+				...state(),
+				layers: [
+					{
+						id: "layer-api",
+						title: "API",
+						tldr: "API layer",
+						files: ["src/api.ts"],
+						done: false,
+						stale: false,
+					},
+				],
+				collapsedDiscussionIds: ["old-discussion"],
+			});
 			const routes = createReviewRoutes({ token, store, diff });
-			const response = await routes(
+			const collapsed = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						collapsedDiscussionIds: [
+							"discussion-a",
+							"",
+							4,
+							"discussion-b",
+							"discussion-a",
+						],
+					}),
+				}),
+			);
+			expect(collapsed.status).toBe(200);
+			expect((await collapsed.json()).collapsedDiscussionIds).toEqual([
+				"discussion-a",
+				"discussion-b",
+			]);
+			expect(
+				(await new ReviewStore(paths).read())?.collapsedDiscussionIds,
+			).toEqual(["discussion-a", "discussion-b"]);
+
+			const viewed = await routes(
 				request(`/api/progress?t=${token}`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ viewedFile: "src/app.ts" }),
 				}),
 			);
-			expect(response.status).toBe(200);
-			expect((await response.json()).viewedFiles).toEqual(["src/app.ts"]);
-			expect((await new ReviewStore(paths).read())?.viewedFiles).toEqual([
-				"src/app.ts",
+			expect(viewed.status).toBe(200);
+			const viewedBody = await viewed.json();
+			expect(viewedBody.viewedFiles).toEqual(["src/app.ts"]);
+			expect(viewedBody.collapsedDiscussionIds).toEqual([
+				"discussion-a",
+				"discussion-b",
 			]);
+
+			const layer = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ layerId: "layer-api", done: true }),
+				}),
+			);
+			expect(layer.status).toBe(200);
+			expect((await layer.json()).collapsedDiscussionIds).toEqual([
+				"discussion-a",
+				"discussion-b",
+			]);
+			expect(await new ReviewStore(paths).read()).toMatchObject({
+				collapsedDiscussionIds: ["discussion-a", "discussion-b"],
+				viewedFiles: ["src/app.ts"],
+				layers: [{ id: "layer-api", done: true }],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("returns HTTP 500 and retains durable collapsed IDs when progress mutation fails", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-routes-failed-progress-"),
+		);
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			class FailingMutationReviewStore extends ReviewStore {
+				override async mutate(
+					_mutator: Parameters<ReviewStore["mutate"]>[0],
+				): Promise<ReviewState> {
+					throw new Error("Injected mutation failure");
+				}
+			}
+			const store = new FailingMutationReviewStore(paths);
+			await store.write({
+				...state(),
+				collapsedDiscussionIds: ["durable-discussion"],
+			});
+			const routes = createReviewRoutes({ token, store, diff });
+			const response = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						collapsedDiscussionIds: ["replacement-discussion"],
+					}),
+				}),
+			);
+
+			expect(response.status).toBe(500);
+			expect(await response.json()).toEqual({
+				error: "Injected mutation failure",
+			});
+			expect(
+				(await new ReviewStore(paths).read())?.collapsedDiscussionIds,
+			).toEqual(["durable-discussion"]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -1629,6 +1730,7 @@ describe("review routes", () => {
 		expect(Object.keys(await response.json())).toEqual([
 			"layers",
 			"viewedFiles",
+			"collapsedDiscussionIds",
 		]);
 		expect(discussionCalls).toBe(0);
 		expect(approvalCalls).toBe(0);

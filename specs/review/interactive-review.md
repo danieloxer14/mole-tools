@@ -196,7 +196,8 @@ but shrinks to a single non-wrapping line showing its Resolved/Open status and
 the first line of its comment body, truncated with an ellipsis. Files with
 discussions rendered in the diff also expose a `Collapse all comments` /
 `Expand all comments` button in the diff header that toggles every discussion
-in that file at once. Collapse state resets when the selected file changes.
+in that file at once. Each discussion's collapse state persists across file
+selection and review reloads.
 
 Published discussion notes render GitHub-flavoured Markdown through the shared
 sanitized comment-rendering boundary, for both positioned notes in the diff
