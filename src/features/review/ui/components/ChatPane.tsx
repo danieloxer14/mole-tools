@@ -26,14 +26,22 @@ import {
 import type { HostDiscussion } from "../../../../ports/git-host";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import {
+	collapseSkillText,
+	findSkillTokens,
+	type SkillRef,
+	type SkillSummary,
+	type SkillToken,
+} from "../../../../shared/skills";
+import {
 	type ChatTag,
 	isFileChatTag,
 	isMarkdownChatTag,
 } from "../../chat-tags";
-import type { ChatEntry } from "../../store";
+import type { ChatEntryWithOptimistic } from "../../store";
 import { CommentMarkdown } from "./CommentMarkdown";
 import { composerEnterAction } from "./composer-keydown";
 import { IconButton } from "./IconButton";
+import { SkillTextarea } from "./SkillTextarea";
 import {
 	isTranscriptAtBottom,
 	scrollTranscriptToBottom,
@@ -53,7 +61,7 @@ import {
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Kbd } from "./ui/kbd";
-import { Textarea } from "./ui/textarea";
+
 export interface ChatToolActivity {
 	id: number;
 	name: string;
@@ -70,7 +78,7 @@ export interface ChatSummary {
 }
 
 export interface ChatPaneProps {
-	transcript: readonly ChatEntry[];
+	transcript: readonly ChatEntryWithOptimistic[];
 	tags: readonly ChatTag[];
 	discussions?: readonly HostDiscussion[];
 	onExplainDiscussion?: (discussionId: string) => void;
@@ -87,6 +95,7 @@ export interface ChatPaneProps {
 	onSelectChat: (chatId: string) => void;
 	onNewChat: () => void;
 	onOpenSettings: () => void;
+	onOpenSkillsSettings?: () => void;
 	creatingChat?: boolean;
 	draft: string;
 	onDraftChange: (value: string) => void;
@@ -95,6 +104,7 @@ export interface ChatPaneProps {
 	onRemoveTag: (tag: ChatTag) => void;
 	onClearTags?: () => void;
 	onOpenFileRef?: (path: string) => void;
+	skills?: readonly SkillSummary[];
 }
 
 function tagLabel(tag: ChatTag): string {
@@ -153,26 +163,79 @@ function linkifyFileReferencesInHtml(html: string): string {
 	);
 }
 
+const EMPTY_SKILLS: readonly SkillSummary[] = [];
+
+const EMPTY_SKILL_NAMES: ReadonlySet<string> = new Set();
+
 function ChatMessageBody({
 	text,
+	sourceText,
+	skillInvocations,
 	onOpenFileRef,
+	skillRefs,
+	skillNames,
+	optimistic = false,
 }: {
 	text: string;
+	sourceText?: string;
+	skillInvocations?: readonly SkillToken[];
 	onOpenFileRef?: (path: string) => void;
+	skillRefs?: readonly SkillRef[];
+	skillNames?: ReadonlySet<string>;
+	optimistic?: boolean;
 }) {
 	const parsed = useMemo(() => {
+		let displayText = text;
+		let tokens: SkillToken[] = [];
+		if (sourceText !== undefined) {
+			displayText = sourceText;
+			tokens = [...(skillInvocations ?? [])];
+		} else if (optimistic) {
+			// Current catalog tags belong only to the transient optimistic row.
+			tokens = findSkillTokens(displayText, skillNames ?? EMPTY_SKILL_NAMES);
+		} else if (skillRefs?.length) {
+			// Legacy entries lack positions; saved refs are their only skill source.
+			displayText = collapseSkillText(displayText, skillRefs);
+			tokens = findSkillTokens(
+				displayText,
+				new Set(skillRefs.map((skill) => skill.name)),
+			);
+		}
+
 		try {
-			return {
-				error: null,
-				html: linkifyFileReferencesInHtml(renderMarkdownHtml(text)),
-			};
+			if (tokens.length === 0) {
+				return {
+					error: null,
+					html: linkifyFileReferencesInHtml(renderMarkdownHtml(displayText)),
+					fallbackText: displayText,
+				};
+			}
+
+			let withSentinels = displayText;
+			for (let index = tokens.length - 1; index >= 0; index -= 1) {
+				const token = tokens[index];
+				if (!token) continue;
+				const before = withSentinels.slice(0, token.start);
+				const after = withSentinels.slice(token.end);
+				withSentinels = `${before}@@SKILL_TAG_${index}@@${after}`;
+			}
+
+			let html = linkifyFileReferencesInHtml(renderMarkdownHtml(withSentinels));
+			for (const [index, token] of tokens.entries()) {
+				html = html.replaceAll(
+					`@@SKILL_TAG_${index}@@`,
+					`<span class="skill-tag" data-skill-name="${token.name}">/${token.name}</span>`,
+				);
+			}
+			return { error: null, html, fallbackText: displayText };
 		} catch (reason: unknown) {
 			return {
 				error: reason instanceof Error ? reason.message : String(reason),
 				html: null,
+				fallbackText: displayText,
 			};
 		}
-	}, [text]);
+	}, [text, sourceText, skillInvocations, skillRefs, skillNames, optimistic]);
 
 	const handleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
 		const target = event.target as HTMLElement;
@@ -185,7 +248,9 @@ function ChatMessageBody({
 
 	if (parsed.error || parsed.html === null) {
 		return (
-			<p className="min-w-0 max-w-full [overflow-wrap:anywhere]">{text}</p>
+			<p className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+				{parsed.fallbackText}
+			</p>
 		);
 	}
 	return (
@@ -226,6 +291,7 @@ export function ChatPane({
 	onSelectChat,
 	onNewChat,
 	onOpenSettings,
+	onOpenSkillsSettings,
 	creatingChat = false,
 	draft,
 	onDraftChange,
@@ -234,7 +300,14 @@ export function ChatPane({
 	onRemoveTag,
 	onClearTags,
 	onOpenFileRef,
+	skills = EMPTY_SKILLS,
 }: ChatPaneProps) {
+	const currentSkillNames = useMemo(() => {
+		const names = new Set<string>();
+		for (const skill of skills) names.add(skill.name);
+		return names;
+	}, [skills]);
+
 	const transcriptElement = useRef<HTMLDivElement | null>(null);
 	const followTranscript = useRef(true);
 	const previousActiveChatId = useRef(activeChatId);
@@ -514,6 +587,7 @@ export function ChatPane({
 					if (entry.role === "assistant" && entry.text.length === 0)
 						return null;
 					const role = entry.role === "user" ? "user" : "assistant";
+					const optimistic = role === "user" && entry.optimistic === true;
 					return (
 						<article
 							className={`min-w-0 max-w-full overflow-hidden rounded-md border p-3 text-sm animate-in fade-in slide-in-from-bottom-1 duration-200 ease-out ${
@@ -533,6 +607,15 @@ export function ChatPane({
 							<ChatMessageBody
 								text={entry.text}
 								onOpenFileRef={onOpenFileRef}
+								{...(role === "user"
+									? {
+											sourceText: entry.sourceText,
+											skillInvocations: entry.skillInvocations,
+											skillRefs: entry.skills,
+											optimistic,
+											...(optimistic ? { skillNames: currentSkillNames } : {}),
+										}
+									: {})}
 							/>
 							{entry.tags.length > 0 ? (
 								<ul className="mt-2 flex min-w-0 max-w-full flex-wrap gap-1.5">
@@ -671,14 +754,17 @@ export function ChatPane({
 						</div>
 					</div>
 				) : null}
-				<Textarea
+				<SkillTextarea
 					aria-label="Chat message"
 					className="min-h-20 resize-none"
-					placeholder="Ask about this merge request"
-					value={draft}
-					onChange={(event) => onDraftChange(event.target.value)}
-					onKeyDown={handleKeyDown}
+					placeholder="Ask about this merge request (type / to open skills)"
 					rows={4}
+					value={draft}
+					onChange={onDraftChange}
+					onKeyDown={handleKeyDown}
+					skills={skills}
+					onOpenSkillsSettings={onOpenSkillsSettings ?? onOpenSettings}
+					pickerRequest={0}
 				/>
 				<div className="flex min-w-0 items-center justify-between gap-2">
 					{!isBusy ? (

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { SkillsSettings } from "./SkillsSettings";
 import { Alert } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -76,6 +78,7 @@ export interface SettingsPanelProps {
 	onClose: () => void;
 	initialSettings?: SettingsSnapshot;
 	initialPrompt?: PromptSnapshot;
+	initialTab?: "prompts" | "skills" | "appearance";
 }
 
 export interface PromptEditorValue {
@@ -95,76 +98,6 @@ export function isSaveDisabled(
 			current.agent === loaded.agent &&
 			current.model.trim() === loaded.model.trim())
 	);
-}
-
-function apiUrl(path: string, token: string): string {
-	const separator = path.includes("?") ? "&" : "?";
-	return `${path}${separator}t=${encodeURIComponent(token)}`;
-}
-
-function responseError(value: unknown): string | null {
-	if (typeof value !== "object" || value === null || !("error" in value))
-		return null;
-	const error = value.error;
-	return typeof error === "string" && error.length > 0 ? error : null;
-}
-function controlValue(event: unknown): string {
-	if (
-		typeof event !== "object" ||
-		event === null ||
-		!("currentTarget" in event)
-	)
-		return "";
-	const target = event.currentTarget;
-	if (
-		typeof target !== "object" ||
-		target === null ||
-		!("value" in target) ||
-		typeof target.value !== "string"
-	)
-		return "";
-	return target.value;
-}
-
-function errorMessage(reason: unknown): string {
-	return reason instanceof Error ? reason.message : String(reason);
-}
-
-async function requestJson<T>(
-	token: string,
-	path: string,
-	init: RequestInit = {},
-): Promise<T> {
-	const headers = new Headers(init.headers);
-	headers.set("X-Mole-Token", token);
-	const response = await fetch(apiUrl(path, token), {
-		...init,
-		headers,
-	});
-
-	let value: unknown;
-	try {
-		value = await response.json();
-	} catch {
-		throw new Error(
-			response.ok
-				? "Response was not valid JSON"
-				: `Request failed (${response.status})`,
-		);
-	}
-
-	const payloadError = responseError(value);
-	if (payloadError) throw new Error(payloadError);
-	if (!response.ok) throw new Error(`Request failed (${response.status})`);
-	return value as T;
-}
-
-function postJson<T>(token: string, path: string, body: unknown): Promise<T> {
-	return requestJson<T>(token, path, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-	});
 }
 
 function slotLatest(slot: SettingsSnapshot["slots"][number]): number {
@@ -198,6 +131,7 @@ export function SettingsPanel({
 	token,
 	initialSettings,
 	initialPrompt,
+	initialTab,
 }: SettingsPanelProps) {
 	const firstSlot: PromptName =
 		initialSettings?.slots.find((slot) => VISIBLE_SLOTS.includes(slot.slot))
@@ -530,9 +464,13 @@ export function SettingsPanel({
 					<h2 className="text-lg font-semibold">Settings</h2>
 				</div>
 			</header>
-			<Tabs defaultValue="prompts" className="min-h-0 flex-1 gap-0">
+			<Tabs
+				defaultValue={initialTab ?? "prompts"}
+				className="min-h-0 flex-1 gap-0"
+			>
 				<TabsList aria-label="Settings sections" className="mx-6 mt-4">
 					<TabsTrigger value="prompts">Prompts</TabsTrigger>
+					<TabsTrigger value="skills">Skills</TabsTrigger>
 					<TabsTrigger value="appearance">Appearance</TabsTrigger>
 				</TabsList>
 				<TabsContent value="prompts" className="flex flex-col">
@@ -885,6 +823,9 @@ export function SettingsPanel({
 							</section>
 						</div>
 					)}
+				</TabsContent>
+				<TabsContent value="skills" className="flex min-h-0 flex-col">
+					<SkillsSettings token={token} />
 				</TabsContent>
 				<TabsContent value="appearance" className="overflow-auto p-6">
 					<AppearanceSettings token={token} />

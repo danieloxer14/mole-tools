@@ -320,6 +320,7 @@ describe("ReviewStore", () => {
 					role: "user",
 					text: "first",
 					tags: [],
+					skills: [],
 					at: expect.any(String),
 					sessionId: null,
 					partial: false,
@@ -328,6 +329,7 @@ describe("ReviewStore", () => {
 					role: "assistant",
 					text: "second",
 					tags: [],
+					skills: [],
 					at: expect.any(String),
 					sessionId: "s1",
 					partial: false,
@@ -435,7 +437,11 @@ describe("ReviewStore", () => {
 			expect(await Bun.file(chatPath).exists()).toBe(false);
 			expect(await Bun.file(targetPath).text()).toBe(raw);
 			expect(await store.readChat(LEGACY_CHAT_ID)).toEqual(
-				entries.map((entry) => ({ ...entry, partial: false })),
+				entries.map((entry) => ({
+					...entry,
+					partial: false,
+					skills: [],
+				})),
 			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

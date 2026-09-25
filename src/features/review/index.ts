@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { updateConfig } from "../../adapters/config/loader";
 import { promptsDir } from "../../adapters/prompts/loader";
+import { SkillStore, skillsDir } from "../../adapters/skills/store";
 import type { Context } from "../../core/context";
 import { PortError } from "../../core/errors";
 import type { Feature } from "../../core/feature";
@@ -143,6 +144,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			worktreePath: result.state.worktreePath,
 			reviewAgent: ctx.createReviewAgent(),
 			promptSourceDir: promptsDir(),
+			skillStore: new SkillStore(skillsDir()),
 			createReviewAgent: ctx.createReviewAgent,
 			persistConfig: (partial) => updateConfig(partial),
 			vcs: ctx.vcs,

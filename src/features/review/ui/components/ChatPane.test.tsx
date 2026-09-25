@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ChatEntry } from "../../store";
 import { ChatPane } from "./ChatPane";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,6 +19,22 @@ function parseMarkup(markup: string): HTMLDivElement {
 	const container = document.createElement("div");
 	container.innerHTML = markup;
 	return container;
+}
+
+function transcriptEntry(
+	role: "user" | "assistant",
+	text: string,
+	skills: ChatEntry["skills"] = [],
+): ChatEntry {
+	return {
+		role,
+		text,
+		tags: [],
+		skills,
+		at: `${role}-${text}`,
+		sessionId: "session-1",
+		partial: false,
+	};
 }
 
 test("renders general discussions collapsed by default", () => {
@@ -221,6 +238,17 @@ test("renders parent-owned composer draft", () => {
 		'textarea[aria-label="Chat message"]',
 	);
 	expect(textarea?.value).toBe("unsent question");
+	expect(textarea?.getAttribute("placeholder")).toBe(
+		"Ask about this merge request (type / to open skills)",
+	);
+});
+
+test("composer has no skill button beside Send", () => {
+	const container = parseMarkup(renderComposer());
+	expect(
+		container.querySelector('form button[aria-label="Insert skill"]'),
+	).toBeNull();
+	expect(container.querySelector('form button[type="submit"]')).not.toBeNull();
 });
 
 test("renders composer keyboard hint as compact two visible lines", () => {
@@ -288,6 +316,183 @@ test("bounds long agent paths in message markdown and context tags", () => {
 	expect(tag?.className).toContain("justify-start");
 	expect(tag?.className).toContain("leading-normal");
 	expect(container.textContent).toContain(longPath);
+});
+
+test("collapses referenced multi-line skill text to a transcript chip", () => {
+	const skillText = "CHECK THE TESTS\nRUN THE TESTS";
+	const container = parseMarkup(
+		renderComposer({
+			transcript: [
+				transcriptEntry(
+					"user",
+					`Please inspect:\n\n${skillText}\n\nThen summarize.`,
+					[{ name: "review-it", version: 1, text: skillText }],
+				),
+			],
+		}),
+	);
+	const message = container.querySelector<HTMLElement>(
+		'[data-role="user"] .rendered-markdown',
+	);
+	const chips = message?.querySelectorAll<HTMLSpanElement>(
+		'span.skill-tag[data-skill-name="review-it"]',
+	);
+
+	expect(chips).toHaveLength(1);
+	expect(chips?.[0]?.textContent).toBe("/review-it");
+	expect(message?.textContent).toContain("Please inspect:");
+	expect(message?.textContent).toContain("Then summarize.");
+	expect(message?.textContent).not.toContain("CHECK THE TESTS");
+	expect(message?.textContent).not.toContain("RUN THE TESTS");
+});
+
+test("renders persisted skill invocations from exact source positions", () => {
+	const entries: ChatEntry[] = [
+		{
+			...transcriptEntry("user", "Keep  here", [
+				{ name: "empty-one", version: 1, text: "" },
+			]),
+			sourceText: "Keep /empty-one here",
+			skillInvocations: [{ name: "empty-one", start: 5, end: 15 }],
+		},
+		{
+			...transcriptEntry("user", "shared body shared body", [
+				{ name: "same-one", version: 1, text: "shared body" },
+				{ name: "same-two", version: 1, text: "shared body" },
+			]),
+			sourceText: "/same-one /same-two",
+			skillInvocations: [
+				{ name: "same-one", start: 0, end: 9 },
+				{ name: "same-two", start: 10, end: 19 },
+			],
+		},
+		{
+			...transcriptEntry("user", "/literal-two", [
+				{ name: "literal-one", version: 1, text: "/literal-two" },
+			]),
+			sourceText: "/literal-one",
+			skillInvocations: [{ name: "literal-one", start: 0, end: 12 }],
+		},
+	];
+	const currentSkills = [
+		"empty-one",
+		"same-one",
+		"same-two",
+		"literal-one",
+		"literal-two",
+	].map((name) => ({
+		name,
+		activeVersion: 1,
+		versions: [1],
+		lastUsedAt: null,
+	}));
+	const container = parseMarkup(
+		renderComposer({ transcript: entries, skills: currentSkills }),
+	);
+	const messages = [
+		...container.querySelectorAll<HTMLElement>(
+			'[data-role="user"] .rendered-markdown',
+		),
+	];
+
+	expect(messages[0]?.textContent).toContain("Keep /empty-one here");
+	expect(
+		messages[0]?.querySelector('.skill-tag[data-skill-name="empty-one"]')
+			?.textContent,
+	).toBe("/empty-one");
+	const sameTags = [...(messages[1]?.querySelectorAll(".skill-tag") ?? [])].map(
+		(tag) => tag.textContent,
+	);
+	expect(sameTags).toEqual(["/same-one", "/same-two"]);
+	expect(messages[2]?.textContent).toContain("/literal-one");
+	const literalTags = [
+		...(messages[2]?.querySelectorAll(".skill-tag") ?? []),
+	].map((tag) => tag.textContent);
+	expect(literalTags).toEqual(["/literal-one"]);
+});
+
+test("does not retroactively tag legacy literal tokens from current skills", () => {
+	const legacy = transcriptEntry("user", "Please /late-skill now");
+	const container = parseMarkup(
+		renderComposer({
+			transcript: [legacy],
+			skills: [
+				{
+					name: "late-skill",
+					activeVersion: 1,
+					versions: [1],
+					lastUsedAt: null,
+				},
+			],
+		}),
+	);
+	const message = container.querySelector<HTMLElement>(
+		'[data-role="user"] .rendered-markdown',
+	);
+
+	expect(message?.textContent).toContain("Please /late-skill now");
+	expect(message?.querySelector(".skill-tag")).toBeNull();
+});
+
+test("renders optimistic user skill tokens but leaves assistant tokens unchanged", () => {
+	const userText = "Please /review-it now";
+	const assistant = transcriptEntry("assistant", userText);
+	const skills = [
+		{
+			name: "review-it",
+			activeVersion: 1,
+			versions: [1],
+			lastUsedAt: null,
+		},
+	];
+	const container = parseMarkup(
+		renderComposer({
+			transcript: [
+				{ ...transcriptEntry("user", userText), optimistic: true },
+				assistant,
+			],
+			skills,
+		}),
+	);
+	const userMessage = container.querySelector<HTMLElement>(
+		'[data-role="user"] .rendered-markdown',
+	);
+	const assistantMessage = container.querySelector<HTMLElement>(
+		'[data-role="assistant"] .rendered-markdown',
+	);
+	const baseline = parseMarkup(
+		renderComposer({ transcript: [assistant] }),
+	).querySelector<HTMLElement>('[data-role="assistant"] .rendered-markdown');
+
+	expect(
+		userMessage?.querySelector<HTMLSpanElement>(
+			'span.skill-tag[data-skill-name="review-it"]',
+		)?.textContent,
+	).toBe("/review-it");
+	expect(assistantMessage?.querySelector(".skill-tag")).toBeNull();
+	expect(assistantMessage?.innerHTML).toBe(baseline?.innerHTML);
+});
+
+test("keeps markup unchanged for user entries with empty refs and no skill tokens", () => {
+	const text = "Skill-free message.\n\nNothing to expand.";
+	const skill = {
+		name: "review-it",
+		activeVersion: 1,
+		versions: [1],
+		lastUsedAt: null,
+	};
+	const userMessage = parseMarkup(
+		renderComposer({
+			transcript: [transcriptEntry("user", text)],
+			skills: [skill],
+		}),
+	).querySelector<HTMLElement>('[data-role="user"] .rendered-markdown');
+	const baseline = parseMarkup(
+		renderComposer({ transcript: [transcriptEntry("assistant", text)] }),
+	).querySelector<HTMLElement>('[data-role="assistant"] .rendered-markdown');
+
+	expect(userMessage?.innerHTML).toBe(baseline?.innerHTML);
+	expect(userMessage?.querySelector(".skill-tag")).toBeNull();
 });
 
 test("keeps the agent pane growth and scroll regions bounded", () => {
@@ -400,6 +605,60 @@ function renderInteractive(
 		rerender: (nextProps) => act(() => render(nextProps)),
 	};
 }
+
+test("reopens slash picker after selected skill draft is cleared", () => {
+	const skills = [
+		{
+			name: "review-newest",
+			activeVersion: 1,
+			versions: [1],
+			lastUsedAt: "2026-09-23T12:00:00.000Z",
+		},
+	];
+	let draft = "";
+	const onDraftChange = (value: string) => {
+		draft = value;
+	};
+	const rendered = renderInteractive({ draft, skills, onDraftChange });
+	const textarea = rendered.container.querySelector<HTMLTextAreaElement>(
+		'textarea[aria-label="Chat message"]',
+	);
+	if (!textarea) throw new Error("Chat composer did not render a textarea");
+
+	const inputText = (value: string) => {
+		Object.getOwnPropertyDescriptor(
+			window.HTMLTextAreaElement.prototype,
+			"value",
+		)?.set?.call(textarea, value);
+		textarea.setSelectionRange(value.length, value.length);
+		textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+	};
+
+	act(() => inputText("/"));
+	rendered.rerender({ draft, skills, onDraftChange });
+	expect(rendered.container.querySelector('[role="listbox"]')).not.toBeNull();
+	act(() =>
+		textarea.dispatchEvent(
+			new window.KeyboardEvent("keydown", {
+				bubbles: true,
+				cancelable: true,
+				key: "Enter",
+			}),
+		),
+	);
+	rendered.rerender({ draft, skills, onDraftChange });
+	expect(textarea.value).toBe("/review-newest ");
+	expect(rendered.container.querySelector('[role="listbox"]')).toBeNull();
+
+	draft = "";
+	rendered.rerender({ draft, skills, onDraftChange });
+	expect(textarea.value).toBe("");
+	act(() => inputText("/"));
+	rendered.rerender({ draft, skills, onDraftChange });
+	expect(textarea.value).toBe("/");
+	expect(rendered.container.querySelector('[role="listbox"]')).not.toBeNull();
+});
+
 test("keeps persisted assistant card DOM stable across history refresh", () => {
 	const entry = {
 		role: "assistant" as const,
@@ -442,6 +701,7 @@ test("renders separate assistant cards, partial labels, and no empty cards", () 
 				role: "user",
 				text: "What changed?",
 				tags: [],
+				skills: [],
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
 				partial: false,
@@ -450,6 +710,7 @@ test("renders separate assistant cards, partial labels, and no empty cards", () 
 				role: "assistant",
 				text: "First answer",
 				tags: [],
+				skills: [],
 				at: "2026-08-24T00:00:01Z",
 				sessionId: "session-1",
 				partial: false,
@@ -458,6 +719,7 @@ test("renders separate assistant cards, partial labels, and no empty cards", () 
 				role: "assistant",
 				text: "Partial answer",
 				tags: [],
+				skills: [],
 				at: "2026-08-24T00:00:02Z",
 				sessionId: "session-1",
 				partial: true,
@@ -466,6 +728,7 @@ test("renders separate assistant cards, partial labels, and no empty cards", () 
 				role: "assistant",
 				text: "",
 				tags: [],
+				skills: [],
 				at: "2026-08-24T00:00:03Z",
 				sessionId: "session-1",
 				partial: false,
@@ -497,7 +760,7 @@ test("keeps errors visible without turning them into transcript cards", () => {
 	expect(markup).not.toContain("Tool activity");
 });
 
-test("does not submit Enter while busy but submits plain Enter while idle", () => {
+test("does not submit Enter while busy but submits only plain Enter while idle", () => {
 	let busySends = 0;
 	const busyRender = renderInteractive({
 		draft: "queued draft",
@@ -511,10 +774,12 @@ test("does not submit Enter while busy but submits plain Enter while idle", () =
 	expect(busyTextarea).not.toBeNull();
 	const busyEnter = new window.KeyboardEvent("keydown", {
 		bubbles: true,
+		cancelable: true,
 		key: "Enter",
 	});
 	const busyShiftEnter = new window.KeyboardEvent("keydown", {
 		bubbles: true,
+		cancelable: true,
 		key: "Enter",
 		shiftKey: true,
 	});
@@ -522,7 +787,7 @@ test("does not submit Enter while busy but submits plain Enter while idle", () =
 	busyTextarea?.dispatchEvent(busyShiftEnter);
 	expect(busySends).toBe(0);
 	expect(busyTextarea?.disabled).toBe(false);
-	expect(busyEnter.defaultPrevented).toBe(false);
+	expect(busyEnter.defaultPrevented).toBe(true);
 	expect(busyShiftEnter.defaultPrevented).toBe(false);
 
 	let idleSends = 0;
@@ -533,12 +798,24 @@ test("does not submit Enter while busy but submits plain Enter while idle", () =
 		},
 	});
 	const idleTextarea = idleRender.container.querySelector("textarea");
+	const idleShiftEnter = new window.KeyboardEvent("keydown", {
+		bubbles: true,
+		cancelable: true,
+		key: "Enter",
+		shiftKey: true,
+	});
+	idleTextarea?.dispatchEvent(idleShiftEnter);
+	expect(idleSends).toBe(0);
+	expect(idleShiftEnter.defaultPrevented).toBe(false);
+
 	const idleEnter = new window.KeyboardEvent("keydown", {
 		bubbles: true,
+		cancelable: true,
 		key: "Enter",
 	});
 	idleTextarea?.dispatchEvent(idleEnter);
 	expect(idleSends).toBe(1);
+	expect(idleEnter.defaultPrevented).toBe(true);
 });
 test("leaves parent-owned draft clearing to the accepted send path", () => {
 	let draftChanges = 0;
@@ -600,6 +877,7 @@ test("exposes semantic message and streaming state", () => {
 				role: "user",
 				text: "What changed?",
 				tags: [],
+				skills: [],
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
 			},
@@ -608,6 +886,7 @@ test("exposes semantic message and streaming state", () => {
 				text: "First answer",
 				tags: [],
 				at: "2026-08-24T00:00:01Z",
+				skills: [],
 				sessionId: "session-1",
 			},
 		],
