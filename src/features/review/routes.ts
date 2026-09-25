@@ -2,6 +2,11 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
+	discoverCodexModels,
+	type CodexModelChoice,
+} from "../../adapters/agent/codex-models";
+import { defaultAgentExec, type AgentExec } from "../../adapters/agent/exec";
+import {
 	type ColorTheme,
 	ColorThemeSchema,
 	type Config,
@@ -132,12 +137,11 @@ export interface ReviewRoutesOptions {
 				diff?: { ignore?: string[] };
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
-					largeFileLineThreshold?: number;
 					agent?: PromptAgentName;
+					binary?: string;
 					model?: string;
+					largeFileLineThreshold?: number;
 				};
-				prompts?: Record<string, string>;
-				appearance?: { colorTheme?: ColorTheme };
 		  };
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
@@ -149,6 +153,7 @@ export interface ReviewRoutesOptions {
 		agent?: PromptAgentName;
 		model?: string;
 	}) => ReviewAgent;
+	codexModelExec?: AgentExec;
 }
 
 export interface ReviewApiState extends ReviewState {
@@ -515,6 +520,7 @@ export function createReviewRoutes(
 	let currentExpandedDiff = options.expandedDiff;
 	let currentMr = options.mr;
 	let initialLayerRunAllowed = true;
+	let codexModelChoicesPromise: Promise<CodexModelChoice[]> | null = null;
 	let fallbackDiscussions = [...(options.discussions ?? [])];
 	const threshold =
 		options.largeFileLineThreshold ??
@@ -590,6 +596,25 @@ export function createReviewRoutes(
 	): Promise<number> {
 		const versions = await listVersions(slot, preset, promptDirOption());
 		return versions.at(-1) ?? 1;
+	}
+	function codexModelChoices(): Promise<CodexModelChoice[]> {
+		if (!codexModelChoicesPromise) {
+			const configuredReview = options.config?.review;
+			const binary =
+				configuredReview?.agent === "codex"
+					? (configuredReview.binary ?? "codex")
+					: "codex";
+			codexModelChoicesPromise = discoverCodexModels(
+				binary,
+				options.worktreePath ?? process.cwd(),
+				options.codexModelExec ?? defaultAgentExec,
+			).catch(() => []);
+		}
+		return codexModelChoicesPromise;
+	}
+
+	async function codexModelsSnapshot(): Promise<Response> {
+		return jsonResponse({ models: await codexModelChoices() });
 	}
 
 	async function settingsSnapshot(): Promise<Response> {
@@ -2133,6 +2158,12 @@ export function createReviewRoutes(
 			}
 			if (
 				request.method === "POST" &&
+				url.pathname === "/api/layers/observe"
+			) {
+				return layerStream(false);
+			}
+			if (
+				request.method === "POST" &&
 				(url.pathname === "/api/layers/regenerate" ||
 					url.pathname === "/api/layers/retry")
 			) {
@@ -2210,6 +2241,12 @@ export function createReviewRoutes(
 			}
 			if (request.method === "GET" && url.pathname === "/api/settings") {
 				return settingsSnapshot();
+			}
+			if (
+				request.method === "GET" &&
+				url.pathname === "/api/settings/codex-models"
+			) {
+				return codexModelsSnapshot();
 			}
 			if (
 				request.method === "POST" &&

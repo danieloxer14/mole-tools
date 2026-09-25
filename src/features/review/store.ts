@@ -14,16 +14,14 @@ import {
 	ReviewStateSchema,
 } from "./state";
 
-export const ChatEntrySchema = z
-	.object({
-		role: z.string().min(1),
-		text: z.string(),
-		tags: z.array(ChatTagSchema),
-		at: z.string().min(1),
-		sessionId: z.string().min(1).nullable(),
-		partial: z.boolean().default(false),
-	})
-	.strict();
+export const ChatEntrySchema = z.object({
+	role: z.string().min(1),
+	text: z.string(),
+	tags: z.array(ChatTagSchema),
+	at: z.string().min(1),
+	sessionId: z.string().min(1).nullable(),
+	partial: z.boolean().default(false),
+});
 export type ChatEntry = z.infer<typeof ChatEntrySchema>;
 
 export interface ReviewStorePaths {

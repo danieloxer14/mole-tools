@@ -130,8 +130,9 @@ turns run in `workspace-write` with the review output directory added via
 `--add-dir`; in those turns the review worktree is also writable to Codex, so
 prompt policy is the guard, as for OMP's `bash` tool. This write access is an
 intentional exception to the read-only review boundary, limited to turns that
-must create review output. Quick-pick model names are Claude names; for Codex,
-type a Codex model name or leave the model blank.
+Claude quick picks use static names; Codex quick picks are discovered from the
+selected Codex CLI's `codex debug models` catalog. You can still type any model,
+or leave the model blank to use Codex's configured default.
 
 Review agent and model can also be selected from the **Settings** dialog's
 **Prompts** tab. Changes apply to the next layer run or chat turn; use

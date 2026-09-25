@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
 import type { Config } from "../../adapters/config/schema";
+import type { AgentExec } from "../../adapters/agent/exec";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
@@ -322,10 +323,12 @@ class ParallelChatAgent implements ReviewAgent {
 class BlockingLayerAgent implements ReviewAgent {
 	readonly started = Promise.withResolvers<void>();
 	readonly release = Promise.withResolvers<void>();
+	runs = 0;
 
 	async preflight(): Promise<void> {}
 
 	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+		this.runs += 1;
 		this.started.resolve();
 		await this.release.promise;
 		const outputPath = turn.message.match(/absolute path: ([^\n]+)/)?.[1];
@@ -1093,6 +1096,50 @@ describe("review routes", () => {
 				}),
 			);
 			expect(unknownSelection.status).toBe(404);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("reads chat entries with unknown fields from newer transcript writers", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-forward-compat-"));
+		try {
+			const chatsDir = join(dir, "chats");
+			await mkdir(chatsDir, { recursive: true });
+			await writeFile(
+				join(chatsDir, "chat-a.ndjson"),
+				`${JSON.stringify({
+					role: "assistant",
+					text: "Stored with newer metadata",
+					tags: [],
+					at: "2026-01-01T00:00:00.000Z",
+					sessionId: null,
+					partial: false,
+					skills: ["review"],
+				})}\n`,
+				"utf8",
+			);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir,
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({ token, store });
+
+			const response = await routes(
+				request(`/api/chat?chatId=chat-a&t=${token}`),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toEqual([
+				{
+					role: "assistant",
+					text: "Stored with newer metadata",
+					tags: [],
+					at: "2026-01-01T00:00:00.000Z",
+					sessionId: null,
+					partial: false,
+				},
+			]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -2254,6 +2301,57 @@ describe("review routes", () => {
 				id: "layer-1",
 				stale: true,
 			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("observes active layer runs and returns cached terminal state", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-layer-observe-"));
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			const store = new ReviewStore(paths);
+			await store.write(state());
+			const agent = new BlockingLayerAgent();
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths: chatPaths(dir),
+				diff: commentDiff,
+				layerAgent: agent,
+			});
+
+			const generation = await routes(
+				request(`/api/layers/regenerate?t=${token}`, { method: "POST" }),
+			);
+			const generationBody = generation.text();
+			await agent.started.promise;
+			const observer = await routes(
+				request(`/api/layers/observe?t=${token}`, { method: "POST" }),
+			);
+			expect(observer.status).toBe(200);
+			const observerBody = observer.text();
+
+			agent.release.resolve();
+			const [generated, observed] = await Promise.all([
+				generationBody,
+				observerBody,
+			]);
+			expect(generated).toContain('event: done\ndata: {"status":"ready"');
+			expect(observed).toContain('event: done\ndata: {"status":"ready"');
+
+			const afterCompletion = await routes(
+				request(`/api/layers/observe?t=${token}`, { method: "POST" }),
+			);
+			expect(await afterCompletion.text()).toContain(
+				'event: done\ndata: {"status":"ready"',
+			);
+			expect(agent.runs).toBe(1);
+			expect((await store.read())?.layerStatus).toBe("ready");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -3795,6 +3893,106 @@ describe("prompt settings preset API", () => {
 		}
 	});
 });
+describe("Codex model settings API", () => {
+	test("returns CLI model choices and caches discovery for the route lifetime", async () => {
+		const calls: Array<{ binary: string; args: string[]; cwd: string }> = [];
+		const exec: AgentExec = async function* (binary, args, { cwd }) {
+			calls.push({ binary, args, cwd });
+			yield JSON.stringify({
+				models: [
+					{
+						slug: "gpt-6-astra",
+						display_name: "GPT-6-Astra",
+						visibility: "list",
+					},
+					{
+						slug: "gpt-6-sol",
+						display_name: "GPT-6-Sol",
+						visibility: "list",
+					},
+					{
+						slug: "gpt-6-luna",
+						display_name: "GPT-6-Luna",
+						visibility: "list",
+					},
+					{
+						slug: "internal-model",
+						display_name: "Internal",
+						visibility: "hide",
+					},
+				],
+			});
+		};
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			worktreePath: "/tmp/codex-worktree",
+			config: { review: { agent: "codex", binary: "/opt/codex" } },
+			codexModelExec: exec,
+		});
+		const path = `/api/settings/codex-models?t=${token}`;
+
+		const response = await routes(request(path));
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			models: [
+				{ id: "gpt-6-astra", label: "GPT-6-Astra" },
+				{ id: "gpt-6-sol", label: "GPT-6-Sol" },
+				{ id: "gpt-6-luna", label: "GPT-6-Luna" },
+			],
+		});
+		const refreshed = await routes(request(path));
+		expect(refreshed.status).toBe(200);
+		expect(calls).toEqual([
+			{
+				binary: "/opt/codex",
+				args: ["debug", "models"],
+				cwd: "/tmp/codex-worktree",
+			},
+		]);
+	});
+
+	test("uses standard codex binary unless Codex is the configured review agent", async () => {
+		let binary: string | undefined;
+		const exec: AgentExec = async function* (command) {
+			binary = command;
+			yield JSON.stringify({ models: [] });
+		};
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			config: { review: { agent: "claude", binary: "/opt/claude" } },
+			codexModelExec: exec,
+		});
+
+		const response = await routes(
+			request(`/api/settings/codex-models?t=${token}`),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ models: [] });
+		expect(binary).toBe("codex");
+	});
+
+	test("keeps settings responses available when Codex discovery fails", async () => {
+		const unavailable: AgentExec = async function* () {
+			throw new Error("Codex CLI unavailable");
+		};
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			codexModelExec: unavailable,
+		});
+
+		const settings = await routes(request(`/api/settings?t=${token}`));
+		expect(settings.status).toBe(200);
+		const choices = await routes(
+			request(`/api/settings/codex-models?t=${token}`),
+		);
+		expect(choices.status).toBe(200);
+		expect(await choices.json()).toEqual({ models: [] });
+	});
+});
+
 describe("review agent settings API", () => {
 	test("updates, persists, and swaps the agent for the next chat turn", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-swap-"));
