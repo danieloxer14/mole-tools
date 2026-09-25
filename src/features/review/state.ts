@@ -127,6 +127,7 @@ export const ReviewStateSchema = z.object({
 		}),
 	),
 	viewedFiles: z.array(z.string()).default([]),
+	collapsedDiscussionIds: z.array(z.string()).default([]),
 	/**
 	 * Legacy single-conversation session id, kept only so v1 state files written
 	 * before multiple chats still parse. The legacy `chatSessionId` is consumed

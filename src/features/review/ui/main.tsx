@@ -16,7 +16,7 @@ import type { ParsedFileDiff } from "../../../shared/diff-parse";
 import { type ChatTag, chatTagsEqual } from "../chat-tags";
 import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
-import type { ChatEntry } from "../store";
+import type { ChatEntry, ChatEntryWithOptimistic } from "../store";
 import { createRequestSequence } from "./chat-request-sequence";
 import { bootColorTheme } from "./color-theme";
 import {
@@ -60,17 +60,19 @@ import { Spinner } from "./components/ui/spinner";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
+	consumeLayerStream,
+	type LayerAction,
+	type LayerStreamFrame,
+	mergeLayerStreamFrame,
+	startInitialLayerStream,
+} from "./layer-stream";
+import { createProgressWriteQueue } from "./progress-write-queue";
+import {
 	type ReviewFreshnessResponse,
 	runReviewRefresh,
 } from "./review-refresh";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
-import {
-	consumeLayerStream,
-	mergeLayerStreamFrame,
-	startInitialLayerStream,
-	type LayerAction,
-	type LayerStreamFrame,
-} from "./layer-stream";
+import { useSkills } from "./use-skills";
 
 import "./app.css";
 
@@ -356,7 +358,7 @@ function otherColumn(column: ReviewColumn): ReviewColumn {
 	return column === "left" ? "right" : "left";
 }
 interface ChatRuntime {
-	entries: ChatEntry[];
+	entries: ChatEntryWithOptimistic[];
 	tags: ChatTag[];
 	draft: string;
 	streamingSegments: string[];
@@ -438,6 +440,11 @@ function ReviewApp() {
 		null,
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [settingsInitialTab, setSettingsInitialTab] = useState<
+		"prompts" | "skills" | "appearance"
+	>("prompts");
+	const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
+	const skills = useSkills(token, skillsRefreshKey);
 	const [error, setError] = useState<string | null>(null);
 	const [approvalLoading, setApprovalLoading] = useState(true);
 	const [approvalAction, setApprovalAction] = useState<ApprovalAction | null>(
@@ -469,6 +476,8 @@ function ReviewApp() {
 	const reviewStateRequests = useRef(createReviewStateRequestSequence());
 	const chatSelectionRequests = useRef(createRequestSequence());
 	const chatSelectionQueue = useRef(Promise.resolve());
+	const collapsedProgressWrites = useRef(createProgressWriteQueue());
+	const collapsedWriteSequence = useRef(0);
 	const autoRunRequested = useRef(false);
 	const draftEditSequence = useRef(new Map<string, number>());
 	const patchChat = useCallback((chatId: string, patch: ChatRuntimePatch) => {
@@ -1051,18 +1060,21 @@ function ReviewApp() {
 				: { ...current, [selectedPath]: wholeFile },
 		);
 	};
-	const saveProgress = (body: Record<string, unknown>) => {
-		setProgressError(null);
-		void fetch(apiUrl("/api/progress", token), {
+	const postProgress = async (
+		body: Record<string, unknown>,
+	): Promise<ReviewProgressResponse> => {
+		const response = await fetch(apiUrl("/api/progress", token), {
 			method: "POST",
 			headers: { "content-type": "application/json", "X-Mole-Token": token },
 			body: JSON.stringify(body),
-		})
-			.then(async (response) => {
-				if (!response.ok)
-					throw new Error(`Progress request failed (${response.status})`);
-				return (await response.json()) as ReviewProgressResponse;
-			})
+		});
+		if (!response.ok)
+			throw new Error(`Progress request failed (${response.status})`);
+		return (await response.json()) as ReviewProgressResponse;
+	};
+	const saveProgress = (body: Record<string, unknown>) => {
+		setProgressError(null);
+		void postProgress(body)
 			.then((next) => {
 				setProgressError(null);
 				setData((current) =>
@@ -1072,6 +1084,33 @@ function ReviewApp() {
 								layers: next.layers,
 								viewedFiles: next.viewedFiles,
 							}
+						: current,
+				);
+			})
+			.catch((reason: unknown) => {
+				setProgressError(
+					reason instanceof Error ? reason.message : String(reason),
+				);
+			});
+	};
+	const saveCollapsedDiscussionIds = (ids: string[]) => {
+		const sequence = ++collapsedWriteSequence.current;
+		setData((current) =>
+			current ? { ...current, collapsedDiscussionIds: ids } : current,
+		);
+		setProgressError(null);
+		void collapsedProgressWrites.current
+			.enqueue(() => postProgress({ collapsedDiscussionIds: ids }))
+			.then((next) => {
+				setProgressError(null);
+				setData((current) =>
+					current
+						? sequence === collapsedWriteSequence.current
+							? {
+									...current,
+									collapsedDiscussionIds: next.collapsedDiscussionIds,
+								}
+							: current
 						: current,
 				);
 			})
@@ -1677,6 +1716,8 @@ function ReviewApp() {
 					role: "user",
 					text: message,
 					tags,
+					skills: [],
+					optimistic: true,
 					at: new Date().toISOString(),
 					sessionId,
 					partial: false,
@@ -1712,6 +1753,7 @@ function ReviewApp() {
 				if (chatControllers.current.get(chatId) === controller)
 					chatControllers.current.delete(chatId);
 				patchChat(chatId, { sending: false, stopping: false });
+				setSkillsRefreshKey((key) => key + 1);
 			});
 	};
 	const handleChatSend = (message: string) => {
@@ -1999,6 +2041,8 @@ function ReviewApp() {
 					fileContents={fileContents}
 					fileContentsError={fileContentsError}
 					discussions={data.discussions}
+					collapsedDiscussionIds={data.collapsedDiscussionIds}
+					onCollapsedDiscussionIdsChange={saveCollapsedDiscussionIds}
 					onExplainDiscussion={explainDiscussion}
 					explainDisabled={creatingChat}
 					drafts={data.drafts}
@@ -2048,6 +2092,7 @@ function ReviewApp() {
 				tabIndex={0}
 			/>
 			<ChatPane
+				skills={skills}
 				transcript={activeChat.entries}
 				tags={activeChat.tags}
 				discussions={generalDiscussions(data.discussions)}
@@ -2063,7 +2108,14 @@ function ReviewApp() {
 				activeChatId={activeChatId}
 				onSelectChat={handleSelectChat}
 				onNewChat={handleNewChat}
-				onOpenSettings={() => setSettingsOpen(true)}
+				onOpenSettings={() => {
+					setSettingsInitialTab("prompts");
+					setSettingsOpen(true);
+				}}
+				onOpenSkillsSettings={() => {
+					setSettingsInitialTab("skills");
+					setSettingsOpen(true);
+				}}
 				creatingChat={creatingChat}
 				draft={activeChat.draft}
 				onDraftChange={(value) => {
@@ -2129,14 +2181,22 @@ function ReviewApp() {
 			<Dialog
 				open={settingsOpen}
 				onOpenChange={(open) => {
-					if (!open) setSettingsOpen(false);
+					if (!open) {
+						setSettingsOpen(false);
+						setSkillsRefreshKey((key) => key + 1);
+					}
 				}}
 			>
 				<DialogContent className="h-[min(calc(100dvh-2rem),56rem)] w-[min(calc(100vw-2rem),64rem)] max-w-none grid-rows-[minmax(0,1fr)] overflow-hidden p-0 sm:max-w-none">
 					<DialogHeader className="sr-only">
 						<DialogTitle>Settings</DialogTitle>
 					</DialogHeader>
-					<SettingsPanel token={token} onClose={() => setSettingsOpen(false)} />
+					<SettingsPanel
+						key={settingsInitialTab}
+						token={token}
+						onClose={() => setSettingsOpen(false)}
+						initialTab={settingsInitialTab}
+					/>
 				</DialogContent>
 			</Dialog>
 		</main>

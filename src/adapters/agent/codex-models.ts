@@ -1,4 +1,4 @@
-import { defaultAgentExec, type AgentExec } from "./exec";
+import { type AgentExec, defaultAgentExec } from "./exec";
 
 export interface CodexModelChoice {
 	id: string;
@@ -19,10 +19,10 @@ export function parseCodexModelCatalog(output: string): CodexModelChoice[] {
 		? catalog
 		: typeof catalog === "object" &&
 				catalog !== null &&
-					"models" in catalog &&
-					Array.isArray(catalog.models)
-				? catalog.models
-				: [];
+				"models" in catalog &&
+				Array.isArray(catalog.models)
+			? catalog.models
+			: [];
 	const seen = new Set<string>();
 	const choices: CodexModelChoice[] = [];
 	for (const entry of entries) {

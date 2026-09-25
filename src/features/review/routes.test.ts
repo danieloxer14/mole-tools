@@ -9,10 +9,12 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FakeReviewAgent } from "../../../test/fakes/FakeReviewAgent";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
-import type { Config } from "../../adapters/config/schema";
 import type { AgentExec } from "../../adapters/agent/exec";
+import type { Config } from "../../adapters/config/schema";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
+import { SkillStore } from "../../adapters/skills/store";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -23,7 +25,7 @@ import type { DiffOptions, FileDiff } from "../../ports/vcs";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { createReviewRoutes, resolveReviewFilePath } from "./routes";
 import { sseResponse } from "./sse";
-import { type ReviewState, ReviewStateSchema } from "./state";
+import { deriveChatTitle, type ReviewState, ReviewStateSchema } from "./state";
 import { ReviewStore } from "./store";
 
 const token = "route-test-token";
@@ -227,6 +229,20 @@ function promptRequest(path: string, body: unknown): Request {
 		body: JSON.stringify(body),
 	});
 }
+
+function skillRequest(path: string, method = "GET", body?: unknown): Request {
+	const separator = path.includes("?") ? "&" : "?";
+	return request(`${path}${separator}t=${token}`, {
+		method,
+		...(body === undefined
+			? {}
+			: {
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(body),
+				}),
+	});
+}
+
 function reviewSettingsRequest(body: unknown): Request {
 	return request(`/api/settings/review?t=${token}`, {
 		method: "POST",
@@ -1101,7 +1117,9 @@ describe("review routes", () => {
 		}
 	});
 	test("reads chat entries with unknown fields from newer transcript writers", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-forward-compat-"));
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-forward-compat-"),
+		);
 		try {
 			const chatsDir = join(dir, "chats");
 			await mkdir(chatsDir, { recursive: true });
@@ -1114,7 +1132,7 @@ describe("review routes", () => {
 					at: "2026-01-01T00:00:00.000Z",
 					sessionId: null,
 					partial: false,
-					skills: ["review"],
+					futureMetadata: "newer writer field",
 				})}\n`,
 				"utf8",
 			);
@@ -1135,6 +1153,7 @@ describe("review routes", () => {
 					role: "assistant",
 					text: "Stored with newer metadata",
 					tags: [],
+					skills: [],
 					at: "2026-01-01T00:00:00.000Z",
 					sessionId: null,
 					partial: false,
@@ -1502,7 +1521,7 @@ describe("review routes", () => {
 		}
 	});
 
-	test("persists viewed progress through ReviewStore", async () => {
+	test("persists collapsed and unrelated progress through ReviewStore", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-routes-"));
 		try {
 			const paths = {
@@ -1511,20 +1530,121 @@ describe("review routes", () => {
 				chatsDir: join(dir, "chats"),
 			};
 			const store = new ReviewStore(paths);
-			await store.write(state());
+			await store.write({
+				...state(),
+				layers: [
+					{
+						id: "layer-api",
+						title: "API",
+						tldr: "API layer",
+						files: ["src/api.ts"],
+						done: false,
+						stale: false,
+					},
+				],
+				collapsedDiscussionIds: ["old-discussion"],
+			});
 			const routes = createReviewRoutes({ token, store, diff });
-			const response = await routes(
+			const collapsed = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						collapsedDiscussionIds: [
+							"discussion-a",
+							"",
+							4,
+							"discussion-b",
+							"discussion-a",
+						],
+					}),
+				}),
+			);
+			expect(collapsed.status).toBe(200);
+			expect((await collapsed.json()).collapsedDiscussionIds).toEqual([
+				"discussion-a",
+				"discussion-b",
+			]);
+			expect(
+				(await new ReviewStore(paths).read())?.collapsedDiscussionIds,
+			).toEqual(["discussion-a", "discussion-b"]);
+
+			const viewed = await routes(
 				request(`/api/progress?t=${token}`, {
 					method: "POST",
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ viewedFile: "src/app.ts" }),
 				}),
 			);
-			expect(response.status).toBe(200);
-			expect((await response.json()).viewedFiles).toEqual(["src/app.ts"]);
-			expect((await new ReviewStore(paths).read())?.viewedFiles).toEqual([
-				"src/app.ts",
+			expect(viewed.status).toBe(200);
+			const viewedBody = await viewed.json();
+			expect(viewedBody.viewedFiles).toEqual(["src/app.ts"]);
+			expect(viewedBody.collapsedDiscussionIds).toEqual([
+				"discussion-a",
+				"discussion-b",
 			]);
+
+			const layer = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ layerId: "layer-api", done: true }),
+				}),
+			);
+			expect(layer.status).toBe(200);
+			expect((await layer.json()).collapsedDiscussionIds).toEqual([
+				"discussion-a",
+				"discussion-b",
+			]);
+			expect(await new ReviewStore(paths).read()).toMatchObject({
+				collapsedDiscussionIds: ["discussion-a", "discussion-b"],
+				viewedFiles: ["src/app.ts"],
+				layers: [{ id: "layer-api", done: true }],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("returns HTTP 500 and retains durable collapsed IDs when progress mutation fails", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-routes-failed-progress-"),
+		);
+		try {
+			const paths = {
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			};
+			class FailingMutationReviewStore extends ReviewStore {
+				override async mutate(
+					_mutator: Parameters<ReviewStore["mutate"]>[0],
+				): Promise<ReviewState> {
+					throw new Error("Injected mutation failure");
+				}
+			}
+			const store = new FailingMutationReviewStore(paths);
+			await store.write({
+				...state(),
+				collapsedDiscussionIds: ["durable-discussion"],
+			});
+			const routes = createReviewRoutes({ token, store, diff });
+			const response = await routes(
+				request(`/api/progress?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						collapsedDiscussionIds: ["replacement-discussion"],
+					}),
+				}),
+			);
+
+			expect(response.status).toBe(500);
+			expect(await response.json()).toEqual({
+				error: "Injected mutation failure",
+			});
+			expect(
+				(await new ReviewStore(paths).read())?.collapsedDiscussionIds,
+			).toEqual(["durable-discussion"]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -1661,6 +1781,7 @@ describe("review routes", () => {
 		expect(Object.keys(await response.json())).toEqual([
 			"layers",
 			"viewedFiles",
+			"collapsedDiscussionIds",
 		]);
 		expect(discussionCalls).toBe(0);
 		expect(approvalCalls).toBe(0);
@@ -2357,6 +2478,437 @@ describe("review routes", () => {
 		}
 	});
 });
+describe("chat skill expansion", () => {
+	async function setup(
+		dir: string,
+		skillStore?: SkillStore,
+		agent = new FakeReviewAgent(),
+	) {
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		});
+		await store.write(state());
+		const routes = createReviewRoutes({
+			token,
+			store,
+			paths: chatPaths(dir),
+			promptText: "Test chat prompt.",
+			reviewAgent: agent,
+			...(skillStore ? { skillStore } : {}),
+		});
+		return { agent, routes, store };
+	}
+
+	test("expands active skills, persists refs, stamps MRU, and titles raw text", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-skills-"));
+		try {
+			const skillStore = new SkillStore(join(dir, "skills"));
+			const skillText = "Follow the review checklist.";
+			await skillStore.create("review-it");
+			await skillStore.saveActive("review-it", skillText);
+			const agent = new FakeReviewAgent();
+			const { routes, store } = await setup(dir, skillStore, agent);
+			const rawMessage = "please /review-it now";
+
+			const response = await routes(chatRequest({ message: rawMessage }));
+			const body = await response.text();
+
+			expect(response.status).toBe(200);
+			expect(body).toContain("event: done");
+			expect(agent.turns[0]?.message).toContain(`please ${skillText} now`);
+			expect(agent.turns[0]?.message).not.toContain("/review-it");
+			expect(await store.readChat("chat-a")).toContainEqual(
+				expect.objectContaining({
+					role: "user",
+					text: `please ${skillText} now`,
+					sourceText: rawMessage,
+					skillInvocations: [{ name: "review-it", start: 7, end: 17 }],
+					skills: [{ name: "review-it", version: 1, text: skillText }],
+				}),
+			);
+			expect((await store.read())?.chats[0]?.title).toBe(
+				deriveChatTitle(rawMessage),
+			);
+
+			const metadata = JSON.parse(
+				await Bun.file(join(dir, "skills", "review-it", "skill.json")).text(),
+			);
+			expect(metadata.lastUsedAt).toEqual(expect.any(String));
+			expect(new Date(metadata.lastUsedAt).toISOString()).toBe(
+				metadata.lastUsedAt,
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists exact skill invocations when expanded content is ambiguous", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-invocations-"));
+		try {
+			const skillStore = new SkillStore(join(dir, "skills"));
+			await skillStore.create("empty-one");
+			await skillStore.create("same-one");
+			await skillStore.create("same-two");
+			await skillStore.create("literal-one");
+			await skillStore.create("literal-two");
+			await skillStore.saveActive("same-one", "shared body");
+			await skillStore.saveActive("same-two", "shared body");
+			await skillStore.saveActive("literal-one", "/literal-two");
+			await skillStore.saveActive("literal-two", "must not expand recursively");
+			const { routes, store, agent } = await setup(dir, skillStore);
+
+			for (const message of [
+				"Keep /empty-one here",
+				"/same-one /same-two",
+				"/literal-one",
+			]) {
+				const response = await routes(chatRequest({ message }));
+				expect(response.status).toBe(200);
+				await response.text();
+			}
+
+			const users = (await store.readChat("chat-a")).filter(
+				(entry) => entry.role === "user",
+			);
+			expect(users).toEqual([
+				expect.objectContaining({
+					text: "Keep  here",
+					sourceText: "Keep /empty-one here",
+					skills: [{ name: "empty-one", version: 1, text: "" }],
+					skillInvocations: [{ name: "empty-one", start: 5, end: 15 }],
+				}),
+				expect.objectContaining({
+					text: "shared body shared body",
+					sourceText: "/same-one /same-two",
+					skills: [
+						{ name: "same-one", version: 1, text: "shared body" },
+						{ name: "same-two", version: 1, text: "shared body" },
+					],
+					skillInvocations: [
+						{ name: "same-one", start: 0, end: 9 },
+						{ name: "same-two", start: 10, end: 19 },
+					],
+				}),
+				expect.objectContaining({
+					text: "/literal-two",
+					sourceText: "/literal-one",
+					skills: [{ name: "literal-one", version: 1, text: "/literal-two" }],
+					skillInvocations: [{ name: "literal-one", start: 0, end: 12 }],
+				}),
+			]);
+			expect(agent.turns.map((turn) => turn.message)).toEqual([
+				expect.stringContaining("Keep  here"),
+				expect.stringContaining("shared body shared body"),
+				expect.stringContaining("/literal-two"),
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not read unrelated skills without a candidate and reads named candidates only", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-selective-skills-"),
+		);
+		try {
+			const skillStore = new SkillStore(join(dir, "skills"));
+			await skillStore.create("review-it");
+			await skillStore.saveActive("review-it", "Review carefully.");
+			const brokenSkill = join(dir, "skills", "broken-one");
+			await mkdir(brokenSkill, { recursive: true });
+			await writeFile(join(brokenSkill, "001.md"), "broken skill content");
+			await mkdir(join(brokenSkill, "skill.json"));
+			const { routes, store, agent } = await setup(dir, skillStore);
+
+			await (await routes(chatRequest({ message: "Ordinary message" }))).text();
+			await (
+				await routes(chatRequest({ message: "Use /review-it now" }))
+			).text();
+
+			expect(agent.turns.map((turn) => turn.message)).toEqual([
+				expect.stringContaining("Ordinary message"),
+				expect.stringContaining("Use Review carefully. now"),
+			]);
+			expect(
+				(await store.readChat("chat-a"))
+					.filter((entry) => entry.role === "user")
+					.map((entry) => [
+						entry.text,
+						entry.sourceText,
+						entry.skillInvocations,
+					]),
+			).toEqual([
+				["Ordinary message", "Ordinary message", []],
+				[
+					"Use Review carefully. now",
+					"Use /review-it now",
+					[{ name: "review-it", start: 4, end: 14 }],
+				],
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reserves a chat before awaiting skill expansion", async () => {
+		const expansionStarted = Promise.withResolvers<void>();
+		const finishExpansion = Promise.withResolvers<void>();
+		class BlockingSkillStore extends SkillStore {
+			override async expansions(names?: readonly string[]) {
+				expansionStarted.resolve();
+				await finishExpansion.promise;
+				return super.expansions(names);
+			}
+		}
+
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-reservation-"));
+		try {
+			const skillStore = new BlockingSkillStore(join(dir, "skills"));
+			await skillStore.create("review-it");
+			await skillStore.saveActive("review-it", "Review carefully.");
+			const agent = new FakeReviewAgent();
+			const { routes, store } = await setup(dir, skillStore, agent);
+			const firstPromise = routes(
+				chatRequest({ message: "Use /review-it now" }),
+			);
+			await expansionStarted.promise;
+
+			const duplicate = await routes(
+				chatRequest({ message: "Duplicate /review-it now" }),
+			);
+			expect(await duplicate.text()).toContain(
+				'event: error\ndata: {"message":"Chat turn already in progress"}',
+			);
+
+			finishExpansion.resolve();
+			const first = await firstPromise;
+			await first.text();
+			expect(agent.turns).toHaveLength(1);
+			expect(agent.turns[0]?.message).toContain("Use Review carefully. now");
+			expect(
+				(await store.readChat("chat-a")).filter(
+					(entry) => entry.role === "user",
+				),
+			).toHaveLength(1);
+		} finally {
+			finishExpansion.resolve();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("cancels while expansion waits and releases the chat reservation", async () => {
+		const expansionStarted = Promise.withResolvers<void>();
+		const finishExpansion = Promise.withResolvers<void>();
+		class BlockingSkillStore extends SkillStore {
+			override async expansions(names?: readonly string[]) {
+				expansionStarted.resolve();
+				await finishExpansion.promise;
+				return super.expansions(names);
+			}
+		}
+
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-cancel-expansion-"),
+		);
+		try {
+			const skillStore = new BlockingSkillStore(join(dir, "skills"));
+			await skillStore.create("review-it");
+			const agent = new FakeReviewAgent();
+			const { routes, store } = await setup(dir, skillStore, agent);
+			const firstPromise = routes(
+				chatRequest({ message: "Cancel /review-it before start" }),
+			);
+			await expansionStarted.promise;
+			const cancelled = await routes(
+				request(`/api/chat/cancel?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ chatId: "chat-a" }),
+				}),
+			);
+			expect(cancelled.status).toBe(204);
+
+			finishExpansion.resolve();
+			const first = await firstPromise;
+			expect(await first.text()).toContain("event: done");
+			expect(agent.turns).toHaveLength(1);
+			expect(agent.turns[0]?.signal?.aborted).toBe(true);
+			expect(await store.readChat("chat-a")).toContainEqual(
+				expect.objectContaining({
+					role: "user",
+					sourceText: "Cancel /review-it before start",
+				}),
+			);
+
+			const later = await routes(
+				chatRequest({ message: "Run after cancellation" }),
+			);
+			expect(await later.text()).toContain("event: done");
+			expect(agent.turns).toHaveLength(2);
+		} finally {
+			finishExpansion.resolve();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("returns skill expansion failures without creating a chat turn", async () => {
+		class ExpansionFailingSkillStore extends SkillStore {
+			override async expansions(
+				_names?: readonly string[],
+			): Promise<Map<string, { version: number; text: string }>> {
+				throw new Error("skill storage unavailable");
+			}
+		}
+
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-skill-read-"));
+		try {
+			const { agent, routes, store } = await setup(
+				dir,
+				new ExpansionFailingSkillStore(join(dir, "skills")),
+			);
+
+			const response = await routes(
+				chatRequest({ message: "please /review-it" }),
+			);
+			const body = await response.text();
+
+			expect(body).toContain(
+				'event: error\ndata: {"message":"skill storage unavailable"}',
+			);
+			expect(agent.turns).toEqual([]);
+			expect(await store.readChat("chat-a")).toEqual([]);
+			expect((await store.read())?.chats[0]?.title).toBe("");
+			const retry = await routes(
+				chatRequest({ message: "please /review-it again" }),
+			);
+			expect(await retry.text()).toContain(
+				'event: error\ndata: {"message":"skill storage unavailable"}',
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("keeps unknown tokens literal without skill refs or MRU changes", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-unknown-skill-"),
+		);
+		try {
+			const skillStore = new SkillStore(join(dir, "skills"));
+			await skillStore.create("review-it");
+			const { agent, routes, store } = await setup(dir, skillStore);
+			const message = "please /nope-nope now";
+
+			await (await routes(chatRequest({ message }))).text();
+
+			expect(agent.turns[0]?.message).toContain(message);
+			expect(await store.readChat("chat-a")).toContainEqual(
+				expect.objectContaining({
+					role: "user",
+					text: message,
+					skills: [],
+				}),
+			);
+			expect((await skillStore.list())[0]?.lastUsedAt).toBeNull();
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects empty-text skill expansions before title or turn persistence", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-empty-skill-"));
+		try {
+			const skillStore = new SkillStore(join(dir, "skills"));
+			await skillStore.create("empty-one");
+			const { agent, routes, store } = await setup(dir, skillStore);
+
+			const response = await routes(chatRequest({ message: "/empty-one" }));
+			const body = await response.text();
+
+			expect(body).toContain(
+				'event: error\ndata: {"message":"Chat message must not be empty"}',
+			);
+			expect(agent.turns).toEqual([]);
+			expect(await store.readChat("chat-a")).toEqual([]);
+			expect((await store.read())?.chats[0]?.title).toBe("");
+			expect((await skillStore.list())[0]?.lastUsedAt).toBeNull();
+			const followUp = await routes(
+				chatRequest({ message: "Reservation must be released" }),
+			);
+			await followUp.text();
+			expect(agent.turns[0]?.message).toContain("Reservation must be released");
+			expect(await store.readChat("chat-a")).toContainEqual(
+				expect.objectContaining({
+					role: "user",
+					sourceText: "Reservation must be released",
+					skillInvocations: [],
+				}),
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("leaves skill tags unchanged when skills are unavailable", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-no-skills-"));
+		try {
+			const { agent, routes, store } = await setup(dir);
+			const message = "please /review-it now";
+
+			await (await routes(chatRequest({ message }))).text();
+
+			expect(agent.turns[0]?.message).toContain(message);
+			expect(await store.readChat("chat-a")).toContainEqual(
+				expect.objectContaining({
+					role: "user",
+					text: message,
+					skills: [],
+				}),
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("runs the turn when touching skill MRU fails", async () => {
+		class TouchFailingSkillStore extends SkillStore {
+			override async touch(
+				_names: readonly string[],
+				_at?: Date,
+			): Promise<void> {
+				throw new Error("MRU is unavailable");
+			}
+		}
+
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-skill-touch-"));
+		try {
+			const skillStore = new TouchFailingSkillStore(join(dir, "skills"));
+			const skillText = "Review the diff.";
+			await skillStore.create("review-it");
+			await skillStore.saveActive("review-it", skillText);
+			const { agent, routes, store } = await setup(dir, skillStore);
+
+			await (
+				await routes(chatRequest({ message: "please /review-it" }))
+			).text();
+
+			expect(agent.turns[0]?.message).toContain(skillText);
+			expect(await store.readChat("chat-a")).toContainEqual(
+				expect.objectContaining({
+					role: "user",
+					text: `please ${skillText}`,
+					skills: [{ name: "review-it", version: 1, text: skillText }],
+				}),
+			);
+			expect((await skillStore.list())[0]?.lastUsedAt).toBeNull();
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("comment from chat routes", () => {
 	class CommentRouteAgent implements ReviewAgent {
 		readonly turns: AgentTurn[] = [];
@@ -3974,6 +4526,7 @@ describe("Codex model settings API", () => {
 	});
 
 	test("keeps settings responses available when Codex discovery fails", async () => {
+		// biome-ignore lint/correctness/useYield: failure is raised before CLI output.
 		const unavailable: AgentExec = async function* () {
 			throw new Error("Codex CLI unavailable");
 		};
@@ -4501,5 +5054,266 @@ describe("appearance settings API", () => {
 		);
 		expect(getResponse.status).toBe(200);
 		expect(await getResponse.json()).toEqual({ colorTheme: "default" });
+	});
+});
+describe("skills API", () => {
+	test("implements the skills CRUD, version, and error contracts", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "skills-routes-"));
+		try {
+			const skillStore = new SkillStore(dir);
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				skillStore,
+			});
+
+			const created = await routes(
+				skillRequest("/api/skills", "POST", { name: "review-it" }),
+			);
+			expect(created.status).toBe(201);
+			expect(await created.json()).toEqual({
+				skill: {
+					name: "review-it",
+					activeVersion: 1,
+					versions: [1],
+					lastUsedAt: null,
+				},
+			});
+
+			const listed = await routes(skillRequest("/api/skills"));
+			expect(listed.status).toBe(200);
+			expect(await listed.json()).toEqual({
+				skills: [
+					{
+						name: "review-it",
+						activeVersion: 1,
+						versions: [1],
+						lastUsedAt: null,
+					},
+				],
+			});
+
+			const detail = await routes(skillRequest("/api/skills/review-it"));
+			expect(detail.status).toBe(200);
+			expect(await detail.json()).toEqual({
+				name: "review-it",
+				version: 1,
+				text: "",
+				activeVersion: 1,
+				versions: [1],
+			});
+
+			const saved = await routes(
+				skillRequest("/api/skills/review-it", "POST", {
+					text: "First version text",
+				}),
+			);
+			expect(saved.status).toBe(200);
+			expect(await saved.json()).toEqual({ version: 1 });
+
+			const createdVersion = await routes(
+				skillRequest("/api/skills/review-it/versions", "POST", {
+					text: "Second version text",
+				}),
+			);
+			expect(createdVersion.status).toBe(200);
+			expect(await createdVersion.json()).toEqual({ version: 2 });
+
+			const firstVersion = await routes(
+				skillRequest("/api/skills/review-it?version=1"),
+			);
+			expect(firstVersion.status).toBe(200);
+			expect(await firstVersion.json()).toEqual({
+				name: "review-it",
+				version: 1,
+				text: "First version text",
+				activeVersion: 2,
+				versions: [1, 2],
+			});
+			const activeDetail = await routes(
+				skillRequest("/api/skills/review-it?version=2"),
+			);
+			expect(activeDetail.status).toBe(200);
+			expect(await activeDetail.json()).toEqual({
+				name: "review-it",
+				version: 2,
+				text: "Second version text",
+				activeVersion: 2,
+				versions: [1, 2],
+			});
+
+			const activated = await routes(
+				skillRequest("/api/skills/review-it/active", "POST", {
+					version: 1,
+				}),
+			);
+			expect(activated.status).toBe(200);
+			expect(await activated.json()).toEqual({ activeVersion: 1 });
+
+			const invalidCreates: [string, string][] = [
+				["", "Name is required"],
+				["a!", "Use only letters, numbers, _ and -"],
+				["abc", "Name must be more than 3 characters"],
+				["a".repeat(65), "Name must be 64 characters or fewer"],
+			];
+			for (const [name, message] of invalidCreates) {
+				const response = await routes(
+					skillRequest("/api/skills", "POST", { name }),
+				);
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({ error: message });
+			}
+			const nonStringName = await routes(
+				skillRequest("/api/skills", "POST", { name: null }),
+			);
+			expect(nonStringName.status).toBe(400);
+			expect(await nonStringName.json()).toEqual({
+				error: "Name is required",
+			});
+
+			const conflict = await routes(
+				skillRequest("/api/skills", "POST", { name: "REVIEW-IT" }),
+			);
+			expect(conflict.status).toBe(409);
+			expect(await conflict.json()).toEqual({
+				error: "A skill with this name already exists",
+			});
+
+			for (const [path, method, body] of [
+				["/api/skills", "POST", null],
+				["/api/skills/review-it", "POST", []],
+				["/api/skills/review-it/versions", "POST", "not an object"],
+				["/api/skills/review-it/active", "POST", 1],
+			] as const) {
+				const response = await routes(skillRequest(path, method, body));
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({
+					error: "Expected a JSON object",
+				});
+			}
+
+			for (const [path, method] of [
+				["/api/skills/review-it", "POST"],
+				["/api/skills/review-it/versions", "POST"],
+			] as const) {
+				const response = await routes(
+					skillRequest(path, method, { text: null }),
+				);
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({
+					error: "Skill text must be a string",
+				});
+			}
+
+			for (const invalidVersion of ["0", "01", "-1", "1.0", "invalid"]) {
+				const response = await routes(
+					skillRequest(`/api/skills/review-it?version=${invalidVersion}`),
+				);
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({
+					error: "Invalid skill version",
+				});
+			}
+			for (const version of [0, 1.5, Number.MAX_SAFE_INTEGER + 1, "1"]) {
+				const response = await routes(
+					skillRequest("/api/skills/review-it/active", "POST", { version }),
+				);
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({
+					error: "Invalid skill version",
+				});
+			}
+
+			for (const invalidName of ["%2F", "%E0%A4%A"]) {
+				const response = await routes(
+					skillRequest(`/api/skills/${invalidName}`),
+				);
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({
+					error: "Invalid skill name",
+				});
+			}
+
+			const missingSkillRequests: Array<[string, string, unknown?]> = [
+				["/api/skills/missing", "GET"],
+				["/api/skills/review-it?version=99", "GET"],
+				["/api/skills/missing", "POST", { text: "text" }],
+				["/api/skills/missing/versions", "POST", { text: "text" }],
+				["/api/skills/missing/active", "POST", { version: 1 }],
+				["/api/skills/missing", "DELETE"],
+			];
+			for (const [path, method, body] of missingSkillRequests) {
+				const response = await routes(skillRequest(path, method, body));
+				expect(response.status).toBe(404);
+				expect(await response.json()).toEqual({
+					error: path.includes("?version=")
+						? "Skill version not found"
+						: "Skill not found",
+				});
+			}
+
+			for (const [path, method] of [
+				["/api/skills/review-it/rename", "POST"],
+				["/api/skills/review-it/versions", "GET"],
+				["/api/skills", "PUT"],
+				["/api/skills/review-it/versions/extra", "POST"],
+			] as const) {
+				const response = await routes(skillRequest(path, method));
+				expect(response.status).toBe(404);
+				expect(await response.text()).toBe("");
+			}
+
+			const deleted = await routes(
+				skillRequest("/api/skills/review-it", "DELETE"),
+			);
+			expect(deleted.status).toBe(200);
+			expect(await deleted.json()).toEqual({ deleted: true });
+			const emptyList = await routes(skillRequest("/api/skills"));
+			expect(await emptyList.json()).toEqual({ skills: [] });
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("requires token and reports when skill storage is unavailable", async () => {
+		const unavailableRoutes = createReviewRoutes({ token, state: state() });
+		const skillEndpoints: Array<[string, string]> = [
+			["/api/skills", "GET"],
+			["/api/skills", "POST"],
+			["/api/skills/review-it", "GET"],
+			["/api/skills/review-it", "POST"],
+			["/api/skills/review-it", "DELETE"],
+			["/api/skills/review-it/versions", "POST"],
+			["/api/skills/review-it/active", "POST"],
+			["/api/skills/review-it/rename", "POST"],
+		];
+
+		for (const [path, method] of skillEndpoints) {
+			const unauthorized = await unavailableRoutes(request(path, { method }));
+			expect(unauthorized.status).toBe(401);
+
+			const unavailable = await unavailableRoutes(skillRequest(path, method));
+			expect(unavailable.status).toBe(503);
+			expect(await unavailable.json()).toEqual({
+				error: "Skills are unavailable",
+			});
+		}
+	});
+
+	test("returns 500 when skill storage throws a plain error", async () => {
+		class ThrowingStore extends SkillStore {
+			override async list(): Promise<never> {
+				throw new Error("boom");
+			}
+		}
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			skillStore: new ThrowingStore("/unused"),
+		});
+
+		const response = await routes(skillRequest("/api/skills"));
+		expect(response.status).toBe(500);
+		expect(await response.json()).toEqual({ error: "boom" });
 	});
 });

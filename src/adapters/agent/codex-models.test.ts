@@ -1,8 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-	discoverCodexModels,
-	parseCodexModelCatalog,
-} from "./codex-models";
+import { discoverCodexModels, parseCodexModelCatalog } from "./codex-models";
 import type { AgentExec } from "./exec";
 
 const catalog = JSON.stringify({
@@ -35,13 +32,13 @@ test("runs codex debug models with the configured binary and cwd", async () => {
 		yield catalog;
 	};
 
-	expect(await discoverCodexModels("custom-codex", "/review/worktree", exec)).toEqual(
-		[
-			{ id: "gpt-6-astra", label: "GPT-6-Astra" },
-			{ id: "gpt-6-sol", label: "GPT-6-Sol" },
-			{ id: "gpt-6-luna", label: "GPT-6-Luna" },
-		],
-	);
+	expect(
+		await discoverCodexModels("custom-codex", "/review/worktree", exec),
+	).toEqual([
+		{ id: "gpt-6-astra", label: "GPT-6-Astra" },
+		{ id: "gpt-6-sol", label: "GPT-6-Sol" },
+		{ id: "gpt-6-luna", label: "GPT-6-Luna" },
+	]);
 	expect(calls).toEqual([
 		{
 			binary: "custom-codex",
@@ -55,6 +52,7 @@ test("returns an empty catalog when CLI output or execution fails", async () => 
 	const malformed: AgentExec = async function* () {
 		yield "not json";
 	};
+	// biome-ignore lint/correctness/useYield: failure is raised before CLI output.
 	const unavailable: AgentExec = async function* () {
 		throw new Error("CLI missing");
 	};

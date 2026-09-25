@@ -3,18 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createReviewRoutes, type ReviewApiState } from "../routes";
-import { ReviewStateSchema } from "../state";
 import type {
 	AgentEvent,
 	AgentTurn,
 	ReviewAgent,
 } from "../../../ports/review-agent";
+import { createReviewRoutes, type ReviewApiState } from "../routes";
+import { ReviewStateSchema } from "../state";
 import { LayerPane } from "./components/LayerPane";
-import {
-	mergeLayerStreamFrame,
-	startInitialLayerStream,
-} from "./layer-stream";
+import { mergeLayerStreamFrame, startInitialLayerStream } from "./layer-stream";
 
 const token = "layer-stream-test-token";
 const originalFetch = globalThis.fetch;
@@ -122,10 +119,9 @@ test("reattaches to a running layer stream and renders its terminal state", asyn
 				});
 
 				const generation = await routes(
-					new Request(
-						`http://127.0.0.1/api/layers/regenerate?t=${token}`,
-						{ method: "POST" },
-					),
+					new Request(`http://127.0.0.1/api/layers/regenerate?t=${token}`, {
+						method: "POST",
+					}),
 				);
 				const generationBody = generation.text();
 				await agent.started.promise;

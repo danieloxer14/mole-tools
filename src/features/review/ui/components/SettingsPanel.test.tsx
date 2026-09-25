@@ -94,7 +94,8 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-comment-from-chat",
 	]);
 	const markup = render();
-	expect(markup).toContain('class="text-lg font-semibold">Settings</h2>');
+	expect(markup).toContain('class="text-2xl font-semibold">Settings</h2>');
+	expect(markup).not.toContain("Review settings");
 
 	const visibleLabels = VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]);
 	const indexes = visibleLabels.map((label) => markup.indexOf(label));
@@ -220,11 +221,13 @@ test("save posts agent and model", async () => {
 			headers: { "content-type": "application/json" },
 		});
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
-		calls.push({ url: String(input), init });
+		const url = String(input);
+		calls.push({ url, init });
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST") {
 			return jsonResponse({ version: 4, saved: true });
 		}
-		if (String(input).includes("/api/settings")) {
+		if (url.includes("/api/settings")) {
 			return jsonResponse(initialSettings);
 		}
 		return jsonResponse({
@@ -504,15 +507,15 @@ test("shows discovered Codex labels and saves the selected slug", async () => {
 		if (!quickpick || !model || !saveButton) {
 			throw new Error("Missing review model controls");
 		}
-		expect(Array.from(quickpick.options, (option) => option.textContent)).toEqual(
-			[
-				"Codex CLI default",
-				"GPT-6-Astra",
-				"GPT-6-Sol",
-				"GPT-6-Luna",
-				"Custom…",
-			],
-		);
+		expect(
+			Array.from(quickpick.options, (option) => option.textContent),
+		).toEqual([
+			"Codex CLI default",
+			"GPT-6-Astra",
+			"GPT-6-Sol",
+			"GPT-6-Luna",
+			"Custom…",
+		]);
 		expect(quickpick.value).toBe("configured-codex-model");
 		expect(model.value).toBe("configured-codex-model");
 
@@ -595,9 +598,9 @@ test("keeps unsaved models isolated when switching review agents", async () => {
 		expect(model.value).toBe("");
 		expect(model.placeholder).toBe("Codex CLI default");
 		expect(quickpick.value).toBe("");
-		expect(Array.from(quickpick.options, (option) => option.textContent)).toEqual(
-			["Codex CLI default"],
-		);
+		expect(
+			Array.from(quickpick.options, (option) => option.textContent),
+		).toEqual(["Codex CLI default"]);
 
 		await changeValue(model, "configured-codex-model", "input");
 		expect(quickpick.value).toBe("configured-codex-model");
@@ -612,9 +615,9 @@ test("keeps unsaved models isolated when switching review agents", async () => {
 		await changeValue(quickpick, "", "change");
 		expect(model.value).toBe("");
 		expect(model.placeholder).toBe("Codex CLI default");
-		expect(Array.from(quickpick.options, (option) => option.textContent)).toEqual(
-			["Codex CLI default"],
-		);
+		expect(
+			Array.from(quickpick.options, (option) => option.textContent),
+		).toEqual(["Codex CLI default"]);
 	} finally {
 		act(() => root.unmount());
 		container.remove();
@@ -852,17 +855,21 @@ test("settings dialog closes through icon, Escape, and backdrop with focus retur
 		container.remove();
 	}
 });
-test("renders Prompts and Appearance tabs with Prompts selected", () => {
+test("renders Prompts, Skills and Appearance tabs with Prompts selected", () => {
 	const markup = render();
 
-	expect(markup).toContain('role="tablist"');
-	const promptsTab = markup.match(
-		/<button[^>]*role="tab"[^>]*>Prompts<\/button>/,
-	)?.[0];
-	expect(promptsTab).toContain('aria-selected="true"');
-	expect(markup).toMatch(
-		/<button[^>]*role="tab"[^>]*aria-selected="false"[^>]*>Appearance<\/button>/,
+	const tabs = Array.from(
+		markup.matchAll(/<button[^>]*role="tab"[^>]*>([^<]+)<\/button>/g),
 	);
+	expect(tabs.map((tab) => tab[1])).toEqual([
+		"Prompts",
+		"Skills",
+		"Appearance",
+	]);
+	expect(tabs[0]?.[0]).toContain('aria-selected="true"');
+	expect(
+		tabs.slice(1).every((tab) => tab[0]?.includes('aria-selected="false"')),
+	).toBe(true);
 });
 
 test("applies and saves a selected color theme", async () => {
@@ -871,6 +878,7 @@ test("applies and saves a selected color theme", async () => {
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
 		const url = String(input);
 		calls.push({ url, init });
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
 			return jsonResponse({ colorTheme: "light" });
 		}
@@ -962,6 +970,7 @@ test("restores the color theme after a failed save and permits re-entry", async 
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
 		const url = String(input);
 		calls.push({ url, init });
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
 			appearancePostCount += 1;
 			if (appearancePostCount === 1) {

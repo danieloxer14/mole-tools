@@ -102,5 +102,14 @@ head and reports staleness without mutating state. Sync recreates detached
 worktree at new head, recomputes merge base/diff/refs, marks layers stale,
 preserves chat/drafts, and stamps drafts whose anchors no longer resolve.
 
+### Skill
+A manually invoked, versioned prompt snippet authored in Settings and
+referenced as `/<name>` in chat. The Skills tab pins **New skill** above its
+scrolling list; name validation appears inline in a cancellable dialog. Type
+`/` at the start of a message or after whitespace to open the picker above the
+slash. **No matches** includes a plus button to open Settings on Skills. The
+server expands tokens to active version text; transcript renders tags and use
+updates most-recently-used order.
+
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

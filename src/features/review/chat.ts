@@ -8,6 +8,7 @@ import type {
 	HostNote,
 } from "../../ports/git-host";
 import type { AgentEvent, ReviewAgent } from "../../ports/review-agent";
+import type { SkillRef, SkillToken } from "../../shared/skills";
 import { type ChatTag, ChatTagSchema } from "./chat-tags";
 import type { ReviewPaths } from "./paths";
 import { ensureChats, type ReviewState, ReviewStateSchema } from "./state";
@@ -138,6 +139,9 @@ export interface ChatTurnOptions {
 	changedFiles?: readonly string[];
 	discussions?: readonly HostDiscussion[];
 	message: string;
+	sourceText?: string;
+	skillInvocations?: readonly SkillToken[];
+	skills?: readonly SkillRef[];
 	tags?: readonly unknown[];
 	openFile?: string | null;
 	currentFile?: string | null;
@@ -448,6 +452,13 @@ export async function runChatTurn(
 		role: "user",
 		text: message,
 		tags,
+		skills: [...(options.skills ?? [])],
+		...(options.sourceText === undefined
+			? {}
+			: { sourceText: options.sourceText }),
+		...(options.skillInvocations === undefined
+			? {}
+			: { skillInvocations: [...options.skillInvocations] }),
 		sessionId: sessionIdFromState,
 	});
 

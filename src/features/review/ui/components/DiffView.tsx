@@ -157,7 +157,8 @@ interface DiffViewProps {
 	onSendDraft?: CommentDraftProps["onSend"];
 	onRetryDraft?: CommentDraftProps["onRetry"];
 	fromChat?: FromChatContext;
-	commentsCollapsed?: boolean;
+	collapsedDiscussionIds?: readonly string[];
+	onCollapsedDiscussionIdsChange?: (ids: string[]) => void;
 	findQuery?: string;
 	onFindQueryChange?: (query: string) => void;
 }
@@ -1965,7 +1966,8 @@ export function DiffView({
 	onSendDraft,
 	onRetryDraft,
 	fromChat,
-	commentsCollapsed,
+	collapsedDiscussionIds: savedCollapsedDiscussionIds = [],
+	onCollapsedDiscussionIdsChange,
 	findQuery: findQueryProp,
 	onFindQueryChange,
 }: DiffViewProps) {
@@ -1975,9 +1977,10 @@ export function DiffView({
 	const [expansionError, setExpansionError] = useState<string | null>(null);
 	const [internalFindQuery, setInternalFindQuery] = useState("");
 	const [findIndex, setFindIndex] = useState(0);
-	const [collapsedDiscussionIds, setCollapsedDiscussionIds] = useState<
-		Set<string>
-	>(() => new Set(commentsCollapsed ? discussions.map((d) => d.id) : []));
+	const [collapsedDiscussionIds, setCollapsedDiscussionIds] = useState(
+		() => new Set(savedCollapsedDiscussionIds),
+	);
+	const collapsedDiscussionIdsRef = useRef(collapsedDiscussionIds);
 	const findRowsRef = useRef<Map<string, HTMLElement>>(new Map());
 	const findInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2021,14 +2024,23 @@ export function DiffView({
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
 	}, []);
-	const toggleDiscussionCollapse = useCallback((discussionId: string) => {
-		setCollapsedDiscussionIds((previous) => {
-			const next = new Set(previous);
+	const commitCollapsedDiscussionIds = useCallback(
+		(next: Set<string>) => {
+			collapsedDiscussionIdsRef.current = next;
+			setCollapsedDiscussionIds(next);
+			onCollapsedDiscussionIdsChange?.([...next]);
+		},
+		[onCollapsedDiscussionIdsChange],
+	);
+	const toggleDiscussionCollapse = useCallback(
+		(discussionId: string) => {
+			const next = new Set(collapsedDiscussionIdsRef.current);
 			if (next.has(discussionId)) next.delete(discussionId);
 			else next.add(discussionId);
-			return next;
-		});
-	}, []);
+			commitCollapsedDiscussionIds(next);
+		},
+		[commitCollapsedDiscussionIds],
+	);
 	const onMarkdownTagRef = useRef(onMarkdownTag);
 	onMarkdownTagRef.current = onMarkdownTag;
 	const stableOnMarkdownTag = useCallback(
@@ -2112,11 +2124,17 @@ export function DiffView({
 			collapsedDiscussionIds.has(discussion.id),
 		);
 	const collapseAllComments = () => {
-		setCollapsedDiscussionIds(
-			allCommentsCollapsed
-				? new Set()
-				: new Set(fileDiscussions.map((discussion) => discussion.id)),
-		);
+		const next = new Set(collapsedDiscussionIdsRef.current);
+		if (allCommentsCollapsed) {
+			for (const discussion of fileDiscussions) {
+				next.delete(discussion.id);
+			}
+		} else {
+			for (const discussion of fileDiscussions) {
+				next.add(discussion.id);
+			}
+		}
+		commitCollapsedDiscussionIds(next);
 	};
 	const commentsLabel = allCommentsCollapsed
 		? "Expand all comments"
