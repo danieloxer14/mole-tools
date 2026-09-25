@@ -1,7 +1,13 @@
 import { PortError } from "../../core/errors";
 
-export const PROMPT_AGENT_NAMES = ["omp", "claude"] as const;
+export const PROMPT_AGENT_NAMES = ["omp", "claude", "codex"] as const;
 export type PromptAgentName = (typeof PROMPT_AGENT_NAMES)[number];
+
+export function formatAgentNames(names: readonly string[]): string {
+	if (names.length === 1) return names[0] ?? "";
+	if (names.length === 2) return `${names[0]} or ${names[1]}`;
+	return `${names.slice(0, -1).join(", ")}, or ${names.at(-1)}`;
+}
 
 export interface PromptVersionMeta {
 	agent: PromptAgentName | null;
@@ -55,7 +61,7 @@ export function parsePromptFile(raw: string, source: string): PromptFile {
 		if (key === "agent") {
 			if (!PROMPT_AGENT_NAMES.includes(value as PromptAgentName)) {
 				throw new PortError(
-					`Invalid prompt metadata in ${source}: agent must be omp or claude`,
+					`Invalid prompt metadata in ${source}: agent must be ${formatAgentNames(PROMPT_AGENT_NAMES)}`,
 				);
 			}
 			agent = value as PromptAgentName;

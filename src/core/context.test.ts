@@ -3,6 +3,7 @@ import { FakeNotifier } from "../../test/fakes/FakeNotifier";
 import { FakeReviewAgent } from "../../test/fakes/FakeReviewAgent";
 import { FakeUiPort } from "../../test/fakes/FakeUiPort";
 import { ClaudeAgentAdapter } from "../adapters/agent/claude";
+import { CodexAgentAdapter } from "../adapters/agent/codex";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import { ConfigSchema } from "../adapters/config/schema";
 import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
@@ -145,6 +146,19 @@ test("selects the configured review agent and accepts an override", () => {
 		ui: new FakeUiPort(),
 	});
 	expect(claudeContext.createReviewAgent()).toBeInstanceOf(ClaudeAgentAdapter);
+
+	const codexConfig = ConfigSchema.parse({
+		...config,
+		review: { agent: "codex" },
+	});
+	const codexContext = buildContext({
+		config: codexConfig,
+		ui: new FakeUiPort(),
+	});
+	expect(codexContext.createReviewAgent()).toBeInstanceOf(CodexAgentAdapter);
+	expect(defaultContext.createReviewAgent({ agent: "codex" })).toBeInstanceOf(
+		CodexAgentAdapter,
+	);
 
 	const fake = new FakeReviewAgent();
 	const overriddenContext = buildContext({

@@ -31,7 +31,7 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```jsonc
 {
   "review": {
-    "agent": "claude", // "omp" or "claude"; default "claude"
+    "agent": "claude", // "omp", "claude", or "codex"; default "claude"
     "binary": "claude", // optional binary override
     "model": "review-model", // optional model forwarded to the selected agent
     "layerTimeoutSeconds": 600,

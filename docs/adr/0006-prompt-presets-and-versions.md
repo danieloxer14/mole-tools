@@ -91,8 +91,8 @@ agent. Cached layers are not invalidated automatically; users use
 
 ### D7 — Review-agent construction uses a factory
 
-`Context.createReviewAgent(override?)` constructs the configured OMP or Claude
-adapter. Override values take precedence over `config.review`; when an
+`Context.createReviewAgent(override?)` constructs the configured OMP, Claude, or Codex adapter.
+Override values take precedence over `config.review`; when an
 override changes the agent, the configured binary is ignored because the
 binary defaults to the selected agent name. An injected review agent used by
 tests is returned unchanged. Review feature call sites use the factory rather

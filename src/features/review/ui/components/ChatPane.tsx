@@ -23,6 +23,7 @@ import {
 	useMemo,
 	useRef,
 } from "react";
+import type { PromptAgentName } from "../../../../adapters/prompts/frontmatter";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import {
@@ -65,7 +66,7 @@ export interface ChatSummary {
 	title: string;
 	createdAt: string;
 	busy: boolean;
-	agent: "omp" | "claude" | null;
+	agent: PromptAgentName | null;
 	model: string | null;
 }
 

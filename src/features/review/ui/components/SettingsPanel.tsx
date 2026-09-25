@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import {
+	PROMPT_AGENT_NAMES,
+	type PromptAgentName,
+} from "../../../../adapters/prompts/frontmatter";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { Alert } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -46,8 +50,11 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 };
 
-type ReviewAgent = "omp" | "claude";
+type ReviewAgent = PromptAgentName;
 type PromptAgent = "default" | ReviewAgent;
+function isReviewAgent(value: string): value is ReviewAgent {
+	return (PROMPT_AGENT_NAMES as readonly string[]).includes(value);
+}
 
 export interface SettingsSnapshot {
 	slots: Array<{
@@ -712,17 +719,18 @@ export function SettingsPanel({
 												onChange={(event) => {
 													const value = controlValue(event);
 													setPromptAgent(
-														value === "omp" || value === "claude"
-															? value
-															: "default",
+														isReviewAgent(value) ? value : "default",
 													);
 												}}
 											>
 												<option value="default">
 													Default ({settings.review.agent})
 												</option>
-												<option value="omp">omp</option>
-												<option value="claude">claude</option>
+												{PROMPT_AGENT_NAMES.map((agent) => (
+													<option key={agent} value={agent}>
+														{agent}
+													</option>
+												))}
 											</NativeSelect>
 										</div>
 
@@ -809,13 +817,10 @@ export function SettingsPanel({
 													size="sm"
 													value={reviewAgent}
 													disabled={pending}
-													onChange={(event) =>
-														setReviewAgent(
-															controlValue(event) === "claude"
-																? "claude"
-																: "omp",
-														)
-													}
+													onChange={(event) => {
+														const value = controlValue(event);
+														if (isReviewAgent(value)) setReviewAgent(value);
+													}}
 												>
 													{settings.review.agents.map((agent) => (
 														<option key={agent} value={agent}>

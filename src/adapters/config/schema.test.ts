@@ -75,6 +75,15 @@ describe("config schema", () => {
 		});
 	});
 
+	test("accepts Codex as the configured review agent", () => {
+		const config = ConfigSchema.parse({
+			...baseConfig,
+			review: { agent: "codex" },
+		});
+
+		expect(config.review.agent).toBe("codex");
+	});
+
 	test("rejects unknown prompt slots with a prompts path", () => {
 		const result = ConfigSchema.safeParse({
 			...baseConfig,

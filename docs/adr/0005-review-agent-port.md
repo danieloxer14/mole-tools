@@ -74,15 +74,24 @@ cancelled.
 |---|---|---|---|---|
 | `OmpAgentAdapter` | `omp` | `-p --mode json --cwd <cwd> --append-system-prompt <file> --tools <allowlist> [--model <model>] [-r <session>] [--add-dir <writeDir>] -- <message>` | Captures the provider `session` event. Resume uses `-r <session>`. | `read,grep,glob,bash`; a layer run adds `write` and its output directory. |
 | `ClaudeAgentAdapter` | `claude` | `-p --output-format stream-json --include-partial-messages --verbose --session-id <uuid> --append-system-prompt <prompt text> --allowedTools Read Grep Glob Bash [--add-dir <writeDir>] --add-dir <cwd> -- <message>` | Mints a UUID for a new turn, emits it after Claude's `system/init`, and reuses it with `--session-id` on resume. | `Read,Grep,Glob,Bash`; `writeDir` adds a bounded directory for layer output. |
+| `CodexAgentAdapter` | `codex` | `exec --json --skip-git-repo-check -C <cwd> --sandbox <read-only\|workspace-write> -c 'projects={<TOML cwd>={trust_level="untrusted"}}' [-m <model>] -c developer_instructions=<prompt text as TOML string> [--add-dir <writeDir>] [resume <session>] -- <message>` | Captures `thread.started.thread_id`; resume uses `codex exec … resume <session>`, and a different `thread.started` id replaces the stored session. | Marks `cwd` untrusted so project-local Codex configuration cannot grant reviewed code MCP commands or broader access. `read-only` sandbox for chat; a `writeDir` turn uses `workspace-write` plus `--add-dir <writeDir>`, which also leaves `cwd` writable. |
 
 The Claude adapter reads `systemPromptFile` and passes its contents because the
 Claude CLI accepts prompt text for `--append-system-prompt`. The OMP adapter
-passes the file path. Both adapters accept an injected executor for deterministic
+passes the file path. All adapters accept an injected executor for deterministic
 contract tests and call the configured binary for `preflight`.
+The Codex adapter reads `systemPromptFile` and passes its text as
+`-c developer_instructions=<TOML string>`.
 
-The optional top-level `review` config selects the adapter (`omp` or `claude`),
-its binary, an OMP model, the layer timeout, and the large-file threshold. It
-is not a `models` route and does not change `RoutingPurpose`:
+The untrusted-project override is applied to every Codex turn, including
+read-only chat turns. It prevents reviewed repository configuration from
+controlling the reviewer's local Codex process. `workspace-write` remains an
+intentional exception for layer and comment output: those turns need to write
+results, and the review worktree is writable as well.
+
+The optional top-level `review` config selects the adapter (`omp`, `claude`, or
+`codex`), its binary, an OMP model, the layer timeout, and the large-file
+threshold. It is not a `models` route and does not change `RoutingPurpose`:
 
 ```jsonc
 {
@@ -157,7 +166,7 @@ write directory.
 | Reuse `Llm` for review chat | It has no sessions, tools, working-directory boundary, or provider event stream. |
 | Put `omp` and `claude` command parsing in routes | Provider NDJSON and permissions would leak into HTTP/UI code and make adapters non-swappable. |
 | Historical alternative: persist a provider session for comment drafting | **Superseded:** comment drafts use local user-authored bodies and do not invoke `ReviewAgent`; persisting a provider session would misstate the implemented behavior. |
-| Grant write access to the worktree | Review must not mutate the code being reviewed. Layer output belongs in a separate directory. |
+| Grant write access to the worktree | Review must not mutate the code being reviewed. Layer output belongs in a separate directory. **Exception (2026-09-25):** Codex `writeDir` turns run in `workspace-write`, which cannot exclude `cwd`; prompt policy keeps the worktree unmodified, matching OMP's unrestricted `bash`. |
 
 ## Consequences
 

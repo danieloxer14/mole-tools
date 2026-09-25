@@ -40,7 +40,7 @@ export const CONFIG_TEMPLATE_TEXT = `{
   //   "baseDir": "~/repos"                          // scanned for Git repos and extra worktrees
   // }
   // "review": {
-  //   "agent": "claude",                         // "omp" or "claude"; default "claude"
+  //   "agent": "claude",                         // "omp", "claude", or "codex"; default "claude"
   //   // "binary": "claude",                      // optional executable override
   //   // "model": "model-name",                   // optional model for the selected agent
   //   "layerTimeoutSeconds": 600,

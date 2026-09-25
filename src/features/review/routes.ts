@@ -14,6 +14,7 @@ import {
 	PromptNameSchema,
 } from "../../adapters/prompts/defaults";
 import {
+	formatAgentNames,
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
 } from "../../adapters/prompts/frontmatter";
@@ -132,7 +133,7 @@ export interface ReviewRoutesOptions {
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
 					largeFileLineThreshold?: number;
-					agent?: "omp" | "claude";
+					agent?: PromptAgentName;
 					model?: string;
 				};
 				prompts?: Record<string, string>;
@@ -145,7 +146,7 @@ export interface ReviewRoutesOptions {
 	explainPromptText?: string;
 	persistConfig?: (partial: Partial<Config>) => Promise<void>;
 	createReviewAgent?: (override?: {
-		agent?: "omp" | "claude";
+		agent?: PromptAgentName;
 		model?: string;
 	}) => ReviewAgent;
 }
@@ -530,11 +531,8 @@ export function createReviewRoutes(
 		} as Partial<Record<PromptName, string>>,
 		review: {
 			agent:
-				(
-					options.config as
-						| { review?: { agent?: "omp" | "claude" } }
-						| undefined
-				)?.review?.agent ?? "claude",
+				(options.config as { review?: { agent?: PromptAgentName } } | undefined)
+					?.review?.agent ?? "claude",
 			model: (options.config as { review?: { model?: string } } | undefined)
 				?.review?.model,
 		},
@@ -617,7 +615,7 @@ export function createReviewRoutes(
 				review: {
 					agent: settings.review.agent,
 					model: settings.review.model,
-					agents: ["omp", "claude"],
+					agents: [...PROMPT_AGENT_NAMES],
 				},
 			});
 		} catch (error) {
@@ -635,7 +633,7 @@ export function createReviewRoutes(
 
 		const parsed = z
 			.object({
-				agent: z.enum(["omp", "claude"]),
+				agent: z.enum(PROMPT_AGENT_NAMES),
 				model: z.string().optional(),
 			})
 			.safeParse(await parseBody(request));
@@ -731,7 +729,12 @@ export function createReviewRoutes(
 					!PROMPT_AGENT_NAMES.includes(rawAgent as PromptAgentName))
 			) {
 				return jsonResponse(
-					{ error: "Prompt agent must be omp, claude, or null" },
+					{
+						error: `Prompt agent must be ${formatAgentNames([
+							...PROMPT_AGENT_NAMES,
+							"null",
+						])}`,
+					},
 					400,
 				);
 			}

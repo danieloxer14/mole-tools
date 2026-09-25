@@ -33,7 +33,7 @@ const initialSettings: SettingsSnapshot = {
 	review: {
 		agent: "omp",
 		model: "claude-sonnet-4",
-		agents: ["omp", "claude"],
+		agents: ["omp", "claude", "codex"],
 	},
 };
 
@@ -328,6 +328,46 @@ test("disables unchanged saves and renders review agent options and model", () =
 	expect(markup).toMatch(
 		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="" selected="">Custom…<\/option>/,
 	);
+});
+
+test("renders codex options for review and prompt agents", () => {
+	const markup = render();
+	expect(markup.split('<option value="codex">codex</option>').length - 1).toBe(
+		2,
+	);
+});
+
+test("keeps codex selected for review and prompt agents", () => {
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt,
+				}),
+			),
+		);
+		for (const id of ["#settings-agent", "#settings-prompt-agent"]) {
+			const select = container.querySelector<HTMLSelectElement>(id);
+			if (!select) throw new Error(`Missing select ${id}`);
+			act(() => {
+				select.value = "codex";
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			expect(container.querySelector<HTMLSelectElement>(id)?.value).toBe(
+				"codex",
+			);
+		}
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
 });
 
 test("styles prompt heading like review agent heading with editor spacing", () => {
