@@ -166,7 +166,7 @@ interface DisplayDiffVariants {
 /** State changed by the lightweight progress endpoint. */
 export type ReviewProgressResponse = Pick<
 	ReviewApiState,
-	"layers" | "viewedFiles"
+	"layers" | "viewedFiles" | "collapsedDiscussionIds"
 >;
 
 export type ReviewRouteHandler = (request: Request) => Promise<Response>;
@@ -1942,6 +1942,7 @@ export function createReviewRoutes(
 				...base,
 				layers: base.layers.map((layer) => ({ ...layer })),
 				viewedFiles: [...base.viewedFiles],
+				collapsedDiscussionIds: [...base.collapsedDiscussionIds],
 			};
 
 			const layerId = typeof body.layerId === "string" ? body.layerId : null;
@@ -1992,6 +1993,15 @@ export function createReviewRoutes(
 					}
 				}
 			}
+			if (Array.isArray(body.collapsedDiscussionIds)) {
+				next.collapsedDiscussionIds = [
+					...new Set(
+						body.collapsedDiscussionIds.filter(
+							(id): id is string => typeof id === "string" && id.length > 0,
+						),
+					),
+				];
+			}
 			return next;
 		};
 
@@ -2013,6 +2023,7 @@ export function createReviewRoutes(
 		return jsonResponse({
 			layers: next.layers,
 			viewedFiles: next.viewedFiles,
+			collapsedDiscussionIds: next.collapsedDiscussionIds,
 		});
 	}
 
@@ -2120,7 +2131,7 @@ export function createReviewRoutes(
 				return sync();
 			}
 			if (request.method === "POST" && url.pathname === "/api/progress") {
-				return progress(request);
+				return await progress(request);
 			}
 			if (request.method === "GET" && url.pathname === "/api/file") {
 				return file(request);

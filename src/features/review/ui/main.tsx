@@ -59,6 +59,7 @@ import {
 import { Spinner } from "./components/ui/spinner";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
+import { createProgressWriteQueue } from "./progress-write-queue";
 import {
 	type ReviewFreshnessResponse,
 	runReviewRefresh,
@@ -571,6 +572,8 @@ function ReviewApp() {
 	const reviewStateRequests = useRef(createReviewStateRequestSequence());
 	const chatSelectionRequests = useRef(createRequestSequence());
 	const chatSelectionQueue = useRef(Promise.resolve());
+	const collapsedProgressWrites = useRef(createProgressWriteQueue());
+	const collapsedWriteSequence = useRef(0);
 	const autoRunRequested = useRef(false);
 	const draftEditSequence = useRef(new Map<string, number>());
 	const patchChat = useCallback((chatId: string, patch: ChatRuntimePatch) => {
@@ -1153,18 +1156,21 @@ function ReviewApp() {
 				: { ...current, [selectedPath]: wholeFile },
 		);
 	};
-	const saveProgress = (body: Record<string, unknown>) => {
-		setProgressError(null);
-		void fetch(apiUrl("/api/progress", token), {
+	const postProgress = async (
+		body: Record<string, unknown>,
+	): Promise<ReviewProgressResponse> => {
+		const response = await fetch(apiUrl("/api/progress", token), {
 			method: "POST",
 			headers: { "content-type": "application/json", "X-Mole-Token": token },
 			body: JSON.stringify(body),
-		})
-			.then(async (response) => {
-				if (!response.ok)
-					throw new Error(`Progress request failed (${response.status})`);
-				return (await response.json()) as ReviewProgressResponse;
-			})
+		});
+		if (!response.ok)
+			throw new Error(`Progress request failed (${response.status})`);
+		return (await response.json()) as ReviewProgressResponse;
+	};
+	const saveProgress = (body: Record<string, unknown>) => {
+		setProgressError(null);
+		void postProgress(body)
 			.then((next) => {
 				setProgressError(null);
 				setData((current) =>
@@ -1174,6 +1180,33 @@ function ReviewApp() {
 								layers: next.layers,
 								viewedFiles: next.viewedFiles,
 							}
+						: current,
+				);
+			})
+			.catch((reason: unknown) => {
+				setProgressError(
+					reason instanceof Error ? reason.message : String(reason),
+				);
+			});
+	};
+	const saveCollapsedDiscussionIds = (ids: string[]) => {
+		const sequence = ++collapsedWriteSequence.current;
+		setData((current) =>
+			current ? { ...current, collapsedDiscussionIds: ids } : current,
+		);
+		setProgressError(null);
+		void collapsedProgressWrites.current
+			.enqueue(() => postProgress({ collapsedDiscussionIds: ids }))
+			.then((next) => {
+				setProgressError(null);
+				setData((current) =>
+					current
+						? sequence === collapsedWriteSequence.current
+							? {
+									...current,
+									collapsedDiscussionIds: next.collapsedDiscussionIds,
+								}
+							: current
 						: current,
 				);
 			})
@@ -2101,6 +2134,8 @@ function ReviewApp() {
 					fileContents={fileContents}
 					fileContentsError={fileContentsError}
 					discussions={data.discussions}
+					collapsedDiscussionIds={data.collapsedDiscussionIds}
+					onCollapsedDiscussionIdsChange={saveCollapsedDiscussionIds}
 					onExplainDiscussion={explainDiscussion}
 					explainDisabled={creatingChat}
 					drafts={data.drafts}

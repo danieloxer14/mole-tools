@@ -122,6 +122,8 @@ describe("setupReview chat state", () => {
 			expect(persisted.chats[0]?.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
 			expect(persisted.chats[0]?.id).not.toBe(LEGACY_CHAT_ID);
 			expect(persisted.activeChatId).toBe(persisted.chats[0]?.id);
+			expect(result.state.collapsedDiscussionIds).toEqual([]);
+			expect(persisted.collapsedDiscussionIds).toEqual([]);
 			expect(result.state.activeChatId).toBe(persisted.chats[0]?.id);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -144,6 +146,7 @@ describe("setupReview chat state", () => {
 					},
 				],
 				viewedFiles: ["src/api.ts"],
+				collapsedDiscussionIds: ["discussion-1"],
 				chats: [
 					{
 						id: "chat-one",
@@ -189,9 +192,11 @@ describe("setupReview chat state", () => {
 			expect(result.state.activeChatId).toBe(existing.activeChatId);
 			expect(result.state.layers).toEqual(existing.layers);
 			expect(result.state.viewedFiles).toEqual(existing.viewedFiles);
+			expect(result.state.collapsedDiscussionIds).toEqual(["discussion-1"]);
 			expect(result.state.drafts).toEqual(existing.drafts);
 			expect(persisted.chats).toEqual(existing.chats);
 			expect(persisted.activeChatId).toBe(existing.activeChatId);
+			expect(persisted.collapsedDiscussionIds).toEqual(["discussion-1"]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -335,6 +340,7 @@ describe("syncReview viewed files", () => {
 			const paths = pathsFor(dir);
 			const existing = stateFor(paths, {
 				viewedFiles: ["src/kept.ts", "src/gone.ts"],
+				collapsedDiscussionIds: ["discussion-not-in-current-diff"],
 			});
 			const store = new ReviewStore(paths);
 			await store.write(existing);
@@ -362,9 +368,15 @@ describe("syncReview viewed files", () => {
 			});
 
 			expect(result.state.viewedFiles).toEqual(["src/kept.ts", "src/gone.ts"]);
+			expect(result.state.collapsedDiscussionIds).toEqual([
+				"discussion-not-in-current-diff",
+			]);
 			expect((await store.read())?.viewedFiles).toEqual([
 				"src/kept.ts",
 				"src/gone.ts",
+			]);
+			expect((await store.read())?.collapsedDiscussionIds).toEqual([
+				"discussion-not-in-current-diff",
 			]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

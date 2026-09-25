@@ -996,7 +996,7 @@ test("omits discussion paths and repeated note metadata", () => {
 
 test("collapses a seeded discussion to a single-line preview", () => {
 	const markup = renderDiff({
-		commentsCollapsed: true,
+		collapsedDiscussionIds: ["discussion-1"],
 		discussions: [
 			discussion("discussion-1", {
 				newPath: "src/app.ts",
@@ -1012,6 +1012,234 @@ test("collapses a seeded discussion to a single-line preview", () => {
 	expect(markup).toContain('data-collapsed="true"');
 	expect(markup).toContain("Please consider this edge case.");
 	expect(markup).toContain("export const value = 1;");
+});
+
+test("renders only persisted discussion IDs collapsed", () => {
+	const markup = renderDiff({
+		collapsedDiscussionIds: ["saved-collapsed"],
+		discussions: [
+			discussion("saved-collapsed", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+			discussion("saved-expanded", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+			discussion("new-discussion", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+	});
+
+	expect(markup).toContain(
+		'data-collapsed="true" data-discussion-id="saved-collapsed"',
+	);
+	expect(markup).toContain(
+		'data-collapsed="false" data-discussion-id="saved-expanded"',
+	);
+	expect(markup).toContain(
+		'data-collapsed="false" data-discussion-id="new-discussion"',
+	);
+});
+
+test("individual collapse changes only that discussion's saved ID", () => {
+	const updates: string[][] = [];
+	const { container, root } = mountDiff({
+		discussions: [
+			discussion("discussion-1", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+			discussion("discussion-2", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+			discussion("other-file-discussion", {
+				newPath: "src/other.ts",
+				oldPath: "src/other.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+		collapsedDiscussionIds: ["discussion-1", "other-file-discussion"],
+		onCollapsedDiscussionIdsChange: (ids) => updates.push(ids),
+	});
+
+	try {
+		const expandFirst = container.querySelector<HTMLButtonElement>(
+			'article[data-discussion-id="discussion-1"] button[aria-label="Expand discussion"]',
+		);
+		expect(expandFirst).not.toBeNull();
+		act(() => expandFirst?.click());
+		expect(updates).toEqual([["other-file-discussion"]]);
+
+		const collapseSecond = container.querySelector<HTMLButtonElement>(
+			'article[data-discussion-id="discussion-2"] button[aria-label="Collapse discussion"]',
+		);
+		expect(collapseSecond).not.toBeNull();
+		act(() => collapseSecond?.click());
+		expect(updates).toEqual([
+			["other-file-discussion"],
+			["other-file-discussion", "discussion-2"],
+		]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("file-level collapse and expand preserve saved IDs for other files", () => {
+	const updates: string[][] = [];
+	const { container, root } = mountDiff({
+		discussions: [
+			discussion("discussion-1", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+			discussion("discussion-2", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+			discussion("other-file-discussion", {
+				newPath: "src/other.ts",
+				oldPath: "src/other.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+		collapsedDiscussionIds: ["other-file-discussion"],
+		onCollapsedDiscussionIdsChange: (ids) => updates.push(ids),
+	});
+
+	try {
+		act(() =>
+			container
+				.querySelector<HTMLButtonElement>(
+					'button[aria-label="Collapse all comments"]',
+				)
+				?.click(),
+		);
+		expect(updates[0]).toEqual([
+			"other-file-discussion",
+			"discussion-1",
+			"discussion-2",
+		]);
+		expect(
+			container
+				.querySelector('article[data-discussion-id="discussion-1"]')
+				?.getAttribute("data-collapsed"),
+		).toBe("true");
+
+		act(() =>
+			container
+				.querySelector<HTMLButtonElement>(
+					'button[aria-label="Expand all comments"]',
+				)
+				?.click(),
+		);
+		expect(updates[1]).toEqual(["other-file-discussion"]);
+		expect(
+			container
+				.querySelector('article[data-discussion-id="discussion-1"]')
+				?.getAttribute("data-collapsed"),
+		).toBe("false");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("restores discussion collapse state after switching files", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	const otherFile: ParsedFileDiff = {
+		...file,
+		oldPath: "src/other.ts",
+		newPath: "src/other.ts",
+	};
+	const appDiscussion = discussion("app-discussion", {
+		newPath: "src/app.ts",
+		oldPath: "src/app.ts",
+		newLine: 1,
+		oldLine: null,
+	});
+	const otherDiscussion = discussion("other-discussion", {
+		newPath: "src/other.ts",
+		oldPath: "src/other.ts",
+		newLine: 1,
+		oldLine: null,
+	});
+	let savedIds: string[] = [];
+	const renderSelectedFile = (
+		path: string,
+		selectedFile: ParsedFileDiff,
+		discussions: HostDiscussion[],
+	) => {
+		root.render(
+			<DiffView
+				key={path}
+				file={selectedFile}
+				mode="inline"
+				largeFileLineThreshold={800}
+				fileContents={null}
+				fileContentsError={null}
+				discussions={discussions}
+				collapsedDiscussionIds={savedIds}
+				onCollapsedDiscussionIdsChange={(ids) => {
+					savedIds = ids;
+				}}
+				onModeChange={() => {}}
+				onLineSelection={() => {}}
+				onCommentSelection={() => {}}
+			/>,
+		);
+	};
+
+	try {
+		act(() => renderSelectedFile("src/app.ts", file, [appDiscussion]));
+		act(() =>
+			container
+				.querySelector<HTMLButtonElement>(
+					'article[data-discussion-id="app-discussion"] button[aria-label="Collapse discussion"]',
+				)
+				?.click(),
+		);
+		expect(savedIds).toEqual(["app-discussion"]);
+
+		act(() => renderSelectedFile("src/other.ts", otherFile, [otherDiscussion]));
+		expect(
+			container
+				.querySelector('article[data-discussion-id="other-discussion"]')
+				?.getAttribute("data-collapsed"),
+		).toBe("false");
+
+		act(() => renderSelectedFile("src/app.ts", file, [appDiscussion]));
+		expect(
+			container
+				.querySelector('article[data-discussion-id="app-discussion"]')
+				?.getAttribute("data-collapsed"),
+		).toBe("true");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
 });
 
 test("counts every positioned discussion rendered in the diff", () => {
@@ -1131,7 +1359,7 @@ test("renders positioned discussion Markdown through the sanitized comment rende
 
 test("keeps collapsed discussion summaries as plain text", () => {
 	const markup = renderDiff({
-		commentsCollapsed: true,
+		collapsedDiscussionIds: ["collapsed-markdown-discussion"],
 		discussions: [
 			{
 				id: "collapsed-markdown-discussion",
