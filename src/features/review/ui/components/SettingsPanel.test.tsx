@@ -333,14 +333,14 @@ test("disables unchanged saves and renders review agent options and model", () =
 	);
 });
 
-test("styles prompt heading like review agent heading with editor spacing", () => {
+test("styles prompt text like Skills with editor spacing", () => {
 	const markup = render();
 
 	expect(markup).toContain(
-		'<label class="text-sm font-medium" for="settings-prompt">Prompt text</label>',
+		'<label class="block text-sm font-medium" for="settings-prompt">Prompt text</label>',
 	);
 	expect(markup).toMatch(
-		/<div class="space-y-2"><label class="text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea/,
+		/<div class="space-y-2"><label class="block text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea(?=[^>]*class="[^"]*min-h-64 font-mono text-sm")(?=[^>]*id="settings-prompt")[^>]*>/,
 	);
 });
 
@@ -403,8 +403,14 @@ test("keeps settings controls reachable in responsive bounded layout", () => {
 	expect(markup).toContain("flex h-full min-h-0 flex-col");
 	expect(markup).toContain("grid-cols-1");
 	expect(markup).toContain("md:grid-cols-[14rem_minmax(0,1fr)]");
+	expect(markup).toMatch(
+		/class="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-\[14rem_minmax\(0,1fr\)\] md:gap-6"/,
+	);
 	expect(markup).toContain("overflow-auto");
 	expect(markup).toContain('<nav class="space-y-1" aria-label="Prompt slots">');
+	expect(markup).toMatch(
+		/<nav class="space-y-1" aria-label="Prompt slots">[\s\S]*<\/nav><section class="min-w-0 space-y-4 md:border-l md:pl-6"/,
+	);
 
 	expect(markup).toContain('<input id="settings-prompt-model"');
 	for (const id of [
