@@ -59,6 +59,13 @@ import {
 import { Spinner } from "./components/ui/spinner";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
+import {
+	consumeLayerStream,
+	type LayerAction,
+	type LayerStreamFrame,
+	mergeLayerStreamFrame,
+	startInitialLayerStream,
+} from "./layer-stream";
 import { createProgressWriteQueue } from "./progress-write-queue";
 import {
 	type ReviewFreshnessResponse,
@@ -330,119 +337,10 @@ async function fetchFileContents(
 	return response.text();
 }
 
-type LayerAction = "regenerate" | "retry";
-
-interface LayerStreamFrame {
-	event: string;
-	data: Record<string, unknown>;
-}
-
-function parseLayerStatus(
-	value: unknown,
-): ReviewStateResponse["layerStatus"] | null {
-	return value === "pending" ||
-		value === "running" ||
-		value === "ready" ||
-		value === "failed"
-		? value
-		: null;
-}
-
-function parseLayerSseBlock(block: string): LayerStreamFrame | null {
-	let event = "message";
-	const dataLines: string[] = [];
-	for (const line of block.split(/\r?\n/)) {
-		if (line.startsWith("event:")) event = line.slice(6).trim();
-		if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-	}
-	if (dataLines.length === 0) return null;
-	try {
-		const data: unknown = JSON.parse(dataLines.join("\n"));
-		if (typeof data !== "object" || data === null) return null;
-		return { event, data: data as Record<string, unknown> };
-	} catch {
-		return null;
-	}
-}
-
-async function consumeLayerStream(
-	token: string,
-	action: LayerAction,
-	onFrame: (frame: LayerStreamFrame) => void,
-): Promise<void> {
-	const response = await fetch(apiUrl(`/api/layers/${action}`, token), {
-		method: "POST",
-		headers: {
-			accept: "text/event-stream",
-			"X-Mole-Token": token,
-		},
-	});
-	if (!response.ok)
-		throw new Error(`Layer ${action} request failed (${response.status})`);
-	if (!response.body) throw new Error("Layer stream did not return a body");
-
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	try {
-		while (true) {
-			const result = await reader.read();
-			if (result.done) break;
-			buffer += decoder.decode(result.value, { stream: true });
-			const blocks = buffer.split(/\r?\n\r?\n/);
-			buffer = blocks.pop() ?? "";
-			for (const block of blocks) {
-				const frame = parseLayerSseBlock(block);
-				if (frame) onFrame(frame);
-			}
-		}
-		buffer += decoder.decode();
-		if (buffer.trim()) {
-			const frame = parseLayerSseBlock(buffer);
-			if (frame) onFrame(frame);
-		}
-	} finally {
-		reader.releaseLock();
-	}
-}
-
 function filePath(file: ParsedFileDiff): string {
 	return file.newPath ?? file.oldPath ?? "";
 }
 
-function mergeLayerStreamFrame(
-	state: ReviewStateResponse,
-	frame: LayerStreamFrame,
-): ReviewStateResponse {
-	const status =
-		frame.event === "error"
-			? ("failed" as const)
-			: parseLayerStatus(frame.data.status);
-	const message =
-		typeof frame.data.message === "string" ? frame.data.message : null;
-	const error =
-		typeof frame.data.error === "string"
-			? frame.data.error
-			: frame.data.error === null
-				? null
-				: undefined;
-	const layers = Array.isArray(frame.data.layers)
-		? (frame.data.layers as ReviewStateResponse["layers"])
-		: state.layers;
-	return {
-		...state,
-		layerStatus: status ?? state.layerStatus,
-		layerError:
-			frame.event === "error"
-				? (message ?? state.layerError)
-				: error !== undefined
-					? error
-					: status === "running"
-						? null
-						: state.layerError,
-		layers,
-	};
-}
 type ColumnWidths = Record<ReviewColumn, number>;
 
 interface ResizeSession {
@@ -713,34 +611,34 @@ function ReviewApp() {
 			});
 		fetchReviewState()
 			.then((next) => {
-				if (!active) return;
-				if (
-					next.layerStatus === "pending" &&
-					!autoRunRequested.current &&
-					next.layers.every((layer) => !layer.stale)
-				) {
-					autoRunRequested.current = true;
+				if (!active || autoRunRequested.current) return;
+				const initialStream = startInitialLayerStream(token, next, applyFrame);
+				if (!initialStream) return;
+				autoRunRequested.current = true;
+				if (initialStream.action === "regenerate") {
 					setLayerAction("regenerate");
-					void consumeLayerStream(token, "regenerate", applyFrame)
-						.then(() => fetchReviewState())
-						.catch((reason: unknown) => {
-							if (!active) return;
-							const message =
-								reason instanceof Error ? reason.message : String(reason);
-							setData((current) =>
-								current
-									? {
-											...current,
-											layerStatus: "failed",
-											layerError: message,
-										}
-									: current,
-							);
-						})
-						.finally(() => {
-							if (active) setLayerAction(null);
-						});
 				}
+				void initialStream.stream
+					.then(() => fetchReviewState())
+					.catch((reason: unknown) => {
+						if (!active) return;
+						const message =
+							reason instanceof Error ? reason.message : String(reason);
+						setData((current) =>
+							current
+								? {
+										...current,
+										layerStatus: "failed",
+										layerError: message,
+									}
+								: current,
+						);
+					})
+					.finally(() => {
+						if (active && initialStream.action === "regenerate") {
+							setLayerAction(null);
+						}
+					});
 			})
 			.catch((reason: unknown) => {
 				if (active)

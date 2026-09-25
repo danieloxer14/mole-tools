@@ -1,4 +1,5 @@
 import { ClaudeAgentAdapter } from "../adapters/agent/claude";
+import { CodexAgentAdapter } from "../adapters/agent/codex";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import {
 	type Config,
@@ -10,6 +11,7 @@ import { JiraAdapter } from "../adapters/issue-tracker/jira";
 import { OllamaAdapter } from "../adapters/llm/ollama";
 import { PiAdapter } from "../adapters/llm/pi";
 import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
+import type { PromptAgentName } from "../adapters/prompts/frontmatter";
 import { GitAdapter } from "../adapters/vcs/git";
 import type { GitHost } from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
@@ -19,7 +21,7 @@ import type { ReviewAgent } from "../ports/review-agent";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
 export interface ReviewAgentOverride {
-	agent?: "omp" | "claude";
+	agent?: PromptAgentName;
 	model?: string;
 }
 
@@ -131,7 +133,7 @@ function buildAdapterMap(config: Config): Map<string, Llm> {
 export function resolveReviewAgentConfig(
 	config: Config,
 	override?: ReviewAgentOverride,
-): { agent: "omp" | "claude"; binary: string; model?: string } {
+): { agent: PromptAgentName; binary: string; model?: string } {
 	const configured = config.review?.agent ?? "claude";
 	const agent = override?.agent ?? configured;
 	const binary =
@@ -148,6 +150,9 @@ function buildReviewAgent(
 
 	if (agent === "claude") {
 		return new ClaudeAgentAdapter({ binary, model });
+	}
+	if (agent === "codex") {
+		return new CodexAgentAdapter({ binary, model });
 	}
 	return new OmpAgentAdapter({ binary, model });
 }

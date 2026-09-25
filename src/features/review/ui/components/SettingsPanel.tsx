@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CodexModelChoice } from "../../../../adapters/agent/codex-models";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import {
+	PROMPT_AGENT_NAMES,
+	type PromptAgentName,
+} from "../../../../adapters/prompts/frontmatter";
 import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { SkillsSettings } from "./SkillsSettings";
@@ -48,8 +53,11 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 };
 
-type ReviewAgent = "omp" | "claude";
+type ReviewAgent = PromptAgentName;
 type PromptAgent = "default" | ReviewAgent;
+function isReviewAgent(value: string): value is ReviewAgent {
+	return (PROMPT_AGENT_NAMES as readonly string[]).includes(value);
+}
 
 export interface SettingsSnapshot {
 	slots: Array<{
@@ -165,16 +173,21 @@ export function SettingsPanel({
 	);
 	const [loadedModel, setLoadedModel] = useState(initialPrompt?.model ?? "");
 	const [newPreset, setNewPreset] = useState("");
-	const [reviewAgent, setReviewAgent] = useState<ReviewAgent>(
-		initialSettings?.review.agent ?? "claude",
-	);
-	const [reviewModel, setReviewModel] = useState(
-		initialSettings?.review.model ?? "",
-	);
+	const initialReviewAgent = initialSettings?.review.agent ?? "claude";
+	const [reviewAgent, setReviewAgent] =
+		useState<ReviewAgent>(initialReviewAgent);
+	const [reviewModels, setReviewModels] = useState<
+		Partial<Record<ReviewAgent, string>>
+	>(() => ({
+		[initialReviewAgent]: initialSettings?.review.model ?? "",
+	}));
+	const [codexModels, setCodexModels] = useState<CodexModelChoice[]>([]);
+	const reviewModel = reviewModels[reviewAgent] ?? "";
 	const [pending, setPending] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 	const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
 	const initialPromptConsumed = useRef(initialPrompt !== undefined);
+	const reviewSettingsInitialized = useRef(initialSettings !== undefined);
 
 	const loadPrompt = useCallback(
 		async (
@@ -228,8 +241,13 @@ export function SettingsPanel({
 			"/api/settings",
 		);
 		setSettings(snapshot);
-		setReviewAgent(snapshot.review.agent);
-		setReviewModel(snapshot.review.model ?? "");
+		if (!reviewSettingsInitialized.current) {
+			reviewSettingsInitialized.current = true;
+			setReviewAgent(snapshot.review.agent);
+			setReviewModels({
+				[snapshot.review.agent]: snapshot.review.model ?? "",
+			});
+		}
 		return snapshot;
 	}, [token]);
 
@@ -255,6 +273,34 @@ export function SettingsPanel({
 			cancelled = true;
 		};
 	}, [refreshSettings, settings]);
+
+	useEffect(() => {
+		if (reviewAgent !== "codex") return;
+		let active = true;
+		void requestJson<{ models?: unknown }>(token, "/api/settings/codex-models")
+			.then((snapshot) => {
+				if (!active) return;
+				setCodexModels(
+					Array.isArray(snapshot.models)
+						? snapshot.models.filter(
+								(model): model is CodexModelChoice =>
+									typeof model === "object" &&
+									model !== null &&
+									"id" in model &&
+									typeof model.id === "string" &&
+									"label" in model &&
+									typeof model.label === "string",
+							)
+						: [],
+				);
+			})
+			.catch(() => {
+				if (active) setCodexModels([]);
+			});
+		return () => {
+			active = false;
+		};
+	}, [reviewAgent, token]);
 
 	useEffect(() => {
 		if (!settings || initialPromptConsumed.current) return;
@@ -445,7 +491,10 @@ export function SettingsPanel({
 			);
 			await refreshSettings();
 			setReviewAgent(result.agent);
-			setReviewModel(result.model ?? "");
+			setReviewModels((models) => ({
+				...models,
+				[result.agent]: result.model ?? "",
+			}));
 			setStatus("Saved review agent");
 		} catch (reason: unknown) {
 			setStatus(errorMessage(reason));
@@ -647,17 +696,18 @@ export function SettingsPanel({
 												onChange={(event) => {
 													const value = controlValue(event);
 													setPromptAgent(
-														value === "omp" || value === "claude"
-															? value
-															: "default",
+														isReviewAgent(value) ? value : "default",
 													);
 												}}
 											>
 												<option value="default">
 													Default ({settings.review.agent})
 												</option>
-												<option value="omp">omp</option>
-												<option value="claude">claude</option>
+												{PROMPT_AGENT_NAMES.map((agent) => (
+													<option key={agent} value={agent}>
+														{agent}
+													</option>
+												))}
 											</NativeSelect>
 										</div>
 
@@ -744,13 +794,10 @@ export function SettingsPanel({
 													size="sm"
 													value={reviewAgent}
 													disabled={pending}
-													onChange={(event) =>
-														setReviewAgent(
-															controlValue(event) === "claude"
-																? "claude"
-																: "omp",
-														)
-													}
+													onChange={(event) => {
+														const value = controlValue(event);
+														if (isReviewAgent(value)) setReviewAgent(value);
+													}}
 												>
 													{settings.review.agents.map((agent) => (
 														<option key={agent} value={agent}>
@@ -771,10 +818,19 @@ export function SettingsPanel({
 													type="text"
 													className="h-8 min-w-0 flex-1"
 													value={reviewModel}
-													disabled={pending}
-													onChange={(event) =>
-														setReviewModel(controlValue(event))
+													placeholder={
+														reviewAgent === "codex"
+															? "Codex CLI default"
+															: undefined
 													}
+													disabled={pending}
+													onChange={(event) => {
+														const value = controlValue(event);
+														setReviewModels((models) => ({
+															...models,
+															[reviewAgent]: value,
+														}));
+													}}
 												/>
 												<NativeSelect
 													className="max-w-full shrink-0"
@@ -782,22 +838,57 @@ export function SettingsPanel({
 													aria-label="Model quick pick"
 													size="sm"
 													value={
-														MODEL_QUICK_PICKS.includes(reviewModel)
-															? reviewModel
-															: ""
+														reviewAgent === "codex"
+															? reviewModel.trim()
+																? reviewModel
+																: ""
+															: reviewAgent === "claude" &&
+																	MODEL_QUICK_PICKS.includes(reviewModel)
+																? reviewModel
+																: ""
 													}
 													disabled={pending}
 													onChange={(event) => {
 														const value = controlValue(event);
-														if (value !== "") setReviewModel(value);
+														if (reviewAgent === "codex") {
+															setReviewModels((models) => ({
+																...models,
+																[reviewAgent]: value,
+															}));
+														} else if (value !== "") {
+															setReviewModels((models) => ({
+																...models,
+																[reviewAgent]: value,
+															}));
+														}
 													}}
 												>
-													<option value="">Custom…</option>
-													{MODEL_QUICK_PICKS.map((model) => (
-														<option key={model} value={model}>
-															{model}
-														</option>
-													))}
+													{reviewAgent === "codex" ? (
+														<>
+															<option value="">Codex CLI default</option>
+															{codexModels.map((model) => (
+																<option key={model.id} value={model.id}>
+																	{model.label}
+																</option>
+															))}
+															{reviewModel.trim() !== "" &&
+																!codexModels.some(
+																	(model) => model.id === reviewModel,
+																) && (
+																	<option value={reviewModel}>Custom…</option>
+																)}
+														</>
+													) : (
+														<>
+															<option value="">Custom…</option>
+															{reviewAgent === "claude" &&
+																MODEL_QUICK_PICKS.map((model) => (
+																	<option key={model} value={model}>
+																		{model}
+																	</option>
+																))}
+														</>
+													)}
 												</NativeSelect>
 											</div>
 											<Button

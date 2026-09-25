@@ -33,7 +33,7 @@ const initialSettings: SettingsSnapshot = {
 	review: {
 		agent: "omp",
 		model: "claude-sonnet-4",
-		agents: ["omp", "claude"],
+		agents: ["omp", "claude", "codex"],
 	},
 };
 
@@ -65,6 +65,23 @@ function jsonResponse(value: unknown, status = 200): Response {
 		status,
 		headers: { "content-type": "application/json" },
 	});
+}
+
+function setControlValue(
+	element: HTMLInputElement | HTMLSelectElement | null,
+	value: string,
+	eventName: "change" | "input",
+): void {
+	if (!element) return;
+	if (element instanceof window.HTMLInputElement) {
+		Object.getOwnPropertyDescriptor(
+			window.HTMLInputElement.prototype,
+			"value",
+		)?.set?.call(element, value);
+	} else {
+		element.value = value;
+	}
+	element.dispatchEvent(new window.Event(eventName, { bubbles: true }));
 }
 
 test("keeps visible slot labels in order and shows active preset and latest version", () => {
@@ -322,15 +339,52 @@ test("disables unchanged saves and renders review agent options and model", () =
 	expect(markup).toContain('<option value="claude">claude</option>');
 	expect(markup).toContain('value="claude-sonnet-4"');
 	expect(markup).toContain('<select id="settings-model-quickpick"');
-	expect(markup).toContain('<option value="" selected="">Custom…</option>');
-	for (const model of MODEL_QUICK_PICKS) {
-		expect(markup).toContain(`<option value="${model}">${model}</option>`);
-	}
-	// The fixture's out-of-list model stays in the free-form input, and the
-	// derived quickpick value renders as the empty "Custom…" placeholder.
 	expect(markup).toMatch(
-		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="" selected="">Custom…<\/option>/,
+		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="" selected="">Custom…<\/option>\s*<\/select>/,
 	);
+	for (const model of MODEL_QUICK_PICKS) {
+		expect(markup).not.toContain(`<option value="${model}">`);
+	}
+});
+
+test("renders codex options for review and prompt agents", () => {
+	const markup = render();
+	expect(markup.split('<option value="codex">codex</option>').length - 1).toBe(
+		2,
+	);
+});
+
+test("keeps codex selected for review and prompt agents", () => {
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt,
+				}),
+			),
+		);
+		for (const id of ["#settings-agent", "#settings-prompt-agent"]) {
+			const select = container.querySelector<HTMLSelectElement>(id);
+			if (!select) throw new Error(`Missing select ${id}`);
+			act(() => {
+				select.value = "codex";
+				select.dispatchEvent(new window.Event("change", { bubbles: true }));
+			});
+			expect(container.querySelector<HTMLSelectElement>(id)?.value).toBe(
+				"codex",
+			);
+		}
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
 });
 
 test("styles prompt text like Skills with editor spacing", () => {
@@ -344,10 +398,10 @@ test("styles prompt text like Skills with editor spacing", () => {
 	);
 });
 
-test("quickpick and text input both reflect a listed model value", () => {
+test("quickpick and text input both reflect a listed Claude model", () => {
 	const settings: SettingsSnapshot = {
 		...initialSettings,
-		review: { ...initialSettings.review, model: "sonnet" },
+		review: { ...initialSettings.review, agent: "claude", model: "sonnet" },
 	};
 	const markup = renderToStaticMarkup(
 		createElement(SettingsPanel, {
@@ -358,12 +412,285 @@ test("quickpick and text input both reflect a listed model value", () => {
 		}),
 	);
 
-	// Both controls read the same reviewModel state: the input keeps the
-	// listed value and the quickpick selects it instead of "Custom…".
 	expect(markup).toContain('value="sonnet"');
 	expect(markup).toMatch(
 		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="">Custom…<\/option>\s*<option value="sonnet" selected="">sonnet<\/option>/,
 	);
+	for (const model of MODEL_QUICK_PICKS) {
+		expect(markup).toContain(`<option value="${model}"`);
+		expect(markup).toContain(`>${model}</option>`);
+	}
+});
+
+test("shows configured Codex model without Claude quick picks", () => {
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			agent: "codex",
+			model: "configured-codex-model",
+		},
+	};
+	const markup = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings: settings,
+			initialPrompt,
+		}),
+	);
+
+	expect(markup).toContain('<option value="codex" selected="">codex</option>');
+	expect(markup).toContain('value="configured-codex-model"');
+	expect(markup).toContain('placeholder="Codex CLI default"');
+	expect(markup).toMatch(
+		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="">Codex CLI default<\/option>\s*<option value="configured-codex-model" selected="">Custom…<\/option>/,
+	);
+	for (const model of MODEL_QUICK_PICKS) {
+		expect(markup).not.toContain(`<option value="${model}">`);
+	}
+});
+
+test("shows discovered Codex labels and saves the selected slug", async () => {
+	const originalFetch = globalThis.fetch;
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			agent: "codex",
+			model: "configured-codex-model",
+		},
+	};
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		calls.push({ url, init });
+		if (url.includes("/api/settings/codex-models")) {
+			return jsonResponse({
+				models: [
+					{ id: "gpt-6-astra", label: "GPT-6-Astra" },
+					{ id: "gpt-6-sol", label: "GPT-6-Sol" },
+					{ id: "gpt-6-luna", label: "GPT-6-Luna" },
+				],
+			});
+		}
+		if (init?.method === "POST")
+			return jsonResponse({ agent: "codex", model: "gpt-6-astra" });
+		return jsonResponse(settings);
+	}) as unknown as typeof fetch;
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt,
+				}),
+			),
+		);
+		await act(async () => {
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+		const quickpick = container.querySelector<HTMLSelectElement>(
+			"#settings-model-quickpick",
+		);
+		const model = container.querySelector<HTMLInputElement>("#settings-model");
+		const saveButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.includes("Save review agent"),
+		);
+		if (!quickpick || !model || !saveButton) {
+			throw new Error("Missing review model controls");
+		}
+		expect(
+			Array.from(quickpick.options, (option) => option.textContent),
+		).toEqual([
+			"Codex CLI default",
+			"GPT-6-Astra",
+			"GPT-6-Sol",
+			"GPT-6-Luna",
+			"Custom…",
+		]);
+		expect(quickpick.value).toBe("configured-codex-model");
+		expect(model.value).toBe("configured-codex-model");
+
+		await act(async () => {
+			setControlValue(model, "typed-codex-custom", "input");
+			await Bun.sleep(0);
+		});
+		expect(quickpick.value).toBe("typed-codex-custom");
+		expect(model.value).toBe("typed-codex-custom");
+
+		await act(async () => {
+			setControlValue(quickpick, "gpt-6-astra", "change");
+			await Bun.sleep(0);
+		});
+		expect(quickpick.value).toBe("gpt-6-astra");
+		expect(model.value).toBe("gpt-6-astra");
+		await act(async () => {
+			saveButton.click();
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+		const saveRequest = calls.find(
+			(call) =>
+				call.init?.method === "POST" &&
+				call.url.includes("/api/settings/review"),
+		);
+		expect(JSON.parse(String(saveRequest?.init?.body))).toEqual({
+			agent: "codex",
+			model: "gpt-6-astra",
+		});
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("keeps unsaved models isolated when switching review agents", async () => {
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: { ...initialSettings.review, agent: "claude", model: "sonnet" },
+	};
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt,
+				}),
+			),
+		);
+		const agent = container.querySelector<HTMLSelectElement>("#settings-agent");
+		const model = container.querySelector<HTMLInputElement>("#settings-model");
+		const quickpick = container.querySelector<HTMLSelectElement>(
+			"#settings-model-quickpick",
+		);
+		if (!agent || !model || !quickpick) {
+			throw new Error("Missing review model controls");
+		}
+		const changeValue = async (
+			element: HTMLInputElement | HTMLSelectElement,
+			value: string,
+			eventName: "change" | "input",
+		) => {
+			await act(async () => {
+				setControlValue(element, value, eventName);
+				await Bun.sleep(0);
+			});
+		};
+
+		expect(model.value).toBe("sonnet");
+		expect(quickpick.value).toBe("sonnet");
+		await changeValue(agent, "codex", "change");
+		expect(model.value).toBe("");
+		expect(model.placeholder).toBe("Codex CLI default");
+		expect(quickpick.value).toBe("");
+		expect(
+			Array.from(quickpick.options, (option) => option.textContent),
+		).toEqual(["Codex CLI default"]);
+
+		await changeValue(model, "configured-codex-model", "input");
+		expect(quickpick.value).toBe("configured-codex-model");
+		await changeValue(agent, "claude", "change");
+		expect(model.value).toBe("sonnet");
+		expect(model.placeholder).toBe("");
+		expect(quickpick.value).toBe("sonnet");
+
+		await changeValue(agent, "codex", "change");
+		expect(model.value).toBe("configured-codex-model");
+		expect(quickpick.value).toBe("configured-codex-model");
+		await changeValue(quickpick, "", "change");
+		expect(model.value).toBe("");
+		expect(model.placeholder).toBe("Codex CLI default");
+		expect(
+			Array.from(quickpick.options, (option) => option.textContent),
+		).toEqual(["Codex CLI default"]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("saving Codex CLI default omits model from review settings request", async () => {
+	const originalFetch = globalThis.fetch;
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			agent: "codex",
+			model: "configured-codex-model",
+		},
+	};
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		calls.push({ url: String(input), init });
+		if (init?.method === "POST") return jsonResponse({ agent: "codex" });
+		return jsonResponse(settings);
+	}) as unknown as typeof fetch;
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt,
+				}),
+			),
+		);
+		const quickpick = container.querySelector<HTMLSelectElement>(
+			"#settings-model-quickpick",
+		);
+		const model = container.querySelector<HTMLInputElement>("#settings-model");
+		const saveButton = Array.from(container.querySelectorAll("button")).find(
+			(button) => button.textContent?.includes("Save review agent"),
+		);
+		if (!quickpick || !model || !saveButton) {
+			throw new Error("Missing review model save controls");
+		}
+
+		await act(async () => {
+			setControlValue(quickpick, "", "change");
+			await Bun.sleep(0);
+		});
+		expect(model.value).toBe("");
+		await act(async () => {
+			saveButton.click();
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+		});
+
+		const saveRequest = calls.find(
+			(call) =>
+				call.init?.method === "POST" &&
+				call.url.includes("/api/settings/review"),
+		);
+		expect(JSON.parse(String(saveRequest?.init?.body))).toEqual({
+			agent: "codex",
+		});
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
 });
 
 test("falls back to Claude when the settings snapshot omits the review agent", () => {
@@ -424,7 +751,6 @@ test("keeps settings controls reachable in responsive bounded layout", () => {
 	}
 	expect(markup).toContain('<option value="default">default (active)</option>');
 	expect(markup).toContain('<option value="omp" selected="">omp</option>');
-	expect(markup).toContain('<option value="sonnet">sonnet</option>');
 });
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 

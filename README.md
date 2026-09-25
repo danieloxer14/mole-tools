@@ -28,7 +28,7 @@ The default Ollama URL is `http://localhost:11434`. Start the server before
 using generation features.
 
 `review` does **not** use `models` or Ollama. It uses its separately configured
-OMP or Claude review agent; see [Review-agent setup](#review-agent-setup).
+OMP, Claude, or Codex review agent; see [Review-agent setup](#review-agent-setup).
 
 ### Bootstrap Configuration
 
@@ -77,9 +77,10 @@ Every route is **required** and must reference an existing provider key. If a ro
 #### Review — Agent and Model Selection
 
 Review-agent selection is independent of `models`. `review.model` is passed to
-the selected review agent as `<agent> --model <name>`; it does not configure
-Ollama. Omit `review` to use the default Claude agent, its default `claude`
-binary, and Claude's own current default model.
+the selected review agent (`omp --model <name>`, `claude --model <name>`, or
+`codex exec -m <name>`); it does not configure Ollama. Omit `review` to use the
+default Claude agent, its default `claude` binary, and Claude's own current
+default model.
 
 ```jsonc
 // OMP: choose an OMP-visible model name.
@@ -107,16 +108,31 @@ binary, and Claude's own current default model.
 }
 ```
 
+```jsonc
+// Codex: choose a Codex model name.
+{ "review": { "agent": "codex", "model": "gpt-5.2", "layerTimeoutSeconds": 600, "largeFileLineThreshold": 800 } }
+```
+
 `review.binary` replaces only the executable name or path. It is useful for a
-non-default installation. `review.model` selects the model for either review
-agent: mole-tools forwards it as `omp --model <name>` or
-`claude --model <name>`.
+non-default installation. `review.model` selects the model for any review
+agent: mole-tools forwards it as `omp --model <name>`,
+`claude --model <name>`, or `codex exec -m <name>`.
 
 The selected model is used for both layer generation and chat. Omit
-`review.model` to retain the selected agent's configured default. Both agents
-are started with read-only inspection tools (`read`, `grep`, `glob`, `bash`) for
-chat; Bash is limited by prompt policy to read-only commands, and prompt edits
-cannot grant write access to code under review.
+`review.model` to retain the selected agent's configured default. OMP and
+Claude are started with read-only inspection tools (`read`, `grep`, `glob`,
+`bash`) for chat; Bash is limited by prompt policy to read-only commands.
+Codex chat turns run in Codex's `read-only` sandbox. Every Codex invocation
+also marks the review working directory as `untrusted`, so project-local
+Codex configuration cannot grant reviewed code access to local MCP commands
+or broader workspace/network permissions. Codex layer and comment-from-chat
+turns run in `workspace-write` with the review output directory added via
+`--add-dir`; in those turns the review worktree is also writable to Codex, so
+prompt policy is the guard, as for OMP's `bash` tool. This write access is an
+intentional exception to the read-only review boundary, limited to turns that
+Claude quick picks use static names; Codex quick picks are discovered from the
+selected Codex CLI's `codex debug models` catalog. You can still type any model,
+or leave the model blank to use Codex's configured default.
 
 Review agent and model can also be selected from the **Settings** dialog's
 **Prompts** tab. Changes apply to the next layer run or chat turn; use
@@ -126,7 +142,7 @@ agent is **Default** inherits the global Review agent/model above; a version
 with an explicit agent uses that agent and its version model (or no `--model`
 flag when that model is blank). Chats keep the agent/model they were bound to
 when created, even after the global setting or prompt version changes. For a
-non-default agent kind, mole-tools uses the `omp` or `claude` binary from
+non-default agent kind, mole-tools uses the `omp`, `claude`, or `codex` binary from
 `PATH`; `review.binary` applies only when the selected agent is the configured
 default.
 
@@ -152,7 +168,7 @@ default.
     "baseDir": "~/repos"
   },
   "review": {
-    "agent": "claude",                       // "omp" or "claude"; default "claude"
+    "agent": "claude",                       // "omp", "claude", or "codex"; default "claude"
     "binary": "claude",                     // optional binary override
     "model": "review-model",                // optional model for the selected agent
     "layerTimeoutSeconds": 600,
@@ -195,9 +211,9 @@ default.
 | `autoReviewer.username` | Enables the "add auto-reviewer?" prompt during merge-request generation. |
 | `dynamicEnvRepos` + `dynamicEnvScript` | After creating an MR, repos listed here get an optional dynamic-environment handoff. |
 | `worktreePrune.baseDir` | Persisted default base directory scanned by `worktree-prune`. |
-| `review.agent` | Selects the independent review adapter (`omp` or `claude`); defaults to `claude`. |
+| `review.agent` | Selects the independent review adapter (`omp`, `claude`, or `codex`); defaults to `claude`. |
 | `review.binary` | Optional executable name/path. Defaults to selected agent name. |
-| `review.model` | Optional model name for OMP or Claude, forwarded as `<agent> --model <name>`. |
+| `review.model` | Optional model name for the selected review agent, forwarded as `omp --model <name>`, `claude --model <name>`, or `codex exec -m <name>`. |
 | `review.layerTimeoutSeconds` | Maximum seconds for one layer-guide run; default `600`. |
 | `review.largeFileLineThreshold` | Diff-line count above which a file starts collapsed; default `800`. |
 | `review.maxLayerPromptBytes` | Maximum UTF-8 bytes sent to one layer-guide run; default `100000`. |
@@ -462,6 +478,17 @@ Claude is the default review agent. Set `review.model` to any model name
 accepted by `claude --model`; mole-tools forwards it for both layer generation
 and chat. Omit it to use Claude Code's normal current default model.
 
+**Codex CLI**
+
+```bash
+codex --version
+codex login
+codex login status
+```
+
+Set `review.model` to a model accepted by `codex exec -m`; omit it to use
+Codex's configured default.
+
 **Local URL and token.** The CLI binds the server to `127.0.0.1` on an
 ephemeral port and prints a URL like
 `http://127.0.0.1:<port>/?t=<random-token>`. Token is minted per run and is
@@ -473,14 +500,17 @@ suppresses browser launch; it does not change server or token behavior.
 **Safe worktree lifecycle.** Review prefers current directory when its
 `origin` matches MR. Otherwise it reuses or creates a cache clone under
 `~/.config/mole-tools/repos/`, then creates detached worktree under
-`~/.config/mole-tools/worktrees/<host>/<project>/mr-<iid>/` at MR head. Chat
-agent can read only; layer agent writes only review output outside worktree.
-Review never edits code under review and never auto-removes worktree when CLI
-exits. Worktree persists for restart and can be cleaned deliberately with
+`~/.config/mole-tools/worktrees/<host>/<project>/mr-<iid>/` at MR head. Layer
+output lives outside the worktree. OMP and Claude chat use read-only inspection
+tools; Codex chat uses a `read-only` sandbox. Codex layer and comment-from-chat
+turns run in `workspace-write`, so the review worktree is also writable; prompt
+policy is the guard against editing code under review. The worktree persists
+for restart and is not auto-removed when the CLI exits; clean deliberately with
 `mole-tools worktree-prune` after checking path and any local work.
 
-**Configuration.** `review.agent` selects `claude` (default) or `omp`; set
-`review.binary` for a non-default executable and `review.model` for either OMP or Claude.
+**Configuration.** `review.agent` selects `claude` (default), `omp`, or
+`codex`; set `review.binary` for a non-default executable and `review.model`
+for any of them.
 Layer output and chat state persist per MR below
 `~/.config/mole-tools/reviews/`. Requires authenticated `glab` and selected
 agent binary on `PATH`. See

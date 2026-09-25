@@ -15,19 +15,17 @@ import {
 	ReviewStateSchema,
 } from "./state";
 
-export const ChatEntrySchema = z
-	.object({
-		role: z.string().min(1),
-		text: z.string(),
-		tags: z.array(ChatTagSchema),
-		skills: z.array(SkillRefSchema).default([]),
-		sourceText: z.string().optional(),
-		skillInvocations: z.array(SkillTokenSchema).optional(),
-		at: z.string().min(1),
-		sessionId: z.string().min(1).nullable(),
-		partial: z.boolean().default(false),
-	})
-	.strict();
+export const ChatEntrySchema = z.object({
+	role: z.string().min(1),
+	text: z.string(),
+	tags: z.array(ChatTagSchema),
+	skills: z.array(SkillRefSchema).default([]),
+	sourceText: z.string().optional(),
+	skillInvocations: z.array(SkillTokenSchema).optional(),
+	at: z.string().min(1),
+	sessionId: z.string().min(1).nullable(),
+	partial: z.boolean().default(false),
+});
 export type ChatEntry = z.infer<typeof ChatEntrySchema>;
 export type ChatEntryWithOptimistic = ChatEntry & { optimistic?: true };
 

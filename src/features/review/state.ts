@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+	PROMPT_AGENT_NAMES,
+	type PromptAgentName,
+} from "../../adapters/prompts/frontmatter";
 
 export const CHAT_TITLE_MAX = 48;
 
@@ -16,7 +20,7 @@ export const ChatMetaSchema = z.object({
 	title: z.string().default(""),
 	sessionId: z.string().min(1).nullable().default(null),
 	createdAt: z.string().min(1),
-	agent: z.enum(["omp", "claude"]).nullable().default(null),
+	agent: z.enum(PROMPT_AGENT_NAMES).nullable().default(null),
 	model: z.string().min(1).nullable().default(null),
 });
 export type ChatMeta = z.infer<typeof ChatMetaSchema>;
@@ -144,7 +148,7 @@ export function deriveChatTitle(message: string): string {
 export function createChatMeta(
 	now: string = new Date().toISOString(),
 	binding: {
-		agent: "omp" | "claude" | null;
+		agent: PromptAgentName | null;
 		model: string | null;
 	} = { agent: null, model: null },
 ): ChatMeta {

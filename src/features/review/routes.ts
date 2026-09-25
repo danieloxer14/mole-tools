@@ -2,6 +2,11 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
+	type CodexModelChoice,
+	discoverCodexModels,
+} from "../../adapters/agent/codex-models";
+import { type AgentExec, defaultAgentExec } from "../../adapters/agent/exec";
+import {
 	type ColorTheme,
 	ColorThemeSchema,
 	type Config,
@@ -14,6 +19,7 @@ import {
 	PromptNameSchema,
 } from "../../adapters/prompts/defaults";
 import {
+	formatAgentNames,
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
 } from "../../adapters/prompts/frontmatter";
@@ -141,12 +147,11 @@ export interface ReviewRoutesOptions {
 				diff?: { ignore?: string[] };
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
-					largeFileLineThreshold?: number;
-					agent?: "omp" | "claude";
+					agent?: PromptAgentName;
+					binary?: string;
 					model?: string;
+					largeFileLineThreshold?: number;
 				};
-				prompts?: Record<string, string>;
-				appearance?: { colorTheme?: ColorTheme };
 		  };
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
@@ -155,9 +160,10 @@ export interface ReviewRoutesOptions {
 	explainPromptText?: string;
 	persistConfig?: (partial: Partial<Config>) => Promise<void>;
 	createReviewAgent?: (override?: {
-		agent?: "omp" | "claude";
+		agent?: PromptAgentName;
 		model?: string;
 	}) => ReviewAgent;
+	codexModelExec?: AgentExec;
 }
 
 export interface ReviewApiState extends ReviewState {
@@ -533,6 +539,7 @@ export function createReviewRoutes(
 	let currentExpandedDiff = options.expandedDiff;
 	let currentMr = options.mr;
 	let initialLayerRunAllowed = true;
+	let codexModelChoicesPromise: Promise<CodexModelChoice[]> | null = null;
 	let fallbackDiscussions = [...(options.discussions ?? [])];
 	const threshold =
 		options.largeFileLineThreshold ??
@@ -549,11 +556,8 @@ export function createReviewRoutes(
 		} as Partial<Record<PromptName, string>>,
 		review: {
 			agent:
-				(
-					options.config as
-						| { review?: { agent?: "omp" | "claude" } }
-						| undefined
-				)?.review?.agent ?? "claude",
+				(options.config as { review?: { agent?: PromptAgentName } } | undefined)
+					?.review?.agent ?? "claude",
 			model: (options.config as { review?: { model?: string } } | undefined)
 				?.review?.model,
 		},
@@ -612,6 +616,25 @@ export function createReviewRoutes(
 		const versions = await listVersions(slot, preset, promptDirOption());
 		return versions.at(-1) ?? 1;
 	}
+	function codexModelChoices(): Promise<CodexModelChoice[]> {
+		if (!codexModelChoicesPromise) {
+			const configuredReview = options.config?.review;
+			const binary =
+				configuredReview?.agent === "codex"
+					? (configuredReview.binary ?? "codex")
+					: "codex";
+			codexModelChoicesPromise = discoverCodexModels(
+				binary,
+				options.worktreePath ?? process.cwd(),
+				options.codexModelExec ?? defaultAgentExec,
+			).catch(() => []);
+		}
+		return codexModelChoicesPromise;
+	}
+
+	async function codexModelsSnapshot(): Promise<Response> {
+		return jsonResponse({ models: await codexModelChoices() });
+	}
 
 	async function settingsSnapshot(): Promise<Response> {
 		try {
@@ -636,7 +659,7 @@ export function createReviewRoutes(
 				review: {
 					agent: settings.review.agent,
 					model: settings.review.model,
-					agents: ["omp", "claude"],
+					agents: [...PROMPT_AGENT_NAMES],
 				},
 			});
 		} catch (error) {
@@ -654,7 +677,7 @@ export function createReviewRoutes(
 
 		const parsed = z
 			.object({
-				agent: z.enum(["omp", "claude"]),
+				agent: z.enum(PROMPT_AGENT_NAMES),
 				model: z.string().optional(),
 			})
 			.safeParse(await parseBody(request));
@@ -750,7 +773,12 @@ export function createReviewRoutes(
 					!PROMPT_AGENT_NAMES.includes(rawAgent as PromptAgentName))
 			) {
 				return jsonResponse(
-					{ error: "Prompt agent must be omp, claude, or null" },
+					{
+						error: `Prompt agent must be ${formatAgentNames([
+							...PROMPT_AGENT_NAMES,
+							"null",
+						])}`,
+					},
 					400,
 				);
 			}
@@ -2310,6 +2338,9 @@ export function createReviewRoutes(
 			if (request.method === "GET" && url.pathname === "/api/diff") {
 				return expandedFile(request);
 			}
+			if (request.method === "POST" && url.pathname === "/api/layers/observe") {
+				return layerStream(false);
+			}
 			if (
 				request.method === "POST" &&
 				(url.pathname === "/api/layers/regenerate" ||
@@ -2389,6 +2420,12 @@ export function createReviewRoutes(
 			}
 			if (request.method === "GET" && url.pathname === "/api/settings") {
 				return settingsSnapshot();
+			}
+			if (
+				request.method === "GET" &&
+				url.pathname === "/api/settings/codex-models"
+			) {
+				return codexModelsSnapshot();
 			}
 			if (
 				request.method === "POST" &&
