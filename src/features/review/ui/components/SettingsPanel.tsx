@@ -524,10 +524,7 @@ export function SettingsPanel({
 		<section className="flex h-full min-h-0 flex-col" aria-busy={pending}>
 			<header className="flex items-start justify-between border-b px-6 py-4">
 				<div>
-					<p className="text-xs uppercase tracking-wider text-muted-foreground">
-						Review settings
-					</p>
-					<h2 className="text-lg font-semibold">Settings</h2>
+					<h2 className="text-2xl font-semibold">Settings</h2>
 				</div>
 			</header>
 			<Tabs defaultValue="prompts" className="min-h-0 flex-1 gap-0">
