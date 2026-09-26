@@ -1,4 +1,5 @@
 import {
+	Check,
 	ChevronDown,
 	FileText,
 	Layers,
@@ -394,19 +395,30 @@ export function LayerPane({
 										>
 											{layer.title}
 										</button>
-										<Badge
-											variant="secondary"
-											className={
-												layerState === "done"
-													? "bg-success/15 text-success"
-													: layerState === "stale"
-														? "bg-warning/15 text-warning"
-														: undefined
-											}
-											data-layer-state={layerState}
-										>
-											{layer.stale ? "Stale" : layer.done ? "Done" : "Open"}
-										</Badge>
+										{layerState === "stale" ? (
+											<Badge
+												variant="secondary"
+												className="bg-warning/15 text-warning"
+												data-layer-state="stale"
+											>
+												Stale
+											</Badge>
+										) : (
+											<span
+												role="img"
+												aria-label={layerState === "done" ? "Done" : "Open"}
+												data-layer-state={layerState}
+												className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full ${
+													layerState === "done"
+														? "bg-success text-success-foreground"
+														: "bg-secondary"
+												}`}
+											>
+												{layerState === "done" && (
+													<Check className="size-3" aria-hidden />
+												)}
+											</span>
+										)}
 									</div>
 									<CollapsibleContent
 										keepMounted

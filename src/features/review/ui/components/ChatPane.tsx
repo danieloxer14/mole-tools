@@ -8,7 +8,6 @@ import {
 	Loader2,
 	Plus,
 	SendHorizontal,
-	Settings,
 	Sparkles,
 	Square,
 	Wrench,
@@ -95,7 +94,6 @@ export interface ChatPaneProps {
 	activeChatId: string | null;
 	onSelectChat: (chatId: string) => void;
 	onNewChat: () => void;
-	onOpenSettings: () => void;
 	onOpenSkillsSettings?: () => void;
 	creatingChat?: boolean;
 	draft: string;
@@ -291,7 +289,6 @@ export function ChatPane({
 	activeChatId,
 	onSelectChat,
 	onNewChat,
-	onOpenSettings,
 	onOpenSkillsSettings,
 	creatingChat = false,
 	draft,
@@ -499,13 +496,6 @@ export function ChatPane({
 							onClick={onNewChat}
 						>
 							<Plus aria-hidden />
-						</IconButton>
-						<IconButton
-							label="Settings"
-							tooltip="Settings"
-							onClick={onOpenSettings}
-						>
-							<Settings aria-hidden />
 						</IconButton>
 					</div>
 				</div>
@@ -764,7 +754,7 @@ export function ChatPane({
 					onChange={onDraftChange}
 					onKeyDown={handleKeyDown}
 					skills={skills}
-					onOpenSkillsSettings={onOpenSkillsSettings ?? onOpenSettings}
+					onOpenSkillsSettings={onOpenSkillsSettings}
 					pickerRequest={0}
 				/>
 				<div className="flex min-w-0 items-center justify-between gap-2">

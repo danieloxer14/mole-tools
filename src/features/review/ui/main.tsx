@@ -1929,173 +1929,175 @@ function ReviewApp() {
 
 	return (
 		<main
-			className="grid h-screen w-screen min-h-0 min-w-0 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)] overflow-hidden bg-background text-foreground"
-			ref={reviewShell}
+			className="flex h-screen w-screen min-h-0 min-w-0 flex-col overflow-hidden bg-background text-foreground"
 			style={reviewShellStyle}
 		>
-			<LayerPane
-				state={data}
-				files={files}
-				selectedPath={selectedPath}
-				onSelectFile={selectFile}
-				onSelectLayer={selectLayer}
-				onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
-				layerAction={layerAction}
-				actionError={progressError}
-				externallyDisabled={refreshing}
-				onRegenerate={() => runLayerAction("regenerate")}
-				onRetry={() => runLayerAction("retry")}
-			/>
-			<hr
-				aria-label="Resize review layers column"
-				aria-orientation="vertical"
-				aria-valuemax={leftColumnMaximum}
-				aria-valuemin={columnMinimums.left}
-				aria-valuenow={columnWidths.left}
-				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
-				onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
-				onPointerCancel={splitterResize.onPointerEnd}
-				onPointerDown={(event) =>
-					splitterResize.onPointerDown(event, "left", columnWidths.left)
-				}
-				onPointerMove={splitterResize.onPointerMove}
-				onPointerUp={splitterResize.onPointerEnd}
-				onLostPointerCapture={splitterResize.onLostPointerCapture}
-				tabIndex={0}
-			/>
-			<section className="flex min-h-0 min-w-0 flex-col">
-				<div className="flex min-h-0 max-h-[40vh] shrink-0 flex-col border-b bg-sidebar">
-					<MrHeader
-						mr={data.mr}
-						headSha={data.revision.headSha}
-						filesChanged={changedFileTotal}
-						insertions={lineTotals.insertions}
-						deletions={lineTotals.deletions}
-						approval={data.approval ?? null}
-						approvalLoading={approvalLoading}
-						approvalAction={approvalAction}
-						onApprovalAction={handleApprovalAction}
-						freshness={freshness}
-						refreshing={refreshing}
-						layerGenerating={layerAction !== null}
-						onRefresh={refreshReview}
-					/>
-					<Toasts toasts={toasts} onDismiss={dismissToast} />
-					<ChangedFiles
-						files={data.diff}
-						viewedFiles={data.viewedFiles}
-						selectedPath={selectedPath}
-						onSelectFile={selectFile}
-						onViewedChange={(paths, viewed) => {
-							saveProgress({
-								viewedFiles: { paths, viewed },
-							});
-						}}
-						showWhitespaceChanges={data.showWhitespaceChanges}
-						whitespaceChanging={whitespaceChanging}
-						syncing={syncing}
-						refreshing={refreshing}
-						onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
-					/>
-				</div>
-				<DiffView
-					key={selectedPath ?? "empty"}
-					file={selectedFile}
-					mode={diffMode}
-					viewMode={selectedViewMode}
-					largeFileLineThreshold={data.largeFileLineThreshold}
-					fileContents={fileContents}
-					fileContentsError={fileContentsError}
-					discussions={data.discussions}
-					collapsedDiscussionIds={data.collapsedDiscussionIds}
-					onCollapsedDiscussionIdsChange={saveCollapsedDiscussionIds}
-					onExplainDiscussion={explainDiscussion}
-					explainDisabled={creatingChat}
-					drafts={data.drafts}
-					onModeChange={setDiffMode}
-					wholeFile={selectedWholeFile}
-					onWholeFileChange={changeWholeFile}
-					onViewModeChange={changeViewMode}
-					viewed={
-						selectedPath !== null && data.viewedFiles.includes(selectedPath)
-					}
-					onViewedChange={(viewed) => {
-						if (selectedPath === null) return;
-						saveProgress({
-							viewedFile: { path: selectedPath, viewed },
-						});
-					}}
-					onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
-					onLineSelection={handleLineSelection}
-					onCommentSelection={createCommentDraft}
-					onMarkdownTag={handleMarkdownTag}
-					onFileTag={handleFileTag}
-					onMarkdownComment={createMarkdownCommentDraft}
-					onCancelDraft={cancelCommentDraft}
-					onEditDraft={updateCommentDraft}
-					onSendDraft={sendCommentDraft}
-					onRetryDraft={retryCommentDraft}
-					fromChat={{
-						availability: activeFromChatAvailability,
-						generations: draftGenerations,
-						onGenerate: generateFromChat,
-						onStop: stopFromChat,
-					}}
-				/>
-			</section>
-			<hr
-				aria-label="Resize chat column"
-				aria-orientation="vertical"
-				aria-valuemax={rightColumnMaximum}
-				aria-valuemin={columnMinimums.right}
-				aria-valuenow={columnWidths.right}
-				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
-				onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
-				onPointerCancel={splitterResize.onPointerEnd}
-				onPointerDown={(event) =>
-					splitterResize.onPointerDown(event, "right", columnWidths.right)
-				}
-				onPointerMove={splitterResize.onPointerMove}
-				onPointerUp={splitterResize.onPointerEnd}
-				onLostPointerCapture={splitterResize.onLostPointerCapture}
-				tabIndex={0}
-			/>
-			<ChatPane
-				skills={skills}
-				transcript={activeChat.entries}
-				tags={activeChat.tags}
-				discussions={generalDiscussions(data.discussions)}
-				onExplainDiscussion={explainDiscussion}
-				explainDisabled={creatingChat}
-				streamingSegments={activeChat.streamingSegments}
-				tools={activeChat.tools}
-				error={activeChat.error ?? commentError}
-				sending={activeChat.sending}
-				busy={activeChatBusy}
-				stopping={activeChat.stopping}
-				chats={chatSummaries}
-				activeChatId={activeChatId}
-				onSelectChat={handleSelectChat}
-				onNewChat={handleNewChat}
+			<MrHeader
+				mr={data.mr}
+				headSha={data.revision.headSha}
+				filesChanged={changedFileTotal}
+				insertions={lineTotals.insertions}
+				deletions={lineTotals.deletions}
+				approval={data.approval ?? null}
+				approvalLoading={approvalLoading}
+				approvalAction={approvalAction}
+				onApprovalAction={handleApprovalAction}
+				freshness={freshness}
+				refreshing={refreshing}
+				layerGenerating={layerAction !== null}
+				onRefresh={refreshReview}
 				onOpenSettings={() => {
 					setSettingsInitialTab("prompts");
 					setSettingsOpen(true);
 				}}
-				onOpenSkillsSettings={() => {
-					setSettingsInitialTab("skills");
-					setSettingsOpen(true);
-				}}
-				creatingChat={creatingChat}
-				draft={activeChat.draft}
-				onDraftChange={(value) => {
-					if (activeChatId) patchChat(activeChatId, { draft: value });
-				}}
-				onSend={handleChatSend}
-				onStop={handleChatStop}
-				onRemoveTag={removeChatTag}
-				onClearTags={clearTags}
-				onOpenFileRef={openFileRef}
 			/>
+			<div
+				className="grid min-h-0 min-w-0 flex-1 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)]"
+				ref={reviewShell}
+			>
+				<LayerPane
+					state={data}
+					files={files}
+					selectedPath={selectedPath}
+					onSelectFile={selectFile}
+					onSelectLayer={selectLayer}
+					onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
+					layerAction={layerAction}
+					actionError={progressError}
+					externallyDisabled={refreshing}
+					onRegenerate={() => runLayerAction("regenerate")}
+					onRetry={() => runLayerAction("retry")}
+				/>
+				<hr
+					aria-label="Resize review layers column"
+					aria-orientation="vertical"
+					aria-valuemax={leftColumnMaximum}
+					aria-valuemin={columnMinimums.left}
+					aria-valuenow={columnWidths.left}
+					className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
+					onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
+					onPointerCancel={splitterResize.onPointerEnd}
+					onPointerDown={(event) =>
+						splitterResize.onPointerDown(event, "left", columnWidths.left)
+					}
+					onPointerMove={splitterResize.onPointerMove}
+					onPointerUp={splitterResize.onPointerEnd}
+					onLostPointerCapture={splitterResize.onLostPointerCapture}
+				/>
+				<section className="flex min-h-0 min-w-0 flex-col">
+					<div className="flex min-h-0 max-h-[40vh] shrink-0 flex-col border-b bg-sidebar">
+						<Toasts toasts={toasts} onDismiss={dismissToast} />
+						<ChangedFiles
+							files={data.diff}
+							viewedFiles={data.viewedFiles}
+							selectedPath={selectedPath}
+							onSelectFile={selectFile}
+							onViewedChange={(paths, viewed) => {
+								saveProgress({
+									viewedFiles: { paths, viewed },
+								});
+							}}
+							showWhitespaceChanges={data.showWhitespaceChanges}
+							whitespaceChanging={whitespaceChanging}
+							syncing={syncing}
+							refreshing={refreshing}
+							onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
+						/>
+					</div>
+					<DiffView
+						key={selectedPath ?? "empty"}
+						file={selectedFile}
+						mode={diffMode}
+						viewMode={selectedViewMode}
+						largeFileLineThreshold={data.largeFileLineThreshold}
+						fileContents={fileContents}
+						fileContentsError={fileContentsError}
+						discussions={data.discussions}
+						collapsedDiscussionIds={data.collapsedDiscussionIds}
+						onCollapsedDiscussionIdsChange={saveCollapsedDiscussionIds}
+						onExplainDiscussion={explainDiscussion}
+						explainDisabled={creatingChat}
+						drafts={data.drafts}
+						onModeChange={setDiffMode}
+						wholeFile={selectedWholeFile}
+						onWholeFileChange={changeWholeFile}
+						onViewModeChange={changeViewMode}
+						viewed={
+							selectedPath !== null && data.viewedFiles.includes(selectedPath)
+						}
+						onViewedChange={(viewed) => {
+							if (selectedPath === null) return;
+							saveProgress({
+								viewedFile: { path: selectedPath, viewed },
+							});
+						}}
+						onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
+						onLineSelection={handleLineSelection}
+						onCommentSelection={createCommentDraft}
+						onMarkdownTag={handleMarkdownTag}
+						onFileTag={handleFileTag}
+						onMarkdownComment={createMarkdownCommentDraft}
+						onCancelDraft={cancelCommentDraft}
+						onEditDraft={updateCommentDraft}
+						onSendDraft={sendCommentDraft}
+						onRetryDraft={retryCommentDraft}
+						fromChat={{
+							availability: activeFromChatAvailability,
+							generations: draftGenerations,
+							onGenerate: generateFromChat,
+							onStop: stopFromChat,
+						}}
+					/>
+				</section>
+				<hr
+					aria-label="Resize chat column"
+					aria-orientation="vertical"
+					aria-valuemax={rightColumnMaximum}
+					aria-valuemin={columnMinimums.right}
+					aria-valuenow={columnWidths.right}
+					className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
+					onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
+					onPointerCancel={splitterResize.onPointerEnd}
+					onPointerDown={(event) =>
+						splitterResize.onPointerDown(event, "right", columnWidths.right)
+					}
+					onPointerMove={splitterResize.onPointerMove}
+					onPointerUp={splitterResize.onPointerEnd}
+					onLostPointerCapture={splitterResize.onLostPointerCapture}
+				/>
+				<ChatPane
+					skills={skills}
+					transcript={activeChat.entries}
+					tags={activeChat.tags}
+					discussions={generalDiscussions(data.discussions)}
+					onExplainDiscussion={explainDiscussion}
+					explainDisabled={creatingChat}
+					streamingSegments={activeChat.streamingSegments}
+					tools={activeChat.tools}
+					error={activeChat.error ?? commentError}
+					sending={activeChat.sending}
+					busy={activeChatBusy}
+					stopping={activeChat.stopping}
+					chats={chatSummaries}
+					activeChatId={activeChatId}
+					onSelectChat={handleSelectChat}
+					onNewChat={handleNewChat}
+					onOpenSkillsSettings={() => {
+						setSettingsInitialTab("skills");
+						setSettingsOpen(true);
+					}}
+					creatingChat={creatingChat}
+					draft={activeChat.draft}
+					onDraftChange={(value) => {
+						if (activeChatId) patchChat(activeChatId, { draft: value });
+					}}
+					onSend={handleChatSend}
+					onStop={handleChatStop}
+					onRemoveTag={removeChatTag}
+					onClearTags={clearTags}
+					onOpenFileRef={openFileRef}
+				/>
+			</div>
 			<Dialog
 				open={externalFile !== null}
 				onOpenChange={(open) => {
