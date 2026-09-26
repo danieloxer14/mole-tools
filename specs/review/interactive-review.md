@@ -159,6 +159,12 @@ The page has three working columns:
   line ranges, rendered-markdown block ranges, and whole files), composer,
   New chat button, chat switcher, and Stop.
 
+Both vertical splitters resize their side on primary-pointer drag, including
+captured movement outside the handle. Matching `pointerup`, `pointercancel`,
+lost pointer capture, or the first matching move without the primary button
+ends the drag; button-up hover after termination does not resize. Keyboard
+controls remain available.
+
 The centre column supports Inline and Side by side layouts. Shiki highlights
 source lines. Added lines use the new side, deleted lines use the old side, and
 line numbers are retained for both sides. Binary files show a stat line only.

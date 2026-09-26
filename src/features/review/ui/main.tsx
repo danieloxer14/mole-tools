@@ -2,7 +2,6 @@ import { Loader2, TriangleAlert, X } from "lucide-react";
 import {
 	type CSSProperties,
 	type KeyboardEvent,
-	type PointerEvent,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -73,6 +72,7 @@ import {
 } from "./review-refresh";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import { useSkills } from "./use-skills";
+import { useSplitterResize } from "./use-splitter-resize";
 
 import "./app.css";
 
@@ -343,13 +343,6 @@ function filePath(file: ParsedFileDiff): string {
 
 type ColumnWidths = Record<ReviewColumn, number>;
 
-interface ResizeSession {
-	column: ReviewColumn;
-	pointerId: number;
-	startClientX: number;
-	startWidth: number;
-}
-
 function centreColumnMinimumWidth(): number {
 	return window.innerWidth <= 1200 ? 450 : 500;
 }
@@ -416,7 +409,6 @@ function ReviewApp() {
 	const [columnWidths, setColumnWidths] =
 		useState<ColumnWidths>(columnMinimums);
 	const reviewShell = useRef<HTMLElement | null>(null);
-	const resizeSession = useRef<ResizeSession | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
@@ -527,36 +519,7 @@ function ReviewApp() {
 				centreColumnMinimumWidth(),
 		);
 	};
-	const handleSplitterPointerDown = (
-		event: PointerEvent<HTMLHRElement>,
-		column: ReviewColumn,
-	) => {
-		if (event.button !== 0) return;
-		event.preventDefault();
-		event.currentTarget.setPointerCapture(event.pointerId);
-		resizeSession.current = {
-			column,
-			pointerId: event.pointerId,
-			startClientX: event.clientX,
-			startWidth: columnWidths[column],
-		};
-	};
-	const handleSplitterPointerMove = (event: PointerEvent<HTMLHRElement>) => {
-		const session = resizeSession.current;
-		if (!session || session.pointerId !== event.pointerId) return;
-		const delta = event.clientX - session.startClientX;
-		resizeColumn(
-			session.column,
-			session.startWidth + (session.column === "left" ? delta : -delta),
-		);
-	};
-	const stopResizing = (event: PointerEvent<HTMLHRElement>) => {
-		if (resizeSession.current?.pointerId !== event.pointerId) return;
-		resizeSession.current = null;
-		if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-			event.currentTarget.releasePointerCapture(event.pointerId);
-		}
-	};
+	const splitterResize = useSplitterResize(resizeColumn);
 	const handleSplitterKeyDown = (
 		event: KeyboardEvent<HTMLHRElement>,
 		column: ReviewColumn,
@@ -1991,10 +1954,13 @@ function ReviewApp() {
 				aria-valuenow={columnWidths.left}
 				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
 				onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
-				onPointerCancel={stopResizing}
-				onPointerDown={(event) => handleSplitterPointerDown(event, "left")}
-				onPointerMove={handleSplitterPointerMove}
-				onPointerUp={stopResizing}
+				onPointerCancel={splitterResize.onPointerEnd}
+				onPointerDown={(event) =>
+					splitterResize.onPointerDown(event, "left", columnWidths.left)
+				}
+				onPointerMove={splitterResize.onPointerMove}
+				onPointerUp={splitterResize.onPointerEnd}
+				onLostPointerCapture={splitterResize.onLostPointerCapture}
 				tabIndex={0}
 			/>
 			<section className="flex min-h-0 min-w-0 flex-col">
@@ -2085,10 +2051,13 @@ function ReviewApp() {
 				aria-valuenow={columnWidths.right}
 				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
 				onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
-				onPointerCancel={stopResizing}
-				onPointerDown={(event) => handleSplitterPointerDown(event, "right")}
-				onPointerMove={handleSplitterPointerMove}
-				onPointerUp={stopResizing}
+				onPointerCancel={splitterResize.onPointerEnd}
+				onPointerDown={(event) =>
+					splitterResize.onPointerDown(event, "right", columnWidths.right)
+				}
+				onPointerMove={splitterResize.onPointerMove}
+				onPointerUp={splitterResize.onPointerEnd}
+				onLostPointerCapture={splitterResize.onLostPointerCapture}
 				tabIndex={0}
 			/>
 			<ChatPane
