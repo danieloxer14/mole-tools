@@ -96,6 +96,20 @@ function renderLayerPane(
 	);
 }
 
+function layerCardMarkup(markup: string, layerId: string): string {
+	const checkboxIndex = markup.indexOf(`id="layer-done-${layerId}"`);
+	expect(checkboxIndex).toBeGreaterThanOrEqual(0);
+	const start = markup.lastIndexOf("<li ", checkboxIndex);
+	const end = markup.indexOf("</li>", checkboxIndex);
+	expect(start).toBeGreaterThanOrEqual(0);
+	expect(end).toBeGreaterThan(start);
+	return markup.slice(start, end + "</li>".length);
+}
+
+function classNames(markup: string): string[] {
+	return markup.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/) ?? [];
+}
+
 test("renders layers-only sticky header controls", () => {
 	const markup = renderLayerPane();
 
@@ -130,49 +144,116 @@ test("renders status-specific sticky header content", () => {
 	expect(failedMarkup).toContain("Agent timed out");
 	expect(failedMarkup).toContain('aria-label="Retry layer generation"');
 
+	const readyState = reviewState({
+		layers: [
+			{
+				id: "completed",
+				title: "Completed",
+				tldr: "Done",
+				files: ["src/completed.ts"],
+				done: true,
+				stale: false,
+			},
+			{
+				id: "stale",
+				title: "Stale",
+				tldr: "Needs refresh",
+				files: ["src/stale.ts"],
+				done: true,
+				stale: true,
+			},
+			{
+				id: "open",
+				title: "Open",
+				tldr: "Not done",
+				files: ["src/open.ts"],
+				done: false,
+				stale: false,
+			},
+		],
+	});
 	const readyMarkup = renderLayerPane({
-		state: reviewState({
-			layers: [
-				{
-					id: "completed",
-					title: "Completed",
-					tldr: "Done",
-					files: ["src/completed.ts"],
-					done: true,
-					stale: false,
-				},
-				{
-					id: "stale",
-					title: "Stale",
-					tldr: "Needs refresh",
-					files: ["src/stale.ts"],
-					done: true,
-					stale: true,
-				},
-				{
-					id: "open",
-					title: "Open",
-					tldr: "Not done",
-					files: ["src/open.ts"],
-					done: false,
-					stale: false,
-				},
-			],
-		}),
+		state: readyState,
 		files: ["src/completed.ts", "src/stale.ts", "src/open.ts"],
 	});
+	const completedCard = layerCardMarkup(readyMarkup, "completed");
+	const staleCard = layerCardMarkup(readyMarkup, "stale");
+	const openCard = layerCardMarkup(readyMarkup, "open");
+	const completedStatus = [
+		...completedCard.matchAll(
+			/<span\b(?=[^>]*\brole="img")[^>]*>[\s\S]*?<\/span>/g,
+		),
+	].map(([statusMarkup]) => statusMarkup);
+	const openStatus = [
+		...openCard.matchAll(/<span\b(?=[^>]*\brole="img")[^>]*>[\s\S]*?<\/span>/g),
+	].map(([statusMarkup]) => statusMarkup);
+
 	expect(readyMarkup).toContain("Completed layers");
 	expect(readyMarkup).toContain('role="progressbar"');
 	expect(readyMarkup).toContain('aria-valuenow="1"');
 	expect(readyMarkup).toContain('aria-valuemax="3"');
 	expect(readyMarkup).toContain(">1/3</span>");
-	expect(readyMarkup).toContain(">Stale</span>");
-	expect(readyMarkup).toContain('data-layer-state="done"');
-	expect(readyMarkup).toContain('data-layer-state="stale"');
-	expect(readyMarkup).toContain('data-layer-state="open"');
-	expect(readyMarkup).toContain("data-done");
-	expect(readyMarkup).toContain("data-stale");
-	expect(completedLayerCount(reviewState().layers)).toBe(0);
+	expect(completedStatus).toHaveLength(1);
+	expect(completedStatus[0]).toContain('aria-label="Done"');
+	expect(completedStatus[0]).toContain('data-layer-state="done"');
+	expect(classNames(completedStatus[0])).toEqual(
+		expect.arrayContaining([
+			"inline-flex",
+			"size-5",
+			"shrink-0",
+			"items-center",
+			"justify-center",
+			"rounded-full",
+			"bg-success",
+			"text-success-foreground",
+		]),
+	);
+	expect(completedStatus[0]).not.toContain("<button");
+	expect(completedCard).not.toContain(">Done</span>");
+	const completedStatusContent = completedStatus[0]
+		.replace(/^<span\b[^>]*>/, "")
+		.replace(/<\/span>$/, "");
+	expect(completedStatusContent).toContain("<svg");
+	expect(completedStatusContent).toContain('aria-hidden="true"');
+	const checkSvg = completedStatusContent.match(/<svg\b[^>]*>/)?.[0] ?? "";
+	expect(checkSvg).toContain("lucide-check");
+	expect(classNames(checkSvg)).toContain("size-3");
+	expect(completedStatusContent).not.toContain("Done");
+
+	expect(openStatus).toHaveLength(1);
+	expect(openStatus[0]).toContain('aria-label="Open"');
+	expect(openStatus[0]).toContain('data-layer-state="open"');
+	expect(classNames(openStatus[0])).toEqual(
+		expect.arrayContaining([
+			"inline-flex",
+			"size-5",
+			"shrink-0",
+			"items-center",
+			"justify-center",
+			"rounded-full",
+			"bg-secondary",
+		]),
+	);
+	expect(openStatus[0]).not.toContain("<button");
+	expect(openCard).not.toContain(">Open</span>");
+	const openStatusContent = openStatus[0]
+		.replace(/^<span\b[^>]*>/, "")
+		.replace(/<\/span>$/, "");
+	expect(openStatusContent).toBe("");
+
+	expect(staleCard).toContain('data-layer-state="stale"');
+	expect(staleCard).toContain(">Stale</span>");
+	expect(staleCard).not.toContain('role="img"');
+	expect(staleCard).not.toContain("bg-success");
+	const staleBadge =
+		staleCard.match(/<span\b(?=[^>]*data-layer-state="stale")[^>]*>/)?.[0] ??
+		"";
+	expect(classNames(staleBadge)).toEqual(
+		expect.arrayContaining(["bg-warning/15", "text-warning"]),
+	);
+	expect(staleCard).toContain("data-done");
+	expect(staleCard).toContain("data-stale");
+	expect(completedLayerCount(readyState.layers)).toBe(1);
 });
 
 test("covers layer action state precedence across statuses", () => {
@@ -444,8 +525,8 @@ test("renders chevron collapse controls before each checkbox", () => {
 	expect(markup).not.toContain(">Expand</button>");
 	expect(markup).toContain('aria-label="Mark Done layer done"');
 	expect(markup).toContain('aria-label="Mark Open layer done"');
-	expect(markup).toContain(">Done</span>");
-	expect(markup).toContain(">Open</span>");
+	expect(markup).toContain(">Done layer</button>");
+	expect(markup).toContain(">Open layer</button>");
 
 	const initiallyCollapsed = new Set(["done-layer"]);
 	expect([...toggleLayerCollapsed(initiallyCollapsed, "done-layer")]).toEqual(
