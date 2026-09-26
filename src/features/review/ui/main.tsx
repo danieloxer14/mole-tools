@@ -1995,6 +1995,24 @@ function ReviewApp() {
 				<LayerPane
 					state={data}
 					files={files}
+					filesContent={
+						<ChangedFiles
+							files={data.diff}
+							viewedFiles={data.viewedFiles}
+							selectedPath={selectedPath}
+							onSelectFile={selectFile}
+							onViewedChange={(paths, viewed) => {
+								saveProgress({
+									viewedFiles: { paths, viewed },
+								});
+							}}
+							showWhitespaceChanges={data.showWhitespaceChanges}
+							whitespaceChanging={whitespaceChanging}
+							syncing={syncing}
+							refreshing={refreshing}
+							onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
+						/>
+					}
 					selectedPath={selectedPath}
 					onSelectFile={selectFile}
 					onSelectLayer={selectLayer}
@@ -2020,25 +2038,7 @@ function ReviewApp() {
 					tabIndex={0}
 				/>
 				<section className="flex min-h-0 min-w-0 flex-col">
-					<div className="flex min-h-0 max-h-[40vh] shrink-0 flex-col border-b bg-sidebar">
-						<Toasts toasts={toasts} onDismiss={dismissToast} />
-						<ChangedFiles
-							files={data.diff}
-							viewedFiles={data.viewedFiles}
-							selectedPath={selectedPath}
-							onSelectFile={selectFile}
-							onViewedChange={(paths, viewed) => {
-								saveProgress({
-									viewedFiles: { paths, viewed },
-								});
-							}}
-							showWhitespaceChanges={data.showWhitespaceChanges}
-							whitespaceChanging={whitespaceChanging}
-							syncing={syncing}
-							refreshing={refreshing}
-							onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
-						/>
-					</div>
+					<Toasts toasts={toasts} onDismiss={dismissToast} />
 					<DiffView
 						key={selectedPath ?? "empty"}
 						file={selectedFile}

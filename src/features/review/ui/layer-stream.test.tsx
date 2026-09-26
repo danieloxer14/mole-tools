@@ -168,6 +168,7 @@ test("reattaches to a running layer stream and renders its terminal state", asyn
 					<LayerPane
 						state={clientState}
 						files={["src/app.ts"]}
+						filesContent={null}
 						selectedPath={null}
 						onSelectFile={() => undefined}
 						onSelectLayer={() => undefined}
