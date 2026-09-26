@@ -10,6 +10,8 @@ curl -fsSL https://raw.githubusercontent.com/danieloxer14/mole-tools/main/instal
 
 Installs the `mole-tools` binary to `/usr/local/bin` (macOS arm64 only).
 
+Run the same command again to update an existing installation.
+
 ---
 
 ## Init
@@ -420,6 +422,14 @@ prompt agent with blank Model or Effort uses that agent's CLI default. New chats
 including Explain chats, bind agent/model/effort once; existing bindings do not
 change when settings change. Legacy prompt versions and chats without effort
 keep it unset. Commit and MR prompts remain on their `models.*` routes.
+
+The **General** tab shows the installed version as small grey text at the
+bottom-left. Each `mole-tools review` launch checks GitHub's latest release in
+the background; the browser reads the result from token-protected
+`GET /api/version`. When a newer version is available, the review header shows
+**Update X.Y.Z available**. Selecting it opens an **Update mole-tools** modal
+with the install command and a **Copy install command** button. Failed checks
+are silent and leave the Update button hidden.
 
 ### Skills
 

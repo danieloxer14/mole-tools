@@ -18,6 +18,7 @@ import {
 } from "./setup";
 import type { ReviewState } from "./state";
 import { ReviewStore } from "./store";
+import { checkForUpdate } from "./version-check";
 
 export interface ReviewFlowResult extends ReviewSetupResult {
 	discussions: HostDiscussion[];
@@ -106,6 +107,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 		],
 	},
 	async run(ctx, args) {
+		const versionStatus = checkForUpdate();
 		const result = await runReviewFlow(ctx, args);
 		const host = ctx.gitHost as unknown as ReviewGitHost | null;
 		const getFileContents = ctx.vcs.readFileAtRevision
@@ -152,6 +154,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			config: ctx.config,
 			mr: result.mr,
 			paths: result.paths,
+			versionStatus,
 		});
 		const address = server.start();
 		try {

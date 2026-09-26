@@ -45,6 +45,15 @@ CLI run and is never persisted. Every `/api/*` request must carry token as
 `?t=<token>` or `X-Mole-Token`; missing or wrong token gets `401`. Server is
 loopback-only and exists only while CLI process runs.
 
+### Update check
+Each `mole-tools review` launch starts a non-blocking lookup of GitHub's
+`releases/latest` endpoint and compares its tag with the bundled `package.json`
+version. Token-protected `GET /api/version` exposes `{ current, latest,
+updateAvailable }`. The **General** tab shows the installed `v<version>` at
+bottom-left. Only a valid, strictly newer latest version adds an **Update
+X.Y.Z available** header button, which opens the Update modal with the install
+command and copy button. A failed check never blocks launch or reports an error.
+
 ### Review worktree
 A detached worktree checked out at MR head for safe inspection. Review first
 uses current directory when its `origin` matches MR; otherwise it reuses or

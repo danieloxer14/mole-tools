@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../../ports/git-host";
 import { IconButton } from "./IconButton";
+import { UpdateAvailable } from "./UpdateAvailable";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -22,6 +23,7 @@ export interface MrHeaderProps {
 	refreshing: boolean;
 	layerGenerating: boolean;
 	onRefresh: () => void;
+	update?: { current: string; latest: string } | null;
 }
 
 export function headerTitle(title: string, iid: number): string {
@@ -91,6 +93,7 @@ export function MrHeader({
 	refreshing,
 	layerGenerating,
 	onRefresh,
+	update,
 }: MrHeaderProps) {
 	const [copied, setCopied] = useState(false);
 	const copyTimer = useRef<Timer | undefined>(undefined);
@@ -141,15 +144,15 @@ export function MrHeader({
 		</Button>
 	);
 	return (
-		<header className="flex items-center justify-between gap-4 bg-card px-4 py-3">
-			<div className="min-w-0 flex-1">
+		<header className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-card px-4 py-3">
+			<div className="min-w-[18rem] flex-1">
 				<h1
 					className="truncate text-lg font-semibold tracking-tight"
 					title={mr.title}
 				>
 					{headerTitle(mr.title, mr.iid)}
 				</h1>
-				<div className="inline-flex items-center gap-2 leading-none">
+				<div className="inline-flex flex-wrap items-center gap-2 leading-none">
 					<Button
 						type="button"
 						variant="ghost"
@@ -214,7 +217,10 @@ export function MrHeader({
 					</span>
 				</div>
 			</div>
-			<div className="inline-flex shrink-0 items-center gap-2 leading-none">
+			<div
+				className="ml-auto inline-flex shrink-0 items-center gap-2 leading-none"
+				data-header-actions=""
+			>
 				<IconButton
 					label="Refresh review and layers"
 					tooltip="Fetch latest MR state, sync when needed, and regenerate layers"
@@ -238,6 +244,9 @@ export function MrHeader({
 				<span id="approve-tooltip" className="sr-only">
 					{approvalButtonTooltip}
 				</span>
+				{update ? (
+					<UpdateAvailable current={update.current} latest={update.latest} />
+				) : null}
 			</div>
 		</header>
 	);

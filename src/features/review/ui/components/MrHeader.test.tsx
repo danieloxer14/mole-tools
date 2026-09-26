@@ -170,6 +170,51 @@ test("renders title, sha identity, approved pill, and GitLab link", () => {
 	expect(link?.getAttribute("target")).toBe("_blank");
 	expect(link?.getAttribute("title")).toBeNull();
 });
+
+test("hides the update button when no update is available", () => {
+	expect(render().querySelector("[data-update-available]")).toBeNull();
+	expect(
+		render({ update: null }).querySelector("[data-update-available]"),
+	).toBeNull();
+});
+
+test("wraps the header when update action reduces metadata space", () => {
+	const container = render({
+		update: { current: "0.9.0", latest: "0.10.0" },
+	});
+	const header = container.querySelector("header");
+	const metadata = header?.firstElementChild;
+	const metadataRow =
+		container.querySelector("[data-sha-control]")?.parentElement;
+	const actionGroup = container.querySelector("[data-header-actions]");
+	const updateButton = container.querySelector<HTMLButtonElement>(
+		"[data-update-available]",
+	);
+
+	expect(header?.className).toContain("flex-wrap");
+	expect(metadata?.className).toContain("min-w-[18rem]");
+	expect(metadata?.className).toContain("flex-1");
+	expect(metadataRow?.className).toContain("flex-wrap");
+	expect(actionGroup?.className).toContain("ml-auto");
+	expect(actionGroup?.className).toContain("shrink-0");
+	expect(updateButton?.textContent).toBe("Update 0.10.0 available");
+	expect(updateButton?.parentElement).toBe(actionGroup);
+	expect(actionGroup?.lastElementChild).toBe(updateButton);
+	expect(
+		container.querySelector('[aria-label="Refresh review and layers"]'),
+	).not.toBeNull();
+	expect(
+		container.querySelector('[aria-label="Open in GitLab"]'),
+	).not.toBeNull();
+	expect(container.querySelector('[aria-label="Unapprove"]')).not.toBeNull();
+	expect(container.querySelector("[data-approval]")).not.toBeNull();
+	expect(container.querySelector("[data-files-changed]")?.textContent).toBe(
+		"3 files changed",
+	);
+	expect(container.querySelector("[data-insertions]")?.textContent).toBe("+12");
+	expect(container.querySelector("[data-deletions]")?.textContent).toBe("−4");
+});
+
 test("renders diff totals right of approval pill with diff colours", () => {
 	const container = render();
 	const stats = container.querySelector("[data-diff-stats]");

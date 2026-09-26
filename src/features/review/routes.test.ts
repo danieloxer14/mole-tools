@@ -25,6 +25,7 @@ import type {
 	ReviewAgent,
 } from "../../ports/review-agent";
 import type { DiffOptions, FileDiff } from "../../ports/vcs";
+import { APP_VERSION } from "../../shared/app-version";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { createReviewRoutes, resolveReviewFilePath } from "./routes";
 import { sseResponse } from "./sse";
@@ -398,7 +399,7 @@ class RecordingLayerAgent implements ReviewAgent {
 describe("review routes", () => {
 	test("rejects every API path without the per-run token", async () => {
 		const routes = createReviewRoutes({ token, state: state() });
-		for (const path of ["/api", "/api/state"]) {
+		for (const path of ["/api", "/api/state", "/api/version"]) {
 			const response = await routes(request(path));
 			expect(response.status).toBe(401);
 			expect(await response.text()).toBe("");
@@ -407,6 +408,42 @@ describe("review routes", () => {
 			request("/api/state", { headers: { "X-Mole-Token": token } }),
 		);
 		expect(authorized.status).toBe(200);
+	});
+	test("returns supplied version status for token-authenticated requests", async () => {
+		const versionStatus = {
+			current: "0.9.0",
+			latest: "0.10.0",
+			updateAvailable: true,
+		};
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve(versionStatus),
+		});
+
+		const response = await routes(
+			request("/api/version", {
+				headers: { "X-Mole-Token": token },
+			}),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual(versionStatus);
+	});
+
+	test("defaults version status to the installed application version", async () => {
+		const routes = createReviewRoutes({ token, state: state() });
+		const response = await routes(
+			request("/api/version", {
+				headers: { "X-Mole-Token": token },
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			current: APP_VERSION,
+			latest: null,
+			updateAvailable: false,
+		});
 	});
 	test("serves canonical diffs by default and caches hidden toggles", async () => {
 		const canonical = [

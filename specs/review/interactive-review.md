@@ -84,6 +84,9 @@ model**, and **Default effort** controls. Each editable review prompt version
 has Agent, Model, and Effort dropdowns. Selections affect future layer runs;
 use **Regenerate** to rebuild cached layers.
 
+The **General** tab shows the installed version (`v<version>`) in small,
+muted-grey text at the bottom-left.
+
 For OMP, the server runs `models --json` with the selected OMP executable; the
 dropdown lists its model selectors and only effort values advertised for the
 selected model. Claude discovery uses the paginated Anthropic Models API when
@@ -138,6 +141,13 @@ The token is not persisted. Every `/api/*` request must carry it either as the
 `401` with an empty body. The bundled HTML page at `/` is not API-authenticated.
 This is a local single-user server, not a remote or background service.
 
+`GET /api/version` is token-protected and returns `{ current, latest,
+updateAvailable }`. Each review launch makes one background lookup of GitHub's
+`releases/latest` endpoint with a five-second timeout. The check strips one
+leading `v`, accepts only strict `MAJOR.MINOR.PATCH` versions, and marks an
+update available only when the latest version is strictly newer than the
+bundled current version.
+
 Stream responses use `Content-Type: text/event-stream; charset=utf-8`. Chat
 requests send JSON bodies with `Content-Type: application/json` and
 `Accept: text/event-stream`; layer and comment stream requests send
@@ -152,6 +162,7 @@ Implemented HTTP surface:
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | `GET /`                                              | Serve embedded React HTML.                                                                                                                                                                                                                                                                                                              |
 | `GET /api/state`                                     | Return persisted state plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here.                                                                                                                                                                         |
+| `GET /api/version`                                   | Return `{ current, latest, updateAvailable }` from the launch-time GitHub release check.                                                                                                                                                                                                                                             |
 | `GET /api/approval`                                  | Return live GitLab approval status for the current user and merge request.                                                                                                                                                                                                                                                              |
 | `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's GitLab approval. |
 | `GET`/`POST /api/refresh`                            | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this check does not mutate the worktree.                                                                                                                                                                                                                          |
@@ -186,6 +197,13 @@ The page has three working columns:
   restored transcript, streaming response/tool activity, context tags (diff
   line ranges, rendered-markdown block ranges, and whole files), composer,
   New chat button, chat switcher, and Stop.
+
+When a newer version is available, the main header's right action group ends
+with an **Update X.Y.Z available** button. It opens an **Update mole-tools**
+modal with the exact install command
+`curl -fsSL https://raw.githubusercontent.com/danieloxer14/mole-tools/main/install.sh | bash`
+and a **Copy install command** button. Successful copy shows a check icon for
+1500 ms. The modal closes with its Close button or Escape.
 
 The centre column supports Inline and Side by side layouts. Shiki highlights
 source lines. Added lines use the new side, deleted lines use the old side, and
@@ -565,6 +583,10 @@ Once the server is up, agent, GitLab discussion, file, sync, and layer failures
 are returned as UI-visible errors with retry where applicable. A failed layer
 does not hide the diff or chat; a failed discussion post preserves its draft;
 a stale anchor is rejected before posting. API responses are `no-store`.
+
+Update-check failures—including offline access, non-2xx responses such as rate
+limits, invalid JSON or tags, and timeout—degrade to no Update button. They do
+not produce a CLI or UI error.
 
 This feature does not provide remote access, a background daemon, automatic
 worktree cleanup, batch review submission, discussion editing/resolution after

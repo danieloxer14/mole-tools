@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEffort } from "../../../../adapters/agent/effort";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import { APP_VERSION } from "../../../../shared/app-version";
 import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { SkillsSettings } from "./SkillsSettings";
@@ -678,7 +679,10 @@ export function SettingsPanel({
 					<TabsTrigger value="skills">Skills</TabsTrigger>
 					<TabsTrigger value="appearance">Appearance</TabsTrigger>
 				</TabsList>
-				<TabsContent value="general" className="min-h-0 overflow-auto p-6">
+				<TabsContent
+					value="general"
+					className="flex min-h-0 flex-col overflow-auto p-6"
+				>
 					{!settings ? (
 						<Alert variant={settingsLoadFailed ? "destructive" : undefined}>
 							{settingsLoadFailed
@@ -832,6 +836,12 @@ export function SettingsPanel({
 							) : null}
 						</div>
 					)}
+					<p
+						className="mt-auto pt-6 text-xs text-muted-foreground"
+						data-app-version=""
+					>
+						v{APP_VERSION}
+					</p>
 				</TabsContent>
 				<TabsContent value="prompts" className="flex flex-col">
 					{status ? (

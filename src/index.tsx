@@ -1,5 +1,4 @@
 import cac from "cac";
-import packageJson from "../package.json";
 import { CONFIG_TEMPLATE, loadConfig } from "./adapters/config/loader";
 import { runInInk } from "./app";
 import { applyZodOptions, stripEmptyDoubleDash } from "./cli/options";
@@ -12,11 +11,12 @@ import {
 	formatGeneralHelp,
 	formatUnknownCommand,
 } from "./features/help/format";
+import { APP_VERSION } from "./shared/app-version";
 
 export { applyZodOptions } from "./cli/options";
 
 const cli = cac("mole-tools");
-cli.version(packageJson.version);
+cli.version(APP_VERSION);
 
 // Help command — registered before features so it takes priority.
 // This path intentionally bypasses loadConfig, buildContext, and runInInk.
