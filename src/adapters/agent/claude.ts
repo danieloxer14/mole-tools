@@ -3,6 +3,11 @@ import type {
 	AgentTurn,
 	ReviewAgent,
 } from "../../ports/review-agent";
+import {
+	type AgentEffort,
+	assertAgentEffort,
+	type ClaudeEffort,
+} from "./effort";
 import { type AgentExec, defaultAgentExec } from "./exec";
 import {
 	diagnostic,
@@ -18,6 +23,7 @@ import {
 export interface ClaudeAgentOptions {
 	binary?: string;
 	model?: string;
+	effort?: AgentEffort;
 	exec?: AgentExec;
 }
 
@@ -197,6 +203,7 @@ function mapClaudeEvent(
 export class ClaudeAgentAdapter implements ReviewAgent {
 	private readonly binary: string;
 	private readonly model?: string;
+	private readonly effort?: ClaudeEffort;
 	private readonly execFn: AgentExec;
 
 	constructor(
@@ -207,6 +214,8 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 		this.execFn = config.execFn;
 		this.binary = config.binary;
 		this.model = config.model;
+		if (config.effort !== undefined) assertAgentEffort("claude", config.effort);
+		this.effort = config.effort;
 	}
 
 	async preflight(): Promise<void> {
@@ -245,6 +254,8 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 			...allowedTools,
 		];
 		if (this.model) args.splice(7, 0, "--model", this.model);
+		if (this.effort)
+			args.splice(this.model ? 9 : 7, 0, "--effort", this.effort);
 		if (turn.writeDir) {
 			args.push("--permission-mode", "acceptEdits", "--add-dir", turn.writeDir);
 		}

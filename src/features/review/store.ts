@@ -182,17 +182,22 @@ export class ReviewStore {
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(raw);
-		} catch (error) {
-			throw new Error(`Invalid review state at ${this.statePath}`, {
-				cause: error,
-			});
+		} catch {
+			await this.archiveRejectedState("invalid-json");
+			return null;
 		}
 
 		if (!isRecord(parsed) || parsed.version !== 1) {
-			await this.discardVersionMismatch();
+			await this.archiveRejectedState("unsupported-version");
 			return null;
 		}
-		const parsedState = ReviewStateSchema.parse(parsed);
+		let parsedState: ReviewState;
+		try {
+			parsedState = ReviewStateSchema.parse(parsed);
+		} catch {
+			await this.archiveRejectedState("invalid-schema");
+			return null;
+		}
 		const legacySessionKey = Object.entries(ReviewStateSchema.shape).find(
 			([, schema]) => schema === LegacyChatSessionSchema,
 		)?.[0];
@@ -212,6 +217,20 @@ export class ReviewStore {
 		);
 	}
 
+	private async archiveRejectedState(reason: string): Promise<void> {
+		const archivedPath = `${this.statePath}.rejected-${Date.now()}-${crypto.randomUUID()}`;
+		logger.warn("review.state.rejected", {
+			path: this.statePath,
+			archivedPath,
+			reason,
+		});
+		try {
+			await rename(this.statePath, archivedPath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+	}
+
 	private async writeStateFile(state: ReviewState): Promise<void> {
 		await mkdir(dirname(this.statePath), { recursive: true });
 		const tempPath = `${this.statePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
@@ -220,15 +239,6 @@ export class ReviewStore {
 			await rename(tempPath, this.statePath);
 		} finally {
 			if (await Bun.file(tempPath).exists()) await unlink(tempPath);
-		}
-	}
-
-	private async discardVersionMismatch(): Promise<void> {
-		logger.warn("review.state.version-mismatch", { path: this.statePath });
-		try {
-			await unlink(this.statePath);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
 	}
 }

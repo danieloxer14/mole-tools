@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getReviewPaths } from "./paths";
@@ -229,6 +229,7 @@ describe("ReviewState", () => {
 				createdAt: "2026-08-15T00:00:00.000Z",
 				agent: null,
 				model: null,
+				effort: null,
 			},
 		]);
 	});
@@ -281,18 +282,63 @@ describe("ReviewStore", () => {
 		}
 	});
 
-	test("discards a state file with an unsupported version", async () => {
+	test("archives a state file with an unsupported version", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-version-"));
 		try {
 			const statePath = join(dir, "review.json");
-			await Bun.write(statePath, JSON.stringify({ version: 2 }));
+			const oldState = JSON.stringify({ version: 2 });
+			await Bun.write(statePath, oldState);
 			const store = new ReviewStore({
 				statePath,
 				chatPath: join(dir, "chat.ndjson"),
 				chatsDir: join(dir, "chats"),
 			});
+
 			expect(await store.read()).toBeNull();
 			expect(await Bun.file(statePath).exists()).toBe(false);
+			const archivedName = (await readdir(dir)).find((name) =>
+				name.startsWith("review.json.rejected-"),
+			);
+			expect(archivedName).toBeDefined();
+			expect(await Bun.file(join(dir, archivedName as string)).text()).toBe(
+				oldState,
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("archives schema-invalid prior state and starts without it", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-invalid-state-"));
+		try {
+			const statePath = join(dir, "review.json");
+			const oldState = JSON.parse(JSON.stringify(state())) as {
+				chats: Array<Record<string, unknown>>;
+			};
+			oldState.chats = [
+				{
+					id: crypto.randomUUID(),
+					createdAt: new Date().toISOString(),
+					agent: "codex",
+				},
+			];
+			const raw = JSON.stringify(oldState);
+			await Bun.write(statePath, raw);
+			const store = new ReviewStore({
+				statePath,
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+
+			expect(await store.read()).toBeNull();
+			expect(await Bun.file(statePath).exists()).toBe(false);
+			const archivedName = (await readdir(dir)).find((name) =>
+				name.startsWith("review.json.rejected-"),
+			);
+			expect(archivedName).toBeDefined();
+			expect(await Bun.file(join(dir, archivedName as string)).text()).toBe(
+				raw,
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

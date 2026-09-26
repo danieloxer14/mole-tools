@@ -76,17 +76,17 @@ Every route is **required** and must reference an existing provider key. If a ro
 
 #### Review — Agent and Model Selection
 
-Review-agent selection is independent of `models`. `review.model` is passed to
-the selected review agent as `<agent> --model <name>`; it does not configure
-Ollama. Omit `review` to use the default Claude agent, its default `claude`
-binary, and Claude's own current default model.
+Review-agent selection is independent of `models`. `review.model` selects the
+optional model for the chosen review agent; it does not configure Ollama. Omit
+`review` to use Claude Code with its current default model and effort.
 
 ```jsonc
-// OMP: choose an OMP-visible model name.
+// OMP: choose a model visible to the selected OMP executable.
 {
   "review": {
     "agent": "omp",
     "model": "openai/gpt-5.2",
+    "effort": "high",
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800
   }
@@ -94,12 +94,13 @@ binary, and Claude's own current default model.
 ```
 
 ```jsonc
-// Claude: choose a Claude Code model name.
+// Claude Code: model and effort are optional.
 {
   "review": {
     "agent": "claude",
     "binary": "claude",
     "model": "sonnet",
+    "effort": "high",
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800,
     "maxLayerPromptBytes": 100000
@@ -107,28 +108,46 @@ binary, and Claude's own current default model.
 }
 ```
 
-`review.binary` replaces only the executable name or path. It is useful for a
-non-default installation. `review.model` selects the model for either review
-agent: mole-tools forwards it as `omp --model <name>` or
-`claude --model <name>`.
+`review.binary` replaces only the executable name or path. When omitted, the
+selected agent's executable name is used. A model is sent as `--model <name>`;
+OMP effort is sent as `--thinking <level>`, and Claude effort as
+`--effort <level>`. Omit `review.model` or `review.effort` to let that agent use
+its CLI default. These are review-agent settings; Codex's `-c` option is not an
+OMP effort flag.
 
-The selected model is used for both layer generation and chat. Omit
-`review.model` to retain the selected agent's configured default. Both agents
-are started with read-only inspection tools (`read`, `grep`, `glob`, `bash`) for
-chat; Bash is limited by prompt policy to read-only commands, and prompt edits
-cannot grant write access to code under review.
+The **Settings** dialog opens on **Prompts**. **General** holds the global
+**Default Agent**, **Default model**, and **Default effort** controls.
+**Prompts** manages the five review prompts
+(`review-layers-code`, `review-layers-plan`, `review-chat`,
+`review-explain-comment`, and `review-comment-from-chat`); each version has
+Agent, Model, and Effort dropdowns. Changes affect future layer runs and new
+chat bindings; use **Regenerate** to rebuild cached layers.
 
-Review agent and model can also be selected from the **Settings** dialog's
-**Prompts** tab. Changes apply to the next layer run or chat turn; use
-**Regenerate** to rebuild cached layers.
-Prompt versions can select an agent and model independently. A version whose
-agent is **Default** inherits the global Review agent/model above; a version
-with an explicit agent uses that agent and its version model (or no `--model`
-flag when that model is blank). Chats keep the agent/model they were bound to
-when created, even after the global setting or prompt version changes. For a
-non-default agent kind, mole-tools uses the `omp` or `claude` binary from
-`PATH`; `review.binary` applies only when the selected agent is the configured
-default.
+The OMP model dropdown comes from `models --json` run by the selected OMP
+executable. Effort choices are limited to values advertised as supported for
+that model. Claude model discovery uses the Anthropic Models API when the
+server has `ANTHROPIC_API_KEY`; API visibility reflects that key's entitlement,
+not the models available to the separate Claude CLI account. Without that key,
+the dropdown offers the Claude CLI aliases `sonnet`, `opus`, and `haiku`; these
+aliases are not a complete CLI catalog. API availability and Claude CLI
+entitlement are distinct. Existing custom model selections remain selectable
+until changed.
+
+Effort is optional. OMP accepts `off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, `max`, and `auto`; model discovery narrows the dropdown to supported
+values. Claude accepts `low`, `medium`, `high`, `xhigh`, and `max`. Unset
+effort sends no effort flag.
+
+Each prompt field overrides its corresponding General default independently
+when Agent is **Default**. An explicit prompt agent uses only that version's
+model and effort; blank values send no corresponding flag and use that agent's
+CLI defaults, without borrowing the other agent's global defaults. New chats,
+including Explain chats, persist the effective agent/model/effort at creation;
+later settings or prompt edits do not rebind them. Older prompt versions
+without effort and older bound chats without effort remain unset and continue
+without an effort flag. An unbound legacy chat with existing transcript binds
+the current global defaults at its next turn. Commit and merge-request prompts
+continue to use their `models.*` routes and ignore review prompt metadata.
 
 
 #### Optional Sections
@@ -198,6 +217,7 @@ default.
 | `review.agent` | Selects the independent review adapter (`omp` or `claude`); defaults to `claude`. |
 | `review.binary` | Optional executable name/path. Defaults to selected agent name. |
 | `review.model` | Optional model name for OMP or Claude, forwarded as `<agent> --model <name>`. |
+| `review.effort` | Optional effort sent as OMP `--thinking` or Claude `--effort`; unset keeps the agent's CLI default. |
 | `review.layerTimeoutSeconds` | Maximum seconds for one layer-guide run; default `600`. |
 | `review.largeFileLineThreshold` | Diff-line count above which a file starts collapsed; default `800`. |
 | `review.maxLayerPromptBytes` | Maximum UTF-8 bytes sent to one layer-guide run; default `100000`. |
@@ -226,13 +246,14 @@ have multiple named presets. The active text is the highest-numbered version
 of the active preset. The shipped default seeds `default/001.md` on first
 access, and `config.prompts` records the active preset per slot (a missing
 entry means `default`).
-The five review prompt slots are managed from the review UI's **Prompts &
-Models** overlay. Saving creates a new version, **Roll back** copies an older
-version forward as a new latest version, and **Reset** writes the shipped
-default as a new version. This history is append-only: mole-tools never
-deletes prompt versions. The `commit-system`, `mr-code`, and `mr-plan`
-presets are selected in `config.json`'s `prompts` map; their text edits still
-live under `~/.config/mole-tools/prompts/`.
+
+The five review prompt slots are managed from the **Prompts** tab in Settings.
+General review defaults are in **General**. Saving a prompt creates a new
+version, **Roll back** copies an older version forward as a new latest version,
+and **Reset** writes the shipped default as a new version. This history is
+append-only: mole-tools never deletes prompt versions. The `commit-system`,
+`mr-code`, and `mr-plan` presets are selected in `config.json`'s `prompts` map;
+their text edits still live under `~/.config/mole-tools/prompts/`.
 
 Existing flat prompt files migrate lazily, once on first access of their slot:
 `prompts/<slot>.md` becomes `<slot>/default/001.md`. The former
@@ -258,21 +279,24 @@ User-authored review skills are stored separately under
 `skill.json` records the active version and most recent use; each `NNN.md`
 file contains one version of the skill text.
 
-Each version file may begin with YAML-style frontmatter containing optional
-agent/model metadata:
+Each review prompt version may begin with YAML-style frontmatter containing
+optional agent/model/effort metadata:
 
 ```text
 ---
 agent: omp
 model: openai/gpt-5.2
+effort: high
 ---
 Review the changed code for correctness and risk.
 ```
 
-When `agent` is unset, the version inherits the global Review agent and model.
-When an agent is set with a blank model, the run sends no `--model` flag.
-Frontmatter is ignored by the commit and MR prompts; those slots continue to
-use their `models.*` LLM routes.
+With Agent **Default** or unset, each blank field inherits its matching global
+Review default. An explicitly selected agent with blank Model or Effort uses
+that agent's CLI default. Older versions without effort keep it unset. Review
+effort uses OMP `--thinking` or Claude `--effort`; unset means no effort flag.
+Frontmatter is ignored by commit and MR prompts, which continue to use their
+`models.*` LLM routes.
 
 | Slot | Used by | Customise for |
 |---|---|---|
@@ -327,7 +351,10 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 
 **How it works.** Fetches staged diff → optionally fetches Jira issue details from branch name → sends everything (diff + context + active prompt preset) to the configured model → formats the message → you accept / edit / reject → committed locally → optional push. If your branch name matches the configured Jira pattern, issue title and description are included in the generation prompt automatically.
 
-**Configuration.** Uses the `commit` model route from config.json. The active `commit-system` prompt preset supplies the system prompt; set it in `config.json`'s `prompts` map, since the review UI's **Prompts & Models** overlay manages the five review slots.
+**Configuration.** Uses the `commit` model route from `config.json`. The active
+`commit-system` prompt preset supplies the system prompt; set it in the
+`prompts` map. Settings **Prompts** manages only the five review prompt slots
+and does not change commit prompt configuration.
 
 
 ---
@@ -371,12 +398,28 @@ Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
 
-The **Settings** dialog has three tabs: **Prompts**, **Skills**, and
-**Appearance**. The **Prompts** tab manages the five review prompt slots
-(`review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`), their presets and
-versions, plus the review agent and model. Changes apply to the next layer
-run or chat turn; use **Regenerate** to rebuild cached layers.
+The **Settings** dialog has four tabs: **General**, **Prompts**, **Skills**, and
+**Appearance**; it opens on **Prompts**. **General** contains **Default Agent**,
+**Default model**, and **Default effort**. The **Prompts** tab manages the five
+review prompt slots (`review-layers-code`, `review-layers-plan`, `review-chat`,
+`review-explain-comment`, `review-comment-from-chat`) and their preset versions,
+each with Agent, Model, and Effort dropdowns. OMP models come from the selected
+executable's `models --json` catalog; Claude uses the Anthropic Models API with
+a server `ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key
+entitlement does not establish Claude CLI access, and aliases are not a full
+CLI catalog. Optional effort choices are model-compatible; OMP sends
+`--thinking`, Claude sends `--effort` (not Codex `-c`).
+
+With Agent **Default**, each unset prompt field inherits its matching General
+value. An inherited effort unsupported by an explicitly selected prompt model
+is omitted for that run, leaving the model's agent default in effect; prompt
+metadata remains unchanged. Changing Default Agent is rejected when an active
+default-agent prompt has a saved effort unsupported by the new agent; change or
+clear that effort, or assign that prompt an explicit agent first. An explicit
+prompt agent with blank Model or Effort uses that agent's CLI default. New chats,
+including Explain chats, bind agent/model/effort once; existing bindings do not
+change when settings change. Legacy prompt versions and chats without effort
+keep it unset. Commit and MR prompts remain on their `models.*` routes.
 
 ### Skills
 
@@ -445,10 +488,12 @@ omp models                         # list model names available to OMP
 omp models find gpt                # optional: search available names
 ```
 
-Configure OMP's provider credentials through OMP before running a review.
-Choose one displayed model name and set it in `review.model`; OMP receives that
-selection for both layer generation and chat. Omit the field to retain OMP's
-configured default model.
+Configure OMP provider credentials through OMP before running a review.
+Settings **General** discovers models from the selected OMP executable using
+`models --json`; each model's advertised compatible effort choices appear in
+the dropdown. The global and per-prompt selections apply to both layer
+generation and chat according to the precedence above. Omit Model or Effort to
+retain the selected agent's configured CLI default.
 
 **Claude Code**
 
@@ -458,9 +503,13 @@ claude auth login
 claude auth status
 ```
 
-Claude is the default review agent. Set `review.model` to any model name
-accepted by `claude --model`; mole-tools forwards it for both layer generation
-and chat. Omit it to use Claude Code's normal current default model.
+Claude is the default review agent. Settings can show model IDs visible to
+`ANTHROPIC_API_KEY` through the Anthropic Models API, but that API entitlement is
+separate from Claude CLI access. Without the key, Settings shows only the
+`sonnet`, `opus`, and `haiku` CLI aliases, not a complete Claude CLI model list.
+Set `review.model` to any model name accepted by `claude --model`; omit it to
+use Claude Code's current default. Claude effort uses `--effort`; leave effort
+unset to use the CLI default.
 
 **Local URL and token.** The CLI binds the server to `127.0.0.1` on an
 ephemeral port and prints a URL like
@@ -479,13 +528,12 @@ Review never edits code under review and never auto-removes worktree when CLI
 exits. Worktree persists for restart and can be cleaned deliberately with
 `mole-tools worktree-prune` after checking path and any local work.
 
-**Configuration.** `review.agent` selects `claude` (default) or `omp`; set
-`review.binary` for a non-default executable and `review.model` for either OMP or Claude.
-Layer output and chat state persist per MR below
-`~/.config/mole-tools/reviews/`. Requires authenticated `glab` and selected
-agent binary on `PATH`. See
-[the interactive review spec](specs/review/interactive-review.md) and
-[ADR 0005](docs/adr/0005-review-agent-port.md) for contracts.
+**Configuration.** `review.agent` selects `claude` (default) or `omp`;
+`review.binary`, `review.model`, and optional `review.effort` select the
+executable, model, and agent-specific effort. General and per-prompt choices,
+catalog sources, and Claude entitlement limits are described in [the
+interactive review spec](specs/review/interactive-review.md) and
+[ADR 0005](docs/adr/0005-review-agent-port.md).
 
 ### `review-babysitter` — Periodic Safe Merge-Request Approval
 
@@ -698,5 +746,5 @@ The publish command does not bump `package.json`, commit, or push `HEAD`. It ref
 | `src/core/` | Context, error handling, feature interface |
 | `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
-| `src/features/review/ui/components/SettingsPanel.tsx` | Review UI Settings dialog (Prompts, Skills, and Appearance tabs) for prompt presets, versions, review-agent settings, and color theme |
+| `src/features/review/ui/components/SettingsPanel.tsx` | Review Settings dialog (General, Prompts, Skills, and Appearance) for global defaults, review prompt presets and versions, catalog-backed agent/model/effort choices, and color theme |
 | `specs/` | Design docs and architecture notes |

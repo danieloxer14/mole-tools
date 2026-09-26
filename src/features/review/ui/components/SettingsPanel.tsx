@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AgentEffort } from "../../../../adapters/agent/effort";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
 import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
 import { AppearanceSettings } from "./AppearanceSettings";
@@ -7,7 +8,6 @@ import { Alert } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { NativeSelect } from "./ui/native-select";
-import { Separator } from "./ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
 export const VISIBLE_SLOTS: readonly PromptName[] = [
@@ -17,7 +17,6 @@ export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-explain-comment",
 	"review-comment-from-chat",
 ];
-export const MODEL_QUICK_PICKS: readonly string[] = ["sonnet", "opus", "fable"];
 
 export const SLOT_LABELS: Record<PromptName, string> = {
 	"commit-system": "Commit message",
@@ -50,6 +49,23 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 
 type ReviewAgent = "omp" | "claude";
 type PromptAgent = "default" | ReviewAgent;
+type SettingsTab = "general" | "prompts" | "skills" | "appearance";
+
+interface ModelCatalogModel {
+	id: string;
+	label: string;
+	efforts: string[];
+}
+
+interface ModelCatalog {
+	models: ModelCatalogModel[];
+	source: "omp" | "anthropic-api" | "claude-aliases";
+	warning?: string;
+}
+
+interface LoadedModelCatalog extends ModelCatalog {
+	agent: ReviewAgent;
+}
 
 export interface SettingsSnapshot {
 	slots: Array<{
@@ -60,6 +76,7 @@ export interface SettingsSnapshot {
 	review: {
 		agent: ReviewAgent;
 		model?: string;
+		effort?: AgentEffort;
 		agents: string[];
 	};
 }
@@ -71,6 +88,7 @@ export interface PromptSnapshot {
 	versions: number[];
 	agent: ReviewAgent | null;
 	model: string | null;
+	effort: AgentEffort | null;
 }
 
 export interface SettingsPanelProps {
@@ -78,13 +96,28 @@ export interface SettingsPanelProps {
 	onClose: () => void;
 	initialSettings?: SettingsSnapshot;
 	initialPrompt?: PromptSnapshot;
-	initialTab?: "prompts" | "skills" | "appearance";
+	initialTab?: SettingsTab;
 }
 
 export interface PromptEditorValue {
 	text: string;
 	agent: PromptAgent;
 	model: string;
+	effort: AgentEffort | "";
+}
+
+function compatibleEfforts(
+	catalog: ModelCatalog | null,
+	modelId: string,
+): string[] {
+	if (!catalog) return [];
+	if (modelId)
+		return catalog.models.find((model) => model.id === modelId)?.efforts ?? [];
+	const firstModel = catalog.models[0];
+	if (!firstModel) return [];
+	return firstModel.efforts.filter((effort) =>
+		catalog.models.every((model) => model.efforts.includes(effort)),
+	);
 }
 
 export function isSaveDisabled(
@@ -96,7 +129,8 @@ export function isSaveDisabled(
 		pending ||
 		(current.text === loaded.text &&
 			current.agent === loaded.agent &&
-			current.model.trim() === loaded.model.trim())
+			current.model.trim() === loaded.model.trim() &&
+			current.effort === loaded.effort)
 	);
 }
 
@@ -116,6 +150,8 @@ function clearPromptState(
 	setLoadedAgent: (value: PromptAgent) => void,
 	setPromptModel: (value: string) => void,
 	setLoadedModel: (value: string) => void,
+	setPromptEffort: (value: AgentEffort | "") => void,
+	setLoadedEffort: (value: AgentEffort | "") => void,
 ): void {
 	setPrompt(null);
 	setText("");
@@ -125,6 +161,8 @@ function clearPromptState(
 	setLoadedAgent("default");
 	setPromptModel("");
 	setLoadedModel("");
+	setPromptEffort("");
+	setLoadedEffort("");
 }
 
 export function SettingsPanel({
@@ -160,10 +198,16 @@ export function SettingsPanel({
 		initialPrompt?.agent ?? "default",
 	);
 	const [promptModel, setPromptModel] = useState(initialPrompt?.model ?? "");
+	const [promptEffort, setPromptEffort] = useState<AgentEffort | "">(
+		initialPrompt?.effort ?? "",
+	);
 	const [loadedAgent, setLoadedAgent] = useState<PromptAgent>(
 		initialPrompt?.agent ?? "default",
 	);
 	const [loadedModel, setLoadedModel] = useState(initialPrompt?.model ?? "");
+	const [loadedEffort, setLoadedEffort] = useState<AgentEffort | "">(
+		initialPrompt?.effort ?? "",
+	);
 	const [newPreset, setNewPreset] = useState("");
 	const [reviewAgent, setReviewAgent] = useState<ReviewAgent>(
 		initialSettings?.review.agent ?? "claude",
@@ -171,10 +215,28 @@ export function SettingsPanel({
 	const [reviewModel, setReviewModel] = useState(
 		initialSettings?.review.model ?? "",
 	);
+	const [reviewEffort, setReviewEffort] = useState<AgentEffort | "">(
+		initialSettings?.review.effort ?? "",
+	);
+	const [selectedTab, setSelectedTab] = useState<SettingsTab>(
+		initialTab ?? "prompts",
+	);
+	const [modelCatalog, setModelCatalog] = useState<LoadedModelCatalog | null>(
+		null,
+	);
+	const [catalogLoading, setCatalogLoading] = useState(false);
+	const [catalogError, setCatalogError] = useState<string | null>(null);
+	const [generalStatus, setGeneralStatus] = useState<string | null>(null);
 	const [pending, setPending] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 	const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
+	const promptRequestId = useRef(0);
+	const catalogRequestId = useRef(0);
 	const initialPromptConsumed = useRef(initialPrompt !== undefined);
+	const promptCatalogAgent: ReviewAgent =
+		promptAgent === "default"
+			? (settings?.review.agent ?? reviewAgent)
+			: promptAgent;
 
 	const loadPrompt = useCallback(
 		async (
@@ -182,12 +244,14 @@ export function SettingsPanel({
 			preset: string,
 			version?: number,
 		): Promise<PromptSnapshot> => {
+			const requestId = ++promptRequestId.current;
 			const query = new URLSearchParams({ preset });
 			if (version !== undefined) query.set("rev", String(version));
 			const snapshot = await requestJson<PromptSnapshot>(
 				token,
 				`/api/prompts/${encodeURIComponent(slot)}?${query.toString()}`,
 			);
+			if (requestId !== promptRequestId.current) return snapshot;
 			setPrompt(snapshot);
 			setSelectedPreset(snapshot.preset);
 			setSelectedVersion(snapshot.version);
@@ -197,6 +261,8 @@ export function SettingsPanel({
 			setLoadedAgent(snapshot.agent ?? "default");
 			setPromptModel(snapshot.model ?? "");
 			setLoadedModel(snapshot.model ?? "");
+			setPromptEffort(snapshot.effort ?? "");
+			setLoadedEffort(snapshot.effort ?? "");
 			return snapshot;
 		},
 		[token],
@@ -230,8 +296,45 @@ export function SettingsPanel({
 		setSettings(snapshot);
 		setReviewAgent(snapshot.review.agent);
 		setReviewModel(snapshot.review.model ?? "");
+		setReviewEffort(snapshot.review.effort ?? "");
 		return snapshot;
 	}, [token]);
+
+	const loadModelCatalog = useCallback(
+		async (agent: ReviewAgent): Promise<void> => {
+			const requestId = ++catalogRequestId.current;
+			setCatalogLoading(true);
+			setCatalogError(null);
+			try {
+				const snapshot = await requestJson<ModelCatalog>(
+					token,
+					`/api/settings/models?agent=${agent}`,
+				);
+				if (requestId !== catalogRequestId.current) return;
+				setModelCatalog({ ...snapshot, agent });
+			} catch (reason: unknown) {
+				if (requestId === catalogRequestId.current)
+					setCatalogError(errorMessage(reason));
+			} finally {
+				if (requestId === catalogRequestId.current) setCatalogLoading(false);
+			}
+		},
+		[token],
+	);
+
+	const catalogAgent =
+		selectedTab === "general"
+			? reviewAgent
+			: selectedTab === "prompts" && settings
+				? promptCatalogAgent
+				: null;
+	useEffect(() => {
+		if (!catalogAgent) return;
+		void loadModelCatalog(catalogAgent);
+		return () => {
+			catalogRequestId.current += 1;
+		};
+	}, [catalogAgent, loadModelCatalog]);
 
 	useEffect(() => {
 		if (settings) return;
@@ -287,6 +390,8 @@ export function SettingsPanel({
 			setLoadedAgent,
 			setPromptModel,
 			setLoadedModel,
+			setPromptEffort,
+			setLoadedEffort,
 		);
 		void loadPromptWithPending(slot, preset);
 	};
@@ -302,6 +407,8 @@ export function SettingsPanel({
 			setLoadedAgent,
 			setPromptModel,
 			setLoadedModel,
+			setPromptEffort,
+			setLoadedEffort,
 		);
 		void loadPromptWithPending(selectedSlot, value);
 	};
@@ -316,9 +423,15 @@ export function SettingsPanel({
 	const handleSave = async () => {
 		if (
 			!prompt ||
+			!promptEffortCompatible ||
 			isSaveDisabled(
-				{ text: loadedText, agent: loadedAgent, model: loadedModel },
-				{ text, agent: promptAgent, model: promptModel },
+				{
+					text: loadedText,
+					agent: loadedAgent,
+					model: loadedModel,
+					effort: loadedEffort,
+				},
+				{ text, agent: promptAgent, model: promptModel, effort: promptEffort },
 				pending,
 			)
 		)
@@ -334,6 +447,7 @@ export function SettingsPanel({
 					text,
 					agent: promptAgent === "default" ? null : promptAgent,
 					model: promptModel.trim() || null,
+					effort: promptEffort || null,
 				},
 			);
 			await refreshSettings();
@@ -433,43 +547,292 @@ export function SettingsPanel({
 		}
 	};
 
+	const selectedModelCatalog =
+		modelCatalog?.agent === reviewAgent ? modelCatalog : null;
+	const modelEfforts = compatibleEfforts(selectedModelCatalog, reviewModel);
+	const visibleEfforts =
+		reviewEffort && !modelEfforts.includes(reviewEffort)
+			? [reviewEffort, ...modelEfforts]
+			: modelEfforts;
+	const promptModelCatalog =
+		modelCatalog?.agent === promptCatalogAgent ? modelCatalog : null;
+	const inheritedPromptModel =
+		promptAgent === "default" ? (settings?.review.model ?? "") : "";
+	const inheritedPromptEffort =
+		promptAgent === "default" ? (settings?.review.effort ?? "") : "";
+	const effectivePromptModel = promptModel || inheritedPromptModel;
+	const promptModelEfforts = compatibleEfforts(
+		promptModelCatalog,
+		effectivePromptModel,
+	);
+	const inheritedPromptEffortCompatible =
+		!inheritedPromptEffort ||
+		!promptModel ||
+		promptModelEfforts.includes(inheritedPromptEffort);
+	const promptEffortCompatible =
+		!promptEffort || promptModelEfforts.includes(promptEffort);
+	const promptEffortNotice = !promptEffortCompatible
+		? "The saved effort is not listed as compatible with this model. Choose Default or a supported effort before saving."
+		: !promptEffort && inheritedPromptEffort && !inheritedPromptEffortCompatible
+			? promptModelCatalog
+				? "The selected model does not list the inherited effort as compatible; the agent default will be used."
+				: catalogLoading
+					? null
+					: "Effort compatibility could not be confirmed; the inherited effort will not be sent."
+			: null;
+
+	const handlePromptAgentChange = (value: string) => {
+		const agent: PromptAgent =
+			value === "omp" || value === "claude" ? value : "default";
+		if (agent === promptAgent) return;
+		catalogRequestId.current += 1;
+		setPromptAgent(agent);
+		setPromptModel("");
+		setPromptEffort("");
+		setCatalogError(null);
+	};
+
+	const handlePromptModelChange = (value: string) => {
+		setPromptModel(value);
+	};
+
+	const handlePromptEffortChange = (value: string) => {
+		setPromptEffort(value as AgentEffort | "");
+	};
+
+	const handleReviewAgentChange = (value: string) => {
+		const agent: ReviewAgent = value === "claude" ? "claude" : "omp";
+		if (agent === reviewAgent) return;
+		catalogRequestId.current += 1;
+		setReviewAgent(agent);
+		setReviewModel("");
+		setReviewEffort("");
+		setCatalogError(null);
+		setGeneralStatus(null);
+	};
+
+	const handleReviewModelChange = (value: string) => {
+		setReviewModel(value);
+		setGeneralStatus(null);
+		if (
+			selectedModelCatalog &&
+			reviewEffort &&
+			!compatibleEfforts(selectedModelCatalog, value).includes(reviewEffort)
+		) {
+			setReviewEffort("");
+		}
+	};
+
 	const handleSaveReview = async () => {
 		setPending(true);
-		setStatus(null);
+		setGeneralStatus(null);
 		try {
-			const model = reviewModel.trim();
-			const result = await postJson<{ agent: ReviewAgent; model?: string }>(
-				token,
-				"/api/settings/review",
-				{ agent: reviewAgent, ...(model ? { model } : {}) },
-			);
+			await postJson<{
+				agent: ReviewAgent;
+				model?: string;
+				effort?: AgentEffort;
+			}>(token, "/api/settings/review", {
+				agent: reviewAgent,
+				model: reviewModel.trim() || null,
+				effort: reviewEffort || null,
+			});
 			await refreshSettings();
-			setReviewAgent(result.agent);
-			setReviewModel(result.model ?? "");
-			setStatus("Saved review agent");
+			setGeneralStatus("Saved review defaults");
 		} catch (reason: unknown) {
-			setStatus(errorMessage(reason));
+			setGeneralStatus(errorMessage(reason));
 		} finally {
 			setPending(false);
 		}
 	};
 
 	return (
-		<section className="flex h-full min-h-0 flex-col" aria-busy={pending}>
+		<section
+			className="flex h-full min-h-0 min-w-0 flex-col"
+			aria-busy={pending}
+		>
 			<header className="flex items-start justify-between border-b px-6 py-4">
 				<div>
 					<h2 className="text-2xl font-semibold">Settings</h2>
 				</div>
 			</header>
 			<Tabs
-				defaultValue={initialTab ?? "prompts"}
+				value={selectedTab}
+				onValueChange={(value) => {
+					if (
+						value === "general" ||
+						value === "prompts" ||
+						value === "skills" ||
+						value === "appearance"
+					) {
+						setSelectedTab(value);
+					}
+				}}
 				className="min-h-0 flex-1 gap-0"
 			>
-				<TabsList aria-label="Settings sections" className="mx-6 mt-4">
+				<TabsList
+					aria-label="Settings sections"
+					className="mx-6 mt-4 max-w-[calc(100%-3rem)] flex-wrap"
+				>
+					<TabsTrigger value="general">General</TabsTrigger>
 					<TabsTrigger value="prompts">Prompts</TabsTrigger>
 					<TabsTrigger value="skills">Skills</TabsTrigger>
 					<TabsTrigger value="appearance">Appearance</TabsTrigger>
 				</TabsList>
+				<TabsContent value="general" className="min-h-0 overflow-auto p-6">
+					{!settings ? (
+						<Alert variant={settingsLoadFailed ? "destructive" : undefined}>
+							{settingsLoadFailed
+								? (status ?? "Settings unavailable.")
+								: "Loading settings…"}
+						</Alert>
+					) : (
+						<div className="space-y-4">
+							<fieldset className="min-w-0 flex flex-wrap items-end gap-3">
+								<legend className="sr-only">Review defaults</legend>
+								<div className="min-w-[9rem] flex-1 space-y-2">
+									<label
+										className="text-xs font-medium"
+										htmlFor="settings-default-agent"
+									>
+										Default Agent
+									</label>
+									<NativeSelect
+										className="w-full"
+										id="settings-default-agent"
+										size="sm"
+										value={reviewAgent}
+										disabled={pending}
+										onChange={(event) =>
+											handleReviewAgentChange(controlValue(event))
+										}
+									>
+										{settings.review.agents.map((agent) => (
+											<option key={agent} value={agent}>
+												{agent}
+											</option>
+										))}
+									</NativeSelect>
+								</div>
+								<div className="min-w-[9rem] flex-1 space-y-2">
+									<label
+										className="text-xs font-medium"
+										htmlFor="settings-default-model"
+									>
+										Default model
+									</label>
+									<NativeSelect
+										className="w-full"
+										id="settings-default-model"
+										size="sm"
+										value={reviewModel}
+										disabled={pending}
+										onChange={(event) =>
+											handleReviewModelChange(controlValue(event))
+										}
+									>
+										<option value="">Default (agent default)</option>
+										{reviewModel &&
+										!selectedModelCatalog?.models.some(
+											(model) => model.id === reviewModel,
+										) ? (
+											<option value={reviewModel}>
+												{reviewModel} (current custom model)
+											</option>
+										) : null}
+										{selectedModelCatalog?.models.map((model) => (
+											<option key={model.id} value={model.id}>
+												{model.label === model.id
+													? model.id
+													: `${model.label} (${model.id})`}
+											</option>
+										))}
+									</NativeSelect>
+								</div>
+								<div className="min-w-[9rem] flex-1 space-y-2">
+									<label
+										className="text-xs font-medium"
+										htmlFor="settings-default-effort"
+									>
+										Default effort
+									</label>
+									<NativeSelect
+										className="w-full"
+										id="settings-default-effort"
+										size="sm"
+										value={reviewEffort}
+										disabled={pending}
+										onChange={(event) => {
+											setReviewEffort(controlValue(event) as AgentEffort | "");
+											setGeneralStatus(null);
+										}}
+									>
+										<option value="">Default (agent default)</option>
+										{visibleEfforts.map((effort) => (
+											<option key={effort} value={effort}>
+												{effort}
+												{modelEfforts.includes(effort)
+													? ""
+													: " (current selection)"}
+											</option>
+										))}
+									</NativeSelect>
+								</div>
+							</fieldset>
+							{catalogLoading ? (
+								<Alert role="status" aria-live="polite">
+									Loading {reviewAgent} models…
+								</Alert>
+							) : null}
+							{catalogError ? (
+								<Alert variant="destructive">
+									<div className="flex flex-wrap items-center justify-between gap-3">
+										<span>{catalogError}</span>
+										<Button
+											size="sm"
+											variant="outline"
+											disabled={catalogLoading}
+											onClick={() => void loadModelCatalog(reviewAgent)}
+										>
+											Retry
+										</Button>
+									</div>
+								</Alert>
+							) : null}
+							{selectedModelCatalog ? (
+								<div className="space-y-1">
+									<p className="text-xs text-muted-foreground">
+										Model catalog source:{" "}
+										{selectedModelCatalog.source === "omp"
+											? "configured OMP executable"
+											: selectedModelCatalog.source === "anthropic-api"
+												? "Anthropic API"
+												: "Claude CLI aliases"}
+										.
+									</p>
+									{selectedModelCatalog.warning ? (
+										<Alert>{selectedModelCatalog.warning}</Alert>
+									) : null}
+								</div>
+							) : null}
+							<Button size="sm" disabled={pending} onClick={handleSaveReview}>
+								Save
+							</Button>
+							{generalStatus ? (
+								<Alert
+									role="status"
+									aria-live="polite"
+									variant={
+										generalStatus === "Saved review defaults"
+											? undefined
+											: "destructive"
+									}
+								>
+									{generalStatus}
+								</Alert>
+							) : null}
+						</div>
+					)}
+				</TabsContent>
 				<TabsContent value="prompts" className="flex flex-col">
 					{status ? (
 						<Alert role="status" aria-live="polite" className="mx-6 mt-4">
@@ -631,59 +994,129 @@ export function SettingsPanel({
 											</Button>
 										</div>
 
-										<div className="flex flex-wrap items-center gap-2">
-											<label
-												className="w-24 shrink-0 text-xs font-medium"
-												htmlFor="settings-prompt-agent"
-											>
-												Agent
-											</label>
-											<NativeSelect
-												className="min-w-0 flex-1"
-												id="settings-prompt-agent"
-												size="sm"
-												value={promptAgent}
-												disabled={pending}
-												onChange={(event) => {
-													const value = controlValue(event);
-													setPromptAgent(
-														value === "omp" || value === "claude"
-															? value
-															: "default",
-													);
-												}}
-											>
-												<option value="default">
-													Default ({settings.review.agent})
-												</option>
-												<option value="omp">omp</option>
-												<option value="claude">claude</option>
-											</NativeSelect>
-										</div>
-
-										<div className="flex flex-wrap items-center gap-2">
-											<label
-												className="w-24 shrink-0 text-xs font-medium"
-												htmlFor="settings-prompt-model"
-											>
-												Model
-											</label>
-											<Input
-												id="settings-prompt-model"
-												type="text"
-												className="h-8 min-w-0 flex-1"
-												value={promptModel}
-												placeholder={
-													promptAgent === "default"
-														? `Default (${settings.review.model ?? "agent default"})`
-														: "Agent default"
-												}
-												disabled={pending}
-												onChange={(event) =>
-													setPromptModel(controlValue(event))
-												}
-											/>
-										</div>
+										<fieldset className="min-w-0 flex flex-wrap items-end gap-3">
+											<legend className="sr-only">
+												Prompt agent, model, and effort
+											</legend>
+											<div className="min-w-[9rem] flex-1 space-y-2">
+												<label
+													className="text-xs font-medium"
+													htmlFor="settings-prompt-agent"
+												>
+													Agent
+												</label>
+												<NativeSelect
+													className="w-full"
+													id="settings-prompt-agent"
+													size="sm"
+													value={promptAgent}
+													disabled={pending}
+													onChange={(event) =>
+														handlePromptAgentChange(controlValue(event))
+													}
+												>
+													<option value="default">
+														Default ({settings.review.agent})
+													</option>
+													<option value="omp">omp</option>
+													<option value="claude">claude</option>
+												</NativeSelect>
+											</div>
+											<div className="min-w-[9rem] flex-1 space-y-2">
+												<label
+													className="text-xs font-medium"
+													htmlFor="settings-prompt-model"
+												>
+													Model
+												</label>
+												<NativeSelect
+													className="w-full"
+													id="settings-prompt-model"
+													size="sm"
+													value={promptModel}
+													disabled={pending}
+													onChange={(event) =>
+														handlePromptModelChange(controlValue(event))
+													}
+												>
+													<option value="">
+														Default ({inheritedPromptModel || "agent default"})
+													</option>
+													{promptModel &&
+													!promptModelCatalog?.models.some(
+														(model) => model.id === promptModel,
+													) ? (
+														<option value={promptModel}>
+															{promptModel} (current custom model)
+														</option>
+													) : null}
+													{promptModelCatalog?.models.map((model) => (
+														<option key={model.id} value={model.id}>
+															{model.label === model.id
+																? model.id
+																: `${model.label} (${model.id})`}
+														</option>
+													))}
+												</NativeSelect>
+											</div>
+											<div className="min-w-[9rem] flex-1 space-y-2">
+												<label
+													className="text-xs font-medium"
+													htmlFor="settings-prompt-effort"
+												>
+													Effort
+												</label>
+												<NativeSelect
+													className="w-full"
+													id="settings-prompt-effort"
+													size="sm"
+													value={promptEffortCompatible ? promptEffort : ""}
+													disabled={pending}
+													onChange={(event) =>
+														handlePromptEffortChange(controlValue(event))
+													}
+												>
+													<option value="">
+														{promptEffortCompatible
+															? `Default (${inheritedPromptEffortCompatible && inheritedPromptEffort ? inheritedPromptEffort : "agent default"})`
+															: "Choose a compatible effort"}
+													</option>
+													{promptModelEfforts.map((effort) => (
+														<option key={effort} value={effort}>
+															{effort}
+														</option>
+													))}
+												</NativeSelect>
+											</div>
+										</fieldset>
+										{promptEffortNotice ? (
+											<Alert role="status">{promptEffortNotice}</Alert>
+										) : null}
+										{catalogLoading ? (
+											<Alert role="status" aria-live="polite">
+												Loading {promptCatalogAgent} models…
+											</Alert>
+										) : null}
+										{catalogError ? (
+											<Alert variant="destructive">
+												<div className="flex flex-wrap items-center justify-between gap-3">
+													<span>{catalogError}</span>
+													<Button
+														size="sm"
+														variant="outline"
+														disabled={catalogLoading}
+														onClick={() =>
+															void loadModelCatalog(promptCatalogAgent)
+														}
+													>
+														Retry
+													</Button>
+												</div>
+											</Alert>
+										) : null}
+										{promptModelCatalog?.warning ? (
+											<Alert>{promptModelCatalog.warning}</Alert>
+										) : null}
 
 										<div className="space-y-2">
 											<label
@@ -703,118 +1136,28 @@ export function SettingsPanel({
 										</div>
 										<Button
 											size="sm"
-											disabled={isSaveDisabled(
-												{
-													text: loadedText,
-													agent: loadedAgent,
-													model: loadedModel,
-												},
-												{ text, agent: promptAgent, model: promptModel },
-												pending,
-											)}
+											disabled={
+												!promptEffortCompatible ||
+												isSaveDisabled(
+													{
+														text: loadedText,
+														agent: loadedAgent,
+														model: loadedModel,
+														effort: loadedEffort,
+													},
+													{
+														text,
+														agent: promptAgent,
+														model: promptModel,
+														effort: promptEffort,
+													},
+													pending,
+												)
+											}
 											onClick={handleSave}
 										>
 											Save as new version
 										</Button>
-
-										<section
-											className="space-y-3"
-											aria-labelledby="settings-review-agent-heading"
-										>
-											<Separator />
-											<h3
-												id="settings-review-agent-heading"
-												className="text-sm font-medium"
-											>
-												Review agent
-											</h3>
-											<p className="text-xs text-muted-foreground">
-												Default for prompt versions whose agent is Default.
-											</p>
-											<div className="flex flex-wrap items-center gap-2">
-												<label
-													className="w-24 shrink-0 text-xs font-medium"
-													htmlFor="settings-agent"
-												>
-													Agent
-												</label>
-												<NativeSelect
-													className="min-w-0 flex-1"
-													id="settings-agent"
-													size="sm"
-													value={reviewAgent}
-													disabled={pending}
-													onChange={(event) =>
-														setReviewAgent(
-															controlValue(event) === "claude"
-																? "claude"
-																: "omp",
-														)
-													}
-												>
-													{settings.review.agents.map((agent) => (
-														<option key={agent} value={agent}>
-															{agent}
-														</option>
-													))}
-												</NativeSelect>
-											</div>
-											<div className="flex flex-wrap items-center gap-2">
-												<label
-													className="w-24 shrink-0 text-xs font-medium"
-													htmlFor="settings-model"
-												>
-													Model
-												</label>
-												<Input
-													id="settings-model"
-													type="text"
-													className="h-8 min-w-0 flex-1"
-													value={reviewModel}
-													disabled={pending}
-													onChange={(event) =>
-														setReviewModel(controlValue(event))
-													}
-												/>
-												<NativeSelect
-													className="max-w-full shrink-0"
-													id="settings-model-quickpick"
-													aria-label="Model quick pick"
-													size="sm"
-													value={
-														MODEL_QUICK_PICKS.includes(reviewModel)
-															? reviewModel
-															: ""
-													}
-													disabled={pending}
-													onChange={(event) => {
-														const value = controlValue(event);
-														if (value !== "") setReviewModel(value);
-													}}
-												>
-													<option value="">Custom…</option>
-													{MODEL_QUICK_PICKS.map((model) => (
-														<option key={model} value={model}>
-															{model}
-														</option>
-													))}
-												</NativeSelect>
-											</div>
-											<Button
-												size="sm"
-												disabled={pending}
-												onClick={handleSaveReview}
-											>
-												Save review agent
-											</Button>
-											<p className="text-xs text-muted-foreground">
-												Applies to the next layer run or chat turn. Use
-												Regenerate to rebuild cached layers.
-											</p>
-											<p className="text-xs text-muted-foreground">
-												Switching agents may restart existing chat sessions.
-											</p>
-										</section>
 									</>
 								)}
 							</section>

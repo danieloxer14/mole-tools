@@ -1,6 +1,8 @@
-import { mkdir, readdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readdir, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { PortError } from "../../core/errors";
+import type { AgentEffort } from "../agent/effort";
 import { defaultConfigPath } from "../config/loader";
 import {
 	DEFAULT_PRESET,
@@ -76,6 +78,19 @@ function versionPath(slotDir: string, preset: string, version: number): string {
 	return join(slotDir, preset, `${String(version).padStart(3, "0")}.md`);
 }
 
+async function writePromptVersion(
+	path: string,
+	content: string,
+): Promise<void> {
+	const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		await Bun.write(tempPath, content);
+		await rename(tempPath, path);
+	} finally {
+		if (await Bun.file(tempPath).exists()) await unlink(tempPath);
+	}
+}
+
 export async function listPresets(
 	name: PromptName,
 	dir = promptsDir(),
@@ -108,6 +123,7 @@ export async function readPrompt(
 	version: number;
 	agent: PromptAgentName | null;
 	model: string | null;
+	effort: AgentEffort | null;
 }> {
 	const dir = options.dir ?? promptsDir();
 	const slotDir = await ensureSlotDir(name, dir);
@@ -142,6 +158,7 @@ export async function readPrompt(
 		version,
 		agent: parsed.agent,
 		model: parsed.model,
+		effort: parsed.effort,
 	};
 }
 
@@ -159,6 +176,7 @@ export async function savePrompt(
 		text: string;
 		agent?: PromptAgentName | null;
 		model?: string | null;
+		effort?: AgentEffort | null;
 		dir?: string;
 	},
 ): Promise<number> {
@@ -176,12 +194,13 @@ export async function savePrompt(
 		versions = [1];
 	}
 	const version = (versions[versions.length - 1] ?? 0) + 1;
-	await Bun.write(
+	await writePromptVersion(
 		versionPath(slotDir, preset, version),
 		serializePromptFile({
 			text: options.text,
 			agent: options.agent ?? null,
 			model: options.model?.trim() || null,
+			effort: options.effort ?? null,
 		}),
 	);
 	return version;

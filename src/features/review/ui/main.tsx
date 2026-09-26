@@ -543,7 +543,7 @@ function ReviewApp() {
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [settingsInitialTab, setSettingsInitialTab] = useState<
-		"prompts" | "skills" | "appearance"
+		"general" | "prompts" | "skills" | "appearance"
 	>("prompts");
 	const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
 	const skills = useSkills(token, skillsRefreshKey);

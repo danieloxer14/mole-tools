@@ -1,4 +1,5 @@
 import { ClaudeAgentAdapter } from "../adapters/agent/claude";
+import type { AgentEffort } from "../adapters/agent/effort";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import {
 	type Config,
@@ -21,6 +22,7 @@ import type { Vcs } from "../ports/vcs";
 export interface ReviewAgentOverride {
 	agent?: "omp" | "claude";
 	model?: string;
+	effort?: AgentEffort | null;
 }
 
 export interface Context {
@@ -131,25 +133,41 @@ function buildAdapterMap(config: Config): Map<string, Llm> {
 export function resolveReviewAgentConfig(
 	config: Config,
 	override?: ReviewAgentOverride,
-): { agent: "omp" | "claude"; binary: string; model?: string } {
+): {
+	agent: "omp" | "claude";
+	binary: string;
+	model?: string;
+	effort?: AgentEffort;
+} {
 	const configured = config.review?.agent ?? "claude";
 	const agent = override?.agent ?? configured;
 	const binary =
 		agent === configured ? (config.review?.binary ?? agent) : agent;
 	const model = override ? override.model : config.review?.model;
-	return { agent, binary, model };
+	const effort = override
+		? (override.effort ?? undefined)
+		: config.review?.effort;
+	return {
+		agent,
+		binary,
+		model,
+		...(effort === undefined ? {} : { effort }),
+	};
 }
 
 function buildReviewAgent(
 	config: Config,
 	override?: ReviewAgentOverride,
 ): ReviewAgent {
-	const { agent, binary, model } = resolveReviewAgentConfig(config, override);
+	const { agent, binary, model, effort } = resolveReviewAgentConfig(
+		config,
+		override,
+	);
 
 	if (agent === "claude") {
-		return new ClaudeAgentAdapter({ binary, model });
+		return new ClaudeAgentAdapter({ binary, model, effort });
 	}
-	return new OmpAgentAdapter({ binary, model });
+	return new OmpAgentAdapter({ binary, model, effort });
 }
 
 export function buildContext(input: {

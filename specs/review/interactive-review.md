@@ -33,7 +33,8 @@ binary on `PATH`. The optional top-level `review` config is independent of
   "review": {
     "agent": "claude", // "omp" or "claude"; default "claude"
     "binary": "claude", // optional binary override
-    "model": "review-model", // optional model forwarded to the selected agent
+    "model": "review-model", // optional; no model flag when omitted
+    "effort": "high", // optional; OMP --thinking or Claude --effort
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800,
   },
@@ -41,8 +42,8 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```
 
 Omitting `review` uses the default agent `claude` with its default `claude`
-binary and no forced model, so the Claude CLI selects its own current default
-model.
+binary and no forced model or effort, so Claude Code selects its own current
+defaults.
 
 Prompt overrides use the existing prompt-loader convention. The first read
 seeds these files under `~/.config/mole-tools/prompts/` without overwriting user
@@ -55,21 +56,48 @@ edits:
 - `review-comment-from-chat.md`
 
 Prompt versions may begin with YAML-style frontmatter. The frontmatter stores
-optional per-version agent/model metadata and is removed before prompt text is
-sent to an agent:
+optional per-version agent/model/effort metadata and is removed before prompt
+text is sent to an agent:
 
 ```text
 ---
 agent: omp
 model: openai/gpt-5.2
+effort: high
 ---
 Review the changed code for correctness and risk.
 ```
 
-When `agent` is unset, the version inherits the global Review agent and model.
-When an agent is set with a blank model, the run sends no `--model` flag.
-Commit and MR prompt slots ignore frontmatter and continue to use their
-`models.*` LLM routes.
+With Agent unset or `default`, the version inherits the General default agent,
+model, and effort independently for each blank field. An explicit `omp` or
+`claude` agent uses only that version's Model and Effort; blank values send no
+corresponding flag and use that agent's CLI defaults rather than inheriting
+settings for another agent. Commit and MR prompt slots ignore review
+frontmatter and continue to use their `models.*` LLM routes; existing prompt
+versions without effort keep that field unset.
+
+### Settings dialog and model catalogs
+
+The Settings dialog opens on **Prompts** and also offers **General**, **Skills**,
+and **Appearance**. **General** has the global **Default Agent**, **Default
+model**, and **Default effort** controls. Each editable review prompt version
+has Agent, Model, and Effort dropdowns. Selections affect future layer runs;
+use **Regenerate** to rebuild cached layers.
+
+For OMP, the server runs `models --json` with the selected OMP executable; the
+dropdown lists its model selectors and only effort values advertised for the
+selected model. Claude discovery uses the paginated Anthropic Models API when
+the server has `ANTHROPIC_API_KEY`. That API list reflects the API key's
+entitlement and does not establish which models the separate Claude CLI account
+can access. Without the key, the dropdown shows `sonnet`, `opus`, and `haiku`
+CLI aliases only; those aliases do not enumerate the full Claude CLI catalog.
+Custom saved models remain selectable until changed.
+
+Effort is optional: unset means no effort flag. OMP effort levels are
+`off|minimal|low|medium|high|xhigh|max|auto`; model compatibility narrows
+available choices. OMP receives `--thinking <level>`. Claude supports
+`low|medium|high|xhigh|max` and receives `--effort <level>`. Codex's `-c` is not
+an OMP flag.
 
 ## 2. Repository and worktree lifecycle
 
@@ -348,14 +376,15 @@ Assistant entries are unchanged.
 
 ### Chat agent binding
 
-Each new chat, including an Explain chat, binds its agent/model from the
+Each new chat, including an Explain chat, binds its agent/model/effort from the
 effective selection of the active `review-chat` prompt version at creation.
-Every turn in that chat uses its binding, even after Review settings or prompt
-versions change. An unbound chat with no transcript and no session binds from
-the `review-chat` slot at its first turn. An unbound chat with a transcript or
-session (a legacy chat) binds to the default Review agent/model at its next
-turn. Either binding is persisted, and the chat switcher shows the binding for
-bound chats.
+Every turn in that chat uses its persisted binding, even after Review settings
+or prompt versions change. Older bound chats without effort keep effort unset
+and continue without an effort flag. An unbound chat with no transcript and no
+session binds from the `review-chat` slot at its first turn. An unbound chat
+with a transcript or session (a legacy chat) binds to the current global
+agent/model/effort at its next turn. Either binding is persisted, and the chat
+switcher shows the binding for bound chats.
 
 Tag line adds one line to agent-chat context. Shift-selecting two lines in the
 same hunk creates an inclusive context range. Dragging from a line's Tag line
