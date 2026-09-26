@@ -60,6 +60,7 @@ const base: MrHeaderProps = {
 	refreshing: false,
 	layerGenerating: false,
 	onRefresh: () => {},
+	onOpenSettings: () => {},
 };
 
 function render(overrides: Partial<MrHeaderProps> = {}): HTMLDivElement {
@@ -188,6 +189,32 @@ test("renders diff totals right of approval pill with diff colours", () => {
 	expect(stats?.parentElement).toBe(sha?.parentElement);
 });
 
+test("orders title, commit metadata, and header actions on one line", () => {
+	const container = render({ freshness: { stale: true } });
+	const title = container.querySelector("h1");
+	const sha = container.querySelector('button[aria-label="Copy commit sha"]');
+	const ordered = [
+		title,
+		sha,
+		container.querySelector('[data-freshness="stale"]'),
+		container.querySelector('[data-approval="approved"]'),
+		container.querySelector("[data-files-changed]"),
+		container.querySelector("[data-insertions]"),
+		container.querySelector("[data-deletions]"),
+		container.querySelector('button[aria-label="Refresh review and layers"]'),
+		container.querySelector('a[aria-label="Open in GitLab"]'),
+		container.querySelector('button[aria-label="Unapprove"]'),
+		container.querySelector('button[aria-label="Settings"]'),
+	];
+
+	expect(title?.nextElementSibling?.querySelector("[data-sha-control]")).toBe(
+		sha,
+	);
+	for (let index = 1; index < ordered.length; index += 1) {
+		expectBefore(ordered[index - 1] ?? null, ordered[index] ?? null);
+	}
+});
+
 test("renders diff totals without approval pill", () => {
 	for (const overrides of [{ approval: null }, { approvalLoading: true }]) {
 		const container = render(overrides);
@@ -251,6 +278,33 @@ test("renders one combined refresh control and stale warning", () => {
 	expect(
 		render({ freshness: null }).querySelector('[data-freshness="stale"]'),
 	).toBeNull();
+});
+
+test("opens header Settings with accessible label and tooltip", async () => {
+	let settingsCalls = 0;
+	const rendered = renderInteractive({
+		onOpenSettings: () => {
+			settingsCalls += 1;
+		},
+	});
+	const button = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Settings"]',
+	);
+
+	expect(button?.getAttribute("title")).toBeNull();
+	expect(button?.getAttribute("aria-label")).toBe("Settings");
+	await act(async () => {
+		document.body.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		button?.focus();
+		await Bun.sleep(0);
+	});
+	expect(
+		document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
+	).toBe("Settings");
+	act(() => button?.click());
+	expect(settingsCalls).toBe(1);
 });
 
 test("refresh busy and disabled states reflect combined work", () => {
