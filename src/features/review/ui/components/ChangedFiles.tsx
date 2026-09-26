@@ -28,9 +28,14 @@ import {
 const TREE_ROOT_INDENT_REM = 0.5;
 // Gap and folder icon width; each child starts under parent label.
 const TREE_INDENT_STEP_REM = 1.25;
+// Keep deep paths from squeezing stats and viewed controls at narrow widths.
+const TREE_MAX_INDENT_REM = 3.5;
 
 function treeRowIndent(depth: number): string {
-	return `${TREE_ROOT_INDENT_REM + depth * TREE_INDENT_STEP_REM}rem`;
+	return `${Math.min(
+		TREE_ROOT_INDENT_REM + depth * TREE_INDENT_STEP_REM,
+		TREE_MAX_INDENT_REM,
+	)}rem`;
 }
 
 export interface ChangedFilesProps {
@@ -236,21 +241,21 @@ function ChangedFileRow({
 	return (
 		<div
 			ref={(element) => registerRow(entry.path, element)}
-			className="group flex items-center gap-2 px-4 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/60 data-[state=selected]:bg-accent"
+			className="group flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/60 data-[state=selected]:bg-accent"
 			data-file-path={entry.path}
 			data-state={selected ? "selected" : "idle"}
 			style={{ paddingInlineStart: treeRowIndent(depth) }}
 		>
 			<button
 				type="button"
-				className="min-w-0 flex-1 truncate text-left font-mono text-xs"
+				className="min-w-0 grow shrink basis-32 truncate text-left font-mono text-xs"
 				aria-label={entry.path}
 				title={entry.path}
 				onClick={() => onSelectFile(entry.path)}
 			>
 				{label}
 			</button>
-			<span className="flex shrink-0 gap-1 text-xs tabular-nums">
+			<span className="flex shrink-0 gap-1 whitespace-nowrap text-xs tabular-nums">
 				<span className="text-success">+{entry.file.insertions}</span>
 				<span className="text-destructive">−{entry.file.deletions}</span>
 			</span>
@@ -325,7 +330,7 @@ function ChangedFilesFolder({
 		>
 			<div
 				data-folder-row={node.path}
-				className="group flex h-7 w-full items-center gap-2 px-4 text-sm transition-colors duration-150 hover:bg-muted/60"
+				className="group flex min-h-7 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 py-0.5 text-sm transition-colors duration-150 hover:bg-muted/60"
 				style={{ paddingInlineStart: treeRowIndent(depth) }}
 			>
 				<CollapsibleTrigger
@@ -337,7 +342,7 @@ function ChangedFilesFolder({
 						<Button
 							type="button"
 							variant="ghost"
-							className="flex h-7 min-w-0 flex-1 shrink items-center justify-start gap-2 rounded-none px-0 text-left text-sm hover:bg-transparent hover:text-inherit aria-expanded:bg-transparent aria-expanded:text-inherit"
+							className="flex h-7 min-w-0 grow shrink basis-32 items-center justify-start gap-2 rounded-none px-0 text-left text-sm hover:bg-transparent hover:text-inherit aria-expanded:bg-transparent aria-expanded:text-inherit"
 						>
 							<Folder className="size-3 shrink-0" aria-hidden />
 							<span className="min-w-0 truncate font-mono text-xs">
@@ -346,7 +351,7 @@ function ChangedFilesFolder({
 						</Button>
 					}
 				/>
-				<span className="flex shrink-0 gap-1 text-xs tabular-nums">
+				<span className="flex shrink-0 gap-1 whitespace-nowrap text-xs tabular-nums">
 					<span className="text-success">+{summary.insertions}</span>
 					<span className="text-destructive">−{summary.deletions}</span>
 				</span>
@@ -522,10 +527,7 @@ export function ChangedFiles({
 				refreshing={refreshing}
 				onShowWhitespaceChangesChange={onShowWhitespaceChangesChange}
 			/>
-			<nav
-				className="min-h-0 max-h-[40vh] flex-1 overflow-auto"
-				aria-label="Changed files"
-			>
+			<nav className="min-h-0 flex-1 overflow-auto" aria-label="Changed files">
 				{mode === "list"
 					? entries.map((entry) => (
 							<ChangedFileRow

@@ -372,10 +372,12 @@ mole-tools merge-request --context "migration risk"   # extra inline guidance
 ### `review` — Interactive GitLab Merge-Request Review
 
 Opens a local review surface with a full-width merge-request header above its
-three review columns. The left column tracks generated review layers and
-coverage, the centre column shows the changed-file diff, and the right column
-provides persistent, read-only agent chat. Comments stay local drafts until you
-explicitly send each one as a positioned GitLab discussion. Each published
+three review columns. The left sidebar offers **Layers** and **Files** tabs:
+Layers tracks generated review layers and coverage, while Files provides
+changed-file navigation. The centre column is reserved for the selected diff;
+it does not contain a second files browser. The right column provides persistent,
+read-only agent chat. Comments stay local drafts until you explicitly send each
+one as a positioned GitLab discussion. Each published
 discussion has an **Explain** button that opens a new chat pre-loaded with the
 surrounding diff: the chat is titled `Explain: …` after the comment, and its
 first turn uses the active `review-explain-comment` prompt preset, the comment's notes,

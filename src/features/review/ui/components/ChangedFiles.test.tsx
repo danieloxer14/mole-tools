@@ -492,3 +492,58 @@ test("uses full-path callbacks in list mode", () => {
 	expect(selected).toEqual(["src/a.ts"]);
 	expect(viewed).toEqual([[["src/a.ts"], true]]);
 });
+
+test("keeps long nested paths, stats, and Viewed controls accessible", () => {
+	const path =
+		"src/feature-with-a-long-name/reviews/a-folder-with-a-long-name/a-file-with-a-long-name.ts";
+	const folderPath =
+		"src/feature-with-a-long-name/reviews/a-folder-with-a-long-name";
+	const selected: string[] = [];
+	const viewed: Array<[readonly string[], boolean]> = [];
+	const rendered = renderInteractive({
+		files: [
+			parsedFile(path, {
+				insertions: 123456,
+				deletions: 789012,
+			}),
+		],
+		onSelectFile: (selectedPath) => selected.push(selectedPath),
+		onViewedChange: (paths, isViewed) => viewed.push([paths, isViewed]),
+	});
+	act(() => modeButton(rendered.container, "Tree view").click());
+
+	const nav = changedFilesNav(rendered.container);
+	const folderButton = nav.querySelector<HTMLButtonElement>(
+		`button[aria-label="Collapse ${folderPath}"]`,
+	);
+	const fileButton = nav.querySelector<HTMLButtonElement>(
+		`button[aria-label="${path}"]`,
+	);
+	const fileViewed = nav.querySelector<HTMLElement>(
+		`[role="checkbox"][aria-label="Viewed ${path}"]`,
+	);
+	const folderViewed = nav.querySelector<HTMLElement>(
+		`[role="checkbox"][aria-label="Viewed folder ${folderPath}"]`,
+	);
+	if (!folderButton || !fileButton || !fileViewed || !folderViewed) {
+		throw new Error("Long nested path controls are missing");
+	}
+
+	expect(folderButton.title).toBe(`Collapse ${folderPath}`);
+	expect(fileButton.title).toBe(path);
+	const fileRow = fileButton.closest<HTMLElement>("[data-file-path]");
+	if (!fileRow) throw new Error("Nested file row is missing");
+	expect(fileRow.querySelector(".text-success")?.textContent).toBe("+123456");
+	expect(fileRow.querySelector(".text-destructive")?.textContent).toBe(
+		"−789012",
+	);
+
+	act(() => fileButton.click());
+	act(() => fileViewed.click());
+	act(() => folderViewed.click());
+	expect(selected).toEqual([path]);
+	expect(viewed).toEqual([
+		[[path], true],
+		[[path], true],
+	]);
+});

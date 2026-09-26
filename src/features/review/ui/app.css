@@ -174,6 +174,21 @@
 @layer components {
 	.diff-table .find-match { background: var(--color-find-match); border-radius: var(--radius-sm); transition: background-color 150ms ease-out; }
 	.diff-table .find-match-current { background: var(--color-find-match-current); outline: 1px solid var(--color-primary); }
+	.review-sidebar-container {
+		container-name: review-sidebar;
+		container-type: inline-size;
+	}
+
+	.review-sidebar-tab-progress {
+		display: none;
+	}
+
+	/* The container measures content width, one pixel narrower than the border box. */
+	@container review-sidebar (min-width: 359px) {
+		.review-sidebar-tab-progress {
+			display: inline;
+		}
+	}
 
 .diff-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 13px; line-height: 1.25rem; min-width: 100%; width: 100%; max-width: 100%; table-layout: fixed; }
 .diff-table td { padding: 0 --spacing(2); white-space: pre-wrap; }

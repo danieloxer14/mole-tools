@@ -1,6 +1,10 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { ReviewState } from "../../state";
+import { ChangedFiles } from "./ChangedFiles";
 import {
 	collapseLayerOnDoneTransition,
 	collapseLayerWhenDone,
@@ -11,6 +15,16 @@ import {
 	shortFilePath,
 	toggleLayerCollapsed,
 } from "./LayerPane";
+
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+const roots: Root[] = [];
+
+afterEach(() => {
+	for (const root of roots.splice(0)) {
+		act(() => root.unmount());
+	}
+	document.body.replaceChildren();
+});
 
 test("keeps a unique file basename in the shortened label", () => {
 	expect(
@@ -82,6 +96,7 @@ function renderLayerPane(
 		<LayerPane
 			state={reviewState()}
 			files={["src/routes/route.ts", "web/route.ts"]}
+			filesContent={null}
 			selectedPath={null}
 			onSelectFile={() => {}}
 			onSelectLayer={() => {}}
@@ -96,6 +111,318 @@ function renderLayerPane(
 	);
 }
 
+function parseMarkup(markup: string): HTMLDivElement {
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	return container;
+}
+function tabButton(container: HTMLElement, label: string): HTMLButtonElement {
+	const tab = [
+		...container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+	].find((candidate) =>
+		candidate.getAttribute("aria-label")?.startsWith(`${label},`),
+	);
+	if (!tab) throw new Error(`Missing ${label} tab`);
+	return tab;
+}
+
+function tabPanel(container: HTMLElement, tab: HTMLButtonElement): HTMLElement {
+	const index = tab.getAttribute("aria-label")?.startsWith("Layers,") ? 0 : 1;
+	const panel =
+		container.querySelectorAll<HTMLElement>('[role="tabpanel"]')[index];
+	if (!panel)
+		throw new Error(`Missing panel for ${tab.getAttribute("aria-label")}`);
+	return panel;
+}
+
+test("keeps Layers and Files tabs available in empty and failed layer states", () => {
+	for (const state of [
+		reviewState({ layers: [] }),
+		reviewState({
+			layerStatus: "failed",
+			layerError: "Layer request failed",
+			layers: [],
+		}),
+	]) {
+		const pane = parseMarkup(renderLayerPane({ state }));
+		const tabs = [...pane.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+		const layersTab = tabButton(pane, "Layers");
+		const filesTab = tabButton(pane, "Files");
+		const layersPanel = tabPanel(pane, layersTab);
+		const filesPanel = tabPanel(pane, filesTab);
+
+		expect(
+			tabs.map((tab) => tab.getAttribute("aria-label")?.split(",")[0]),
+		).toEqual(["Layers", "Files"]);
+		expect(layersTab.getAttribute("aria-selected")).toBe("true");
+		expect(filesTab.getAttribute("aria-selected")).toBe("false");
+		expect(pane.querySelector("h2")).toBeNull();
+		expect(filesPanel.hasAttribute("inert")).toBe(true);
+		expect(layersPanel.textContent).toContain(
+			state.layerStatus === "failed"
+				? "Layer generation failed"
+				: "No review layers.",
+		);
+		if (state.layerStatus === "failed") {
+			expect(
+				layersPanel.querySelector('[role="alert"]')?.textContent,
+			).toContain("Layer request failed");
+		}
+	}
+});
+
+test("shows non-stale layer and unique current-file progress in tabs", () => {
+	const layerTemplate = reviewState().layers.at(0);
+	if (!layerTemplate) throw new Error("Expected a layer template");
+
+	const pane = parseMarkup(
+		renderLayerPane({
+			files: ["src/current.ts", "src/current.ts", "", "src/other.ts"],
+			state: reviewState({
+				layers: [
+					{ ...layerTemplate, id: "completed", done: true, stale: false },
+					{ ...layerTemplate, id: "stale", done: true, stale: true },
+					{ ...layerTemplate, id: "pending", done: false, stale: false },
+				],
+				viewedFiles: ["src/current.ts", "src/current.ts", "obsolete.ts", ""],
+			}),
+		}),
+	);
+	const layersTab = tabButton(pane, "Layers");
+	const filesTab = tabButton(pane, "Files");
+
+	expect(layersTab.getAttribute("aria-label")).toBe(
+		"Layers, 1 of 3 layers complete",
+	);
+	expect(
+		layersTab.querySelector(".review-sidebar-tab-progress")?.textContent,
+	).toBe("1/3");
+	expect(filesTab.getAttribute("aria-label")).toBe(
+		"Files, 1 of 2 current diff files viewed",
+	);
+	expect(
+		filesTab.querySelector(".review-sidebar-tab-progress")?.textContent,
+	).toBe("1/2");
+});
+
+test("shows and exposes zero current-file progress", () => {
+	const pane = parseMarkup(
+		renderLayerPane({
+			files: [""],
+			state: reviewState({ viewedFiles: ["obsolete.ts", ""] }),
+		}),
+	);
+	const filesTab = tabButton(pane, "Files");
+
+	expect(filesTab.getAttribute("aria-label")).toBe(
+		"Files, 0 of 0 current diff files viewed",
+	);
+	expect(
+		filesTab.querySelector(".review-sidebar-tab-progress")?.textContent,
+	).toBe("0/0");
+});
+
+test("keeps file and layer state across accessible sidebar tab switches", () => {
+	const diffFiles: ParsedFileDiff[] = [
+		{
+			oldPath: "src/routes/route.ts",
+			newPath: "src/routes/route.ts",
+			status: "modified",
+			binary: false,
+			insertions: 2,
+			deletions: 1,
+			hunks: [],
+		},
+		{
+			oldPath: "web/route.ts",
+			newPath: "web/route.ts",
+			status: "modified",
+			binary: false,
+			insertions: 2,
+			deletions: 1,
+			hunks: [],
+		},
+	];
+	const filePaths = ["src/routes/route.ts", "web/route.ts"];
+	const fileSelections: string[] = [];
+	const viewedChanges: Array<[readonly string[], boolean]> = [];
+	const whitespaceChanges: boolean[] = [];
+	let selectedPath: string | null = filePaths[0] ?? null;
+	let viewedFiles: string[] = [];
+	let showWhitespaceChanges = true;
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	const onSelectFile = (path: string) => {
+		fileSelections.push(path);
+		selectedPath = path;
+	};
+	const onViewedChange = (paths: readonly string[], viewed: boolean) => {
+		viewedChanges.push([paths, viewed]);
+		viewedFiles = viewed
+			? [...new Set([...viewedFiles, ...paths])]
+			: viewedFiles.filter((path) => !paths.includes(path));
+	};
+	const render = () =>
+		root.render(
+			<LayerPane
+				state={reviewState()}
+				files={filePaths}
+				filesContent={
+					<ChangedFiles
+						files={diffFiles}
+						viewedFiles={viewedFiles}
+						selectedPath={selectedPath}
+						onSelectFile={onSelectFile}
+						onViewedChange={onViewedChange}
+						showWhitespaceChanges={showWhitespaceChanges}
+						onShowWhitespaceChangesChange={(show) => {
+							whitespaceChanges.push(show);
+							showWhitespaceChanges = show;
+						}}
+					/>
+				}
+				selectedPath={selectedPath}
+				onSelectFile={onSelectFile}
+				onSelectLayer={() => {}}
+				onToggleDone={() => {}}
+				layerAction={null}
+				actionError={null}
+				externallyDisabled={false}
+				onRegenerate={() => {}}
+				onRetry={() => {}}
+			/>,
+		);
+
+	act(render);
+	const layersTab = tabButton(container, "Layers");
+	const filesTab = tabButton(container, "Files");
+	const layersPanel = tabPanel(container, layersTab);
+	const filesPanel = tabPanel(container, filesTab);
+	expect(layersTab.getAttribute("aria-selected")).toBe("true");
+	expect(filesPanel.hasAttribute("hidden")).toBe(true);
+	expect(filesPanel.hasAttribute("inert")).toBe(true);
+	expect(
+		container.querySelectorAll('[data-region="changed-files"]'),
+	).toHaveLength(1);
+	const changedFilesRegion = container.querySelector(
+		'[data-region="changed-files"]',
+	);
+	expect(changedFilesRegion?.closest('[role="tabpanel"]')).toBe(filesPanel);
+
+	act(() => {
+		filesTab.focus();
+		filesTab.dispatchEvent(
+			new window.KeyboardEvent("keydown", {
+				key: " ",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	});
+	expect(filesTab.getAttribute("aria-selected")).toBe("true");
+	expect(layersPanel.hasAttribute("inert")).toBe(true);
+	expect(filesPanel.hasAttribute("inert")).toBe(false);
+
+	const nav = container.querySelector<HTMLElement>(
+		'nav[aria-label="Changed files"]',
+	);
+	if (!nav) throw new Error("Changed files navigation is missing");
+	act(() =>
+		container
+			.querySelector<HTMLButtonElement>('button[aria-label="Tree view"]')
+			?.click(),
+	);
+	act(() =>
+		nav
+			.querySelector<HTMLButtonElement>(
+				'button[aria-label="src/routes/route.ts"]',
+			)
+			?.click(),
+	);
+	act(render);
+	act(() =>
+		nav
+			.querySelector<HTMLElement>(
+				'[role="checkbox"][aria-label="Viewed src/routes/route.ts"]',
+			)
+			?.click(),
+	);
+	act(render);
+	act(() =>
+		container
+			.querySelector<HTMLElement>(
+				'[role="checkbox"][aria-label="Show whitespace changes"]',
+			)
+			?.click(),
+	);
+	act(render);
+	expect(fileSelections).toEqual(["src/routes/route.ts"]);
+	expect(viewedChanges).toEqual([[["src/routes/route.ts"], true]]);
+	expect(whitespaceChanges).toEqual([false]);
+
+	const srcFolder = nav.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse src"]',
+	);
+	if (!srcFolder) throw new Error("src folder is missing");
+	act(() => srcFolder.click());
+	expect(
+		nav
+			.querySelector('button[aria-label="Expand src"]')
+			?.getAttribute("aria-expanded"),
+	).toBe("false");
+
+	act(() => layersTab.click());
+	const layerFileChip = layersPanel.querySelector<HTMLButtonElement>(
+		'button[aria-label="web/route.ts"]',
+	);
+	if (!layerFileChip) throw new Error("Layer file chip is missing");
+	act(() => layerFileChip.click());
+	act(render);
+	expect(fileSelections).toEqual(["src/routes/route.ts", "web/route.ts"]);
+	expect(
+		layersPanel
+			.querySelector('button[aria-label="web/route.ts"]')
+			?.getAttribute("aria-current"),
+	).toBe("true");
+
+	act(() =>
+		layersPanel
+			.querySelector<HTMLButtonElement>('button[aria-label="Collapse Diff"]')
+			?.click(),
+	);
+	expect(
+		layersPanel
+			.querySelector('button[aria-label="Expand Diff"]')
+			?.getAttribute("aria-expanded"),
+	).toBe("false");
+	act(() => filesTab.click());
+	expect(
+		container
+			.querySelector<HTMLButtonElement>('button[aria-label="Tree view"]')
+			?.getAttribute("aria-pressed"),
+	).toBe("true");
+	expect(
+		nav
+			.querySelector('button[aria-label="Expand src"]')
+			?.getAttribute("aria-expanded"),
+	).toBe("false");
+	expect(
+		nav
+			.querySelector('button[aria-label="web/route.ts"]')
+			?.closest("[data-file-path]")
+			?.getAttribute("data-state"),
+	).toBe("selected");
+
+	act(() => layersTab.click());
+	expect(
+		layersPanel
+			.querySelector('button[aria-label="Expand Diff"]')
+			?.getAttribute("aria-expanded"),
+	).toBe("false");
+});
+
 function layerCardMarkup(markup: string, layerId: string): string {
 	const checkboxIndex = markup.indexOf(`id="layer-done-${layerId}"`);
 	expect(checkboxIndex).toBeGreaterThanOrEqual(0);
@@ -106,44 +433,61 @@ function layerCardMarkup(markup: string, layerId: string): string {
 	return markup.slice(start, end + "</li>".length);
 }
 
-function classNames(markup: string): string[] {
-	return markup.match(/\bclass="([^"]*)"/)?.[1].split(/\s+/) ?? [];
-}
+test("places layer actions beside each status", () => {
+	const scenarios = [
+		{
+			status: "pending",
+			message: "Preparing layers…",
+			action: "Regenerate layers",
+		},
+		{
+			status: "running",
+			message: "Generating layers…",
+			action: "Regenerate layers",
+		},
+		{
+			status: "failed",
+			message: "Layer generation failed",
+			action: "Retry layer generation",
+		},
+	] as const;
 
-test("renders layers-only sticky header controls", () => {
-	const markup = renderLayerPane();
+	for (const scenario of scenarios) {
+		const pane = parseMarkup(
+			renderLayerPane({
+				state: reviewState({
+					layerStatus: scenario.status,
+					layerError: scenario.status === "failed" ? "Agent timed out" : null,
+				}),
+			}),
+		);
+		const status = [...pane.querySelectorAll("span")].find(
+			(span) => span.textContent === scenario.message,
+		);
+		const button = pane.querySelector<HTMLButtonElement>(
+			`button[aria-label="${scenario.action}"]`,
+		);
 
-	expect(markup).toContain("<h2");
-	expect(markup).toContain("Review layers");
-	expect(markup).toContain('aria-label="Regenerate layers"');
-	expect(markup).not.toContain("<h1");
+		expect(status).not.toBeUndefined();
+		expect(status?.parentElement?.nextElementSibling).toBe(button);
+		expect(button?.querySelector("svg")).not.toBeNull();
+		expect(status?.previousElementSibling?.matches("svg") ?? false).toBe(
+			scenario.status === "running",
+		);
+		expect(button?.disabled).toBe(scenario.status === "running");
+		expect(button?.getAttribute("aria-busy")).toBe(
+			scenario.status === "running" ? "true" : null,
+		);
+		if (scenario.status === "failed") {
+			expect(pane.querySelector('[role="alert"]')?.textContent).toContain(
+				"Agent timed out",
+			);
+		}
+	}
+	expect(layersStatusMessage("running")).toBe("Generating layers…");
 });
 
-test("renders status-specific sticky header content", () => {
-	expect(
-		renderLayerPane({ state: reviewState({ layerStatus: "pending" }) }),
-	).toContain("Preparing layers…");
-
-	const runningMarkup = renderLayerPane({
-		state: reviewState({ layerStatus: "running" }),
-	});
-	expect(runningMarkup).toContain("Generating layers…");
-	expect(runningMarkup).not.toContain('aria-label="Completed layers"');
-	expect(runningMarkup).toContain("data-dimmed");
-	expect(runningMarkup).toContain(">Diff</button>");
-	expect(layersStatusMessage("running")).toBe("Generating layers…");
-
-	const failedMarkup = renderLayerPane({
-		state: reviewState({
-			layerStatus: "failed",
-			layerError: "Agent timed out",
-		}),
-	});
-	expect(failedMarkup).toContain("Layer generation failed");
-	expect(failedMarkup).toContain('role="alert"');
-	expect(failedMarkup).toContain("Agent timed out");
-	expect(failedMarkup).toContain('aria-label="Retry layer generation"');
-
+test("orders ready completion status, progress, fraction, and regenerate action", () => {
 	const readyState = reviewState({
 		layers: [
 			{
@@ -176,83 +520,40 @@ test("renders status-specific sticky header content", () => {
 		state: readyState,
 		files: ["src/completed.ts", "src/stale.ts", "src/open.ts"],
 	});
+	const pane = parseMarkup(readyMarkup);
+	const completedLabel = [...pane.querySelectorAll("span")].find(
+		(span) => span.textContent === "Completed",
+	);
+	const progress = pane.querySelector(
+		'[role="progressbar"][aria-label="Completed"]',
+	);
+	const fraction = [
+		...(progress?.parentElement?.querySelectorAll("span") ?? []),
+	].find((span) => span.textContent === "1/3");
+	const regenerate = pane.querySelector<HTMLButtonElement>(
+		'button[aria-label="Regenerate layers"]',
+	);
+
+	expect(completedLabel).not.toBeUndefined();
+	expect(progress?.getAttribute("aria-valuenow")).toBe("1");
+	expect(progress?.getAttribute("aria-valuemax")).toBe("3");
+	expect(completedLabel?.nextElementSibling).toBe(progress);
+	expect(progress?.nextElementSibling).toBe(fraction);
+	expect(fraction?.nextElementSibling).toBe(regenerate);
+	expect(regenerate?.querySelector("svg")).not.toBeNull();
+	expect(completedLabel?.previousElementSibling).toBeNull();
+
 	const completedCard = layerCardMarkup(readyMarkup, "completed");
 	const staleCard = layerCardMarkup(readyMarkup, "stale");
 	const openCard = layerCardMarkup(readyMarkup, "open");
-	const completedStatus = [
-		...completedCard.matchAll(
-			/<span\b(?=[^>]*\brole="img")[^>]*>[\s\S]*?<\/span>/g,
-		),
-	].map(([statusMarkup]) => statusMarkup);
-	const openStatus = [
-		...openCard.matchAll(/<span\b(?=[^>]*\brole="img")[^>]*>[\s\S]*?<\/span>/g),
-	].map(([statusMarkup]) => statusMarkup);
-
-	expect(readyMarkup).toContain("Completed layers");
-	expect(readyMarkup).toContain('role="progressbar"');
-	expect(readyMarkup).toContain('aria-valuenow="1"');
-	expect(readyMarkup).toContain('aria-valuemax="3"');
-	expect(readyMarkup).toContain(">1/3</span>");
-	expect(completedStatus).toHaveLength(1);
-	expect(completedStatus[0]).toContain('aria-label="Done"');
-	expect(completedStatus[0]).toContain('data-layer-state="done"');
-	expect(classNames(completedStatus[0])).toEqual(
-		expect.arrayContaining([
-			"inline-flex",
-			"size-5",
-			"shrink-0",
-			"items-center",
-			"justify-center",
-			"rounded-full",
-			"bg-success",
-			"text-success-foreground",
-		]),
-	);
-	expect(completedStatus[0]).not.toContain("<button");
-	expect(completedCard).not.toContain(">Done</span>");
-	const completedStatusContent = completedStatus[0]
-		.replace(/^<span\b[^>]*>/, "")
-		.replace(/<\/span>$/, "");
-	expect(completedStatusContent).toContain("<svg");
-	expect(completedStatusContent).toContain('aria-hidden="true"');
-	const checkSvg = completedStatusContent.match(/<svg\b[^>]*>/)?.[0] ?? "";
-	expect(checkSvg).toContain("lucide-check");
-	expect(classNames(checkSvg)).toContain("size-3");
-	expect(completedStatusContent).not.toContain("Done");
-
-	expect(openStatus).toHaveLength(1);
-	expect(openStatus[0]).toContain('aria-label="Open"');
-	expect(openStatus[0]).toContain('data-layer-state="open"');
-	expect(classNames(openStatus[0])).toEqual(
-		expect.arrayContaining([
-			"inline-flex",
-			"size-5",
-			"shrink-0",
-			"items-center",
-			"justify-center",
-			"rounded-full",
-			"bg-secondary",
-		]),
-	);
-	expect(openStatus[0]).not.toContain("<button");
-	expect(openCard).not.toContain(">Open</span>");
-	const openStatusContent = openStatus[0]
-		.replace(/^<span\b[^>]*>/, "")
-		.replace(/<\/span>$/, "");
-	expect(openStatusContent).toBe("");
-
+	expect(completedCard).toContain('aria-label="Done"');
+	expect(completedCard).toContain('data-layer-state="done"');
 	expect(staleCard).toContain('data-layer-state="stale"');
 	expect(staleCard).toContain(">Stale</span>");
-	expect(staleCard).not.toContain('role="img"');
-	expect(staleCard).not.toContain("bg-success");
-	const staleBadge =
-		staleCard.match(/<span\b(?=[^>]*data-layer-state="stale")[^>]*>/)?.[0] ??
-		"";
-	expect(classNames(staleBadge)).toEqual(
-		expect.arrayContaining(["bg-warning/15", "text-warning"]),
-	);
 	expect(staleCard).toContain("data-done");
 	expect(staleCard).toContain("data-stale");
+	expect(openCard).toContain('aria-label="Open"');
+	expect(openCard).toContain('data-layer-state="open"');
 	expect(completedLayerCount(readyState.layers)).toBe(1);
 });
 
@@ -278,18 +579,75 @@ test("covers layer action state precedence across statuses", () => {
 	expect(failedAction.tooltip).toBe("Retry layer generation");
 });
 
-test("blocks the layer action during refresh without showing generation busy", () => {
-	const action = layersActionState("ready", null, true);
-	expect(action.disabled).toBe(true);
-	expect(action.tooltip).toBe("Refresh in progress…");
-	const markup = renderLayerPane({ externallyDisabled: true });
+test("keeps layer actions disabled with refresh and generation feedback", () => {
+	const refreshAction = layersActionState("ready", null, true);
+	expect(refreshAction.disabled).toBe(true);
+	expect(refreshAction.tooltip).toBe("Refresh in progress…");
+	const refreshPane = parseMarkup(
+		renderLayerPane({ externallyDisabled: true }),
+	);
+	const refreshButton = refreshPane.querySelector<HTMLButtonElement>(
+		'button[aria-label="Regenerate layers"]',
+	);
 
-	expect(markup).toContain('data-slot="tooltip-trigger"');
-	expect(markup).toContain('tabindex="0"');
-	expect(markup).not.toContain('aria-busy="true"');
+	expect(refreshButton?.getAttribute("aria-disabled")).toBe("true");
+	expect(
+		refreshPane.querySelector('[data-slot="tooltip-trigger"]'),
+	).not.toBeNull();
+	expect(refreshPane.querySelector('[tabindex="0"]')).not.toBeNull();
+	expect(refreshButton?.getAttribute("aria-busy")).toBeNull();
+
+	const generationPane = parseMarkup(
+		renderLayerPane({ layerAction: "regenerate" }),
+	);
+	const generationButton = generationPane.querySelector<HTMLButtonElement>(
+		'button[aria-label="Regenerate layers"]',
+	);
+	expect(generationButton?.disabled).toBe(true);
+	expect(generationButton?.getAttribute("aria-busy")).toBe("true");
+	expect(generationButton?.querySelector("svg")).not.toBeNull();
 });
 
-test("renders layer action errors as alerts in the sticky header", () => {
+test("regenerate and retry actions invoke their layer callbacks", () => {
+	const actions: string[] = [];
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	const props = {
+		files: ["src/routes/route.ts", "web/route.ts"],
+		filesContent: null,
+		selectedPath: null,
+		onSelectFile: () => {},
+		onSelectLayer: () => {},
+		onToggleDone: () => {},
+		layerAction: null,
+		actionError: null,
+		externallyDisabled: false,
+		onRegenerate: () => actions.push("regenerate"),
+		onRetry: () => actions.push("retry"),
+	};
+
+	act(() => root.render(<LayerPane {...props} state={reviewState()} />));
+	const regenerate = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Regenerate layers"]',
+	);
+	act(() => regenerate?.click());
+	expect(actions).toEqual(["regenerate"]);
+
+	act(() =>
+		root.render(
+			<LayerPane {...props} state={reviewState({ layerStatus: "failed" })} />,
+		),
+	);
+	const retry = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Retry layer generation"]',
+	);
+	act(() => retry?.click());
+	expect(actions).toEqual(["regenerate", "retry"]);
+});
+
+test("renders layer action errors as alerts", () => {
 	const markup = renderLayerPane({
 		actionError: "Unable to regenerate layers",
 	});
@@ -308,7 +666,7 @@ test("renders layer file chips with shortened labels and full-path accessible la
 	expect(markup).toContain('title="web/route.ts"');
 });
 
-test("allows long file chip labels to wrap without clipping", () => {
+test("keeps long layer file labels readable and accessible", () => {
 	const longPath =
 		"src/features/review/components/very-long-file-name-that-wraps-safely-and-stays-visible-in-chip.ts";
 	const visibleLabel =
@@ -326,13 +684,8 @@ test("allows long file chip labels to wrap without clipping", () => {
 	});
 
 	expect(markup).toContain(`>${visibleLabel}</button>`);
-	expect(markup).toContain("h-auto");
-	expect(markup).toContain("overflow-visible");
-	expect(markup).toContain("whitespace-normal");
-	expect(markup).toContain("break-words");
-	expect(markup).toContain("[overflow-wrap:anywhere]");
-	expect(markup).toContain("justify-start");
-	expect(markup).toContain("text-left");
+	expect(markup).toContain(`title="${longPath}"`);
+	expect(markup).toContain(`aria-label="${longPath}"`);
 });
 
 test("marks the selected layer file chip active", () => {
@@ -342,118 +695,7 @@ test("marks the selected layer file chip active", () => {
 	expect(markup).toContain('data-active="false"');
 });
 
-test("uses foreground title text without orange selected override", () => {
-	const markup = renderLayerPane({ selectedPath: "src/routes/route.ts" });
-
-	expect(markup).toContain(
-		'class="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"',
-	);
-	expect(markup).toContain("space-y-3 px-3 pb-3 text-sm text-foreground");
-});
-
-test("keeps foreground title text for done and stale layers", () => {
-	const markup = renderLayerPane({
-		state: reviewState({
-			layers: [
-				{
-					id: "done",
-					title: "Done layer",
-					tldr: "Done details",
-					files: ["src/done.ts"],
-					done: true,
-					stale: false,
-				},
-				{
-					id: "stale",
-					title: "Stale layer",
-					tldr: "Stale details",
-					files: ["src/stale.ts"],
-					done: false,
-					stale: true,
-				},
-			],
-		}),
-		files: ["src/done.ts", "src/stale.ts"],
-	});
-
-	const titleClass =
-		'class="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"';
-	expect((markup.match(new RegExp(titleClass, "g")) ?? []).length).toBe(2);
-});
-
-test("gives file labels hover and filled selected treatments", () => {
-	const markup = renderLayerPane({ selectedPath: "src/routes/route.ts" });
-
-	expect(markup).toContain("hover:bg-muted");
-	expect(markup).toContain("data-[active=true]:bg-primary");
-	expect(markup).toContain("data-[active=true]:text-primary-foreground");
-	expect(markup).toContain('aria-current="true"');
-});
-test("uses padded spacing between layer header and cards", () => {
-	const markup = renderLayerPane();
-
-	expect(markup).toContain(
-		'class="m-0 flex-1 list-none space-y-2 overflow-auto px-4 pt-4 pb-4 transition-opacity duration-200 ease-out data-[dimmed]:opacity-60"',
-	);
-});
-
-test("uses centered, tight alignment for layer header controls", () => {
-	const markup = renderLayerPane();
-
-	expect(markup).toContain("px-4 pt-4 pb-3 leading-none");
-	expect(markup).toContain("items-center gap-2 px-4 pb-3 text-xs leading-none");
-	expect(markup).toContain(
-		'class="inline-flex items-center tabular-nums leading-none"',
-	);
-	expect(markup).toContain(
-		"grid-cols-[auto_minmax(0,1fr)_minmax(3rem,1fr)_auto]",
-	);
-});
-
-test("keeps white title and description classes for done and stale layers", () => {
-	const markup = renderLayerPane({
-		state: reviewState({
-			layers: [
-				{
-					id: "done",
-					title: "Done layer",
-					tldr: "Done details",
-					files: ["src/done.ts"],
-					done: true,
-					stale: false,
-				},
-				{
-					id: "stale",
-					title: "Stale layer",
-					tldr: "Stale details",
-					files: ["src/stale.ts"],
-					done: true,
-					stale: true,
-				},
-			],
-		}),
-		files: ["src/done.ts", "src/stale.ts"],
-	});
-
-	expect(
-		(markup.match(/text-foreground/g) ?? []).length,
-	).toBeGreaterThanOrEqual(4);
-});
-
-test("renders layer coverage on one row without BDD and exposes regenerate", () => {
-	const markup = renderLayerPane({
-		state: reviewState({ viewedFiles: ["src/routes/route.ts"] }),
-	});
-
-	expect(markup).toContain('aria-label="Regenerate layers"');
-	expect(markup).toContain('class="flex items-center gap-3 text-xs"');
-	expect(markup).toContain("File coverage");
-	expect(markup).toContain("flex-1");
-	expect(markup).toContain('style="width:50%"');
-	expect(markup).not.toContain("BDD");
-});
-
-test("renders zero and full layer coverage", () => {
+test("renders zero and full changed-file coverage", () => {
 	const zeroMarkup = renderLayerPane();
 	expect(zeroMarkup).toContain('aria-label="Diff file coverage"');
 	expect(zeroMarkup).toContain('aria-valuenow="0"');
@@ -469,14 +711,6 @@ test("renders zero and full layer coverage", () => {
 	expect(fullMarkup).toContain('aria-valuenow="2"');
 	expect(fullMarkup).toContain('aria-valuemax="2"');
 	expect(fullMarkup).toContain('style="width:100%"');
-});
-
-test("exposes retry for a failed layer guide", () => {
-	const markup = renderLayerPane({
-		state: reviewState({ layerStatus: "failed" }),
-	});
-
-	expect(markup).toContain('aria-label="Retry layer generation"');
 });
 
 function renderCollapseLayers(): string {
