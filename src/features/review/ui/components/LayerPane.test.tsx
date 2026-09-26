@@ -522,10 +522,10 @@ test("orders ready completion status, progress, fraction, and regenerate action"
 	});
 	const pane = parseMarkup(readyMarkup);
 	const completedLabel = [...pane.querySelectorAll("span")].find(
-		(span) => span.textContent === "Completed layers",
+		(span) => span.textContent === "Completed",
 	);
 	const progress = pane.querySelector(
-		'[role="progressbar"][aria-label="Completed layers"]',
+		'[role="progressbar"][aria-label="Completed"]',
 	);
 	const fraction = [
 		...(progress?.parentElement?.querySelectorAll("span") ?? []),

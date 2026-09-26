@@ -44,7 +44,7 @@ export function layersStatusMessage(
 		case "failed":
 			return "Layer generation failed";
 		case "ready":
-			return "Completed layers";
+			return "Completed";
 	}
 }
 export function layersActionState(
@@ -293,7 +293,7 @@ export function LayerPane({
 								</span>
 								<ProgressBar
 									className="min-w-0"
-									label="Completed layers"
+									label="Completed"
 									value={completed}
 									max={state.layers.length}
 								/>

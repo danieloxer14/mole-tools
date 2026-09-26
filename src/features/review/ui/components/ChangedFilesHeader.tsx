@@ -59,21 +59,9 @@ export function ChangedFilesHeader({
 	return (
 		<div
 			data-region="changed-files"
-			className="flex min-w-0 flex-col gap-2 border-t border-b px-4 py-2 text-xs text-muted-foreground"
+			className="flex min-w-0 flex-col gap-2 border-t border-b px-4 pt-3 pb-3 text-xs text-muted-foreground"
 		>
 			<div className="flex min-w-0 items-center gap-2">
-				<span className="shrink-0">Viewed files</span>
-				<ProgressBar
-					className="min-w-0 flex-1"
-					label="Viewed file coverage"
-					value={viewedCount}
-					max={total}
-				/>
-				<span className="shrink-0 whitespace-nowrap tabular-nums">
-					{viewedCount}/{total} files
-				</span>
-			</div>
-			<div className="flex min-w-0 flex-wrap items-center gap-2">
 				<SegmentedToggleGroup
 					className="shrink-0"
 					multiple={false}
@@ -117,6 +105,17 @@ export function ChangedFilesHeader({
 						<TooltipContent>Tree view</TooltipContent>
 					</Tooltip>
 				</SegmentedToggleGroup>
+				<ProgressBar
+					className="min-w-0 flex-1"
+					label="Viewed file coverage"
+					value={viewedCount}
+					max={total}
+				/>
+				<span className="shrink-0 whitespace-nowrap tabular-nums">
+					{viewedCount}/{total} files
+				</span>
+			</div>
+			<div className="flex min-w-0 flex-wrap items-center gap-2">
 				<div className="flex min-w-0 items-center gap-2">
 					<Checkbox
 						id="show-whitespace-changes"

@@ -182,7 +182,7 @@ test("reattaches to a running layer stream and renders its terminal state", asyn
 				);
 				expect(markup).not.toContain("Generating layers…");
 				expect(markup).toContain(
-					fail ? "Layer generation failed" : "Completed layers",
+					fail ? "Layer generation failed" : "Completed",
 				);
 			} finally {
 				agent.release.resolve();
