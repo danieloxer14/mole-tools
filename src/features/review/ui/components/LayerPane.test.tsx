@@ -362,14 +362,14 @@ test("keeps file and layer state across accessible sidebar tab switches", () => 
 	expect(viewedChanges).toEqual([[["src/routes/route.ts"], true]]);
 	expect(whitespaceChanges).toEqual([false]);
 
-	const srcFolder = nav.querySelector<HTMLButtonElement>(
-		'button[aria-label="Collapse src"]',
+	const srcRoutesFolder = nav.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse src/routes"]',
 	);
-	if (!srcFolder) throw new Error("src folder is missing");
-	act(() => srcFolder.click());
+	if (!srcRoutesFolder) throw new Error("src/routes folder is missing");
+	act(() => srcRoutesFolder.click());
 	expect(
 		nav
-			.querySelector('button[aria-label="Expand src"]')
+			.querySelector('button[aria-label="Expand src/routes"]')
 			?.getAttribute("aria-expanded"),
 	).toBe("false");
 
@@ -405,7 +405,7 @@ test("keeps file and layer state across accessible sidebar tab switches", () => 
 	).toBe("true");
 	expect(
 		nav
-			.querySelector('button[aria-label="Expand src"]')
+			.querySelector('button[aria-label="Expand src/routes"]')
 			?.getAttribute("aria-expanded"),
 	).toBe("false");
 	expect(
