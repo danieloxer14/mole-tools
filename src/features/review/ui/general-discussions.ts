@@ -15,9 +15,8 @@ const HIDDEN_ACTIVITY_NOTE_PATTERNS: readonly RegExp[] = [
 ];
 
 function isHiddenActivityNote(note: HostNote): boolean {
-	return HIDDEN_ACTIVITY_NOTE_PATTERNS.some((pattern) =>
-		pattern.test(note.body.trimStart()),
-	);
+	const body = note.body.trimStart().replace(/^<p\b[^>]*>\s*/i, "");
+	return HIDDEN_ACTIVITY_NOTE_PATTERNS.some((pattern) => pattern.test(body));
 }
 
 /**

@@ -6,6 +6,7 @@ const hiddenBodies = [
 	"added 1 commit\n\n<ul><li>abc - x</li></ul>",
 	"added 3 commits",
 	"changed title from **{-a-}** to **{+b+}**",
+	"<p>changed title from <code>old</code> to <code>new</code></p>",
 	"changed the description",
 	"mentioned in merge request !12",
 	"mentioned in commit abc1234",
