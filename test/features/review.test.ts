@@ -457,7 +457,7 @@ describe("review feature", () => {
 				store,
 				paths,
 				layerAgent: agent,
-				config: { review: { layerTimeoutSeconds: 0.01 } },
+				config: { review: { layerTimeoutSeconds: 1 } },
 			});
 
 			const response = await routes(
@@ -469,7 +469,7 @@ describe("review feature", () => {
 
 			expect(agent.signals[0]?.aborted).toBe(true);
 			expect(body).toContain(
-				'event: error\ndata: {"message":"Layer agent timed out after 0.01 seconds"}',
+				'event: error\ndata: {"message":"Layer agent timed out after 1 seconds"}',
 			);
 			expect(body).toContain(
 				'event: done\ndata: {"status":"failed","layers":[]}',

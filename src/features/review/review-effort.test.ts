@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAgentAdapter } from "../../adapters/agent/claude";
 import type { AgentExec } from "../../adapters/agent/exec";
+import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
 import { OmpAgentAdapter } from "../../adapters/agent/omp";
 import { ConfigSchema } from "../../adapters/config/schema";
 import { resolveReviewAgentConfig } from "../../core/context";
@@ -18,6 +19,26 @@ import { type ReviewState, ReviewStateSchema } from "./state";
 import { ReviewStore } from "./store";
 
 const token = "review-effort-test-token";
+
+type OmpModelCatalogFixture = Array<{
+	selector: string;
+	thinking: string[];
+}>;
+
+const defaultOmpModelCatalog: OmpModelCatalogFixture = [
+	{ selector: "global-model", thinking: ["auto"] },
+	{ selector: "prompt-model", thinking: ["high"] },
+];
+
+function modelCatalogRunner(
+	models: OmpModelCatalogFixture = defaultOmpModelCatalog,
+): OmpModelCatalogProcessRunner {
+	return async () => ({
+		stdout: new TextEncoder().encode(JSON.stringify({ models })),
+		stderr: new Uint8Array(),
+		exitCode: 0,
+	});
+}
 
 function state(): ReviewState {
 	return ReviewStateSchema.parse({
@@ -119,17 +140,7 @@ async function runLayerSelection(
 			model?: string;
 			effort?: string | null;
 		}> = [];
-		const modelCatalogRunner = modelCatalog
-			? {
-					ompModelCatalogProcessRunner: async () => ({
-						stdout: new TextEncoder().encode(
-							JSON.stringify({ models: modelCatalog }),
-						),
-						stderr: new Uint8Array(),
-						exitCode: 0,
-					}),
-				}
-			: {};
+		const selectedModelCatalog = modelCatalog ?? defaultOmpModelCatalog;
 		const agent = new LayerAgent();
 		const routes = createReviewRoutes({
 			token,
@@ -143,7 +154,7 @@ async function runLayerSelection(
 			diff,
 			promptSourceDir: dir,
 			config: { review },
-			...modelCatalogRunner,
+			ompModelCatalogProcessRunner: modelCatalogRunner(selectedModelCatalog),
 			createReviewAgent: (override) => {
 				factoryCalls.push(override ?? {});
 				return agent;
@@ -309,6 +320,7 @@ describe("review effort selection", () => {
 				config: {
 					review: { agent: "omp", model: "global-model", effort: "auto" },
 				},
+				ompModelCatalogProcessRunner: modelCatalogRunner(),
 				createReviewAgent: (override) => {
 					factoryCalls.push(override ?? {});
 					return new ChatAgent();

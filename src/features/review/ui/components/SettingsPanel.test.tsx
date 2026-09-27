@@ -14,7 +14,6 @@ import {
 	SLOT_LABELS,
 	VISIBLE_SLOTS,
 } from "./SettingsPanel";
-
 import { Dialog, DialogContent } from "./ui/dialog";
 
 const initialSettings: SettingsSnapshot = {
@@ -81,23 +80,6 @@ function changeSelect(
 async function flushReact(): Promise<void> {
 	await Bun.sleep(0);
 	await Bun.sleep(0);
-}
-
-function setControlValue(
-	element: HTMLInputElement | HTMLSelectElement | null,
-	value: string,
-	eventName: "change" | "input",
-): void {
-	if (!element) return;
-	if (element instanceof window.HTMLInputElement) {
-		Object.getOwnPropertyDescriptor(
-			window.HTMLInputElement.prototype,
-			"value",
-		)?.set?.call(element, value);
-	} else {
-		element.value = value;
-	}
-	element.dispatchEvent(new window.Event(eventName, { bubbles: true }));
 }
 
 test("keeps visible slot labels in order and shows active preset and latest version", () => {
@@ -919,7 +901,6 @@ test("styles prompt heading with editor spacing", () => {
 		/<div class="space-y-2"><label class="block text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea(?=[^>]*class="[^"]*min-h-64 font-mono text-sm")(?=[^>]*id="settings-prompt")[^>]*>/,
 	);
 });
-
 
 test("falls back to Claude when the settings snapshot omits the review agent", () => {
 	// The API can omit the agent field; drop it to verify the panel's own

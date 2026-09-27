@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentEffort } from "../../../../adapters/agent/effort";
 import type { CodexModelChoice } from "../../../../adapters/agent/codex-models";
+import type { AgentEffort } from "../../../../adapters/agent/effort";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
 import {
 	PROMPT_AGENT_NAMES,
@@ -219,9 +219,8 @@ export function SettingsPanel({
 	);
 	const [newPreset, setNewPreset] = useState("");
 	const initialReviewAgent = initialSettings?.review.agent ?? "claude";
-	const [reviewAgent, setReviewAgent] = useState<ReviewAgent>(
-		initialReviewAgent,
-	);
+	const [reviewAgent, setReviewAgent] =
+		useState<ReviewAgent>(initialReviewAgent);
 	const [reviewModels, setReviewModels] = useState<
 		Partial<Record<ReviewAgent, string>>
 	>(() => ({
@@ -246,7 +245,7 @@ export function SettingsPanel({
 	const promptRequestId = useRef(0);
 	const catalogRequestId = useRef(0);
 	const initialPromptConsumed = useRef(initialPrompt !== undefined);
-const promptCatalogAgent: ReviewAgent =
+	const promptCatalogAgent: ReviewAgent =
 		promptAgent === "default"
 			? (settings?.review.agent ?? reviewAgent)
 			: promptAgent;
@@ -308,7 +307,7 @@ const promptCatalogAgent: ReviewAgent =
 			"/api/settings",
 		);
 		setSettings(snapshot);
-if (!reviewSettingsInitialized.current) {
+		if (!reviewSettingsInitialized.current) {
 			reviewSettingsInitialized.current = true;
 			setReviewAgent(snapshot.review.agent);
 			setReviewModels({
@@ -404,7 +403,6 @@ if (!reviewSettingsInitialized.current) {
 		};
 	}, [refreshSettings, settings]);
 
-
 	useEffect(() => {
 		if (!settings || initialPromptConsumed.current) return;
 		initialPromptConsumed.current = true;
@@ -415,7 +413,6 @@ if (!reviewSettingsInitialized.current) {
 		setSelectedPreset(preset);
 		void loadPromptWithPending(selectedSlot, preset);
 	}, [loadPromptWithPending, selectedSlot, settings]);
-
 
 	const selectedSlotSettings = settings?.slots.find(
 		(slot) => slot.slot === selectedSlot,
@@ -1212,7 +1209,6 @@ if (!reviewSettingsInitialized.current) {
 										>
 											Save as new version
 										</Button>
-
 									</>
 								)}
 							</section>

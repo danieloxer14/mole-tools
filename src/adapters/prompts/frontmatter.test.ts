@@ -48,7 +48,7 @@ describe("prompt frontmatter", () => {
 				"---\nagent: codex\n---\nx",
 				"review-chat/default/001.md",
 			),
-		).toEqual({ text: "x", agent: "codex", model: null });
+		).toEqual({ text: "x", agent: "codex", model: null, effort: null });
 	});
 
 	test("formats prompt agent names", () => {
@@ -107,7 +107,7 @@ describe("prompt frontmatter", () => {
 				"review-chat/default/007.md",
 			),
 		).toThrow(
-			"Invalid prompt metadata in review-chat/default/007.md: unsupported effort",
+			"Invalid prompt metadata in review-chat/default/007.md: effort is not supported by omp",
 		);
 		expect(() =>
 			parsePromptFile(

@@ -43,8 +43,8 @@ import {
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
 import { LayerPane } from "./components/LayerPane";
-import { ReviewSplitter } from "./components/ReviewSplitter";
 import { type ApprovalAction, MrHeader, tabTitle } from "./components/MrHeader";
+import { ReviewSplitter } from "./components/ReviewSplitter";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";

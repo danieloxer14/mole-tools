@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEffort } from "../../adapters/agent/effort";
+import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -19,6 +20,26 @@ import { type ReviewStateMutation, ReviewStore } from "./store";
 
 const token = "chat-effort-test-token";
 const createdAt = "2026-09-26T00:00:00.000Z";
+const ompModelCatalogProcessRunner: OmpModelCatalogProcessRunner =
+	async () => ({
+		stdout: new TextEncoder().encode(
+			JSON.stringify({
+				models: [
+					{ selector: "chat-model", thinking: ["high"] },
+					{ selector: "explain-model", thinking: ["xhigh"] },
+					{ selector: "prompt-model", thinking: ["high"] },
+					{ selector: "current-prompt-model", thinking: ["high"] },
+					{ selector: "persisted-chat-model", thinking: ["high"] },
+					{ selector: "retry-model", thinking: ["high"] },
+					{ selector: "persisted-model", thinking: ["high"] },
+					{ selector: "stored-model", thinking: [] },
+					{ selector: "later-default-model", thinking: [] },
+				],
+			}),
+		),
+		stderr: new Uint8Array(),
+		exitCode: 0,
+	});
 
 type ChatSeed = Partial<ReviewState["chats"][number]> &
 	Pick<ReviewState["chats"][number], "id">;
@@ -193,6 +214,7 @@ function makeRoutes(
 			},
 		},
 		createReviewAgent,
+		ompModelCatalogProcessRunner,
 	});
 }
 
@@ -318,9 +340,9 @@ describe("chat agent selection persistence", () => {
 						effort: "low",
 					},
 				},
+				ompModelCatalogProcessRunner,
 				createReviewAgent: (override) => {
 					overrides.push(override ?? {});
-					return agent;
 				},
 			});
 

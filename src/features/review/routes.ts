@@ -2,6 +2,11 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
+	type CodexModelCatalogProcessRunner,
+	type CodexModelChoice,
+	discoverCodexModels,
+} from "../../adapters/agent/codex-models";
+import {
 	type AgentEffort,
 	AgentEffortSchema,
 	CODEX_EFFORTS_BY_MODEL,
@@ -13,11 +18,6 @@ import {
 	type OmpModelCatalogConfig,
 	type OmpModelCatalogProcessRunner,
 } from "../../adapters/agent/model-catalog-omp";
-import {
-	type CodexModelCatalogProcessRunner,
-	type CodexModelChoice,
-	discoverCodexModels,
-} from "../../adapters/agent/codex-models";
 import {
 	type ColorTheme,
 	ColorThemeSchema,
@@ -818,8 +818,7 @@ export function createReviewRoutes(
 			);
 		const model = parsed.data.model?.trim() || undefined;
 		const agentChanged = parsed.data.agent !== settings.review.agent;
-		const agentOrModelChanged =
-			agentChanged || model !== settings.review.model;
+		const agentOrModelChanged = agentChanged || model !== settings.review.model;
 		if (agentOrModelChanged) {
 			const incompatiblePrompts: Array<{
 				slot: PromptName;
@@ -1908,10 +1907,7 @@ export function createReviewRoutes(
 				chats: [...base.chats, chat],
 				activeChatId: chat.id,
 			}));
-			return jsonResponse(
-				{ chats: next.chats, activeChatId: chat.id },
-				201,
-			);
+			return jsonResponse({ chats: next.chats, activeChatId: chat.id }, 201);
 		} catch (error) {
 			return promptErrorResponse(error);
 		}
