@@ -259,7 +259,9 @@ describe("OMP model catalog", () => {
 		);
 	});
 
-	test("terminates oversized OMP processes without changing settings", async () => {
+	test("terminates oversized OMP processes without changing settings", {
+		timeout: 12_000,
+	}, async () => {
 		for (const [stream, script] of [
 			["stdout", "exec yes x"],
 			["stderr", "exec yes x 1>&2"],

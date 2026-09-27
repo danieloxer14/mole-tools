@@ -8,11 +8,11 @@ import {
 import type { CodexModelChoice } from "../../../../adapters/agent/codex-models";
 import type { AgentEffort } from "../../../../adapters/agent/effort";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
-import { APP_VERSION } from "../../../../shared/app-version";
 import {
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
 } from "../../../../adapters/prompts/frontmatter";
+import { APP_VERSION } from "../../../../shared/app-version";
 import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { SkillsSettings } from "./SkillsSettings";
@@ -747,7 +747,10 @@ export function SettingsPanel({
 					<TabsTrigger value="skills">Skills</TabsTrigger>
 					<TabsTrigger value="appearance">Appearance</TabsTrigger>
 				</TabsList>
-				<TabsContent value="general" className="flex min-h-0 flex-col overflow-auto p-6">
+				<TabsContent
+					value="general"
+					className="flex min-h-0 flex-col overflow-auto p-6"
+				>
 					<GeneralContentWrapper enabled={whitespace !== undefined}>
 						{whitespace ? (
 							<div className="flex min-w-0 items-center gap-2 border-b pb-4 text-sm">

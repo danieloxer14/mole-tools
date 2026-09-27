@@ -167,10 +167,7 @@ function chatRequest(chatId: string, message: string): Request {
 	return request("/api/chat", { chatId, message });
 }
 
-function reviewSettingsRequest(
-	agent: PromptAgentName,
-	model: string,
-): Request {
+function reviewSettingsRequest(agent: PromptAgentName, model: string): Request {
 	return request("/api/settings/review", { agent, model });
 }
 
