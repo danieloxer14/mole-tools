@@ -149,13 +149,26 @@ test("selects the configured review agent and accepts an override", () => {
 
 	const codexConfig = ConfigSchema.parse({
 		...config,
-		review: { agent: "codex" },
+		review: { agent: "codex", model: "gpt-6-sol", effort: "ultra" },
 	});
 	const codexContext = buildContext({
 		config: codexConfig,
 		ui: new FakeUiPort(),
 	});
 	expect(codexContext.createReviewAgent()).toBeInstanceOf(CodexAgentAdapter);
+	expect(resolveReviewAgentConfig(codexConfig)).toEqual({
+		agent: "codex",
+		binary: "codex",
+		model: "gpt-6-sol",
+		effort: "ultra",
+	});
+	expect(
+		defaultContext.createReviewAgent({
+			agent: "codex",
+			model: "gpt-6-astra",
+			effort: "high",
+		}),
+	).toBeInstanceOf(CodexAgentAdapter);
 	expect(defaultContext.createReviewAgent({ agent: "codex" })).toBeInstanceOf(
 		CodexAgentAdapter,
 	);
@@ -189,6 +202,16 @@ test("override decides the model without inheriting configured model", () => {
 		agent: "omp",
 		binary: "custom-omp",
 		model: "configured-model",
+	});
+	expect(
+		resolveReviewAgentConfig(configuredConfig, {
+			agent: "omp",
+			binary: null,
+		}),
+	).toEqual({
+		agent: "omp",
+		binary: "omp",
+		model: undefined,
 	});
 	expect(
 		resolveReviewAgentConfig(configuredConfig, { model: "override-model" }),

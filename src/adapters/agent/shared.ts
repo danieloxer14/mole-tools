@@ -1,4 +1,5 @@
 import type { AgentEvent } from "../../ports/review-agent";
+import type { AgentEffort } from "./effort";
 import { type AgentExec, defaultAgentExec } from "./exec";
 
 export type JsonRecord = Record<string, unknown>;
@@ -9,12 +10,14 @@ export type ParsedLine =
 type AgentOptions = {
 	binary?: string;
 	model?: string;
+	effort?: AgentEffort;
 	exec?: AgentExec;
 };
 
 export type AgentConfig = {
 	binary: string;
 	model?: string;
+	effort?: AgentEffort;
 	execFn: AgentExec;
 };
 
@@ -92,12 +95,14 @@ export function resolveAgentConfig<T extends AgentOptions>(
 			execFn: execOrOptions,
 			binary: options.binary ?? defaultBinary,
 			model: options.model,
+			effort: options.effort,
 		};
 	}
 	return {
 		execFn: execOrOptions.exec ?? defaultAgentExec,
 		binary: execOrOptions.binary ?? defaultBinary,
 		model: execOrOptions.model,
+		effort: execOrOptions.effort,
 	};
 }
 

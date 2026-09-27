@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AgentEffortSchema, isAgentEffort } from "../agent/effort";
 import { PresetNameSchema, PromptNameSchema } from "../prompts/defaults";
 import { PROMPT_AGENT_NAMES } from "../prompts/frontmatter";
 
@@ -65,9 +66,22 @@ export const ReviewConfigSchema = z
 		agent: z.enum(PROMPT_AGENT_NAMES).default("claude"),
 		binary: z.string().min(1).optional(),
 		model: z.string().min(1).optional(),
+		effort: AgentEffortSchema.optional(),
 		layerTimeoutSeconds: z.number().int().positive().default(600),
 		largeFileLineThreshold: z.number().int().positive().default(800),
 		maxLayerPromptBytes: z.number().int().positive().default(100_000),
+	})
+	.superRefine((review, context) => {
+		if (
+			review.effort !== undefined &&
+			!isAgentEffort(review.agent, review.effort, review.model)
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["effort"],
+				message: `Unsupported effort for ${review.agent}`,
+			});
+		}
 	})
 	.default({
 		agent: "claude",
@@ -75,7 +89,6 @@ export const ReviewConfigSchema = z
 		largeFileLineThreshold: 800,
 		maxLayerPromptBytes: 100_000,
 	});
-
 export const ColorThemeSchema = z.enum(["default", "light"]);
 export type ColorTheme = z.infer<typeof ColorThemeSchema>;
 export const AppearanceConfigSchema = z.object({

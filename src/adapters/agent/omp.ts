@@ -3,6 +3,7 @@ import type {
 	AgentTurn,
 	ReviewAgent,
 } from "../../ports/review-agent";
+import { type AgentEffort, assertAgentEffort, type OmpEffort } from "./effort";
 import { type AgentExec, defaultAgentExec } from "./exec";
 import {
 	diagnostic,
@@ -18,6 +19,7 @@ import {
 export interface OmpAgentOptions {
 	binary?: string;
 	model?: string;
+	effort?: AgentEffort;
 	exec?: AgentExec;
 }
 
@@ -106,6 +108,7 @@ function mapOmpEvent(value: JsonRecord): AgentEvent | null {
 export class OmpAgentAdapter implements ReviewAgent {
 	private readonly binary: string;
 	private readonly model?: string;
+	private readonly effort?: OmpEffort;
 	private readonly execFn: AgentExec;
 
 	constructor(
@@ -116,6 +119,8 @@ export class OmpAgentAdapter implements ReviewAgent {
 		this.execFn = config.execFn;
 		this.binary = config.binary;
 		this.model = config.model;
+		if (config.effort !== undefined) assertAgentEffort("omp", config.effort);
+		this.effort = config.effort;
 	}
 
 	async preflight(): Promise<void> {
@@ -140,6 +145,7 @@ export class OmpAgentAdapter implements ReviewAgent {
 			tools,
 		];
 		if (this.model) args.push("--model", this.model);
+		if (this.effort) args.push("--thinking", this.effort);
 		if (turn.sessionId) args.push("-r", turn.sessionId);
 		if (turn.writeDir) args.push("--add-dir", turn.writeDir);
 		args.push("--", turn.message);

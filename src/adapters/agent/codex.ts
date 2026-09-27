@@ -4,6 +4,7 @@ import type {
 	ReviewAgent,
 } from "../../ports/review-agent";
 import { type AgentExec, defaultAgentExec } from "./exec";
+import { type AgentEffort, assertAgentEffort } from "./effort";
 import {
 	diagnostic,
 	errorMessage,
@@ -18,6 +19,7 @@ import {
 export interface CodexAgentOptions {
 	binary?: string;
 	model?: string;
+	effort?: AgentEffort;
 	exec?: AgentExec;
 }
 
@@ -163,6 +165,7 @@ function mapCodexEvent(
 
 export class CodexAgentAdapter implements ReviewAgent {
 	private readonly binary: string;
+	private readonly effort?: AgentEffort;
 	private readonly model?: string;
 	private readonly execFn: AgentExec;
 
@@ -174,6 +177,9 @@ export class CodexAgentAdapter implements ReviewAgent {
 		this.execFn = config.execFn;
 		this.binary = config.binary;
 		this.model = config.model;
+		if (config.effort !== undefined)
+			assertAgentEffort("codex", config.effort, config.model);
+		this.effort = config.effort;
 	}
 
 	async preflight(): Promise<void> {
@@ -208,6 +214,9 @@ export class CodexAgentAdapter implements ReviewAgent {
 			`projects={${tomlBasicString(turn.cwd)}={trust_level="untrusted"}}`,
 		);
 		if (this.model) args.push("-m", this.model);
+		if (this.effort) {
+			args.push("-c", `model_reasoning_effort=${this.effort}`);
+		}
 		args.push("-c", `developer_instructions=${tomlBasicString(systemPrompt)}`);
 		if (turn.writeDir) args.push("--add-dir", turn.writeDir);
 		if (turn.sessionId) {

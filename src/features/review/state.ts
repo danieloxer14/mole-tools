@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+	type AgentEffort,
+	AgentEffortSchema,
+} from "../../adapters/agent/effort";
+import {
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
 } from "../../adapters/prompts/frontmatter";
@@ -22,6 +26,7 @@ export const ChatMetaSchema = z.object({
 	createdAt: z.string().min(1),
 	agent: z.enum(PROMPT_AGENT_NAMES).nullable().default(null),
 	model: z.string().min(1).nullable().default(null),
+	effort: AgentEffortSchema.nullable().default(null),
 });
 export type ChatMeta = z.infer<typeof ChatMetaSchema>;
 
@@ -150,7 +155,8 @@ export function createChatMeta(
 	binding: {
 		agent: PromptAgentName | null;
 		model: string | null;
-	} = { agent: null, model: null },
+		effort: AgentEffort | null;
+	} = { agent: null, model: null, effort: null },
 ): ChatMeta {
 	return {
 		id: crypto.randomUUID(),
@@ -159,6 +165,7 @@ export function createChatMeta(
 		createdAt: now,
 		agent: binding.agent,
 		model: binding.model,
+		effort: binding.effort,
 	};
 }
 
@@ -186,6 +193,7 @@ export function ensureChats(
 						createdAt: state.revision.syncedAt,
 						agent: null,
 						model: null,
+						effort: null,
 					},
 				];
 	const activeChatId = chats.some((chat) => chat.id === state.activeChatId)
