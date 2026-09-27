@@ -41,4 +41,10 @@ Stop reporting after the first non-zero gate, and return the structured result e
   build: bun run build
   test: bun test
 
+- origin: /Users/danieloxer/dev/mole-tools-agent-settings
+  install: bun install --frozen-lockfile
+  lint: bun run lint
+  build: bun run build
+  test: bun test
+
 <!-- /xplan:setup-commands -->

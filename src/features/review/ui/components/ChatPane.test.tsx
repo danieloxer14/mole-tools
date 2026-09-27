@@ -55,7 +55,6 @@ test("renders general discussions collapsed by default", () => {
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			discussions={[
@@ -161,34 +160,24 @@ test("renders one switcher item per chat with active and busy state", async () =
 	expect(selectedChatId).toBe("chat-1");
 });
 
-test("wires rendered chat header controls to actions", () => {
+test("keeps New chat and removes the general Settings control", () => {
 	let newChatCalls = 0;
-	let settingsCalls = 0;
 	const rendered = renderInteractive({
 		onNewChat: () => {
 			newChatCalls += 1;
-		},
-		onOpenSettings: () => {
-			settingsCalls += 1;
 		},
 	});
 
 	const newChatButton = rendered.container.querySelector<HTMLButtonElement>(
 		'button[aria-label="New chat"]',
 	);
-	const settingsButton = rendered.container.querySelector<HTMLButtonElement>(
-		'button[aria-label="Settings"]',
-	);
 	expect(newChatButton).not.toBeNull();
-	expect(settingsButton).not.toBeNull();
+	expect(
+		rendered.container.querySelector('button[aria-label="Settings"]'),
+	).toBeNull();
 
-	act(() => {
-		newChatButton?.click();
-		settingsButton?.click();
-	});
-
+	act(() => newChatButton?.click());
 	expect(newChatCalls).toBe(1);
-	expect(settingsCalls).toBe(1);
 });
 
 test("disables and marks new chat busy while creating", () => {
@@ -220,7 +209,6 @@ test("renders parent-owned composer draft", () => {
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft="unsent question"
 			onDraftChange={() => {}}
 			streamingSegments={[]}
@@ -538,7 +526,6 @@ function renderComposer(
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			streamingSegments={[]}
@@ -584,7 +571,6 @@ function renderInteractive(
 				activeChatId="chat-1"
 				onSelectChat={() => {}}
 				onNewChat={() => {}}
-				onOpenSettings={() => {}}
 				draft=""
 				onDraftChange={() => {}}
 				streamingSegments={[]}
@@ -657,6 +643,44 @@ test("reopens slash picker after selected skill draft is cleared", () => {
 	rendered.rerender({ draft, skills, onDraftChange });
 	expect(textarea.value).toBe("/");
 	expect(rendered.container.querySelector('[role="listbox"]')).not.toBeNull();
+});
+
+test("opens Skills settings from the skill picker plus button", () => {
+	let draft = "";
+	let openedSkills = false;
+	const onDraftChange = (value: string) => {
+		draft = value;
+	};
+	const onOpenSkillsSettings = () => {
+		openedSkills = true;
+	};
+	const rendered = renderInteractive({
+		draft,
+		skills: [],
+		onDraftChange,
+		onOpenSkillsSettings,
+	});
+	const textarea = rendered.container.querySelector<HTMLTextAreaElement>(
+		'textarea[aria-label="Chat message"]',
+	);
+	if (!textarea) throw new Error("Chat composer did not render a textarea");
+
+	Object.getOwnPropertyDescriptor(
+		window.HTMLTextAreaElement.prototype,
+		"value",
+	)?.set?.call(textarea, "/");
+	textarea.setSelectionRange(1, 1);
+	act(() =>
+		textarea.dispatchEvent(new window.Event("input", { bubbles: true })),
+	);
+	rendered.rerender({ draft, skills: [], onDraftChange, onOpenSkillsSettings });
+
+	const settingsButton = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Open Skills settings"]',
+	);
+	expect(settingsButton).not.toBeNull();
+	act(() => settingsButton?.click());
+	expect(openedSkills).toBe(true);
 });
 
 test("keeps persisted assistant card DOM stable across history refresh", () => {
@@ -949,7 +973,6 @@ function renderGeneralDiscussions(
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			discussions={generalDiscussions}

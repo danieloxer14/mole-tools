@@ -4,17 +4,25 @@ import { z } from "zod";
 import {
 	type AgentEffort,
 	AgentEffortSchema,
+	CODEX_EFFORTS_BY_MODEL,
 	isAgentEffort,
 } from "../../adapters/agent/effort";
 import { discoverClaudeModels } from "../../adapters/agent/model-catalog-claude";
 import {
 	discoverOmpModels,
+	type OmpModelCatalogConfig,
 	type OmpModelCatalogProcessRunner,
 } from "../../adapters/agent/model-catalog-omp";
+import {
+	type CodexModelCatalogProcessRunner,
+	type CodexModelChoice,
+	discoverCodexModels,
+} from "../../adapters/agent/codex-models";
 import {
 	type ColorTheme,
 	ColorThemeSchema,
 	type Config,
+	ReviewConfigSchema,
 } from "../../adapters/config/schema";
 import {
 	DEFAULT_PROMPTS,
@@ -24,6 +32,7 @@ import {
 	PromptNameSchema,
 } from "../../adapters/prompts/defaults";
 import {
+	formatAgentNames,
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
 	type PromptVersionMeta,
@@ -153,13 +162,11 @@ export interface ReviewRoutesOptions {
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
 					largeFileLineThreshold?: number;
-					agent?: "omp" | "claude";
+					agent?: PromptAgentName;
 					binary?: string;
 					model?: string;
 					effort?: AgentEffort;
 				};
-				prompts?: Record<string, string>;
-				appearance?: { colorTheme?: ColorTheme };
 		  };
 	mr?: LayerMergeRequest;
 	promptSourceDir?: string;
@@ -170,10 +177,12 @@ export interface ReviewRoutesOptions {
 	ompModelCatalogProcessRunner?: OmpModelCatalogProcessRunner;
 	claudeModelCatalogFetcher?: typeof fetch;
 	createReviewAgent?: (override?: {
-		agent?: "omp" | "claude";
+		agent?: PromptAgentName;
+		binary?: string | null;
 		model?: string;
 		effort?: AgentEffort | null;
 	}) => ReviewAgent;
+	codexModelCatalogProcessRunner?: CodexModelCatalogProcessRunner;
 }
 
 export interface ReviewApiState extends ReviewState {
@@ -549,6 +558,7 @@ export function createReviewRoutes(
 	let currentExpandedDiff = options.expandedDiff;
 	let currentMr = options.mr;
 	let initialLayerRunAllowed = true;
+	let codexModelChoicesPromise: Promise<CodexModelChoice[]> | null = null;
 	let fallbackDiscussions = [...(options.discussions ?? [])];
 	const threshold =
 		options.largeFileLineThreshold ??
@@ -565,11 +575,8 @@ export function createReviewRoutes(
 		} as Partial<Record<PromptName, string>>,
 		review: {
 			agent:
-				(
-					options.config as
-						| { review?: { agent?: "omp" | "claude" } }
-						| undefined
-				)?.review?.agent ?? "claude",
+				(options.config as { review?: { agent?: PromptAgentName } } | undefined)
+					?.review?.agent ?? "claude",
 			model: (options.config as { review?: { model?: string } } | undefined)
 				?.review?.model,
 			effort:
@@ -581,6 +588,9 @@ export function createReviewRoutes(
 				"default") as ColorTheme,
 		},
 	};
+	let persistedReviewConfig: Config["review"] = ReviewConfigSchema.parse(
+		options.config?.review ?? {},
+	);
 	const layerAgent = options.layerAgent ?? options.reviewAgent;
 	const chatAgent = options.reviewAgent;
 	function defaultSelection(): AgentSelection {
@@ -594,6 +604,15 @@ export function createReviewRoutes(
 		PromptAgentName,
 		Promise<Map<string, readonly string[]>>
 	>();
+	function ompModelCatalogConfig(): OmpModelCatalogConfig {
+		if (settings.review.agent !== "omp") return {};
+		return {
+			review: {
+				agent: "omp",
+				binary: persistedReviewConfig.binary,
+			},
+		};
+	}
 	function modelEffortsFor(
 		agent: PromptAgentName,
 	): Promise<Map<string, readonly string[]>> {
@@ -602,49 +621,64 @@ export function createReviewRoutes(
 			catalog =
 				agent === "omp"
 					? discoverOmpModels(
-							options.config ?? {},
+							ompModelCatalogConfig(),
 							options.ompModelCatalogProcessRunner,
+						).then(
+							(models) =>
+								new Map(
+									models.map(({ id, efforts }) => [id, efforts] as const),
+								),
 						)
-							.then(
-								(models) =>
-									new Map(
-										models.map(({ id, efforts }) => [id, efforts] as const),
+					: agent === "codex"
+						? Promise.resolve(
+								new Map(
+									Object.entries(CODEX_EFFORTS_BY_MODEL).map(
+										([id, efforts]) => [id, efforts] as const,
 									),
+								),
 							)
-							.catch(() => new Map())
-					: discoverClaudeModels({
-							apiKey: process.env.ANTHROPIC_API_KEY ?? null,
-							fetcher: options.claudeModelCatalogFetcher,
-						})
-							.then(
+						: discoverClaudeModels({
+								apiKey: process.env.ANTHROPIC_API_KEY ?? null,
+								fetcher: options.claudeModelCatalogFetcher,
+							}).then(
 								({ models }) =>
 									new Map(
 										models.map(({ id, efforts }) => [id, efforts] as const),
 									),
-							)
-							.catch(() => new Map());
+							);
 			modelEffortCatalogs.set(agent, catalog);
 		}
-		return catalog;
+		return catalog.catch(() => {
+			if (modelEffortCatalogs.get(agent) === catalog) {
+				modelEffortCatalogs.delete(agent);
+			}
+			return new Map<string, readonly string[]>();
+		});
 	}
 	async function effectivePromptSelection(
 		version: PromptVersionMeta,
 	): Promise<AgentSelection> {
 		const fallback = defaultSelection();
 		const selection = effectiveAgentSelection(version, fallback);
+		if (selection.effort === null || selection.model === null) return selection;
 		if (
-			version.agent !== null ||
-			version.effort !== null ||
-			version.model === null ||
-			selection.effort === null
+			selection.agent === "claude" &&
+			(version.agent !== null ||
+				version.effort !== null ||
+				version.model === null)
 		) {
 			return selection;
 		}
+
 		const modelEfforts = await modelEffortsFor(selection.agent);
-		return effectiveAgentSelection(
-			version,
-			fallback,
-			modelEfforts.get(selection.model) ?? [],
+		if (modelEfforts.get(selection.model)?.includes(selection.effort)) {
+			return selection;
+		}
+		if (version.agent === null && version.effort == null) {
+			return { ...selection, effort: null };
+		}
+		throw new PortError(
+			`Effort ${selection.effort} is not supported by model ${selection.model}`,
 		);
 	}
 	async function slotSelection(slot: PromptName): Promise<AgentSelection> {
@@ -657,8 +691,20 @@ export function createReviewRoutes(
 	function agentForSelection(
 		selection: AgentSelection,
 	): ReviewAgent | undefined {
+		const originalReview = options.config?.review;
+		const originalAgent = originalReview?.agent ?? "claude";
+		const originalBinary = originalReview?.binary;
+		const binary =
+			!originalBinary || selection.agent !== originalAgent
+				? undefined
+				: selection.agent === settings.review.agent
+					? persistedReviewConfig.binary === originalBinary
+						? undefined
+						: (persistedReviewConfig.binary ?? null)
+					: null;
 		return options.createReviewAgent?.({
 			agent: selection.agent,
+			...(binary === undefined ? {} : { binary }),
 			model: selection.model ?? undefined,
 			...(selection.effort === null ? {} : { effort: selection.effort }),
 		});
@@ -690,6 +736,24 @@ export function createReviewRoutes(
 		const versions = await listVersions(slot, preset, promptDirOption());
 		return versions.at(-1) ?? 1;
 	}
+	function codexModelChoices(): Promise<CodexModelChoice[]> {
+		if (!codexModelChoicesPromise) {
+			const binary =
+				settings.review.agent === "codex"
+					? (persistedReviewConfig.binary ?? "codex")
+					: "codex";
+			codexModelChoicesPromise = discoverCodexModels(
+				binary,
+				options.worktreePath ?? process.cwd(),
+				options.codexModelCatalogProcessRunner,
+			).catch(() => []);
+		}
+		return codexModelChoicesPromise;
+	}
+
+	async function codexModelsSnapshot(): Promise<Response> {
+		return jsonResponse({ models: await codexModelChoices() });
+	}
 
 	async function settingsSnapshot(): Promise<Response> {
 		try {
@@ -715,7 +779,7 @@ export function createReviewRoutes(
 					agent: settings.review.agent,
 					model: settings.review.model,
 					effort: settings.review.effort ?? undefined,
-					agents: ["omp", "claude"],
+					agents: [...PROMPT_AGENT_NAMES],
 				},
 			});
 		} catch (error) {
@@ -726,14 +790,15 @@ export function createReviewRoutes(
 	async function updateReviewSettings(request: Request): Promise<Response> {
 		const parsed = z
 			.object({
-				agent: z.enum(["omp", "claude"]),
+				agent: z.enum(PROMPT_AGENT_NAMES),
 				model: z.string().nullable().optional(),
 				effort: AgentEffortSchema.nullable().optional(),
 			})
 			.superRefine((selection, context) => {
+				const model = selection.model?.trim() || undefined;
 				if (
 					selection.effort != null &&
-					!isAgentEffort(selection.agent, selection.effort)
+					!isAgentEffort(selection.agent, selection.effort, model)
 				) {
 					context.addIssue({
 						code: "custom",
@@ -751,8 +816,11 @@ export function createReviewRoutes(
 				{ error: "Review agent selection is unavailable" },
 				501,
 			);
-
-		if (parsed.data.agent !== settings.review.agent) {
+		const model = parsed.data.model?.trim() || undefined;
+		const agentChanged = parsed.data.agent !== settings.review.agent;
+		const agentOrModelChanged =
+			agentChanged || model !== settings.review.model;
+		if (agentOrModelChanged) {
 			const incompatiblePrompts: Array<{
 				slot: PromptName;
 				effort: AgentEffort;
@@ -766,7 +834,11 @@ export function createReviewRoutes(
 				if (
 					prompt.agent === null &&
 					prompt.effort !== null &&
-					!isAgentEffort(parsed.data.agent, prompt.effort)
+					!isAgentEffort(
+						parsed.data.agent,
+						prompt.effort,
+						prompt.model ?? model,
+					)
 				) {
 					incompatiblePrompts.push({ slot, effort: prompt.effort });
 				}
@@ -777,27 +849,30 @@ export function createReviewRoutes(
 					.join(", ");
 				return jsonResponse(
 					{
-						error: `Cannot change the default agent to ${parsed.data.agent}: active default-agent prompt effort is unsupported for ${details}. Change or clear those prompt efforts, or assign those prompts an explicit agent.`,
+						error: `Cannot change the default agent or model: active default-agent prompt effort is unsupported for ${details}. Change or clear those prompt efforts, or assign those prompts an explicit agent.`,
 					},
 					400,
 				);
 			}
 		}
 
-		const model = parsed.data.model?.trim() || undefined;
 		const effort = parsed.data.effort ?? null;
 		const {
 			model: _existingModel,
 			effort: _existingEffort,
 			...existingReview
-		} = options.config?.review ?? {};
+		} = persistedReviewConfig;
+		const { binary: _existingBinary, ...reviewWithoutBinary } = existingReview;
 		const review = {
-			...existingReview,
+			...(agentChanged ? reviewWithoutBinary : existingReview),
 			agent: parsed.data.agent,
 			...(model === undefined ? {} : { model }),
 			...(effort === null ? {} : { effort }),
 		};
-		await options.persistConfig?.({ review: review as Config["review"] });
+		await options.persistConfig?.({ review });
+		persistedReviewConfig = review;
+		modelEffortCatalogs.clear();
+		codexModelChoicesPromise = null;
 
 		settings.review = { agent: parsed.data.agent, model, effort };
 		return jsonResponse({
@@ -882,7 +957,12 @@ export function createReviewRoutes(
 					!PROMPT_AGENT_NAMES.includes(rawAgent as PromptAgentName))
 			) {
 				return jsonResponse(
-					{ error: "Prompt agent must be omp, claude, or null" },
+					{
+						error: `Prompt agent must be ${formatAgentNames([
+							...PROMPT_AGENT_NAMES,
+							"null",
+						])}`,
+					},
 					400,
 				);
 			}
@@ -913,10 +993,27 @@ export function createReviewRoutes(
 					? AgentEffortSchema.parse(rawEffort)
 					: null;
 			const selectedAgent = agent ?? settings.review.agent;
-			if (effort !== null && !isAgentEffort(selectedAgent, effort)) {
+			const selectedModel =
+				agent === null ? (model ?? settings.review.model) : model;
+			if (
+				effort !== null &&
+				!isAgentEffort(selectedAgent, effort, selectedModel)
+			) {
 				throw new PortError(
 					`Prompt effort is not supported by ${selectedAgent}`,
 				);
+			}
+			if (
+				effort !== null &&
+				selectedModel !== null &&
+				selectedAgent !== "claude"
+			) {
+				const supportedEfforts = await modelEffortsFor(selectedAgent);
+				if (!supportedEfforts.get(selectedModel)?.includes(effort)) {
+					throw new PortError(
+						`Prompt effort ${effort} is not supported by model ${selectedModel}`,
+					);
+				}
 			}
 			const presetValue =
 				body.preset === undefined ? presetFor(slot) : body.preset;
@@ -1801,19 +1898,23 @@ export function createReviewRoutes(
 		return emptyResponse(204);
 	}
 	async function createChat(): Promise<Response> {
-		const binding = options.createReviewAgent
-			? await slotSelection("review-chat")
-			: { agent: null, model: null, effort: null };
-		const chat = createChatMeta(undefined, binding);
-		const next = await mutateState((base) => ({
-			...base,
-			chats: [...base.chats, chat],
-			activeChatId: chat.id,
-		}));
-		return jsonResponse(
-			{ chats: next.chats, activeChatId: next.activeChatId },
-			201,
-		);
+		try {
+			const binding = options.createReviewAgent
+				? await slotSelection("review-chat")
+				: { agent: null, model: null, effort: null };
+			const chat = createChatMeta(undefined, binding);
+			const next = await mutateState((base) => ({
+				...base,
+				chats: [...base.chats, chat],
+				activeChatId: chat.id,
+			}));
+			return jsonResponse(
+				{ chats: next.chats, activeChatId: chat.id },
+				201,
+			);
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
 	}
 
 	async function explainComment(request: Request): Promise<Response> {
@@ -1859,7 +1960,7 @@ export function createReviewRoutes(
 				201,
 			);
 		} catch (error) {
-			return jsonResponse({ error: errorMessage(error) }, 500);
+			return promptErrorResponse(error);
 		}
 	}
 
@@ -2501,6 +2602,9 @@ export function createReviewRoutes(
 			if (request.method === "GET" && url.pathname === "/api/diff") {
 				return expandedFile(request);
 			}
+			if (request.method === "POST" && url.pathname === "/api/layers/observe") {
+				return layerStream(false);
+			}
 			if (
 				request.method === "POST" &&
 				(url.pathname === "/api/layers/regenerate" ||
@@ -2587,7 +2691,7 @@ export function createReviewRoutes(
 				if (agent === "omp") {
 					try {
 						const models = await discoverOmpModels(
-							options.config ?? {},
+							ompModelCatalogConfig(),
 							options.ompModelCatalogProcessRunner,
 						);
 						return jsonResponse({ models, source: "omp" });
@@ -2611,6 +2715,12 @@ export function createReviewRoutes(
 			}
 			if (request.method === "GET" && url.pathname === "/api/settings") {
 				return settingsSnapshot();
+			}
+			if (
+				request.method === "GET" &&
+				url.pathname === "/api/settings/codex-models"
+			) {
+				return codexModelsSnapshot();
 			}
 			if (
 				request.method === "POST" &&

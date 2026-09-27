@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentEffort } from "../../../../adapters/agent/effort";
+import type { CodexModelChoice } from "../../../../adapters/agent/codex-models";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import {
+	PROMPT_AGENT_NAMES,
+	type PromptAgentName,
+} from "../../../../adapters/prompts/frontmatter";
 import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { SkillsSettings } from "./SkillsSettings";
@@ -47,7 +52,7 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 };
 
-type ReviewAgent = "omp" | "claude";
+type ReviewAgent = PromptAgentName;
 type PromptAgent = "default" | ReviewAgent;
 type SettingsTab = "general" | "prompts" | "skills" | "appearance";
 
@@ -59,12 +64,16 @@ interface ModelCatalogModel {
 
 interface ModelCatalog {
 	models: ModelCatalogModel[];
-	source: "omp" | "anthropic-api" | "claude-aliases";
+	source: "omp" | "anthropic-api" | "claude-aliases" | "codex";
 	warning?: string;
 }
 
 interface LoadedModelCatalog extends ModelCatalog {
 	agent: ReviewAgent;
+}
+
+function isReviewAgent(value: string): value is ReviewAgent {
+	return (PROMPT_AGENT_NAMES as readonly string[]).includes(value);
 }
 
 export interface SettingsSnapshot {
@@ -209,12 +218,16 @@ export function SettingsPanel({
 		initialPrompt?.effort ?? "",
 	);
 	const [newPreset, setNewPreset] = useState("");
+	const initialReviewAgent = initialSettings?.review.agent ?? "claude";
 	const [reviewAgent, setReviewAgent] = useState<ReviewAgent>(
-		initialSettings?.review.agent ?? "claude",
+		initialReviewAgent,
 	);
-	const [reviewModel, setReviewModel] = useState(
-		initialSettings?.review.model ?? "",
-	);
+	const [reviewModels, setReviewModels] = useState<
+		Partial<Record<ReviewAgent, string>>
+	>(() => ({
+		[initialReviewAgent]: initialSettings?.review.model ?? "",
+	}));
+	const reviewModel = reviewModels[reviewAgent] ?? "";
 	const [reviewEffort, setReviewEffort] = useState<AgentEffort | "">(
 		initialSettings?.review.effort ?? "",
 	);
@@ -233,10 +246,11 @@ export function SettingsPanel({
 	const promptRequestId = useRef(0);
 	const catalogRequestId = useRef(0);
 	const initialPromptConsumed = useRef(initialPrompt !== undefined);
-	const promptCatalogAgent: ReviewAgent =
+const promptCatalogAgent: ReviewAgent =
 		promptAgent === "default"
 			? (settings?.review.agent ?? reviewAgent)
 			: promptAgent;
+	const reviewSettingsInitialized = useRef(initialSettings !== undefined);
 
 	const loadPrompt = useCallback(
 		async (
@@ -294,9 +308,14 @@ export function SettingsPanel({
 			"/api/settings",
 		);
 		setSettings(snapshot);
-		setReviewAgent(snapshot.review.agent);
-		setReviewModel(snapshot.review.model ?? "");
-		setReviewEffort(snapshot.review.effort ?? "");
+if (!reviewSettingsInitialized.current) {
+			reviewSettingsInitialized.current = true;
+			setReviewAgent(snapshot.review.agent);
+			setReviewModels({
+				[snapshot.review.agent]: snapshot.review.model ?? "",
+			});
+			setReviewEffort(snapshot.review.effort ?? "");
+		}
 		return snapshot;
 	}, [token]);
 
@@ -306,10 +325,36 @@ export function SettingsPanel({
 			setCatalogLoading(true);
 			setCatalogError(null);
 			try {
-				const snapshot = await requestJson<ModelCatalog>(
-					token,
-					`/api/settings/models?agent=${agent}`,
-				);
+				let snapshot: ModelCatalog;
+				if (agent === "codex") {
+					const result = await requestJson<{ models?: unknown }>(
+						token,
+						"/api/settings/codex-models",
+					);
+					const models = Array.isArray(result.models)
+						? result.models.filter(
+								(model): model is CodexModelChoice =>
+									typeof model === "object" &&
+									model !== null &&
+									"id" in model &&
+									typeof model.id === "string" &&
+									"label" in model &&
+									typeof model.label === "string",
+							)
+						: [];
+					snapshot = {
+						models: models.map((model) => ({
+							...model,
+							efforts: Array.isArray(model.efforts) ? model.efforts : [],
+						})),
+						source: "codex",
+					};
+				} else {
+					snapshot = await requestJson<ModelCatalog>(
+						token,
+						`/api/settings/models?agent=${agent}`,
+					);
+				}
 				if (requestId !== catalogRequestId.current) return;
 				setModelCatalog({ ...snapshot, agent });
 			} catch (reason: unknown) {
@@ -359,6 +404,7 @@ export function SettingsPanel({
 		};
 	}, [refreshSettings, settings]);
 
+
 	useEffect(() => {
 		if (!settings || initialPromptConsumed.current) return;
 		initialPromptConsumed.current = true;
@@ -369,6 +415,7 @@ export function SettingsPanel({
 		setSelectedPreset(preset);
 		void loadPromptWithPending(selectedSlot, preset);
 	}, [loadPromptWithPending, selectedSlot, settings]);
+
 
 	const selectedSlotSettings = settings?.slots.find(
 		(slot) => slot.slot === selectedSlot,
@@ -582,8 +629,7 @@ export function SettingsPanel({
 			: null;
 
 	const handlePromptAgentChange = (value: string) => {
-		const agent: PromptAgent =
-			value === "omp" || value === "claude" ? value : "default";
+		const agent: PromptAgent = isReviewAgent(value) ? value : "default";
 		if (agent === promptAgent) return;
 		catalogRequestId.current += 1;
 		setPromptAgent(agent);
@@ -601,18 +647,16 @@ export function SettingsPanel({
 	};
 
 	const handleReviewAgentChange = (value: string) => {
-		const agent: ReviewAgent = value === "claude" ? "claude" : "omp";
-		if (agent === reviewAgent) return;
+		if (!isReviewAgent(value) || value === reviewAgent) return;
 		catalogRequestId.current += 1;
-		setReviewAgent(agent);
-		setReviewModel("");
+		setReviewAgent(value);
 		setReviewEffort("");
 		setCatalogError(null);
 		setGeneralStatus(null);
 	};
 
 	const handleReviewModelChange = (value: string) => {
-		setReviewModel(value);
+		setReviewModels((models) => ({ ...models, [reviewAgent]: value }));
 		setGeneralStatus(null);
 		if (
 			selectedModelCatalog &&
@@ -689,7 +733,7 @@ export function SettingsPanel({
 						<div className="space-y-4">
 							<fieldset className="min-w-0 flex flex-wrap items-end gap-3">
 								<legend className="sr-only">Review defaults</legend>
-								<div className="min-w-[9rem] flex-1 space-y-2">
+								<div className="min-w-[9rem] flex-1 space-y-4">
 									<label
 										className="text-xs font-medium"
 										htmlFor="settings-default-agent"
@@ -713,7 +757,7 @@ export function SettingsPanel({
 										))}
 									</NativeSelect>
 								</div>
-								<div className="min-w-[9rem] flex-1 space-y-2">
+								<div className="min-w-[9rem] flex-1 space-y-4">
 									<label
 										className="text-xs font-medium"
 										htmlFor="settings-default-model"
@@ -748,7 +792,7 @@ export function SettingsPanel({
 										))}
 									</NativeSelect>
 								</div>
-								<div className="min-w-[9rem] flex-1 space-y-2">
+								<div className="min-w-[9rem] flex-1 space-y-4">
 									<label
 										className="text-xs font-medium"
 										htmlFor="settings-default-effort"
@@ -802,11 +846,13 @@ export function SettingsPanel({
 								<div className="space-y-1">
 									<p className="text-xs text-muted-foreground">
 										Model catalog source:{" "}
-										{selectedModelCatalog.source === "omp"
-											? "configured OMP executable"
-											: selectedModelCatalog.source === "anthropic-api"
-												? "Anthropic API"
-												: "Claude CLI aliases"}
+										{selectedModelCatalog.source === "codex"
+											? "configured Codex executable"
+											: selectedModelCatalog.source === "omp"
+												? "configured OMP executable"
+												: selectedModelCatalog.source === "anthropic-api"
+													? "Anthropic API"
+													: "Claude CLI aliases"}
 										.
 									</p>
 									{selectedModelCatalog.warning ? (
@@ -876,7 +922,7 @@ export function SettingsPanel({
 									))}
 							</nav>
 							<section
-								className="min-w-0 space-y-4"
+								className="min-w-0 space-y-4 md:border-l md:pl-6"
 								aria-label={SLOT_LABELS[selectedSlot]}
 							>
 								<p className="text-sm text-muted-foreground">
@@ -998,7 +1044,7 @@ export function SettingsPanel({
 											<legend className="sr-only">
 												Prompt agent, model, and effort
 											</legend>
-											<div className="min-w-[9rem] flex-1 space-y-2">
+											<div className="min-w-[9rem] flex-1 space-y-4">
 												<label
 													className="text-xs font-medium"
 													htmlFor="settings-prompt-agent"
@@ -1018,11 +1064,14 @@ export function SettingsPanel({
 													<option value="default">
 														Default ({settings.review.agent})
 													</option>
-													<option value="omp">omp</option>
-													<option value="claude">claude</option>
+													{PROMPT_AGENT_NAMES.map((agent) => (
+														<option key={agent} value={agent}>
+															{agent}
+														</option>
+													))}
 												</NativeSelect>
 											</div>
-											<div className="min-w-[9rem] flex-1 space-y-2">
+											<div className="min-w-[9rem] flex-1 space-y-4">
 												<label
 													className="text-xs font-medium"
 													htmlFor="settings-prompt-model"
@@ -1059,7 +1108,7 @@ export function SettingsPanel({
 													))}
 												</NativeSelect>
 											</div>
-											<div className="min-w-[9rem] flex-1 space-y-2">
+											<div className="min-w-[9rem] flex-1 space-y-4">
 												<label
 													className="text-xs font-medium"
 													htmlFor="settings-prompt-effort"
@@ -1070,7 +1119,7 @@ export function SettingsPanel({
 													className="w-full"
 													id="settings-prompt-effort"
 													size="sm"
-													value={promptEffortCompatible ? promptEffort : ""}
+													value={promptEffort}
 													disabled={pending}
 													onChange={(event) =>
 														handlePromptEffortChange(controlValue(event))
@@ -1079,8 +1128,13 @@ export function SettingsPanel({
 													<option value="">
 														{promptEffortCompatible
 															? `Default (${inheritedPromptEffortCompatible && inheritedPromptEffort ? inheritedPromptEffort : "agent default"})`
-															: "Choose a compatible effort"}
+															: "Default (agent default)"}
 													</option>
+													{promptEffort && !promptEffortCompatible ? (
+														<option value={promptEffort}>
+															{promptEffort} (unsupported for selected model)
+														</option>
+													) : null}
 													{promptModelEfforts.map((effort) => (
 														<option key={effort} value={effort}>
 															{effort}
@@ -1120,7 +1174,7 @@ export function SettingsPanel({
 
 										<div className="space-y-2">
 											<label
-												className="text-sm font-medium"
+												className="block text-sm font-medium"
 												htmlFor="settings-prompt"
 											>
 												Prompt text
@@ -1158,6 +1212,7 @@ export function SettingsPanel({
 										>
 											Save as new version
 										</Button>
+
 									</>
 								)}
 							</section>

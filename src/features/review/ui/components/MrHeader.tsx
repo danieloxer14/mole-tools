@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink, RefreshCw } from "lucide-react";
+import { Check, Copy, ExternalLink, RefreshCw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../../ports/git-host";
 import { IconButton } from "./IconButton";
@@ -22,6 +22,7 @@ export interface MrHeaderProps {
 	refreshing: boolean;
 	layerGenerating: boolean;
 	onRefresh: () => void;
+	onOpenSettings: () => void;
 }
 
 export function headerTitle(title: string, iid: number): string {
@@ -91,6 +92,7 @@ export function MrHeader({
 	refreshing,
 	layerGenerating,
 	onRefresh,
+	onOpenSettings,
 }: MrHeaderProps) {
 	const [copied, setCopied] = useState(false);
 	const copyTimer = useRef<Timer | undefined>(undefined);
@@ -141,80 +143,78 @@ export function MrHeader({
 		</Button>
 	);
 	return (
-		<header className="flex items-center justify-between gap-4 bg-card px-4 py-3">
-			<div className="min-w-0 flex-1">
-				<h1
-					className="truncate text-lg font-semibold tracking-tight"
-					title={mr.title}
+		<header className="flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto border-b bg-card px-4 py-3">
+			<h1
+				className="min-w-0 shrink truncate text-lg font-semibold tracking-tight"
+				title={mr.title}
+			>
+				{headerTitle(mr.title, mr.iid)}
+			</h1>
+			<div className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap leading-none">
+				<Button
+					type="button"
+					variant="ghost"
+					size="xs"
+					className="inline-flex min-w-24 items-center overflow-hidden font-mono text-xs leading-none"
+					data-sha-control=""
+					aria-label="Copy commit sha"
+					title={headSha}
+					onClick={copySha}
 				>
-					{headerTitle(mr.title, mr.iid)}
-				</h1>
-				<div className="inline-flex items-center gap-2 leading-none">
-					<Button
-						type="button"
-						variant="ghost"
-						size="xs"
-						className="inline-flex min-w-24 items-center overflow-hidden font-mono text-xs leading-none"
-						data-sha-control=""
-						aria-label="Copy commit sha"
-						title={headSha}
-						onClick={copySha}
+					<span className="min-w-0 truncate" data-sha-label="">
+						{shaButtonLabel(headSha, copied)}
+					</span>
+					{copied ? (
+						<Check
+							className="size-3 shrink-0 animate-in zoom-in-50 duration-150 ease-out"
+							aria-hidden
+						/>
+					) : (
+						<Copy className="size-3 shrink-0" aria-hidden />
+					)}
+				</Button>
+				{freshness?.stale ? (
+					<Badge
+						className="inline-flex items-center leading-none bg-warning/15 text-warning"
+						data-freshness="stale"
 					>
-						<span className="min-w-0 truncate" data-sha-label="">
-							{shaButtonLabel(headSha, copied)}
+						Out of sync
+					</Badge>
+				) : null}
+				{approvalLabel !== null ? (
+					<Badge
+						variant="secondary"
+						className={
+							approved
+								? "inline-flex items-center leading-none bg-success/15 text-success"
+								: "inline-flex items-center leading-none"
+						}
+						data-approval={approved ? "approved" : "not-approved"}
+						title={
+							approval && approval.approvedBy.length > 0
+								? `Approved by ${approval.approvedBy.join(", ")}`
+								: undefined
+						}
+					>
+						{approvalLabel}
+					</Badge>
+				) : null}
+				<span
+					className="inline-flex items-center gap-3 text-xs leading-none tabular-nums text-muted-foreground"
+					data-diff-stats=""
+				>
+					<span data-files-changed="">{filesChangedLabel(filesChanged)}</span>
+					<span className="inline-flex gap-1">
+						<span className="text-success" data-insertions="">
+							+{insertions}
 						</span>
-						{copied ? (
-							<Check
-								className="size-3 shrink-0 animate-in zoom-in-50 duration-150 ease-out"
-								aria-hidden
-							/>
-						) : (
-							<Copy className="size-3 shrink-0" aria-hidden />
-						)}
-					</Button>
-					{freshness?.stale ? (
-						<Badge
-							className="inline-flex items-center leading-none bg-warning/15 text-warning"
-							data-freshness="stale"
-						>
-							Out of sync
-						</Badge>
-					) : null}
-					{approvalLabel !== null ? (
-						<Badge
-							variant="secondary"
-							className={
-								approved
-									? "inline-flex items-center leading-none bg-success/15 text-success"
-									: "inline-flex items-center leading-none"
-							}
-							data-approval={approved ? "approved" : "not-approved"}
-							title={
-								approval && approval.approvedBy.length > 0
-									? `Approved by ${approval.approvedBy.join(", ")}`
-									: undefined
-							}
-						>
-							{approvalLabel}
-						</Badge>
-					) : null}
-					<span
-						className="inline-flex items-center gap-3 text-xs leading-none tabular-nums text-muted-foreground"
-						data-diff-stats=""
-					>
-						<span data-files-changed="">{filesChangedLabel(filesChanged)}</span>
-						<span className="inline-flex gap-1">
-							<span className="text-success" data-insertions="">
-								+{insertions}
-							</span>
-							<span className="text-destructive" data-deletions="">
-								−{deletions}
-							</span>
+						<span className="text-destructive" data-deletions="">
+							−{deletions}
 						</span>
 					</span>
-				</div>
+				</span>
 			</div>
-			<div className="inline-flex shrink-0 items-center gap-2 leading-none">
+			<div className="ml-auto inline-flex shrink-0 items-center gap-2 whitespace-nowrap leading-none">
 				<IconButton
 					label="Refresh review and layers"
 					tooltip="Fetch latest MR state, sync when needed, and regenerate layers"
@@ -238,6 +238,13 @@ export function MrHeader({
 				<span id="approve-tooltip" className="sr-only">
 					{approvalButtonTooltip}
 				</span>
+				<IconButton
+					label="Settings"
+					tooltip="Settings"
+					onClick={onOpenSettings}
+				>
+					<Settings aria-hidden />
+				</IconButton>
 			</div>
 		</header>
 	);

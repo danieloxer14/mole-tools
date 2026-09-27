@@ -2,7 +2,6 @@ import { Loader2, TriangleAlert, X } from "lucide-react";
 import {
 	type CSSProperties,
 	type KeyboardEvent,
-	type PointerEvent,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -44,6 +43,7 @@ import {
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
 import { LayerPane } from "./components/LayerPane";
+import { ReviewSplitter } from "./components/ReviewSplitter";
 import { type ApprovalAction, MrHeader, tabTitle } from "./components/MrHeader";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
@@ -59,6 +59,13 @@ import {
 import { Spinner } from "./components/ui/spinner";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
+import {
+	consumeLayerStream,
+	type LayerAction,
+	type LayerStreamFrame,
+	mergeLayerStreamFrame,
+	startInitialLayerStream,
+} from "./layer-stream";
 import { createProgressWriteQueue } from "./progress-write-queue";
 import {
 	type ReviewFreshnessResponse,
@@ -66,6 +73,7 @@ import {
 } from "./review-refresh";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import { useSkills } from "./use-skills";
+import { useSplitterResize } from "./use-splitter-resize";
 
 import "./app.css";
 
@@ -330,127 +338,11 @@ async function fetchFileContents(
 	return response.text();
 }
 
-type LayerAction = "regenerate" | "retry";
-
-interface LayerStreamFrame {
-	event: string;
-	data: Record<string, unknown>;
-}
-
-function parseLayerStatus(
-	value: unknown,
-): ReviewStateResponse["layerStatus"] | null {
-	return value === "pending" ||
-		value === "running" ||
-		value === "ready" ||
-		value === "failed"
-		? value
-		: null;
-}
-
-function parseLayerSseBlock(block: string): LayerStreamFrame | null {
-	let event = "message";
-	const dataLines: string[] = [];
-	for (const line of block.split(/\r?\n/)) {
-		if (line.startsWith("event:")) event = line.slice(6).trim();
-		if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-	}
-	if (dataLines.length === 0) return null;
-	try {
-		const data: unknown = JSON.parse(dataLines.join("\n"));
-		if (typeof data !== "object" || data === null) return null;
-		return { event, data: data as Record<string, unknown> };
-	} catch {
-		return null;
-	}
-}
-
-async function consumeLayerStream(
-	token: string,
-	action: LayerAction,
-	onFrame: (frame: LayerStreamFrame) => void,
-): Promise<void> {
-	const response = await fetch(apiUrl(`/api/layers/${action}`, token), {
-		method: "POST",
-		headers: {
-			accept: "text/event-stream",
-			"X-Mole-Token": token,
-		},
-	});
-	if (!response.ok)
-		throw new Error(`Layer ${action} request failed (${response.status})`);
-	if (!response.body) throw new Error("Layer stream did not return a body");
-
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	try {
-		while (true) {
-			const result = await reader.read();
-			if (result.done) break;
-			buffer += decoder.decode(result.value, { stream: true });
-			const blocks = buffer.split(/\r?\n\r?\n/);
-			buffer = blocks.pop() ?? "";
-			for (const block of blocks) {
-				const frame = parseLayerSseBlock(block);
-				if (frame) onFrame(frame);
-			}
-		}
-		buffer += decoder.decode();
-		if (buffer.trim()) {
-			const frame = parseLayerSseBlock(buffer);
-			if (frame) onFrame(frame);
-		}
-	} finally {
-		reader.releaseLock();
-	}
-}
-
 function filePath(file: ParsedFileDiff): string {
 	return file.newPath ?? file.oldPath ?? "";
 }
 
-function mergeLayerStreamFrame(
-	state: ReviewStateResponse,
-	frame: LayerStreamFrame,
-): ReviewStateResponse {
-	const status =
-		frame.event === "error"
-			? ("failed" as const)
-			: parseLayerStatus(frame.data.status);
-	const message =
-		typeof frame.data.message === "string" ? frame.data.message : null;
-	const error =
-		typeof frame.data.error === "string"
-			? frame.data.error
-			: frame.data.error === null
-				? null
-				: undefined;
-	const layers = Array.isArray(frame.data.layers)
-		? (frame.data.layers as ReviewStateResponse["layers"])
-		: state.layers;
-	return {
-		...state,
-		layerStatus: status ?? state.layerStatus,
-		layerError:
-			frame.event === "error"
-				? (message ?? state.layerError)
-				: error !== undefined
-					? error
-					: status === "running"
-						? null
-						: state.layerError,
-		layers,
-	};
-}
 type ColumnWidths = Record<ReviewColumn, number>;
-
-interface ResizeSession {
-	column: ReviewColumn;
-	pointerId: number;
-	startClientX: number;
-	startWidth: number;
-}
 
 function centreColumnMinimumWidth(): number {
 	return window.innerWidth <= 1200 ? 450 : 500;
@@ -518,7 +410,6 @@ function ReviewApp() {
 	const [columnWidths, setColumnWidths] =
 		useState<ColumnWidths>(columnMinimums);
 	const reviewShell = useRef<HTMLElement | null>(null);
-	const resizeSession = useRef<ResizeSession | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
@@ -629,36 +520,7 @@ function ReviewApp() {
 				centreColumnMinimumWidth(),
 		);
 	};
-	const handleSplitterPointerDown = (
-		event: PointerEvent<HTMLHRElement>,
-		column: ReviewColumn,
-	) => {
-		if (event.button !== 0) return;
-		event.preventDefault();
-		event.currentTarget.setPointerCapture(event.pointerId);
-		resizeSession.current = {
-			column,
-			pointerId: event.pointerId,
-			startClientX: event.clientX,
-			startWidth: columnWidths[column],
-		};
-	};
-	const handleSplitterPointerMove = (event: PointerEvent<HTMLHRElement>) => {
-		const session = resizeSession.current;
-		if (!session || session.pointerId !== event.pointerId) return;
-		const delta = event.clientX - session.startClientX;
-		resizeColumn(
-			session.column,
-			session.startWidth + (session.column === "left" ? delta : -delta),
-		);
-	};
-	const stopResizing = (event: PointerEvent<HTMLHRElement>) => {
-		if (resizeSession.current?.pointerId !== event.pointerId) return;
-		resizeSession.current = null;
-		if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-			event.currentTarget.releasePointerCapture(event.pointerId);
-		}
-	};
+	const splitterResize = useSplitterResize(resizeColumn);
 	const handleSplitterKeyDown = (
 		event: KeyboardEvent<HTMLHRElement>,
 		column: ReviewColumn,
@@ -713,34 +575,34 @@ function ReviewApp() {
 			});
 		fetchReviewState()
 			.then((next) => {
-				if (!active) return;
-				if (
-					next.layerStatus === "pending" &&
-					!autoRunRequested.current &&
-					next.layers.every((layer) => !layer.stale)
-				) {
-					autoRunRequested.current = true;
+				if (!active || autoRunRequested.current) return;
+				const initialStream = startInitialLayerStream(token, next, applyFrame);
+				if (!initialStream) return;
+				autoRunRequested.current = true;
+				if (initialStream.action === "regenerate") {
 					setLayerAction("regenerate");
-					void consumeLayerStream(token, "regenerate", applyFrame)
-						.then(() => fetchReviewState())
-						.catch((reason: unknown) => {
-							if (!active) return;
-							const message =
-								reason instanceof Error ? reason.message : String(reason);
-							setData((current) =>
-								current
-									? {
-											...current,
-											layerStatus: "failed",
-											layerError: message,
-										}
-									: current,
-							);
-						})
-						.finally(() => {
-							if (active) setLayerAction(null);
-						});
 				}
+				void initialStream.stream
+					.then(() => fetchReviewState())
+					.catch((reason: unknown) => {
+						if (!active) return;
+						const message =
+							reason instanceof Error ? reason.message : String(reason);
+						setData((current) =>
+							current
+								? {
+										...current,
+										layerStatus: "failed",
+										layerError: message,
+									}
+								: current,
+						);
+					})
+					.finally(() => {
+						if (active && initialStream.action === "regenerate") {
+							setLayerAction(null);
+						}
+					});
 			})
 			.catch((reason: unknown) => {
 				if (active)
@@ -2068,167 +1930,171 @@ function ReviewApp() {
 
 	return (
 		<main
-			className="grid h-screen w-screen min-h-0 min-w-0 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)] overflow-hidden bg-background text-foreground"
-			ref={reviewShell}
+			className="flex h-screen w-screen min-h-0 min-w-0 flex-col overflow-hidden bg-background text-foreground"
 			style={reviewShellStyle}
 		>
-			<LayerPane
-				state={data}
-				files={files}
-				selectedPath={selectedPath}
-				onSelectFile={selectFile}
-				onSelectLayer={selectLayer}
-				onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
-				layerAction={layerAction}
-				actionError={progressError}
-				externallyDisabled={refreshing}
-				onRegenerate={() => runLayerAction("regenerate")}
-				onRetry={() => runLayerAction("retry")}
-			/>
-			<hr
-				aria-label="Resize review layers column"
-				aria-orientation="vertical"
-				aria-valuemax={leftColumnMaximum}
-				aria-valuemin={columnMinimums.left}
-				aria-valuenow={columnWidths.left}
-				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
-				onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
-				onPointerCancel={stopResizing}
-				onPointerDown={(event) => handleSplitterPointerDown(event, "left")}
-				onPointerMove={handleSplitterPointerMove}
-				onPointerUp={stopResizing}
-				tabIndex={0}
-			/>
-			<section className="flex min-h-0 min-w-0 flex-col">
-				<div className="flex min-h-0 max-h-[40vh] shrink-0 flex-col border-b bg-sidebar">
-					<MrHeader
-						mr={data.mr}
-						headSha={data.revision.headSha}
-						filesChanged={changedFileTotal}
-						insertions={lineTotals.insertions}
-						deletions={lineTotals.deletions}
-						approval={data.approval ?? null}
-						approvalLoading={approvalLoading}
-						approvalAction={approvalAction}
-						onApprovalAction={handleApprovalAction}
-						freshness={freshness}
-						refreshing={refreshing}
-						layerGenerating={layerAction !== null}
-						onRefresh={refreshReview}
-					/>
-					<Toasts toasts={toasts} onDismiss={dismissToast} />
-					<ChangedFiles
-						files={data.diff}
-						viewedFiles={data.viewedFiles}
-						selectedPath={selectedPath}
-						onSelectFile={selectFile}
-						onViewedChange={(paths, viewed) => {
-							saveProgress({
-								viewedFiles: { paths, viewed },
-							});
-						}}
-						showWhitespaceChanges={data.showWhitespaceChanges}
-						whitespaceChanging={whitespaceChanging}
-						syncing={syncing}
-						refreshing={refreshing}
-						onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
-					/>
-				</div>
-				<DiffView
-					key={selectedPath ?? "empty"}
-					file={selectedFile}
-					mode={diffMode}
-					viewMode={selectedViewMode}
-					largeFileLineThreshold={data.largeFileLineThreshold}
-					fileContents={fileContents}
-					fileContentsError={fileContentsError}
-					discussions={data.discussions}
-					collapsedDiscussionIds={data.collapsedDiscussionIds}
-					onCollapsedDiscussionIdsChange={saveCollapsedDiscussionIds}
-					onExplainDiscussion={explainDiscussion}
-					explainDisabled={creatingChat}
-					drafts={data.drafts}
-					onModeChange={setDiffMode}
-					wholeFile={selectedWholeFile}
-					onWholeFileChange={changeWholeFile}
-					onViewModeChange={changeViewMode}
-					viewed={
-						selectedPath !== null && data.viewedFiles.includes(selectedPath)
-					}
-					onViewedChange={(viewed) => {
-						if (selectedPath === null) return;
-						saveProgress({
-							viewedFile: { path: selectedPath, viewed },
-						});
-					}}
-					onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
-					onLineSelection={handleLineSelection}
-					onCommentSelection={createCommentDraft}
-					onMarkdownTag={handleMarkdownTag}
-					onFileTag={handleFileTag}
-					onMarkdownComment={createMarkdownCommentDraft}
-					onCancelDraft={cancelCommentDraft}
-					onEditDraft={updateCommentDraft}
-					onSendDraft={sendCommentDraft}
-					onRetryDraft={retryCommentDraft}
-					fromChat={{
-						availability: activeFromChatAvailability,
-						generations: draftGenerations,
-						onGenerate: generateFromChat,
-						onStop: stopFromChat,
-					}}
-				/>
-			</section>
-			<hr
-				aria-label="Resize chat column"
-				aria-orientation="vertical"
-				aria-valuemax={rightColumnMaximum}
-				aria-valuemin={columnMinimums.right}
-				aria-valuenow={columnWidths.right}
-				className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
-				onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
-				onPointerCancel={stopResizing}
-				onPointerDown={(event) => handleSplitterPointerDown(event, "right")}
-				onPointerMove={handleSplitterPointerMove}
-				onPointerUp={stopResizing}
-				tabIndex={0}
-			/>
-			<ChatPane
-				skills={skills}
-				transcript={activeChat.entries}
-				tags={activeChat.tags}
-				discussions={generalDiscussions(data.discussions)}
-				onExplainDiscussion={explainDiscussion}
-				explainDisabled={creatingChat}
-				streamingSegments={activeChat.streamingSegments}
-				tools={activeChat.tools}
-				error={activeChat.error ?? commentError}
-				sending={activeChat.sending}
-				busy={activeChatBusy}
-				stopping={activeChat.stopping}
-				chats={chatSummaries}
-				activeChatId={activeChatId}
-				onSelectChat={handleSelectChat}
-				onNewChat={handleNewChat}
+			<MrHeader
+				mr={data.mr}
+				headSha={data.revision.headSha}
+				filesChanged={changedFileTotal}
+				insertions={lineTotals.insertions}
+				deletions={lineTotals.deletions}
+				approval={data.approval ?? null}
+				approvalLoading={approvalLoading}
+				approvalAction={approvalAction}
+				onApprovalAction={handleApprovalAction}
+				freshness={freshness}
+				refreshing={refreshing}
+				layerGenerating={layerAction !== null}
+				onRefresh={refreshReview}
 				onOpenSettings={() => {
 					setSettingsInitialTab("prompts");
 					setSettingsOpen(true);
 				}}
-				onOpenSkillsSettings={() => {
-					setSettingsInitialTab("skills");
-					setSettingsOpen(true);
-				}}
-				creatingChat={creatingChat}
-				draft={activeChat.draft}
-				onDraftChange={(value) => {
-					if (activeChatId) patchChat(activeChatId, { draft: value });
-				}}
-				onSend={handleChatSend}
-				onStop={handleChatStop}
-				onRemoveTag={removeChatTag}
-				onClearTags={clearTags}
-				onOpenFileRef={openFileRef}
 			/>
+			<div
+				className="grid min-h-0 min-w-0 flex-1 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)]"
+				ref={reviewShell}
+			>
+				<LayerPane
+					state={data}
+					files={files}
+					filesContent={
+						<ChangedFiles
+							files={data.diff}
+							viewedFiles={data.viewedFiles}
+							selectedPath={selectedPath}
+							onSelectFile={selectFile}
+							onViewedChange={(paths, viewed) => {
+								saveProgress({
+									viewedFiles: { paths, viewed },
+								});
+							}}
+							showWhitespaceChanges={data.showWhitespaceChanges}
+							whitespaceChanging={whitespaceChanging}
+							syncing={syncing}
+							refreshing={refreshing}
+							onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
+						/>
+					}
+					selectedPath={selectedPath}
+					onSelectFile={selectFile}
+					onSelectLayer={selectLayer}
+					onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
+					layerAction={layerAction}
+					actionError={progressError}
+					externallyDisabled={refreshing}
+					onRegenerate={() => runLayerAction("regenerate")}
+					onRetry={() => runLayerAction("retry")}
+				/>
+				<ReviewSplitter
+					aria-label="Resize review layers column"
+					aria-valuemax={leftColumnMaximum}
+					aria-valuemin={columnMinimums.left}
+					aria-valuenow={columnWidths.left}
+					onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
+					onPointerCancel={splitterResize.onPointerEnd}
+					onPointerDown={(event) =>
+						splitterResize.onPointerDown(event, "left", columnWidths.left)
+					}
+					onPointerMove={splitterResize.onPointerMove}
+					onPointerUp={splitterResize.onPointerEnd}
+					onLostPointerCapture={splitterResize.onLostPointerCapture}
+				/>
+				<section className="flex min-h-0 min-w-0 flex-col">
+					<Toasts toasts={toasts} onDismiss={dismissToast} />
+					<DiffView
+						key={selectedPath ?? "empty"}
+						file={selectedFile}
+						mode={diffMode}
+						viewMode={selectedViewMode}
+						largeFileLineThreshold={data.largeFileLineThreshold}
+						fileContents={fileContents}
+						fileContentsError={fileContentsError}
+						discussions={data.discussions}
+						collapsedDiscussionIds={data.collapsedDiscussionIds}
+						onCollapsedDiscussionIdsChange={saveCollapsedDiscussionIds}
+						onExplainDiscussion={explainDiscussion}
+						explainDisabled={creatingChat}
+						drafts={data.drafts}
+						onModeChange={setDiffMode}
+						wholeFile={selectedWholeFile}
+						onWholeFileChange={changeWholeFile}
+						onViewModeChange={changeViewMode}
+						viewed={
+							selectedPath !== null && data.viewedFiles.includes(selectedPath)
+						}
+						onViewedChange={(viewed) => {
+							if (selectedPath === null) return;
+							saveProgress({
+								viewedFile: { path: selectedPath, viewed },
+							});
+						}}
+						onExpandDiff={(file) => fetchExpandedDiff(token, filePath(file))}
+						onLineSelection={handleLineSelection}
+						onCommentSelection={createCommentDraft}
+						onMarkdownTag={handleMarkdownTag}
+						onFileTag={handleFileTag}
+						onMarkdownComment={createMarkdownCommentDraft}
+						onCancelDraft={cancelCommentDraft}
+						onEditDraft={updateCommentDraft}
+						onSendDraft={sendCommentDraft}
+						onRetryDraft={retryCommentDraft}
+						fromChat={{
+							availability: activeFromChatAvailability,
+							generations: draftGenerations,
+							onGenerate: generateFromChat,
+							onStop: stopFromChat,
+						}}
+					/>
+				</section>
+				<ReviewSplitter
+					aria-label="Resize chat column"
+					aria-valuemax={rightColumnMaximum}
+					aria-valuemin={columnMinimums.right}
+					aria-valuenow={columnWidths.right}
+					onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
+					onPointerCancel={splitterResize.onPointerEnd}
+					onPointerDown={(event) =>
+						splitterResize.onPointerDown(event, "right", columnWidths.right)
+					}
+					onPointerMove={splitterResize.onPointerMove}
+					onPointerUp={splitterResize.onPointerEnd}
+					onLostPointerCapture={splitterResize.onLostPointerCapture}
+				/>
+				<ChatPane
+					skills={skills}
+					transcript={activeChat.entries}
+					tags={activeChat.tags}
+					discussions={generalDiscussions(data.discussions)}
+					onExplainDiscussion={explainDiscussion}
+					explainDisabled={creatingChat}
+					streamingSegments={activeChat.streamingSegments}
+					tools={activeChat.tools}
+					error={activeChat.error ?? commentError}
+					sending={activeChat.sending}
+					busy={activeChatBusy}
+					stopping={activeChat.stopping}
+					chats={chatSummaries}
+					activeChatId={activeChatId}
+					onSelectChat={handleSelectChat}
+					onNewChat={handleNewChat}
+					onOpenSkillsSettings={() => {
+						setSettingsInitialTab("skills");
+						setSettingsOpen(true);
+					}}
+					creatingChat={creatingChat}
+					draft={activeChat.draft}
+					onDraftChange={(value) => {
+						if (activeChatId) patchChat(activeChatId, { draft: value });
+					}}
+					onSend={handleChatSend}
+					onStop={handleChatStop}
+					onRemoveTag={removeChatTag}
+					onClearTags={clearTags}
+					onOpenFileRef={openFileRef}
+				/>
+			</div>
 			<Dialog
 				open={externalFile !== null}
 				onOpenChange={(open) => {

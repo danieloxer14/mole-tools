@@ -108,12 +108,13 @@ describe("OMP model catalog", () => {
 		expect(config).toEqual(originalConfig);
 	});
 
-	test("invokes a configured executable directly with models --json", async () => {
+	test("invokes configured executable directly and joins streamed output chunks", async () => {
 		const stdout = JSON.stringify({
 			models: [{ selector: "actual-process-model", thinking: ["minimal"] }],
 		});
+		const split = Math.floor(stdout.length / 2);
 		await withTemporaryExecutable(
-			`[ "$1" = "models" ] && [ "$2" = "--json" ] || exit 42\nprintf '%s' '${stdout}'`,
+			`[ "$1" = "models" ] && [ "$2" = "--json" ] || exit 42\nprintf '%s' '${stdout.slice(0, split)}'\nsleep 0.05\nprintf '%s' '${stdout.slice(split)}'`,
 			async (binary) => {
 				expect(
 					await discoverOmpModels({

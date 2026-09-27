@@ -194,9 +194,7 @@ async function collectBoundedOutput(
 	}
 
 	if (chunks.length === 0) return EMPTY_OUTPUT;
-	const onlyChunk = chunks[0];
-	if (onlyChunk !== undefined) return onlyChunk;
-
+	if (chunks.length === 1) return chunks[0] ?? EMPTY_OUTPUT;
 	const output = new Uint8Array(byteLength);
 	let offset = 0;
 	for (const chunk of chunks) {

@@ -12,6 +12,19 @@ describe("effectiveAgentSelection", () => {
 		).toEqual({ agent: "omp", model: "prompt-model", effort: null });
 	});
 
+	test("clears inherited Codex effort unsupported by prompt model", () => {
+		expect(
+			effectiveAgentSelection(
+				{ agent: null, model: "gpt-5.5", effort: null },
+				{ agent: "codex", model: "gpt-6-sol", effort: "ultra" },
+			),
+		).toEqual({
+			agent: "codex",
+			model: "gpt-5.5",
+			effort: null,
+		});
+	});
+
 	test("rejects an explicitly saved effort unsupported by the prompt model", () => {
 		expect(() =>
 			effectiveAgentSelection(

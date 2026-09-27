@@ -52,7 +52,16 @@ function renderInteractive(): HTMLDivElement {
 test("renders viewed files progress header", () => {
 	const html = markup();
 
-	expect(html).toContain("Viewed files");
+	expect(html).not.toContain("Viewed files");
+	const container = document.createElement("div");
+	container.innerHTML = html;
+	const firstRow = container.querySelector(
+		'[data-region="changed-files"]',
+	)?.firstElementChild;
+	expect(
+		firstRow?.querySelector('[aria-label="Changed files layout"]'),
+	).not.toBeNull();
+	expect(firstRow?.querySelector('[role="progressbar"]')).not.toBeNull();
 	expect(html).toContain('role="progressbar"');
 	expect(html).toContain('aria-label="Viewed file coverage"');
 	expect(html).toContain("1/3 files");

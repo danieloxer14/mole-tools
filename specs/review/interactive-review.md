@@ -31,7 +31,7 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```jsonc
 {
   "review": {
-    "agent": "claude", // "omp" or "claude"; default "claude"
+    "agent": "claude", // "omp", "claude", or "codex"; default "claude"
     "binary": "claude", // optional binary override
     "model": "review-model", // optional; no model flag when omitted
     "effort": "high", // optional; OMP --thinking or Claude --effort
@@ -69,10 +69,10 @@ Review the changed code for correctness and risk.
 ```
 
 With Agent unset or `default`, the version inherits the General default agent,
-model, and effort independently for each blank field. An explicit `omp` or
-`claude` agent uses only that version's Model and Effort; blank values send no
-corresponding flag and use that agent's CLI defaults rather than inheriting
-settings for another agent. Commit and MR prompt slots ignore review
+model, and effort independently for each blank field. An explicit `omp`,
+`claude`, or `codex` agent uses only that version's Model and Effort; blank
+values send no corresponding flag and use that agent's CLI defaults rather than
+inheriting settings for another agent. Commit and MR prompt slots ignore review
 frontmatter and continue to use their `models.*` LLM routes; existing prompt
 versions without effort keep that field unset.
 
@@ -181,11 +181,17 @@ The page has three working columns:
   manual Done checkboxes, per-layer file chips showing the shortest unique path
   suffix (usually the basename) with the full path in the accessible label and
   hover tooltip, per-layer file coverage, and a global Viewed-files progress bar.
-- **Centre — Changed files and diff.** The complete changed-file tree remains available even when a layer does not mention a file. Navigation starts in flat list mode by default, with one mutually exclusive segmented List view/Tree view control for switching layouts. Tree folders start expanded and can be collapsed or expanded independently. File rows preserve full-path selection, insertion and deletion statistics, and persisted Viewed state. Selecting a changed file from any surface expands its tree ancestors when needed and scrolls its row into view with `nearest`, so an already-visible row does not move.
+- **Centre — Changed files and diff.** The complete changed-file navigation remains available even when a layer does not mention a file. Navigation starts in grouped list mode: each distinct full parent path has a non-collapsible heading, files display by basename in encounter order, and root-level files appear directly without a synthetic heading. The mutually exclusive segmented List view/Tree view control switches to an expanded-by-default compact tree; each disclosure row joins eligible single-directory chains and stops at a branch or directory containing a direct file, with indentation based on displayed depth. Directory rows disclose descendants only; insertion/deletion statistics and persisted Viewed controls appear on file rows only. Names display in full when they fit and use middle ellipsis while retaining a visible suffix when constrained; changed-file and disclosure controls retain the complete path in their accessible name and tooltip. The navigation scrolls vertically without horizontal overflow, shrinking names before file stats and Viewed controls. Selecting a changed file from any surface expands its displayed tree ancestors when needed and scrolls its row into view with `nearest`, so an already-visible row does not move.
 - **Right — Agent chat.** General discussions, Explain per discussion,
   restored transcript, streaming response/tool activity, context tags (diff
   line ranges, rendered-markdown block ranges, and whole files), composer,
   New chat button, chat switcher, and Stop.
+
+Both vertical splitters resize their side on primary-pointer drag, including
+captured movement outside the handle. Matching `pointerup`, `pointercancel`,
+lost pointer capture, or the first matching move without the primary button
+ends the drag; button-up hover after termination does not resize. Keyboard
+controls remain available.
 
 The centre column supports Inline and Side by side layouts. Shiki highlights
 source lines. Added lines use the new side, deleted lines use the old side, and

@@ -40,6 +40,9 @@ describe("loadConfig", () => {
 			maxLayerPromptBytes: 100_000,
 		});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('"agent": "claude",');
+		expect(CONFIG_TEMPLATE_TEXT).toContain(
+			'"omp", "claude", or "codex"; default "claude"',
+		);
 		expect(CONFIG_TEMPLATE.prompts).toEqual({});
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "review": {');
 		expect(CONFIG_TEMPLATE_TEXT).toContain('// "reviewBabysitter": {');
