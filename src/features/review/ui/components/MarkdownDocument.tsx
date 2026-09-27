@@ -27,7 +27,11 @@ export interface MarkdownBlockRange {
 
 export type MarkdownRenderPolicy =
 	| { kind: "file" }
-	| { kind: "description"; projectWebUrl: string };
+	| {
+			kind: "description";
+			projectWebUrl: string;
+			mediaToken: string;
+	  };
 
 export interface MarkdownDocumentProps {
 	source: string;
@@ -70,6 +74,10 @@ function renderMarkdown(
 ): RenderedMarkdownOutput {
 	const mermaidSources = new Map<string, string>();
 	const codeSources = new Map<string, { code: string; lang: string }>();
+	// GitLab's dimension suffix parses as a text token after a video image.
+	let nextVideoId = 0;
+	let pendingVideoId: string | null = null;
+	const videoDimensions = new Map<string, { width: string; height: string }>();
 	const blocks = renderMarkdownBlocks(source, (renderer) => {
 		const defaultTable = renderer.table.bind(renderer);
 		renderer.code = (token: Tokens.Code) => {
@@ -91,14 +99,63 @@ function renderMarkdown(
 			renderer.html = ({ text }: Tokens.HTML | Tokens.Tag) => escapeHtml(text);
 		} else {
 			const defaultImage = renderer.image.bind(renderer);
-			renderer.image = (token: Tokens.Image) =>
-				isVideoUrl(token.href)
-					? `<video controls preload="metadata" src="${escapeHtml(token.href)}" title="${escapeHtml(token.text)}"></video>`
-					: defaultImage(token);
+			const defaultText = renderer.text.bind(renderer);
+			const defaultParagraph = renderer.paragraph.bind(renderer);
+			renderer.paragraph = (token: Tokens.Paragraph) => {
+				const html = defaultParagraph(token);
+				pendingVideoId = null;
+				return html;
+			};
+			renderer.image = (token: Tokens.Image) => {
+				if (!isVideoUrl(token.href)) {
+					pendingVideoId = null;
+					return defaultImage(token);
+				}
+
+				const id = String(nextVideoId++);
+				pendingVideoId = id;
+				return `<video data-mole-video-id="${id}" controls preload="metadata" src="${escapeHtml(token.href)}" title="${escapeHtml(token.text)}"></video>`;
+			};
+			renderer.text = (token) => {
+				const videoId = pendingVideoId;
+				pendingVideoId = null;
+				const dimensions = /^\{width=(\d+) height=(\d+)\}/.exec(token.text);
+				if (
+					videoId === null ||
+					dimensions === null ||
+					dimensions[1] === undefined ||
+					dimensions[2] === undefined
+				) {
+					return defaultText(token);
+				}
+
+				videoDimensions.set(videoId, {
+					width: dimensions[1],
+					height: dimensions[2],
+				});
+				const remainder = token.text.slice(dimensions[0].length);
+				return remainder
+					? defaultText({ ...token, raw: remainder, text: remainder })
+					: "";
+			};
 		}
 		renderer.table = (token: Tokens.Table) =>
 			`<div class="rendered-table-wrap min-w-0 max-w-full">${defaultTable(token)}</div>`;
 	});
+	// Remove renderer-only markers before DOMPurify sees generated HTML.
+	if (policy.kind === "description" && nextVideoId > 0) {
+		for (const block of blocks) {
+			block.html = block.html.replace(
+				/data-mole-video-id="(\d+)"/g,
+				(_marker, id: string) => {
+					const dimensions = videoDimensions.get(id);
+					return dimensions
+						? `width="${dimensions.width}" height="${dimensions.height}"`
+						: "";
+				},
+			);
+		}
+	}
 	const { html: bodyHtml, blockRanges } = wrapMarkdownBlocksWithActions(
 		blocks,
 		{
@@ -124,7 +181,11 @@ function renderMarkdown(
 			: DOMPurify.sanitize(bodyHtml, sanitizeOptions);
 	const html =
 		policy.kind === "description"
-			? finalizeDescriptionHtml(sanitizedHtml, policy.projectWebUrl)
+			? finalizeDescriptionHtml(
+					sanitizedHtml,
+					policy.projectWebUrl,
+					policy.mediaToken,
+				)
 			: sanitizedHtml;
 	return { html, mermaidSources, codeSources, blockRanges };
 }
@@ -292,14 +353,21 @@ export const MarkdownDocument = memo(function MarkdownDocument({
 }: MarkdownDocumentProps) {
 	const projectUrl =
 		policy.kind === "description" ? policy.projectWebUrl : null;
+	const mediaToken = policy.kind === "description" ? policy.mediaToken : null;
 	const parsed = useMemo(() => {
 		try {
 			return {
 				error: null,
 				value: renderMarkdown(
 					source,
-					policy.kind === "description" && projectUrl !== null
-						? { kind: "description", projectWebUrl: projectUrl }
+					policy.kind === "description" &&
+						projectUrl !== null &&
+						mediaToken !== null
+						? {
+								kind: "description",
+								projectWebUrl: projectUrl,
+								mediaToken,
+							}
 						: { kind: "file" },
 					commentable,
 				),
@@ -310,7 +378,7 @@ export const MarkdownDocument = memo(function MarkdownDocument({
 				value: null,
 			};
 		}
-	}, [source, policy.kind, projectUrl, commentable]);
+	}, [source, policy.kind, projectUrl, mediaToken, commentable]);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [drag, setDrag] = useState<MarkdownDragState | null>(null);
 	const dragRef = useRef<MarkdownDragState | null>(null);
@@ -532,7 +600,11 @@ export const MarkdownDocument = memo(function MarkdownDocument({
 				containerRef={containerRef}
 			/>
 			<div
-				className="rendered-markdown min-w-0 max-w-full pl-4 [overflow-wrap:anywhere]"
+				className={
+					policy.kind === "file"
+						? "rendered-markdown min-w-0 max-w-full pl-4 [overflow-wrap:anywhere]"
+						: "rendered-markdown overview-markdown min-w-0 max-w-full [overflow-wrap:anywhere]"
+				}
 				ref={containerRef}
 				// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
 				dangerouslySetInnerHTML={{ __html: parsed.value.html }}

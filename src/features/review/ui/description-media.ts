@@ -38,9 +38,66 @@ export function isVideoUrl(url: string): boolean {
 	return (VIDEO_EXTENSIONS as readonly string[]).includes(extension);
 }
 
+function projectUploadAsset(
+	url: string,
+	projectUrl: string,
+): { secret: string; filename: string } | null {
+	const project = new URL(projectUrl);
+	let asset: URL;
+	try {
+		asset = new URL(url, project);
+	} catch {
+		return null;
+	}
+	if (
+		asset.origin !== project.origin ||
+		(asset.protocol !== "https:" && asset.protocol !== "http:")
+	) {
+		return null;
+	}
+
+	const projectPath = project.pathname.replace(/\/$/, "");
+	const uploadPrefixes = [`${projectPath}/uploads/`, "/uploads/"];
+	const prefix = uploadPrefixes.find((candidate) =>
+		asset.pathname.startsWith(candidate),
+	);
+	if (!prefix) return null;
+
+	const segments = asset.pathname.slice(prefix.length).split("/");
+	if (segments.length !== 2) return null;
+	const [secret, encodedFilename] = segments;
+	if (!secret || !/^[a-f0-9]{32}$/i.test(secret) || !encodedFilename) {
+		return null;
+	}
+
+	let filename: string;
+	try {
+		filename = decodeURIComponent(encodedFilename);
+	} catch {
+		return null;
+	}
+	if (
+		filename === "" ||
+		filename === "." ||
+		filename === ".." ||
+		Array.from(filename).some(
+			(character) =>
+				character === "/" ||
+				character === "\\" ||
+				character <= "\u001f" ||
+				character === "\u007f",
+		)
+	) {
+		return null;
+	}
+
+	return { secret, filename };
+}
+
 export function finalizeDescriptionHtml(
 	html: string,
 	projectUrl: string,
+	mediaToken: string,
 ): string {
 	const template = document.createElement("template");
 	template.innerHTML = html;
@@ -59,7 +116,16 @@ export function finalizeDescriptionHtml(
 			if (value === null) continue;
 
 			const resolvedUrl = resolveDescriptionUrl(value, projectUrl);
-			element.setAttribute(attribute, resolvedUrl);
+			const projectUpload =
+				selector === "a[href]"
+					? null
+					: projectUploadAsset(resolvedUrl, projectUrl);
+			const mediaUrl = projectUpload
+				? `/api/description-media/${projectUpload.secret}/${encodeURIComponent(
+						projectUpload.filename,
+					)}?t=${encodeURIComponent(mediaToken)}`
+				: resolvedUrl;
+			element.setAttribute(attribute, mediaUrl);
 			if (
 				selector === "a[href]" &&
 				(resolvedUrl.startsWith("http:") || resolvedUrl.startsWith("https:"))

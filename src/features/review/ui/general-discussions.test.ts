@@ -12,13 +12,15 @@ const hiddenBodies = [
 	"marked this merge request as **draft**",
 	"assigned to @alice",
 	"requested review from @bob",
+	"left review comments",
+	"resolved all threads",
+	"approved this merge request",
 ];
 
 const visibleSystemBodies = [
 	"added ~bug label",
 	"unassigned @bob",
 	"mentioned in issue #3",
-	"approved this merge request",
 	"removed review request for @bob",
 ];
 
@@ -51,11 +53,9 @@ describe("generalDiscussions", () => {
 		}
 	});
 
-	test("keeps human notes with listed system activity wording", () => {
+	test("hides activity wording even when GitLab marks note non-system", () => {
 		for (const body of hiddenBodies) {
-			expect(
-				generalDiscussions([discussion([note(body, false)])]),
-			).toHaveLength(1);
+			expect(generalDiscussions([discussion([note(body, false)])])).toEqual([]);
 		}
 	});
 

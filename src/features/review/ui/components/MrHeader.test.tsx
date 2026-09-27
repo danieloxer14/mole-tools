@@ -176,6 +176,30 @@ test("renders Review view toggle first with the active option pressed", () => {
 	expect(overview?.getAttribute("aria-pressed")).toBe("true");
 });
 
+test("keeps toggle options intrinsic and preserves title on narrow screens", () => {
+	const header = render().querySelector("header");
+	const title = header?.querySelector("h1");
+	const options = Array.from(
+		header?.querySelectorAll('[aria-label="Review view"] button') ?? [],
+	);
+
+	expect(header?.className).toContain("flex-wrap");
+	expect(header?.className).toContain("lg:flex-nowrap");
+	expect(title?.className).toContain("basis-full");
+	expect(title?.className).toContain("break-words");
+	expect(title?.className).toContain("lg:truncate");
+	expect(title?.className).toContain("lg:basis-auto");
+	expect(options).toHaveLength(2);
+	for (const option of options) {
+		expect(option.className).toContain("!flex-none");
+		expect(option.className).toContain("!h-9");
+		expect(option.className).toContain("!min-w-fit");
+		expect(option.className).toContain("!px-4");
+		expect(option.className).toContain("!text-sm");
+		expect(option.className).not.toContain("max-lg:");
+	}
+});
+
 test("selecting Overview reports the overview view", () => {
 	const changes: ReviewView[] = [];
 	const { container } = renderInteractive({

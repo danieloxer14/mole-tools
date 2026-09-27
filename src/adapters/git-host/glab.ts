@@ -277,6 +277,22 @@ function mapMergeRequest(
 export class GlabAdapter implements GitHost {
 	constructor(private readonly execFn: GlabExec = defaultGlabExec) {}
 
+	async getGitLabAuthToken(hostname: string): Promise<string | null> {
+		const result = await this._exec([
+			"auth",
+			"status",
+			"--hostname",
+			hostname,
+			"--show-token",
+		]);
+		if (result.exitCode !== 0) return null;
+
+		const token =
+			result.stdout.match(/\btoken(?:\s+found)?\s*:\s*(\S+)/i)?.[1] ??
+			result.stderr.match(/\btoken(?:\s+found)?\s*:\s*(\S+)/i)?.[1];
+		return token ?? null;
+	}
+
 	async preflight(): Promise<void> {
 		let result = await this._exec(["--version"]);
 		if (result.exitCode !== 0) {

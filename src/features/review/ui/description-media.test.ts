@@ -7,7 +7,9 @@ import {
 	VIDEO_EXTENSIONS,
 } from "./description-media";
 
+const mediaToken = "review-local-token";
 const projectUrl = "https://gitlab.example.com/group/api";
+const uploadSecret = "0123456789abcdef0123456789abcdef";
 
 test("builds the project web URL from the merge request origin and project path", () => {
 	expect(
@@ -80,6 +82,7 @@ test("finalizes description media and external links", () => {
 	const html = finalizeDescriptionHtml(
 		'<img src="/uploads/a.png"><video src="media/v.mp4" poster="/uploads/poster.jpg"></video><source src="/uploads/b.webm"><a href="docs/a.md">relative</a><a href="https://elsewhere.example/page">external</a><a href="mailto:team@example.com">email</a>',
 		projectUrl,
+		mediaToken,
 	);
 	const template = document.createElement("template");
 	template.innerHTML = html;
@@ -114,4 +117,33 @@ test("finalizes description media and external links", () => {
 	expect(mailtoLink?.getAttribute("href")).toBe("mailto:team@example.com");
 	expect(mailtoLink?.hasAttribute("target")).toBe(false);
 	expect(mailtoLink?.hasAttribute("rel")).toBe(false);
+});
+
+test("rewrites only project GitLab upload media to tokenized local URLs", () => {
+	const html = finalizeDescriptionHtml(
+		`<img src="/uploads/${uploadSecret}/clip%20one.png"><video poster="https://gitlab.example.com/group/api/uploads/${uploadSecret}/poster.png"></video><source src="https://gitlab.example.com/group/other/uploads/${uploadSecret}/other.webm"><img src="https://elsewhere.example/uploads/${uploadSecret}/external.png"><img src="/uploads/not-a-secret/file.mp4"><a href="/uploads/${uploadSecret}/linked.png">direct link</a>`,
+		projectUrl,
+		mediaToken,
+	);
+	const template = document.createElement("template");
+	template.innerHTML = html;
+
+	expect(template.content.querySelector("img")?.getAttribute("src")).toBe(
+		`/api/description-media/${uploadSecret}/clip%20one.png?t=${mediaToken}`,
+	);
+	expect(template.content.querySelector("video")?.getAttribute("poster")).toBe(
+		`/api/description-media/${uploadSecret}/poster.png?t=${mediaToken}`,
+	);
+	expect(template.content.querySelector("source")?.getAttribute("src")).toBe(
+		`https://gitlab.example.com/group/other/uploads/${uploadSecret}/other.webm`,
+	);
+	expect(template.content.querySelectorAll("img")[1]?.getAttribute("src")).toBe(
+		`https://elsewhere.example/uploads/${uploadSecret}/external.png`,
+	);
+	expect(template.content.querySelectorAll("img")[2]?.getAttribute("src")).toBe(
+		"https://gitlab.example.com/group/api/uploads/not-a-secret/file.mp4",
+	);
+	expect(template.content.querySelector("a")?.getAttribute("href")).toBe(
+		`https://gitlab.example.com/group/api/uploads/${uploadSecret}/linked.png`,
+	);
 });

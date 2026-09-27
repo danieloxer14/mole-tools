@@ -131,6 +131,7 @@ Implemented HTTP surface:
 | `POST /api/progress`                                 | Persist a layer `done` toggle and/or a viewed-file change, returning only updated `layers` and `viewedFiles`; viewed-file changes support one path or a batch `{ viewedFiles: { paths: string[], viewed: boolean } }` applied in one mutation. |
 | `GET /api/file?path=&side=`                          | Return text from the worktree (`new`) or the merge-base revision (`old`); reject traversal outside the worktree.                                                                                                                                                                                                                        |
 | `GET /api/diff?path=`                                | Return the unfiltered parsed file diff for an explicit expansion.                                                                                                                                                                                                                                                                       |
+| `GET /api/description-media/:secret/:filename?t=` | Require the local token and stream a current-project upload through authenticated GitLab API; forward `Range` and safe `206` metadata for media seeking. Unsupported adapters return `503`. |
 | `POST /api/layers/regenerate` or `/api/layers/retry` | Run layer generation and stream status/done frames.                                                                                                                                                                                                                                                                                     |
 | `GET /api/chat?chatId=`                              | Return entries for the selected chat.                                                                                                                                                                                                                                                                                                   |
 | `POST /api/chat`                                     | Accept `{ chatId, message, tags[], openFile }` and stream text/tool/error frames.                                                                                                                                                                                                                                                       |
@@ -148,7 +149,9 @@ Implemented HTTP surface:
 
 The review header sits above the panes and starts with a segmented `Code` /
 `Overview` toggle. `Code` is selected by default; the selection is local and
-is not persisted.
+is not persisted. At narrow widths, the toggle is compact and the MR title
+receives a full-width row before metadata and header actions; wider layouts keep
+the header on one line.
 
 In `Code` view, the left sidebar holds review layers and the changed-file tree,
 the centre column shows the selected file's diff, and the right column is the
@@ -174,26 +177,35 @@ agent chat. The MR title sits in the header above the panes.
   and Stop. General discussions appear in Overview, not in the agent chat.
 
 In `Overview` view, the left review layers/changed-files pane, its splitter,
-and the centre diff column are replaced by one vertically scrolling page. The
-right splitter and agent chat remain unchanged and resizable. Overview renders
+and the centre diff column are replaced by one vertically scrolling page.
+The right splitter and agent chat remain unchanged and resizable. Overview renders
 the MR description as GFM, including headings, lists, tables, Shiki-highlighted
-code, and Mermaid diagrams. Sanitized raw HTML can render images with `width`
-and `height` attributes and raw `<video>`/`<source>` media; scripts, iframes,
-embeds, objects, `<style>` tags, and `style` attributes are stripped. Markdown
-image-syntax links to `.mp4`, `.m4v`, `.mov`, `.webm`, or `.ogv` render as
-`<video controls>`. Relative media and link URLs resolve against the GitLab
-project (`/uploads/…` is project-relative; other `/…` URLs are origin-relative);
-absolute HTTP(S) links
-open in a new tab with `rel="noopener noreferrer"`. Each description block
-offers `Tag` only, never `Comment`; `Tag whole description` tags the whole
+code, and Mermaid diagrams. Description Markdown has no left inset; code-file
+Markdown retains its existing left inset. Sanitized raw HTML can render images
+with `width` and `height` attributes and raw `<video>`/`<source>` media; scripts,
+iframes, embeds, objects, `<style>` tags, and `style` attributes are stripped.
+Markdown image-syntax links to `.mp4`, `.m4v`, `.mov`, `.webm`, or `.ogv` render
+as `<video controls>`. A GitLab video image followed immediately by
+`{width=<integer> height=<integer>}` applies those values as video dimensions
+and does not render the suffix as text. Relative media and link URLs resolve
+against the GitLab project (`/uploads/…` is project-relative; other `/…` URLs
+are origin-relative); absolute HTTP(S) links open in a new tab with
+`rel="noopener noreferrer"`. Each description block offers `Tag` only, never
+`Comment`. The whole-description button is right-aligned, visibly labeled
+`Tag file`, and accessible as `Tag whole description`; it tags the whole
 description. A whitespace-only description shows `No description provided.`
-and no whole-description tag button.
-Images and videos from private-project uploads may not load when the browser
-withholds the GitLab session cookie on cross-site requests from the local
-review page.
+and no whole-description tag button. Project-upload media with a 32-hex secret
+uses the authenticated local media route; its GitLab instance and project come
+from persisted MR metadata, never a browser-supplied host or project. The route
+uses `glab auth token` and streams bytes, forwarding `Range` and `206` metadata;
+other media sources, including external GitLab URLs, stay direct.
 
 At the bottom of Overview, `General discussion` has a count badge, the
-read-only discussion cards, and an Explain action for each discussion. With no
+read-only discussion cards, and an Explain action for each discussion. It
+excludes known activity-note prefixes for title changes, left review comments,
+resolved threads, and approvals, even when GitLab's `system` flag is false.
+Overview content fills the available center column, including description
+Markdown and media; the Agent pane remains separate and resizable. With no
 discussions, it shows `No general discussion yet.` Agent-generated file links
 that resolve to a changed file switch the view to `Code` and select that file;
 unresolved links still open the external preview dialog in either view.

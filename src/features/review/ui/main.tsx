@@ -2090,6 +2090,7 @@ function ReviewApp() {
 					<OverviewPane
 						description={data.mr.description}
 						projectWebUrl={projectWebUrl(data.mr)}
+						mediaToken={token}
 						discussions={generalDiscussions(data.discussions)}
 						onTagDescription={handleDescriptionTag}
 						onExplainDiscussion={explainDiscussion}

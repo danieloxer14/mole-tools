@@ -8,6 +8,7 @@ import { OverviewPane, type OverviewPaneProps } from "./OverviewPane";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const projectWebUrl = "https://gitlab.example.com/group/project";
+const mediaToken = "review-local-token";
 const discussions: HostDiscussion[] = [
 	{
 		id: "general-discussion-1",
@@ -45,6 +46,7 @@ function mountOverview(props: Partial<OverviewPaneProps> = {}): {
 			<OverviewPane
 				description="A merge request description."
 				projectWebUrl={projectWebUrl}
+				mediaToken={mediaToken}
 				discussions={[]}
 				onTagDescription={() => {}}
 				{...props}
@@ -63,6 +65,33 @@ test("shows Description before General discussion", () => {
 	expect(headings).toEqual(["Description", "General discussion"]);
 	expect(container.querySelector('[aria-label="Overview"]')).not.toBeNull();
 	expect(container.textContent).toContain("A merge request description.");
+});
+
+test("uses available width for Overview and description Markdown", () => {
+	const { container } = mountOverview();
+	const overview = container.querySelector('[aria-label="Overview"]');
+	const content = overview?.firstElementChild;
+	const markdown = overview?.querySelector(".overview-markdown");
+
+	expect(content?.className).toContain("w-full");
+	expect(content?.className).not.toContain("max-w-4xl");
+	expect(markdown?.className).toContain("overview-markdown");
+});
+
+test("uses larger section headers and a right-aligned Tag file action", () => {
+	const { container } = mountOverview();
+	const descriptionHeading = container.querySelector("#description-heading");
+	const discussionHeading = container.querySelector(
+		"#general-discussion-heading",
+	);
+	const tagButton = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Tag whole description"]',
+	);
+
+	expect(descriptionHeading?.className).toContain("text-xl");
+	expect(discussionHeading?.className).toContain("text-xl");
+	expect(tagButton?.textContent?.trim()).toBe("Tag file");
+	expect(tagButton?.parentElement?.className).toContain("justify-between");
 });
 
 test("tags the whole description as a validated chat tag", () => {

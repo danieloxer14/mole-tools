@@ -126,6 +126,8 @@ export type CreateDiscussionInput =
 
 export interface GitHost {
 	preflight(): Promise<void>;
+	/** Returns auth token for authenticated, binary GitLab upload requests. */
+	getGitLabAuthToken?(hostname: string): Promise<string | null>;
 	currentUser(): Promise<HostUser | null>;
 	findOpenMr(sourceBranch: string): Promise<{ url: string } | null>;
 	resolveHandle(handle: string): Promise<HostMember | null>;

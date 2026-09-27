@@ -3,13 +3,14 @@ import { useCallback } from "react";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import type { DescriptionChatTag } from "../../chat-tags";
 import { GeneralDiscussionList } from "./GeneralDiscussions";
-import { IconButton } from "./IconButton";
 import { type MarkdownBlockRange, MarkdownDocument } from "./MarkdownDocument";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 
 export interface OverviewPaneProps {
 	description: string;
 	projectWebUrl: string;
+	mediaToken: string;
 	discussions: readonly HostDiscussion[];
 	onTagDescription: (tag: DescriptionChatTag) => void;
 	onExplainDiscussion?: (discussionId: string) => void;
@@ -19,6 +20,7 @@ export interface OverviewPaneProps {
 export function OverviewPane({
 	description,
 	projectWebUrl,
+	mediaToken,
 	discussions,
 	onTagDescription,
 	onExplainDiscussion,
@@ -36,28 +38,31 @@ export function OverviewPane({
 			aria-label="Overview"
 			className="flex min-h-0 min-w-0 flex-col overflow-y-auto"
 		>
-			<div className="mx-auto w-full max-w-4xl px-6 py-6">
+			<div className="w-full min-w-0 px-6 py-6">
 				<section aria-labelledby="description-heading" className="space-y-4">
-					<div className="flex items-center gap-2">
-						<h2 id="description-heading" className="text-base font-semibold">
+					<div className="flex items-center justify-between gap-4">
+						<h2 id="description-heading" className="text-xl font-semibold">
 							Description
 						</h2>
 						{hasDescription ? (
-							<IconButton
-								label="Tag whole description"
-								tooltip="Add the whole merge request description to the active chat context"
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								aria-label="Tag whole description"
 								onClick={() =>
 									onTagDescription({ kind: "description", quote: description })
 								}
 							>
 								<Tag aria-hidden />
-							</IconButton>
+								Tag file
+							</Button>
 						) : null}
 					</div>
 					{hasDescription ? (
 						<MarkdownDocument
 							source={description}
-							policy={{ kind: "description", projectWebUrl }}
+							policy={{ kind: "description", projectWebUrl, mediaToken }}
 							commentable={false}
 							onTagBlock={tagBlock}
 						/>
@@ -75,7 +80,7 @@ export function OverviewPane({
 					<div className="flex items-center gap-2">
 						<h2
 							id="general-discussion-heading"
-							className="text-base font-semibold"
+							className="text-xl font-semibold"
 						>
 							General discussion
 						</h2>

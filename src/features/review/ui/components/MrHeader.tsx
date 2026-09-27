@@ -151,7 +151,7 @@ export function MrHeader({
 		</Button>
 	);
 	return (
-		<header className="flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto border-b bg-card px-4 py-3">
+		<header className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 overflow-x-auto border-b bg-card px-3 py-2 lg:flex-nowrap lg:px-4 lg:py-3">
 			<SegmentedToggleGroup
 				className="shrink-0"
 				aria-label="Review view"
@@ -162,18 +162,23 @@ export function MrHeader({
 					if (next === "code" || next === "overview") onViewChange(next);
 				}}
 			>
-				<SegmentedToggleGroupItem value="code" aria-pressed={view === "code"}>
+				<SegmentedToggleGroupItem
+					value="code"
+					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
+					aria-pressed={view === "code"}
+				>
 					Code
 				</SegmentedToggleGroupItem>
 				<SegmentedToggleGroupItem
 					value="overview"
+					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
 					aria-pressed={view === "overview"}
 				>
 					Overview
 				</SegmentedToggleGroupItem>
 			</SegmentedToggleGroup>
 			<h1
-				className="min-w-0 shrink truncate text-lg font-semibold tracking-tight"
+				className="min-w-0 basis-full break-words text-lg font-semibold tracking-tight lg:flex-1 lg:basis-auto lg:truncate"
 				title={mr.title}
 			>
 				{headerTitle(mr.title, mr.iid)}
