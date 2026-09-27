@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEffort } from "../../adapters/agent/effort";
 import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
+import type { PromptAgentName } from "../../adapters/prompts/frontmatter";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -45,7 +46,7 @@ type ChatSeed = Partial<ReviewState["chats"][number]> &
 	Pick<ReviewState["chats"][number], "id">;
 
 type AgentOverride = {
-	agent?: "omp" | "claude";
+	agent?: PromptAgentName;
 	model?: string;
 	effort?: AgentEffort | null;
 };
@@ -167,7 +168,7 @@ function chatRequest(chatId: string, message: string): Request {
 }
 
 function reviewSettingsRequest(
-	agent: "omp" | "claude",
+	agent: PromptAgentName,
 	model: string,
 ): Request {
 	return request("/api/settings/review", { agent, model });
@@ -180,7 +181,7 @@ function commentFromChatRequest(draftId: string, chatId: string): Request {
 async function writePrompt(
 	dir: string,
 	slot: string,
-	metadata: { agent: "omp" | "claude"; model: string; effort: AgentEffort },
+	metadata: { agent: PromptAgentName; model: string; effort: AgentEffort },
 ): Promise<void> {
 	const promptDir = join(dir, slot, "default");
 	await mkdir(promptDir, { recursive: true });
@@ -196,7 +197,7 @@ function makeRoutes(
 	store: ReviewStore,
 	createReviewAgent: AgentFactory,
 	options: {
-		reviewAgent?: "omp" | "claude";
+		reviewAgent?: PromptAgentName;
 		model?: string;
 		effort?: AgentEffort;
 	} = {},
@@ -220,7 +221,7 @@ function makeRoutes(
 
 async function updateGlobalSelection(
 	routes: ReviewRouteHandler,
-	agent: "omp" | "claude",
+	agent: PromptAgentName,
 	model: string,
 ): Promise<void> {
 	const response = await routes(reviewSettingsRequest(agent, model));
@@ -343,6 +344,7 @@ describe("chat agent selection persistence", () => {
 				ompModelCatalogProcessRunner,
 				createReviewAgent: (override) => {
 					overrides.push(override ?? {});
+					return agent;
 				},
 			});
 

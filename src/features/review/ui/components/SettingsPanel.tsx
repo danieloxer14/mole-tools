@@ -8,6 +8,7 @@ import {
 import type { CodexModelChoice } from "../../../../adapters/agent/codex-models";
 import type { AgentEffort } from "../../../../adapters/agent/effort";
 import type { PromptName } from "../../../../adapters/prompts/defaults";
+import { APP_VERSION } from "../../../../shared/app-version";
 import {
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
@@ -259,6 +260,7 @@ export function SettingsPanel({
 	const [selectedTab, setSelectedTab] = useState<SettingsTab>(
 		initialTab ?? "prompts",
 	);
+
 	const [modelCatalog, setModelCatalog] = useState<LoadedModelCatalog | null>(
 		null,
 	);
@@ -745,7 +747,7 @@ export function SettingsPanel({
 					<TabsTrigger value="skills">Skills</TabsTrigger>
 					<TabsTrigger value="appearance">Appearance</TabsTrigger>
 				</TabsList>
-				<TabsContent value="general" className="min-h-0 overflow-auto p-6">
+				<TabsContent value="general" className="flex min-h-0 flex-col overflow-auto p-6">
 					<GeneralContentWrapper enabled={whitespace !== undefined}>
 						{whitespace ? (
 							<div className="flex min-w-0 items-center gap-2 border-b pb-4 text-sm">
@@ -921,6 +923,12 @@ export function SettingsPanel({
 							</div>
 						)}
 					</GeneralContentWrapper>
+					<p
+						className="mt-auto pt-6 text-xs text-muted-foreground"
+						data-app-version=""
+					>
+						v{APP_VERSION}
+					</p>
 				</TabsContent>
 				<TabsContent value="prompts" className="flex flex-col">
 					{status ? (
@@ -1171,7 +1179,7 @@ export function SettingsPanel({
 													<option value="">
 														{promptEffortCompatible
 															? `Default (${inheritedPromptEffortCompatible && inheritedPromptEffort ? inheritedPromptEffort : "agent default"})`
-															: "Default (agent default)"}
+															: "Choose a compatible effort"}
 													</option>
 													{promptEffort && !promptEffortCompatible ? (
 														<option value={promptEffort}>

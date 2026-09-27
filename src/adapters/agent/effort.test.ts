@@ -96,7 +96,6 @@ describe("agent effort levels", () => {
 			);
 		}
 	});
-
 	test("validates only each agent's supported efforts", () => {
 		for (const effort of OMP_EFFORTS) {
 			expect(isAgentEffort("omp", effort)).toBe(true);

@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink, RefreshCw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../../ports/git-host";
 import { IconButton } from "./IconButton";
+import { UpdateAvailable } from "./UpdateAvailable";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -28,6 +29,7 @@ export interface MrHeaderProps {
 	refreshing: boolean;
 	layerGenerating: boolean;
 	onRefresh: () => void;
+	update?: { current: string; latest: string } | null;
 	onOpenSettings: () => void;
 }
 
@@ -100,6 +102,7 @@ export function MrHeader({
 	refreshing,
 	layerGenerating,
 	onRefresh,
+	update,
 	onOpenSettings,
 }: MrHeaderProps) {
 	const [copied, setCopied] = useState(false);
@@ -247,7 +250,10 @@ export function MrHeader({
 					</span>
 				</span>
 			</div>
-			<div className="ml-auto inline-flex shrink-0 items-center gap-2 whitespace-nowrap leading-none">
+			<div
+				className="ml-auto inline-flex shrink-0 items-center gap-2 whitespace-nowrap leading-none"
+				data-header-actions=""
+			>
 				<IconButton
 					label="Refresh review and layers"
 					tooltip="Fetch latest MR state, sync when needed, and regenerate layers"
@@ -271,6 +277,9 @@ export function MrHeader({
 				<span id="approve-tooltip" className="sr-only">
 					{approvalButtonTooltip}
 				</span>
+				{update ? (
+					<UpdateAvailable current={update.current} latest={update.latest} />
+				) : null}
 				<IconButton
 					label="Settings"
 					tooltip="Settings"

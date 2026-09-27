@@ -48,29 +48,30 @@ describe("prompt frontmatter", () => {
 				"---\nagent: codex\n---\nx",
 				"review-chat/default/001.md",
 			),
-		).toEqual({ text: "x", agent: "codex", model: null, effort: null });
-	});
-
-	test("formats prompt agent names", () => {
-		expect(formatAgentNames(["omp"])).toBe("omp");
-		expect(formatAgentNames(["omp", "claude"])).toBe("omp or claude");
-		expect(formatAgentNames(["omp", "claude", "codex"])).toBe(
-			"omp, claude, or codex",
-		);
-	});
-
-	test("parses Codex as the prompt agent", () => {
-		expect(
-			parsePromptFile(
-				"---\nagent: codex\n---\nx",
-				"review-chat/default/001.md",
-			),
 		).toEqual({
 			text: "x",
 			agent: "codex",
 			model: null,
 			effort: null,
 		});
+	});
+	test("validates Codex effort against prompt model", () => {
+		expect(
+			parsePromptFile(
+				"---\nagent: codex\nmodel: gpt-6-astra\neffort: ultra\n---\nx",
+				"review-chat/default/001.md",
+			),
+		).toMatchObject({
+			agent: "codex",
+			model: "gpt-6-astra",
+			effort: "ultra",
+		});
+		expect(() =>
+			parsePromptFile(
+				"---\nagent: codex\nmodel: gpt-6-luna\neffort: ultra\n---\nx",
+				"review-chat/default/001.md",
+			),
+		).toThrow("effort is not supported by codex");
 	});
 
 	test("treats a leading horizontal rule as prompt text", () => {

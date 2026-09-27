@@ -58,6 +58,7 @@ import type {
 import type { IssueTracker } from "../../ports/issue-tracker";
 import type { AgentEvent, ReviewAgent } from "../../ports/review-agent";
 import type { FileDiff, Vcs } from "../../ports/vcs";
+import { APP_VERSION } from "../../shared/app-version";
 import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
@@ -109,6 +110,7 @@ import {
 	ReviewStateSchema,
 } from "./state";
 import type { ReviewStore } from "./store";
+import type { VersionStatus } from "./version-check";
 
 const DEFAULT_LARGE_FILE_LINE_THRESHOLD = 800;
 
@@ -184,6 +186,7 @@ export interface ReviewRoutesOptions {
 		model?: string;
 		effort?: AgentEffort | null;
 	}) => ReviewAgent;
+	versionStatus?: Promise<VersionStatus>;
 	codexModelCatalogProcessRunner?: CodexModelCatalogProcessRunner;
 }
 
@@ -992,7 +995,6 @@ export function createReviewRoutes(
 				);
 			}
 		}
-
 		const effort = parsed.data.effort ?? null;
 		const {
 			model: _existingModel,
@@ -2788,6 +2790,16 @@ export function createReviewRoutes(
 			}
 			if (request.method === "GET" && url.pathname === "/api/state") {
 				return jsonResponse(await apiState());
+			}
+			if (request.method === "GET" && url.pathname === "/api/version") {
+				return jsonResponse(
+					await (options.versionStatus ??
+						Promise.resolve({
+							current: APP_VERSION,
+							latest: null,
+							updateAvailable: false,
+						})),
+				);
 			}
 			if (
 				request.method === "POST" &&

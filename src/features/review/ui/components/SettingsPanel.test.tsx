@@ -3,6 +3,7 @@ import { act, createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
+import { APP_VERSION } from "../../../../shared/app-version";
 import { applyColorTheme } from "../color-theme";
 import {
 	isSaveDisabled,
@@ -521,6 +522,49 @@ test("General hosts the whitespace toggle independent of settings load", async (
 		globalThis.fetch = originalFetch;
 	}
 });
+
+test("shows bundled app version last in General with and without loaded settings", () => {
+	const loaded = new DOMParser().parseFromString(
+		renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialSettings,
+				initialPrompt,
+				initialTab: "general",
+			}),
+		),
+		"text/html",
+	);
+	const loading = new DOMParser().parseFromString(
+		renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialTab: "general",
+			}),
+		),
+		"text/html",
+	);
+
+	for (const document of [loaded, loading]) {
+		const indicator = document.querySelector("[data-app-version]");
+		expect(indicator?.textContent).toBe(`v${APP_VERSION}`);
+
+		const panel = indicator?.parentElement;
+		expect(panel?.getAttribute("data-slot")).toBe("tabs-content");
+		expect(panel?.lastElementChild).toBe(indicator);
+		expect(panel?.classList.contains("flex")).toBe(true);
+		expect(panel?.classList.contains("min-h-0")).toBe(true);
+		expect(panel?.classList.contains("flex-col")).toBe(true);
+		expect(panel?.classList.contains("overflow-auto")).toBe(true);
+		expect(panel?.classList.contains("p-6")).toBe(true);
+		expect(indicator?.getAttribute("class")).toBe(
+			"mt-auto pt-6 text-xs text-muted-foreground",
+		);
+	}
+});
+
 // Happy DOM exercises narrow-screen navigation but does not prove pixel geometry.
 test("375px settings controls stay keyboard and scroll reachable", async () => {
 	const scriptPath = new URL("./SettingsPanel.375px.smoke.tsx", import.meta.url)
@@ -915,7 +959,6 @@ test("loads and selects Codex models in General and prompt settings", async () =
 		globalThis.fetch = originalFetch;
 	}
 });
-
 test("General preserves custom model and effort through catalog failure and retry", async () => {
 	const originalFetch = globalThis.fetch;
 	let catalogRequests = 0;

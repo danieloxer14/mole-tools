@@ -27,6 +27,7 @@ import type {
 	ReviewAgent,
 } from "../../ports/review-agent";
 import type { DiffOptions, FileDiff } from "../../ports/vcs";
+import { APP_VERSION } from "../../shared/app-version";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { createReviewRoutes, resolveReviewFilePath } from "./routes";
 import { sseResponse } from "./sse";
@@ -402,7 +403,7 @@ class RecordingLayerAgent implements ReviewAgent {
 describe("review routes", () => {
 	test("rejects every API path without the per-run token", async () => {
 		const routes = createReviewRoutes({ token, state: state() });
-		for (const path of ["/api", "/api/state"]) {
+		for (const path of ["/api", "/api/state", "/api/version"]) {
 			const response = await routes(request(path));
 			expect(response.status).toBe(401);
 			expect(await response.text()).toBe("");
@@ -411,6 +412,42 @@ describe("review routes", () => {
 			request("/api/state", { headers: { "X-Mole-Token": token } }),
 		);
 		expect(authorized.status).toBe(200);
+	});
+	test("returns supplied version status for token-authenticated requests", async () => {
+		const versionStatus = {
+			current: "0.9.0",
+			latest: "0.10.0",
+			updateAvailable: true,
+		};
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve(versionStatus),
+		});
+
+		const response = await routes(
+			request("/api/version", {
+				headers: { "X-Mole-Token": token },
+			}),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual(versionStatus);
+	});
+
+	test("defaults version status to the installed application version", async () => {
+		const routes = createReviewRoutes({ token, state: state() });
+		const response = await routes(
+			request("/api/version", {
+				headers: { "X-Mole-Token": token },
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			current: APP_VERSION,
+			latest: null,
+			updateAvailable: false,
+		});
 	});
 
 	test("streams authenticated project-upload ranges as binary media", async () => {
@@ -622,7 +659,6 @@ describe("review routes", () => {
 		const body = (await response.json()) as ReviewState;
 		expect(body.mr.description).toBe("Body");
 	});
-
 	test("serves canonical diffs by default and caches hidden toggles", async () => {
 		const canonical = [
 			rawDiff("src/whitespace.ts", "@@ -1 +1 @@\n-old  \n+new\n"),
@@ -5263,6 +5299,95 @@ describe("review agent settings API", () => {
 					},
 				},
 			]);
+			expect(await Bun.file(join(promptDir, "001.md")).text()).toBe(promptText);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("rejects default-agent changes invalidating active prompt effort", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-effort-"));
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			const explicitPromptDir = join(dir, "review-layers-plan", "default");
+			await mkdir(promptDir, { recursive: true });
+			await mkdir(explicitPromptDir, { recursive: true });
+			const promptText = "---\neffort: auto\n---\nDefault-agent prompt";
+			await writeFile(join(promptDir, "001.md"), promptText, "utf8");
+			await writeFile(
+				join(explicitPromptDir, "001.md"),
+				"---\nagent: omp\neffort: auto\n---\nExplicit-agent prompt",
+				"utf8",
+			);
+			const persisted: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: {
+					review: { agent: "omp", model: "old-model", effort: "auto" },
+				},
+				createReviewAgent: () => new StreamChatAgent(),
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({
+					agent: "claude",
+					model: "new-model",
+					effort: "low",
+				}),
+			);
+			expect(response.status).toBe(400);
+			const result = (await response.json()) as { error: string };
+			expect(result.error).toContain("review-layers-code (auto)");
+			expect(result.error).toContain("Change or clear those prompt efforts");
+			expect(result.error).not.toContain("review-layers-plan");
+			expect(persisted).toEqual([]);
+
+			const settingsResponse = await routes(
+				request(`/api/settings?t=${token}`),
+			);
+			expect(settingsResponse.status).toBe(200);
+			expect((await settingsResponse.json()).review).toMatchObject({
+				agent: "omp",
+				model: "old-model",
+				effort: "auto",
+			});
+			expect(await Bun.file(join(promptDir, "001.md")).text()).toBe(promptText);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("explicit-agent prompt effort does not block global default-agent change", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-agent-explicit-prompt-"),
+		);
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			await mkdir(promptDir, { recursive: true });
+			const promptText = "---\nagent: omp\neffort: auto\n---\nExplicit prompt";
+			await writeFile(join(promptDir, "001.md"), promptText, "utf8");
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: { review: { agent: "omp" } },
+				createReviewAgent: () => new StreamChatAgent(),
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({ agent: "claude", effort: "low" }),
+			);
+			expect(response.status).toBe(200);
+			const settings = await routes(request(`/api/settings?t=${token}`));
+			expect(settings.status).toBe(200);
+			expect((await settings.json()).review).toMatchObject({
+				agent: "claude",
+				effort: "low",
+			});
 			expect(await Bun.file(join(promptDir, "001.md")).text()).toBe(promptText);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

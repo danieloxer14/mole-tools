@@ -24,7 +24,6 @@ describe("effectiveAgentSelection", () => {
 			effort: null,
 		});
 	});
-
 	test("rejects an explicitly saved effort unsupported by the prompt model", () => {
 		expect(() =>
 			effectiveAgentSelection(

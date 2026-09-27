@@ -108,7 +108,7 @@ describe("OMP model catalog", () => {
 		expect(config).toEqual(originalConfig);
 	});
 
-	test("invokes configured executable directly and joins streamed output chunks", async () => {
+	test("invokes configured executable directly with models --json and joins streamed output chunks", async () => {
 		const stdout = JSON.stringify({
 			models: [{ selector: "actual-process-model", thinking: ["minimal"] }],
 		});

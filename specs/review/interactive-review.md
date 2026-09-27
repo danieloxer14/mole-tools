@@ -69,10 +69,7 @@ Review the changed code for correctness and risk.
 ```
 
 With Agent unset or `default`, the version inherits the General default agent,
-model, and effort independently for each blank field. An explicit `omp`,
-`claude`, or `codex` agent uses only that version's Model and Effort; blank
-values send no corresponding flag and use that agent's CLI defaults rather than
-inheriting settings for another agent. Commit and MR prompt slots ignore review
+model, and effort independently for each blank field. An explicit `omp`, `claude`, or `codex` agent uses only that version's Model and Effort; blank values send no corresponding flag and use that agent's CLI defaults rather than inheriting settings for another agent. Commit and MR prompt slots ignore review
 frontmatter and continue to use their `models.*` LLM routes; existing prompt
 versions without effort keep that field unset.
 
@@ -80,11 +77,9 @@ versions without effort keep that field unset.
 
 The Settings dialog opens on **Prompts** and also offers **General**, **Skills**,
 and **Appearance**. **General** has the global **Default Agent**, **Default
-model**, and **Default effort** controls, plus **Show whitespace changes**.
-That toggle applies immediately to the current review and is not saved with
-review defaults. Each editable review prompt version has Agent, Model, and
-Effort dropdowns. Selections affect future layer runs; use **Regenerate** to
-rebuild cached layers.
+model**, and **Default effort** controls, plus **Show whitespace changes**. That toggle applies immediately to the current review and is not saved with review defaults. Each editable review prompt version has Agent, Model, and Effort dropdowns. Selections affect future layer runs; use **Regenerate** to rebuild cached layers.
+
+The **General** tab shows the installed version (`v<version>`) in small, muted-grey text at the bottom-left.
 
 For OMP, the server runs `models --json` with the selected OMP executable; the
 dropdown lists its model selectors and only effort values advertised for the
@@ -98,8 +93,9 @@ Custom saved models remain selectable until changed.
 Effort is optional: unset means no effort flag. OMP effort levels are
 `off|minimal|low|medium|high|xhigh|max|auto`; model compatibility narrows
 available choices. OMP receives `--thinking <level>`. Claude supports
-`low|medium|high|xhigh|max` and receives `--effort <level>`. Codex's `-c` is not
-an OMP flag.
+`low|medium|high|xhigh|max` and receives `--effort <level>`. Codex accepts
+model-specific reasoning levels and receives
+`-c model_reasoning_effort=<level>`.
 
 ## 2. Repository and worktree lifecycle
 
@@ -140,6 +136,13 @@ The token is not persisted. Every `/api/*` request must carry it either as the
 `401` with an empty body. The bundled HTML page at `/` is not API-authenticated.
 This is a local single-user server, not a remote or background service.
 
+`GET /api/version` is token-protected and returns `{ current, latest,
+updateAvailable }`. Each review launch makes one background lookup of GitHub's
+`releases/latest` endpoint with a five-second timeout. The check strips one
+leading `v`, accepts only strict `MAJOR.MINOR.PATCH` versions, and marks an
+update available only when the latest version is strictly newer than the
+bundled current version.
+
 Stream responses use `Content-Type: text/event-stream; charset=utf-8`. Chat
 requests send JSON bodies with `Content-Type: application/json` and
 `Accept: text/event-stream`; layer and comment stream requests send
@@ -154,6 +157,7 @@ Implemented HTTP surface:
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | `GET /`                                              | Serve embedded React HTML.                                                                                                                                                                                                                                                                                                              |
 | `GET /api/state`                                     | Return persisted state, including `mr.description` (empty for legacy state), plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here. |
+| `GET /api/version`                                   | Return `{ current, latest, updateAvailable }` from the launch-time GitHub release check. |
 | `GET /api/approval`                                  | Return live GitLab approval status for the current user and merge request.                                                                                                                                                                                                                                                              |
 | `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's GitLab approval. |
 | `GET`/`POST /api/refresh`                            | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this check does not mutate the worktree.                                                                                                                                                                                                                          |
@@ -254,6 +258,13 @@ drag, including captured movement outside the handle. Matching `pointerup`,
 `pointercancel`, lost pointer capture, or the first matching move without the
 primary button ends the drag; button-up hover after termination does not
 resize. Keyboard controls remain available.
+
+When a newer version is available, the main header's right action group ends
+with an **Update X.Y.Z available** button. It opens an **Update mole-tools**
+modal with the exact install command
+`curl -fsSL https://raw.githubusercontent.com/danieloxer14/mole-tools/main/install.sh | bash`
+and a **Copy install command** button. Successful copy shows a check icon for
+1500 ms. The modal closes with its Close button or Escape.
 
 The centre column supports Inline and Side by side layouts. Shiki highlights
 source lines. Added lines use the new side, deleted lines use the old side, and
@@ -641,6 +652,10 @@ Once the server is up, agent, GitLab discussion, file, sync, and layer failures
 are returned as UI-visible errors with retry where applicable. A failed layer
 does not hide the diff or chat; a failed discussion post preserves its draft;
 a stale anchor is rejected before posting. API responses are `no-store`.
+
+Update-check failures—including offline access, non-2xx responses such as rate
+limits, invalid JSON or tags, and timeout—degrade to no Update button. They do
+not produce a CLI or UI error.
 
 This feature does not provide remote access, a background daemon, automatic
 worktree cleanup, batch review submission, discussion editing/resolution after

@@ -20,6 +20,7 @@ import {
 import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
 import type { ChatEntry, ChatEntryWithOptimistic } from "../store";
+import type { VersionStatus } from "../version-check";
 import { createRequestSequence } from "./chat-request-sequence";
 import { bootColorTheme } from "./color-theme";
 import {
@@ -161,6 +162,15 @@ async function fetchApproval(token: string): Promise<MrApprovalState | null> {
 		throw new Error(`Approval request failed (${response.status})`);
 	const value: unknown = await response.json();
 	return value === null ? null : (value as MrApprovalState);
+}
+
+async function fetchVersionStatus(token: string): Promise<VersionStatus> {
+	const response = await fetch(apiUrl("/api/version", token), {
+		headers: { "X-Mole-Token": token },
+	});
+	if (!response.ok)
+		throw new Error(`Version status request failed (${response.status})`);
+	return (await response.json()) as VersionStatus;
 }
 
 async function updateApproval(
@@ -412,6 +422,9 @@ function useToasts() {
 function ReviewApp() {
 	const token = useMemo(tokenFromLocation, []);
 	const [data, setData] = useState<ReviewStateResponse | null>(null);
+	const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(
+		null,
+	);
 
 	const { dismissToast, pushToast, toasts } = useToasts();
 	const [columnMinimums] = useState<ColumnWidths>(() => ({
@@ -624,6 +637,20 @@ function ReviewApp() {
 			active = false;
 		};
 	}, [token, pushToast, fetchReviewState]);
+
+	useEffect(() => {
+		if (!token) return;
+		let active = true;
+		void fetchVersionStatus(token)
+			.then((next) => {
+				if (active) setVersionStatus(next);
+			})
+			.catch(() => undefined);
+		return () => {
+			active = false;
+		};
+	}, [token]);
+
 	useEffect(() => {
 		if (!data) return;
 		const visiblePaths = data.diff
@@ -1969,6 +1996,14 @@ function ReviewApp() {
 				freshness={freshness}
 				refreshing={refreshing}
 				layerGenerating={layerAction !== null}
+				update={
+					versionStatus?.updateAvailable && versionStatus.latest
+						? {
+								current: versionStatus.current,
+								latest: versionStatus.latest,
+							}
+						: null
+				}
 				onRefresh={refreshReview}
 				onOpenSettings={() => {
 					setSettingsInitialTab("prompts");
