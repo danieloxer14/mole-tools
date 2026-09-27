@@ -288,12 +288,8 @@ test("keeps review controls when an update is available", () => {
 	expect(container.querySelector("[data-files-changed]")?.textContent).toBe(
 		"3 files changed",
 	);
-	expect(container.querySelector("[data-insertions]")?.textContent).toBe(
-		"+12",
-	);
-	expect(container.querySelector("[data-deletions]")?.textContent).toBe(
-		"−4",
-	);
+	expect(container.querySelector("[data-insertions]")?.textContent).toBe("+12");
+	expect(container.querySelector("[data-deletions]")?.textContent).toBe("−4");
 });
 
 test("renders diff totals right of approval pill with diff colours", () => {
