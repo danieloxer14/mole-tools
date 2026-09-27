@@ -106,9 +106,15 @@ async function runOmpModelCatalogProcess(
 		stderr: "pipe",
 		detached: process.platform !== "win32",
 	});
+	const stdoutReader = child.stdout.getReader();
+	const stderrReader = child.stderr.getReader();
 	let failure: Error | undefined;
 	const { promise: failureSignal, reject: rejectFailure } =
 		Promise.withResolvers<never>();
+	const cancelReaders = (error: Error) => {
+		void stdoutReader.cancel(error).catch(() => {});
+		void stderrReader.cancel(error).catch(() => {});
+	};
 	const terminate = (error: Error) => {
 		if (failure) return;
 		failure = error;
@@ -116,16 +122,17 @@ async function runOmpModelCatalogProcess(
 			if (process.platform !== "win32") {
 				try {
 					process.kill(-child.pid, "SIGKILL");
-					rejectFailure(error);
-					return;
 				} catch {
 					// Fall back to killing the direct child if group signaling is unavailable.
+					child.kill("SIGKILL");
 				}
+			} else {
+				child.kill("SIGKILL");
 			}
-			child.kill("SIGKILL");
 		} catch {
 			// The operation still fails at its deadline if the process already exited.
 		}
+		cancelReaders(error);
 		rejectFailure(error);
 	};
 	const timeout = setTimeout(
@@ -136,23 +143,23 @@ async function runOmpModelCatalogProcess(
 		options.timeoutMs,
 	);
 
+	const stdoutPromise = collectBoundedOutput(
+		stdoutReader,
+		"stdout",
+		options.maxOutputBytes,
+		terminate,
+	);
+	const stderrPromise = collectBoundedOutput(
+		stderrReader,
+		"stderr",
+		options.maxOutputBytes,
+		terminate,
+	);
+	const exitPromise = child.exited;
+
 	try {
 		const [stdout, stderr, exitCode] = await Promise.race([
-			Promise.all([
-				collectBoundedOutput(
-					child.stdout,
-					"stdout",
-					options.maxOutputBytes,
-					terminate,
-				),
-				collectBoundedOutput(
-					child.stderr,
-					"stderr",
-					options.maxOutputBytes,
-					terminate,
-				),
-				child.exited,
-			]),
+			Promise.all([stdoutPromise, stderrPromise, exitPromise]),
 			failureSignal,
 		]);
 
@@ -162,6 +169,7 @@ async function runOmpModelCatalogProcess(
 		const processError =
 			error instanceof Error ? error : new Error("OMP model catalog failed");
 		if (!failure) terminate(processError);
+		await Promise.allSettled([stdoutPromise, stderrPromise, exitPromise]);
 		throw failure ?? processError;
 	} finally {
 		clearTimeout(timeout);
@@ -169,7 +177,7 @@ async function runOmpModelCatalogProcess(
 }
 
 async function collectBoundedOutput(
-	stream: ReadableStream<Uint8Array>,
+	reader: ReadableStreamDefaultReader<Uint8Array>,
 	name: "stdout" | "stderr",
 	maxBytes: number,
 	terminate: (error: Error) => void,
@@ -178,11 +186,13 @@ async function collectBoundedOutput(
 	let byteLength = 0;
 
 	try {
-		for await (const chunk of stream) {
-			if (byteLength + chunk.byteLength > maxBytes)
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (byteLength + value.byteLength > maxBytes)
 				throw new Error(`OMP model catalog ${name} exceeded 2 MiB`);
-			chunks.push(chunk);
-			byteLength += chunk.byteLength;
+			chunks.push(value);
+			byteLength += value.byteLength;
 		}
 	} catch (error) {
 		const streamError =
@@ -191,6 +201,8 @@ async function collectBoundedOutput(
 				: new Error(`Unable to read OMP model catalog ${name}`);
 		terminate(streamError);
 		throw streamError;
+	} finally {
+		reader.releaseLock();
 	}
 
 	if (chunks.length === 0) return EMPTY_OUTPUT;
