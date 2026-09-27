@@ -1,5 +1,5 @@
 ---
-name: xplan-worktree-setup
+name: xplan-worktree-setup-EASY
 description: "Prepares an xplan worktree: installs dependencies and runs the repository's quality gates"
 tools: read, grep, glob, bash
 spawns: ""

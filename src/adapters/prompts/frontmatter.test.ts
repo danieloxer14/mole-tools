@@ -8,16 +8,47 @@ import {
 } from "./frontmatter";
 
 describe("prompt frontmatter", () => {
-	test("round-trips agent and model", () => {
+	test("round-trips agent, model, and effort", () => {
 		const file: PromptFile = {
 			text: "Review this change.\n",
 			agent: "claude",
 			model: "sonnet",
+			effort: "high",
 		};
 
 		expect(
 			parsePromptFile(serializePromptFile(file), "review-chat/default/001.md"),
 		).toEqual(file);
+	});
+
+	test("loads older metadata without effort as null", () => {
+		expect(
+			parsePromptFile(
+				"---\nagent: omp\nmodel: sonnet\n---\nReview this change.",
+				"review-chat/default/001.md",
+			),
+		).toEqual({
+			text: "Review this change.",
+			agent: "omp",
+			model: "sonnet",
+			effort: null,
+		});
+	});
+	test("formats prompt agent names", () => {
+		expect(formatAgentNames(["omp"])).toBe("omp");
+		expect(formatAgentNames(["omp", "claude"])).toBe("omp or claude");
+		expect(formatAgentNames(["omp", "claude", "codex"])).toBe(
+			"omp, claude, or codex",
+		);
+	});
+
+	test("parses Codex as the prompt agent", () => {
+		expect(
+			parsePromptFile(
+				"---\nagent: codex\n---\nx",
+				"review-chat/default/001.md",
+			),
+		).toEqual({ text: "x", agent: "codex", model: null, effort: null });
 	});
 
 	test("formats prompt agent names", () => {
@@ -34,7 +65,12 @@ describe("prompt frontmatter", () => {
 				"---\nagent: codex\n---\nx",
 				"review-chat/default/001.md",
 			),
-		).toEqual({ text: "x", agent: "codex", model: null });
+		).toEqual({
+			text: "x",
+			agent: "codex",
+			model: null,
+			effort: null,
+		});
 	});
 
 	test("treats a leading horizontal rule as prompt text", () => {
@@ -44,6 +80,7 @@ describe("prompt frontmatter", () => {
 			text: raw,
 			agent: null,
 			model: null,
+			effort: null,
 		});
 	});
 
@@ -63,14 +100,56 @@ describe("prompt frontmatter", () => {
 			),
 		).toThrow(PortError);
 	});
+	test("rejects unsupported and malformed effort metadata", () => {
+		expect(() =>
+			parsePromptFile(
+				"---\nagent: omp\neffort: ultra\n---\nReview this change.",
+				"review-chat/default/007.md",
+			),
+		).toThrow(
+			"Invalid prompt metadata in review-chat/default/007.md: effort is not supported by omp",
+		);
+		expect(() =>
+			parsePromptFile(
+				"---\neffort high\n---\nReview this change.",
+				"review-chat/default/007.md",
+			),
+		).toThrow("malformed effort");
+	});
+	test("rejects duplicate and agent-incompatible effort metadata", () => {
+		expect(() =>
+			parsePromptFile(
+				"---\nagent: omp\neffort: high\neffort: low\n---\nPrompt",
+				"review-chat/default/007.md",
+			),
+		).toThrow("duplicate key effort");
+		expect(() =>
+			parsePromptFile(
+				"---\nagent: claude\neffort: off\n---\nPrompt",
+				"review-chat/default/007.md",
+			),
+		).toThrow("effort is not supported by claude");
+	});
 
-	test("omits frontmatter when both fields are null", () => {
+	test("omits frontmatter when all metadata fields are null", () => {
 		const file: PromptFile = {
 			text: "Prompt body",
 			agent: null,
 			model: null,
+			effort: null,
 		};
 
 		expect(serializePromptFile(file)).toBe(file.text);
+	});
+
+	test("serializes only non-null metadata fields", () => {
+		expect(
+			serializePromptFile({
+				text: "Prompt body",
+				agent: "claude",
+				model: null,
+				effort: null,
+			}),
+		).toBe("---\nagent: claude\n---\nPrompt body");
 	});
 });

@@ -90,8 +90,9 @@ intentional exception for layer and comment output: those turns need to write
 results, and the review worktree is writable as well.
 
 The optional top-level `review` config selects the adapter (`omp`, `claude`, or
-`codex`), its binary, an OMP model, the layer timeout, and the large-file
-threshold. It is not a `models` route and does not change `RoutingPurpose`:
+`codex`), its binary, an agent-specific model and effort, the layer timeout, and
+the large-file threshold. It is not a `models` route and does not change
+`RoutingPurpose`:
 
 ```jsonc
 {
@@ -164,7 +165,7 @@ write directory.
 | Option | Rejected because |
 |---|---|
 | Reuse `Llm` for review chat | It has no sessions, tools, working-directory boundary, or provider event stream. |
-| Put `omp` and `claude` command parsing in routes | Provider NDJSON and permissions would leak into HTTP/UI code and make adapters non-swappable. |
+| Put `omp`, `claude`, and `codex` command parsing in routes | Provider NDJSON and permissions would leak into HTTP/UI code and make adapters non-swappable. |
 | Historical alternative: persist a provider session for comment drafting | **Superseded:** comment drafts use local user-authored bodies and do not invoke `ReviewAgent`; persisting a provider session would misstate the implemented behavior. |
 | Grant write access to the worktree | Review must not mutate the code being reviewed. Layer output belongs in a separate directory. **Exception (2026-09-25):** Codex `writeDir` turns run in `workspace-write`, which cannot exclude `cwd`; prompt policy keeps the worktree unmodified, matching OMP's unrestricted `bash`. |
 

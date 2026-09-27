@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PortError } from "../../core/errors";
@@ -95,6 +95,7 @@ describe("prompt store", () => {
 		expect(prompt.version).toBe(1);
 		expect(prompt.agent).toBeNull();
 		expect(prompt.model).toBeNull();
+		expect(prompt.effort).toBeNull();
 	});
 
 	test("seeds shipped default before appending an edited version", async () => {
@@ -146,6 +147,7 @@ describe("prompt store", () => {
 			version: 1,
 			agent: null,
 			model: null,
+			effort: null,
 		});
 	});
 
@@ -156,13 +158,16 @@ describe("prompt store", () => {
 			text: "Metadata prompt",
 			agent: "omp",
 			model: "sonnet",
+			effort: "high",
 			dir: root,
 		});
 
 		expect(version).toBe(2);
 		expect(
 			await Bun.file(join(root, "review-chat", "default", "002.md")).text(),
-		).toBe("---\nagent: omp\nmodel: sonnet\n---\nMetadata prompt");
+		).toBe(
+			"---\nagent: omp\nmodel: sonnet\neffort: high\n---\nMetadata prompt",
+		);
 		expect(
 			await readPrompt("review-chat", {
 				preset: "default",
@@ -175,6 +180,7 @@ describe("prompt store", () => {
 			version: 2,
 			agent: "omp",
 			model: "sonnet",
+			effort: "high",
 		});
 	});
 
@@ -198,6 +204,58 @@ describe("prompt store", () => {
 		const prompt = await readPrompt("review-chat", { dir: root });
 		expect(prompt.agent).toBeNull();
 		expect(prompt.model).toBeNull();
+		expect(prompt.effort).toBeNull();
+	});
+
+	test("older frontmatter versions without effort load with null", async () => {
+		const root = await promptsDir();
+		await writeVersion(
+			root,
+			"review-chat",
+			"default",
+			"001.md",
+			"---\nagent: omp\nmodel: sonnet\n---\nPrompt body",
+		);
+
+		expect(await readPrompt("review-chat", { dir: root })).toMatchObject({
+			agent: "omp",
+			model: "sonnet",
+			effort: null,
+			text: "Prompt body",
+		});
+	});
+
+	test("keeps prior prompt version when appending a version fails", async () => {
+		const root = await promptsDir();
+		const presetDir = join(root, "review-chat", "default");
+		await writeVersion(
+			root,
+			"review-chat",
+			"default",
+			"001.md",
+			"Stable version",
+		);
+		await mkdir(join(presetDir, "002.md"));
+
+		await expect(
+			savePrompt("review-chat", {
+				preset: "default",
+				text: "Incomplete version",
+				agent: "omp",
+				effort: "high",
+				dir: root,
+			}),
+		).rejects.toThrow();
+
+		expect(
+			await readPrompt("review-chat", {
+				preset: "default",
+				version: 1,
+				dir: root,
+			}),
+		).toMatchObject({ text: "Stable version", effort: null });
+		expect(await listVersions("review-chat", "default", root)).toEqual([1]);
+		expect((await readdir(presetDir)).sort()).toEqual(["001.md", "002.md"]);
 	});
 
 	test("lists default and extra presets in sorted order", async () => {

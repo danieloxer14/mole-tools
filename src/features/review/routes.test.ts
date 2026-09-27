@@ -9,9 +9,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { FakeReviewAgent } from "../../../test/fakes/FakeReviewAgent";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
+import type { CodexModelCatalogProcessRunner } from "../../adapters/agent/codex-models";
 import type { AgentExec } from "../../adapters/agent/exec";
+import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
+import { OmpAgentAdapter } from "../../adapters/agent/omp";
 import type { Config } from "../../adapters/config/schema";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import { SkillStore } from "../../adapters/skills/store";
@@ -27,6 +32,7 @@ import { createReviewRoutes, resolveReviewFilePath } from "./routes";
 import { sseResponse } from "./sse";
 import { deriveChatTitle, type ReviewState, ReviewStateSchema } from "./state";
 import { ReviewStore } from "./store";
+import { SettingsPanel } from "./ui/components/SettingsPanel";
 
 const token = "route-test-token";
 
@@ -3641,7 +3647,7 @@ describe("comment from chat routes", () => {
 		}
 	});
 
-	test("from-chat uses the comment slot version agent", async () => {
+	test("from-chat uses the selection bound to an unbound legacy chat", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-comment-agent-"));
 		try {
 			await writeCommentPrompt(
@@ -3673,7 +3679,13 @@ describe("comment from chat routes", () => {
 			expect(eventData(await response.text(), "done")).toMatchObject({
 				status: "ok",
 			});
-			expect(factoryCalls).toEqual([{ agent: "omp", model: "slot-model" }]);
+			expect(factoryCalls).toEqual([
+				{ agent: "claude", model: "default-model" },
+			]);
+			expect((await store.read())?.chats[0]).toMatchObject({
+				agent: "claude",
+				model: "default-model",
+			});
 			expect(agent.prompts[0]).toContain("COMMENT SLOT VERSION PROMPT");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -4194,6 +4206,7 @@ describe("prompt settings read API", () => {
 				version: 1,
 				agent: null,
 				model: null,
+				effort: null,
 				versions: [1],
 			});
 			expect(
@@ -4227,6 +4240,7 @@ describe("prompt settings read API", () => {
 				version: 1,
 				agent: null,
 				model: null,
+				effort: null,
 				versions: [1, 2],
 			});
 		} finally {
@@ -4294,6 +4308,15 @@ describe("prompt settings version write API", () => {
 				token,
 				state: state(),
 				promptSourceDir: dir,
+				ompModelCatalogProcessRunner: async () => ({
+					stdout: new TextEncoder().encode(
+						JSON.stringify({
+							models: [{ selector: "sonnet", thinking: ["high"] }],
+						}),
+					),
+					stderr: new Uint8Array(),
+					exitCode: 0,
+				}),
 			});
 			const changedText = "Edited commit prompt\n";
 
@@ -4303,6 +4326,7 @@ describe("prompt settings version write API", () => {
 					text: changedText,
 					agent: "omp",
 					model: "sonnet",
+					effort: "high",
 				}),
 			);
 			expect(saveResponse.status).toBe(200);
@@ -4312,7 +4336,20 @@ describe("prompt settings version write API", () => {
 			});
 			expect(
 				await Bun.file(join(dir, "commit-system", "default", "002.md")).text(),
-			).toBe(`---\nagent: omp\nmodel: sonnet\n---\n${changedText}`);
+			).toBe(
+				`---\nagent: omp\nmodel: sonnet\neffort: high\n---\n${changedText}`,
+			);
+
+			const unsupportedEffort = await routes(
+				promptRequest("/api/prompts/commit-system", {
+					preset: "default",
+					text: changedText,
+					agent: "omp",
+					model: "sonnet",
+					effort: "low",
+				}),
+			);
+			expect(unsupportedEffort.status).toBe(400);
 
 			const duplicateResponse = await routes(
 				promptRequest("/api/prompts/commit-system", {
@@ -4320,6 +4357,7 @@ describe("prompt settings version write API", () => {
 					text: `  ${changedText.trim()}  `,
 					agent: "omp",
 					model: "sonnet",
+					effort: "high",
 				}),
 			);
 			expect(duplicateResponse.status).toBe(200);
@@ -4343,7 +4381,9 @@ describe("prompt settings version write API", () => {
 			expect(await rollbackResponse.json()).toEqual({ version: 3 });
 			expect(
 				await Bun.file(join(dir, "commit-system", "default", "003.md")).text(),
-			).toBe(`---\nagent: omp\nmodel: sonnet\n---\n${changedText}`);
+			).toBe(
+				`---\nagent: omp\nmodel: sonnet\neffort: high\n---\n${changedText}`,
+			);
 
 			const resetResponse = await routes(
 				promptRequest("/api/prompts/commit-system/reset", {
@@ -4361,6 +4401,7 @@ describe("prompt settings version write API", () => {
 			expect(await resetPrompt.json()).toMatchObject({
 				agent: null,
 				model: null,
+				effort: null,
 			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -4403,6 +4444,7 @@ describe("prompt settings version write API", () => {
 				text: "Same prompt",
 				agent: "claude",
 				model: null,
+				effort: null,
 			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -4749,39 +4791,48 @@ describe("prompt settings preset API", () => {
 describe("Codex model settings API", () => {
 	test("returns CLI model choices and caches discovery for the route lifetime", async () => {
 		const calls: Array<{ binary: string; args: string[]; cwd: string }> = [];
-		const exec: AgentExec = async function* (binary, args, { cwd }) {
-			calls.push({ binary, args, cwd });
-			yield JSON.stringify({
-				models: [
-					{
-						slug: "gpt-6-astra",
-						display_name: "GPT-6-Astra",
-						visibility: "list",
-					},
-					{
-						slug: "gpt-6-sol",
-						display_name: "GPT-6-Sol",
-						visibility: "list",
-					},
-					{
-						slug: "gpt-6-luna",
-						display_name: "GPT-6-Luna",
-						visibility: "list",
-					},
-					{
-						slug: "internal-model",
-						display_name: "Internal",
-						visibility: "hide",
-					},
-				],
-			});
+		const output = JSON.stringify({
+			models: [
+				{
+					slug: "gpt-6-astra",
+					display_name: "GPT-6-Astra",
+					visibility: "list",
+				},
+				{
+					slug: "gpt-6-sol",
+					display_name: "GPT-6-Sol",
+					visibility: "list",
+				},
+				{
+					slug: "gpt-6-luna",
+					display_name: "GPT-6-Luna",
+					visibility: "list",
+				},
+				{
+					slug: "internal-model",
+					display_name: "Internal",
+					visibility: "hide",
+				},
+			],
+		});
+		const runner: CodexModelCatalogProcessRunner = async (
+			binary,
+			args,
+			{ cwd },
+		) => {
+			calls.push({ binary, args: [...args], cwd });
+			return {
+				stdout: new TextEncoder().encode(output),
+				stderr: new Uint8Array(),
+				exitCode: 0,
+			};
 		};
 		const routes = createReviewRoutes({
 			token,
 			state: state(),
 			worktreePath: "/tmp/codex-worktree",
 			config: { review: { agent: "codex", binary: "/opt/codex" } },
-			codexModelExec: exec,
+			codexModelCatalogProcessRunner: runner,
 		});
 		const path = `/api/settings/codex-models?t=${token}`;
 
@@ -4789,9 +4840,9 @@ describe("Codex model settings API", () => {
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
 			models: [
-				{ id: "gpt-6-astra", label: "GPT-6-Astra" },
-				{ id: "gpt-6-sol", label: "GPT-6-Sol" },
-				{ id: "gpt-6-luna", label: "GPT-6-Luna" },
+				{ id: "gpt-6-astra", label: "GPT-6-Astra", efforts: [] },
+				{ id: "gpt-6-sol", label: "GPT-6-Sol", efforts: [] },
+				{ id: "gpt-6-luna", label: "GPT-6-Luna", efforts: [] },
 			],
 		});
 		const refreshed = await routes(request(path));
@@ -4807,15 +4858,19 @@ describe("Codex model settings API", () => {
 
 	test("uses standard codex binary unless Codex is the configured review agent", async () => {
 		let binary: string | undefined;
-		const exec: AgentExec = async function* (command) {
+		const runner: CodexModelCatalogProcessRunner = async (command) => {
 			binary = command;
-			yield JSON.stringify({ models: [] });
+			return {
+				stdout: new TextEncoder().encode(JSON.stringify({ models: [] })),
+				stderr: new Uint8Array(),
+				exitCode: 0,
+			};
 		};
 		const routes = createReviewRoutes({
 			token,
 			state: state(),
 			config: { review: { agent: "claude", binary: "/opt/claude" } },
-			codexModelExec: exec,
+			codexModelCatalogProcessRunner: runner,
 		});
 
 		const response = await routes(
@@ -4827,14 +4882,13 @@ describe("Codex model settings API", () => {
 	});
 
 	test("keeps settings responses available when Codex discovery fails", async () => {
-		// biome-ignore lint/correctness/useYield: failure is raised before CLI output.
-		const unavailable: AgentExec = async function* () {
+		const unavailable: CodexModelCatalogProcessRunner = async () => {
 			throw new Error("Codex CLI unavailable");
 		};
 		const routes = createReviewRoutes({
 			token,
 			state: state(),
-			codexModelExec: unavailable,
+			codexModelCatalogProcessRunner: unavailable,
 		});
 
 		const settings = await routes(request(`/api/settings?t=${token}`));
@@ -4893,7 +4947,15 @@ describe("review agent settings API", () => {
 			});
 			expect(factoryCalls).toEqual([]);
 			expect(persisted).toEqual([
-				{ review: { agent: "claude", model: "claude-model" } },
+				{
+					review: {
+						agent: "claude",
+						model: "claude-model",
+						layerTimeoutSeconds: 600,
+						largeFileLineThreshold: 800,
+						maxLayerPromptBytes: 100_000,
+					},
+				},
 			]);
 
 			const chatResponse = await routes(
@@ -4955,7 +5017,15 @@ describe("review agent settings API", () => {
 			});
 			expect(factoryCalls).toEqual([]);
 			expect(persisted).toEqual([
-				{ review: { agent: "codex", model: "gpt-5.2" } },
+				{
+					review: {
+						agent: "codex",
+						model: "gpt-5.2",
+						layerTimeoutSeconds: 600,
+						largeFileLineThreshold: 800,
+						maxLayerPromptBytes: 100_000,
+					},
+				},
 			]);
 
 			const chatResponse = await routes(chatRequest({ message: "Use codex" }));
@@ -4997,7 +5067,203 @@ describe("review agent settings API", () => {
 			expect(response.status).toBe(200);
 			expect(await response.json()).toEqual({ agent: "claude" });
 			expect(factoryCalls).toEqual([]);
-			expect(persisted).toEqual([{ review: { agent: "claude" } }]);
+			expect(persisted).toEqual([
+				{
+					review: {
+						agent: "claude",
+						layerTimeoutSeconds: 600,
+						largeFileLineThreshold: 800,
+						maxLayerPromptBytes: 100_000,
+					},
+				},
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("rejects default-agent changes invalidating active prompt effort", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-effort-"));
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			const explicitPromptDir = join(dir, "review-layers-plan", "default");
+			await mkdir(promptDir, { recursive: true });
+			await mkdir(explicitPromptDir, { recursive: true });
+			const promptText = "---\neffort: auto\n---\nDefault-agent prompt";
+			await writeFile(join(promptDir, "001.md"), promptText, "utf8");
+			await writeFile(
+				join(explicitPromptDir, "001.md"),
+				"---\nagent: omp\neffort: auto\n---\nExplicit-agent prompt",
+				"utf8",
+			);
+			const persisted: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: {
+					review: { agent: "omp", model: "old-model", effort: "auto" },
+				},
+				createReviewAgent: () => new StreamChatAgent(),
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({
+					agent: "claude",
+					model: "new-model",
+					effort: "low",
+				}),
+			);
+			expect(response.status).toBe(400);
+			const result = (await response.json()) as { error: string };
+			expect(result.error).toContain("review-layers-code (auto)");
+			expect(result.error).toContain("Change or clear those prompt efforts");
+			expect(result.error).not.toContain("review-layers-plan");
+			expect(persisted).toEqual([]);
+
+			const settingsResponse = await routes(
+				request(`/api/settings?t=${token}`),
+			);
+			expect(settingsResponse.status).toBe(200);
+			expect((await settingsResponse.json()).review).toMatchObject({
+				agent: "omp",
+				model: "old-model",
+				effort: "auto",
+			});
+			expect(await Bun.file(join(promptDir, "001.md")).text()).toBe(promptText);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("validates active prompt effort against requested Codex model", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-codex-model-"));
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\neffort: low\n---\nDefault-agent prompt",
+				"utf8",
+			);
+			const persisted: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: { review: { agent: "claude" } },
+				createReviewAgent: () => new StreamChatAgent(),
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({
+					agent: "codex",
+					model: "gpt-6-sol",
+					effort: "high",
+				}),
+			);
+			expect(response.status).toBe(200);
+			expect(persisted).toEqual([
+				{
+					review: {
+						agent: "codex",
+						model: "gpt-6-sol",
+						effort: "high",
+						layerTimeoutSeconds: 600,
+						largeFileLineThreshold: 800,
+						maxLayerPromptBytes: 100_000,
+					},
+				},
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("revalidates active prompt effort when only default model changes", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-agent-codex-model-change-"),
+		);
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\neffort: ultra\n---\nDefault-agent prompt",
+				"utf8",
+			);
+			const persisted: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: {
+					review: { agent: "codex", model: "gpt-6-sol", effort: "high" },
+				},
+				createReviewAgent: () => new StreamChatAgent(),
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({
+					agent: "codex",
+					model: "gpt-5.5",
+					effort: "high",
+				}),
+			);
+			expect(response.status).toBe(400);
+			expect((await response.json()).error).toContain(
+				"review-layers-code (ultra)",
+			);
+			expect(persisted).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("explicit-agent prompt effort does not block global default-agent change", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-agent-explicit-prompt-"),
+		);
+		try {
+			const promptDir = join(dir, "review-layers-code", "default");
+			await mkdir(promptDir, { recursive: true });
+			const promptText = "---\nagent: omp\neffort: auto\n---\nExplicit prompt";
+			await writeFile(join(promptDir, "001.md"), promptText, "utf8");
+			const persisted: unknown[] = [];
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				promptSourceDir: dir,
+				config: { review: { agent: "omp" } },
+				createReviewAgent: () => new StreamChatAgent(),
+				persistConfig: async (partial) => {
+					persisted.push(partial);
+				},
+			});
+
+			const response = await routes(
+				reviewSettingsRequest({ agent: "claude", effort: "low" }),
+			);
+			expect(response.status).toBe(200);
+			expect(persisted).toEqual([
+				{
+					review: {
+						agent: "claude",
+						effort: "low",
+						layerTimeoutSeconds: 600,
+						largeFileLineThreshold: 800,
+						maxLayerPromptBytes: 100_000,
+					},
+				},
+			]);
+			expect(await Bun.file(join(promptDir, "001.md")).text()).toBe(promptText);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -5075,8 +5341,343 @@ describe("review agent settings API", () => {
 		}
 	});
 });
+
+describe("integrated settings experience", () => {
+	test("saves and reloads General and prompt settings before layer and chat runs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-settings-flow-"));
+		const paths = chatPaths(dir);
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: paths.chatsDir,
+		});
+		const invocations: Array<{ binary: string; args: string[] }> = [];
+		const exec: AgentExec = async function* (binary, args, options) {
+			if (options.signal?.aborted) return;
+			if (args[0] === "--version") {
+				yield "settings-test-omp";
+				return;
+			}
+			invocations.push({ binary, args: [...args] });
+			const separator = args.lastIndexOf("--");
+			const message = args[separator + 1] ?? "";
+			const outputPath = message.match(/absolute path: ([^\n]+)/)?.[1];
+			if (outputPath) {
+				await Bun.write(
+					outputPath,
+					JSON.stringify({
+						version: 1,
+						layers: [
+							{
+								title: "Settings integration",
+								tldr: "Layer run used saved settings.",
+								files: ["src/app.ts"],
+							},
+						],
+					}),
+				);
+			}
+			yield JSON.stringify({
+				type: "session",
+				id: `settings-session-${invocations.length}`,
+			});
+			if (!outputPath) {
+				yield JSON.stringify({
+					type: "message_update",
+					assistantMessageEvent: {
+						type: "text_delta",
+						delta: "Settings integration reply",
+					},
+				});
+			}
+			yield JSON.stringify({ type: "agent_end" });
+		};
+		let persistedReview: Config["review"] = {
+			agent: "claude",
+			layerTimeoutSeconds: 600,
+			largeFileLineThreshold: 800,
+			maxLayerPromptBytes: 100_000,
+		};
+		const createRoutes = () =>
+			createReviewRoutes({
+				token,
+				store,
+				state: state(),
+				paths,
+				diff,
+				promptSourceDir: dir,
+				config: { jira: { enabled: false }, review: persistedReview },
+				ompModelCatalogProcessRunner: async () => ({
+					stdout: new TextEncoder().encode(
+						JSON.stringify({
+							models: [
+								{
+									selector: "settings-model",
+									thinking: ["medium", "high"],
+								},
+							],
+						}),
+					),
+					stderr: new Uint8Array(),
+					exitCode: 0,
+				}),
+				claudeModelCatalogFetcher: async () =>
+					new Response(JSON.stringify({ data: [], has_more: false }), {
+						status: 200,
+					}),
+				createReviewAgent: (selection) =>
+					new OmpAgentAdapter({
+						binary: "settings-test-omp",
+						model: selection?.model,
+						effort: selection?.effort ?? undefined,
+						exec,
+					}),
+				persistConfig: async (partial) => {
+					if (partial.review) {
+						persistedReview = { ...persistedReview, ...partial.review };
+					}
+				},
+			});
+
+		let routes = createRoutes();
+		const originalFetch = globalThis.fetch;
+		const pendingRequests = new Set<Promise<Response>>();
+		globalThis.fetch = ((input, init) => {
+			const pending = routes(
+				new Request(new URL(String(input), "http://127.0.0.1"), init),
+			);
+			pendingRequests.add(pending);
+			const tracked = pending.then((response) => {
+				const readJson = response.json.bind(response);
+				response.json = async () => {
+					try {
+						return await readJson();
+					} finally {
+						pendingRequests.delete(pending);
+					}
+				};
+				return response;
+			});
+			void tracked.catch(() => pendingRequests.delete(pending));
+			return tracked;
+		}) as typeof fetch;
+		const container = document.createElement("div");
+		let root = createRoot(container);
+		let mounted = true;
+
+		const flushReact = async () => {
+			while (pendingRequests.size > 0) {
+				const pending = [...pendingRequests];
+				await act(async () => {
+					await Promise.all(pending);
+					await Promise.resolve();
+					await Promise.resolve();
+				});
+			}
+		};
+		const changeSelect = (selector: string, value: string) => {
+			const control = container.querySelector<HTMLSelectElement>(selector);
+			if (!control) throw new Error(`Missing select ${selector}`);
+			control.value = value;
+			control.dispatchEvent(new window.Event("change", { bubbles: true }));
+		};
+		const selectOption = async (selector: string, value: string) => {
+			act(() => changeSelect(selector, value));
+			await flushReact();
+		};
+		const unmountSettings = () => {
+			if (!mounted) return;
+			act(() => root.unmount());
+			mounted = false;
+		};
+		const clickButton = async (label: string) => {
+			const button = Array.from(
+				container.querySelectorAll<HTMLButtonElement>("button"),
+			).find((candidate) => candidate.textContent?.trim() === label);
+			if (!button) throw new Error(`Missing button ${label}`);
+			act(() => button.click());
+			await flushReact();
+		};
+		const clickTab = async (label: string) => {
+			const tab = Array.from(
+				container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+			).find((candidate) => candidate.textContent?.trim() === label);
+			if (!tab) throw new Error(`Missing settings tab ${label}`);
+			act(() => tab.click());
+			await flushReact();
+		};
+		const renderSettings = async (initialTab: "general" | "prompts") => {
+			act(() =>
+				root.render(
+					createElement(SettingsPanel, {
+						token,
+						onClose: () => {},
+						initialTab,
+					}),
+				),
+			);
+			await flushReact();
+		};
+		const reloadSettings = async (initialTab: "general" | "prompts") => {
+			unmountSettings();
+			routes = createRoutes();
+			root = createRoot(container);
+			mounted = true;
+			await renderSettings(initialTab);
+		};
+
+		try {
+			await store.write(state());
+			await renderSettings("general");
+			await selectOption("#settings-default-agent", "omp");
+			await selectOption("#settings-default-model", "settings-model");
+			await selectOption("#settings-default-effort", "high");
+			await clickButton("Save");
+
+			expect(container.textContent).toContain("Saved review defaults");
+			expect(persistedReview).toMatchObject({
+				agent: "omp",
+				model: "settings-model",
+				effort: "high",
+			});
+			const savedSettings = await routes(request(`/api/settings?t=${token}`));
+			expect(savedSettings.status).toBe(200);
+			expect((await savedSettings.json()).review).toMatchObject({
+				agent: "omp",
+				model: "settings-model",
+				effort: "high",
+			});
+
+			await reloadSettings("general");
+			expect(
+				container.querySelector<HTMLSelectElement>("#settings-default-agent")
+					?.value,
+			).toBe("omp");
+			expect(
+				container.querySelector<HTMLSelectElement>("#settings-default-model")
+					?.value,
+			).toBe("settings-model");
+			expect(
+				container.querySelector<HTMLSelectElement>("#settings-default-effort")
+					?.value,
+			).toBe("high");
+			await clickTab("Prompts");
+			await selectOption("#settings-prompt-effort", "medium");
+			expect(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+					?.value,
+			).toBe("default");
+			await clickButton("Save as new version");
+			expect(container.textContent).toContain("Saved v2");
+			const savedPrompt = await routes(
+				request(`/api/prompts/review-layers-code?preset=default&t=${token}`),
+			);
+			expect(savedPrompt.status).toBe(200);
+			expect(await savedPrompt.json()).toMatchObject({
+				version: 2,
+				agent: null,
+				model: null,
+				effort: "medium",
+			});
+
+			await reloadSettings("prompts");
+			expect(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+					?.value,
+			).toBe("medium");
+			unmountSettings();
+
+			routes = createRoutes();
+			const layerResponse = await routes(
+				request(`/api/layers/regenerate?t=${token}`, { method: "POST" }),
+			);
+			expect(layerResponse.status).toBe(200);
+			const layerStream = await layerResponse.text();
+			expect(layerStream).toContain('"status":"ready"');
+
+			const createChatResponse = await routes(
+				request(`/api/chats?t=${token}`, { method: "POST" }),
+			);
+			const createChatBody: unknown = await createChatResponse.json();
+			if (
+				typeof createChatBody !== "object" ||
+				createChatBody === null ||
+				!("activeChatId" in createChatBody) ||
+				typeof createChatBody.activeChatId !== "string" ||
+				createChatBody.activeChatId.length === 0
+			) {
+				throw new Error("new chat response missing activeChatId");
+			}
+			const newChatId = createChatBody.activeChatId;
+			expect(newChatId).not.toBe("chat-a");
+			const chatResponse = await routes(
+				chatRequest({
+					chatId: newChatId,
+					message: "Use the saved settings",
+				}),
+			);
+			expect(chatResponse.status).toBe(200);
+			expect(await chatResponse.text()).toContain("Settings integration reply");
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === newChatId),
+			).toMatchObject({
+				agent: "omp",
+				model: "settings-model",
+				effort: "high",
+			});
+			expect(invocations).toHaveLength(2);
+			expect(
+				invocations.map(({ binary, args }) => ({
+					binary,
+					model: args.includes("--model")
+						? args[args.indexOf("--model") + 1]
+						: null,
+					effort: args.includes("--thinking")
+						? args[args.indexOf("--thinking") + 1]
+						: null,
+					writeDir: args.includes("--add-dir"),
+				})),
+			).toEqual([
+				{
+					binary: "settings-test-omp",
+					model: "settings-model",
+					effort: "medium",
+					writeDir: true,
+				},
+				{
+					binary: "settings-test-omp",
+					model: "settings-model",
+					effort: "high",
+					writeDir: false,
+				},
+			]);
+			expect(invocations.flatMap(({ args }) => args)).not.toContain("-c");
+		} finally {
+			unmountSettings();
+			container.remove();
+			globalThis.fetch = originalFetch;
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
 describe("chat binding", () => {
-	async function setupBinding(dir: string) {
+	async function setupBinding(
+		dir: string,
+		review: {
+			agent: "omp" | "claude" | "codex";
+			model?: string;
+			effort?: "high";
+		} = { agent: "claude", model: "default-model" },
+		ompRunner: OmpModelCatalogProcessRunner = async () => ({
+			stdout: new TextEncoder().encode(
+				JSON.stringify({
+					models: [{ selector: "sonnet", thinking: ["low"] }],
+				}),
+			),
+			stderr: new Uint8Array(),
+			exitCode: 0,
+		}),
+	) {
 		const store = new ReviewStore({
 			statePath: join(dir, "review.json"),
 			chatPath: join(dir, "chat.ndjson"),
@@ -5087,13 +5688,15 @@ describe("chat binding", () => {
 		const factoryCalls: Array<{
 			agent?: "omp" | "claude" | "codex";
 			model?: string;
+			effort?: "high";
 		}> = [];
 		const routes = createReviewRoutes({
 			token,
 			store,
 			paths: chatPaths(dir),
 			promptSourceDir: dir,
-			config: { review: { agent: "claude", model: "default-model" } },
+			config: { review },
+			ompModelCatalogProcessRunner: ompRunner,
 			reviewAgent: agent,
 			discussions: [discussion],
 			explainPromptText: "Explain prefix.",
@@ -5164,6 +5767,138 @@ describe("chat binding", () => {
 				model: "slot-model",
 			});
 			expect(factoryCalls).toEqual([{ agent: "omp", model: "slot-model" }]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("inherits supported Codex effort through prompt model override", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-binding-codex-effort-"),
+		);
+		try {
+			const promptDir = join(dir, "review-chat", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\nmodel: gpt-5.5\n---\nChat prompt",
+				"utf8",
+			);
+			const { store, routes, factoryCalls } = await setupBinding(dir, {
+				agent: "codex",
+				model: "gpt-6-sol",
+				effort: "high",
+			});
+			const createResponse = await routes(
+				request(`/api/chats?t=${token}`, { method: "POST" }),
+			);
+			expect(createResponse.status).toBe(201);
+			const created = (await createResponse.json()) as {
+				activeChatId: string;
+			};
+			const chatId = created.activeChatId;
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === chatId),
+			).toMatchObject({
+				agent: "codex",
+				model: "gpt-5.5",
+				effort: "high",
+			});
+
+			const turnResponse = await routes(
+				chatRequest({ chatId, message: "Use inherited Codex effort" }),
+			);
+			await turnResponse.text();
+			expect(factoryCalls).toContainEqual({
+				agent: "codex",
+				model: "gpt-5.5",
+				effort: "high",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not bind chat to explicit effort unsupported by selected model", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-binding-invalid-effort-"),
+		);
+		try {
+			const promptDir = join(dir, "review-chat", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\nagent: omp\nmodel: sonnet\neffort: high\n---\nChat prompt",
+				"utf8",
+			);
+			const { routes, factoryCalls } = await setupBinding(dir);
+			const response = await routes(
+				request(`/api/chats?t=${token}`, { method: "POST" }),
+			);
+
+			expect(response.status).toBe(400);
+			expect(factoryCalls).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("retries failed OMP effort discovery on the next selection", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-binding-catalog-retry-"),
+		);
+		try {
+			const promptDir = join(dir, "review-chat", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\nmodel: prompt-model\n---\nChat prompt",
+				"utf8",
+			);
+			let discoveryCalls = 0;
+			const { store, routes } = await setupBinding(
+				dir,
+				{ agent: "omp", model: "global-model", effort: "high" },
+				async () => {
+					discoveryCalls += 1;
+					if (discoveryCalls === 1) throw new Error("temporary OMP failure");
+					return {
+						stdout: new TextEncoder().encode(
+							JSON.stringify({
+								models: [{ selector: "prompt-model", thinking: ["high"] }],
+							}),
+						),
+						stderr: new Uint8Array(),
+						exitCode: 0,
+					};
+				},
+			);
+
+			const first = await routes(
+				request(`/api/chats?t=${token}`, { method: "POST" }),
+			);
+			expect(first.status).toBe(201);
+			const firstChatId = (await first.json()).activeChatId as string;
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === firstChatId),
+			).toMatchObject({
+				agent: "omp",
+				model: "prompt-model",
+				effort: null,
+			});
+
+			const second = await routes(
+				request(`/api/chats?t=${token}`, { method: "POST" }),
+			);
+			expect(second.status).toBe(201);
+			const secondChatId = (await second.json()).activeChatId as string;
+			expect(
+				(await store.read())?.chats.find((chat) => chat.id === secondChatId),
+			).toMatchObject({
+				agent: "omp",
+				model: "prompt-model",
+				effort: "high",
+			});
+			expect(discoveryCalls).toBe(2);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

@@ -54,6 +54,7 @@ import {
 	tabTitle,
 } from "./components/MrHeader";
 import { OverviewPane } from "./components/OverviewPane";
+import { ReviewSplitter } from "./components/ReviewSplitter";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";
@@ -445,7 +446,7 @@ function ReviewApp() {
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [settingsInitialTab, setSettingsInitialTab] = useState<
-		"prompts" | "skills" | "appearance"
+		"general" | "prompts" | "skills" | "appearance"
 	>("prompts");
 	const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
 	const skills = useSkills(token, skillsRefreshKey);
@@ -2017,23 +2018,21 @@ function ReviewApp() {
 						onRegenerate={() => runLayerAction("regenerate")}
 						onRetry={() => runLayerAction("retry")}
 					/>
+					<ReviewSplitter
+						aria-label="Resize review layers column"
+						aria-valuemax={leftColumnMaximum}
+						aria-valuemin={columnMinimums.left}
+						aria-valuenow={columnWidths.left}
+						onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
+						onPointerCancel={splitterResize.onPointerEnd}
+						onPointerDown={(event) =>
+							splitterResize.onPointerDown(event, "left", columnWidths.left)
+						}
+						onPointerMove={splitterResize.onPointerMove}
+						onPointerUp={splitterResize.onPointerEnd}
+						onLostPointerCapture={splitterResize.onLostPointerCapture}
+					/>
 				</div>
-				<hr
-					aria-label="Resize review layers column"
-					aria-orientation="vertical"
-					aria-valuemax={leftColumnMaximum}
-					aria-valuemin={columnMinimums.left}
-					aria-valuenow={columnWidths.left}
-					className={`m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none${reviewView === "overview" ? " hidden" : ""}`}
-					onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
-					onPointerCancel={splitterResize.onPointerEnd}
-					onPointerDown={(event) =>
-						splitterResize.onPointerDown(event, "left", columnWidths.left)
-					}
-					onPointerMove={splitterResize.onPointerMove}
-					onPointerUp={splitterResize.onPointerEnd}
-					onLostPointerCapture={splitterResize.onLostPointerCapture}
-				/>
 				<section
 					className={
 						reviewView === "overview"
@@ -2097,13 +2096,11 @@ function ReviewApp() {
 						explainDisabled={creatingChat}
 					/>
 				) : null}
-				<hr
+				<ReviewSplitter
 					aria-label="Resize chat column"
-					aria-orientation="vertical"
 					aria-valuemax={rightColumnMaximum}
 					aria-valuemin={columnMinimums.right}
 					aria-valuenow={columnWidths.right}
-					className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
 					onKeyDown={(event) => handleSplitterKeyDown(event, "right")}
 					onPointerCancel={splitterResize.onPointerEnd}
 					onPointerDown={(event) =>

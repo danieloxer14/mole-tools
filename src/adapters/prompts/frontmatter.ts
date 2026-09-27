@@ -1,4 +1,9 @@
 import { PortError } from "../../core/errors";
+import {
+	type AgentEffort,
+	AgentEffortSchema,
+	isAgentEffort,
+} from "../agent/effort";
 
 export const PROMPT_AGENT_NAMES = ["omp", "claude", "codex"] as const;
 export type PromptAgentName = (typeof PROMPT_AGENT_NAMES)[number];
@@ -12,13 +17,14 @@ export function formatAgentNames(names: readonly string[]): string {
 export interface PromptVersionMeta {
 	agent: PromptAgentName | null;
 	model: string | null;
+	effort: AgentEffort | null;
 }
 
 export interface PromptFile extends PromptVersionMeta {
 	text: string;
 }
 
-const FRONTMATTER_LINE = /^(agent|model):[ \t]*(.*?)[ \t]*$/;
+const FRONTMATTER_LINE = /^(agent|model|effort):[ \t]*(.*?)[ \t]*$/;
 
 export function parsePromptFile(raw: string, source: string): PromptFile {
 	const lines = raw.split("\n");
@@ -27,25 +33,32 @@ export function parsePromptFile(raw: string, source: string): PromptFile {
 		strippedLines.push(line.endsWith("\r") ? line.slice(0, -1) : line);
 	}
 	if (strippedLines[0] !== "---") {
-		return { text: raw, agent: null, model: null };
+		return { text: raw, agent: null, model: null, effort: null };
 	}
 
 	const closingIndex = strippedLines.findIndex(
 		(line, index) => index > 0 && line === "---",
 	);
-	if (closingIndex < 0) return { text: raw, agent: null, model: null };
+	if (closingIndex < 0)
+		return { text: raw, agent: null, model: null, effort: null };
 
 	const metadataLines = strippedLines.slice(1, closingIndex);
 
 	for (const line of metadataLines) {
 		if (line.trim().length === 0) continue;
 		if (!FRONTMATTER_LINE.test(line)) {
-			return { text: raw, agent: null, model: null };
+			if (/^effort\b/.test(line.trimStart())) {
+				throw new PortError(
+					`Invalid prompt metadata in ${source}: malformed effort`,
+				);
+			}
+			return { text: raw, agent: null, model: null, effort: null };
 		}
 	}
 
 	let agent: PromptAgentName | null = null;
 	let model: string | null = null;
+	let effort: AgentEffort | null = null;
 	const seen = new Set<string>();
 	for (const line of metadataLines) {
 		if (line.trim().length === 0) continue;
@@ -65,14 +78,34 @@ export function parsePromptFile(raw: string, source: string): PromptFile {
 				);
 			}
 			agent = value as PromptAgentName;
-		} else {
+		} else if (key === "model") {
 			if (value.length === 0) {
 				throw new PortError(
 					`Invalid prompt metadata in ${source}: model must not be empty`,
 				);
 			}
 			model = value;
+		} else if (value === "" || value === "null") {
+			effort = null;
+		} else {
+			const parsedEffort = AgentEffortSchema.safeParse(value);
+			if (!parsedEffort.success) {
+				throw new PortError(
+					`Invalid prompt metadata in ${source}: unsupported effort`,
+				);
+			}
+			effort = parsedEffort.data;
 		}
+	}
+
+	if (
+		agent !== null &&
+		effort !== null &&
+		!isAgentEffort(agent, effort, model)
+	) {
+		throw new PortError(
+			`Invalid prompt metadata in ${source}: effort is not supported by ${agent}`,
+		);
 	}
 
 	let closingEnd = 0;
@@ -81,15 +114,17 @@ export function parsePromptFile(raw: string, source: string): PromptFile {
 		if (index < closingIndex) closingEnd += 1;
 	}
 	const text = raw[closingEnd] === "\n" ? raw.slice(closingEnd + 1) : "";
-	return { text, agent, model };
+	return { text, agent, model, effort };
 }
 
 export function serializePromptFile(file: PromptFile): string {
-	if (file.agent === null && file.model === null) return file.text;
+	if (file.agent === null && file.model === null && file.effort === null)
+		return file.text;
 	return (
 		"---\n" +
 		(file.agent === null ? "" : `agent: ${file.agent}\n`) +
 		(file.model === null ? "" : `model: ${file.model}\n`) +
+		(file.effort === null ? "" : `effort: ${file.effort}\n`) +
 		"---\n" +
 		file.text
 	);

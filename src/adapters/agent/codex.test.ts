@@ -148,6 +148,41 @@ describe("CodexAgentAdapter", () => {
 		});
 	});
 
+	test("passes model-supported reasoning effort as a Codex config pair", async () => {
+		const calls: Call[] = [];
+		await withPrompt("System prompt", async (systemPromptFile) => {
+			const adapter = new CodexAgentAdapter({
+				exec: replay([], calls),
+				model: "gpt-6-sol",
+				effort: "ultra",
+			});
+			await collect(adapter.run(makeTurn(systemPromptFile)));
+
+			const args = calls[0]?.args ?? [];
+			const effortIndex = args.indexOf("model_reasoning_effort=ultra");
+			expect(args.slice(effortIndex - 1, effortIndex + 1)).toEqual([
+				"-c",
+				"model_reasoning_effort=ultra",
+			]);
+		});
+	});
+
+	test("rejects unsupported model-specific Codex effort", () => {
+		expect(
+			() =>
+				new CodexAgentAdapter({
+					model: "gpt-6-luna",
+					effort: "ultra",
+				}),
+		).toThrow("codex effort must be one of: low, medium, high, xhigh, max");
+		expect(
+			() =>
+				new CodexAgentAdapter({
+					model: "unknown-model",
+					effort: "high",
+				}),
+		).toThrow("codex effort must be one of: ");
+	});
 	test("TOML-escapes project paths in the untrusted override", async () => {
 		const calls: Call[] = [];
 		const cwd = '/tmp/review "project"\\folder';

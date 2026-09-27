@@ -2,14 +2,27 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
+	type CodexModelCatalogProcessRunner,
 	type CodexModelChoice,
 	discoverCodexModels,
 } from "../../adapters/agent/codex-models";
-import { type AgentExec, defaultAgentExec } from "../../adapters/agent/exec";
+import {
+	type AgentEffort,
+	AgentEffortSchema,
+	CODEX_EFFORTS_BY_MODEL,
+	isAgentEffort,
+} from "../../adapters/agent/effort";
+import { discoverClaudeModels } from "../../adapters/agent/model-catalog-claude";
+import {
+	discoverOmpModels,
+	type OmpModelCatalogConfig,
+	type OmpModelCatalogProcessRunner,
+} from "../../adapters/agent/model-catalog-omp";
 import {
 	type ColorTheme,
 	ColorThemeSchema,
 	type Config,
+	ReviewConfigSchema,
 } from "../../adapters/config/schema";
 import {
 	DEFAULT_PROMPTS,
@@ -22,6 +35,7 @@ import {
 	formatAgentNames,
 	PROMPT_AGENT_NAMES,
 	type PromptAgentName,
+	type PromptVersionMeta,
 } from "../../adapters/prompts/frontmatter";
 import {
 	listPresets,
@@ -149,10 +163,11 @@ export interface ReviewRoutesOptions {
 				diff?: { ignore?: string[] };
 				jira?: { enabled?: boolean; branchPattern?: string };
 				review?: ReviewLayerConfig & {
+					largeFileLineThreshold?: number;
 					agent?: PromptAgentName;
 					binary?: string;
 					model?: string;
-					largeFileLineThreshold?: number;
+					effort?: AgentEffort;
 				};
 		  };
 	mr?: LayerMergeRequest;
@@ -161,11 +176,15 @@ export interface ReviewRoutesOptions {
 	promptText?: string;
 	explainPromptText?: string;
 	persistConfig?: (partial: Partial<Config>) => Promise<void>;
+	ompModelCatalogProcessRunner?: OmpModelCatalogProcessRunner;
+	claudeModelCatalogFetcher?: typeof fetch;
 	createReviewAgent?: (override?: {
 		agent?: PromptAgentName;
+		binary?: string | null;
 		model?: string;
+		effort?: AgentEffort | null;
 	}) => ReviewAgent;
-	codexModelExec?: AgentExec;
+	codexModelCatalogProcessRunner?: CodexModelCatalogProcessRunner;
 }
 
 export interface ReviewApiState extends ReviewState {
@@ -698,33 +717,134 @@ export function createReviewRoutes(
 					?.review?.agent ?? "claude",
 			model: (options.config as { review?: { model?: string } } | undefined)
 				?.review?.model,
+			effort:
+				(options.config as { review?: { effort?: AgentEffort } } | undefined)
+					?.review?.effort ?? null,
 		},
 		appearance: {
 			colorTheme: (options.config?.appearance?.colorTheme ??
 				"default") as ColorTheme,
 		},
 	};
+	let persistedReviewConfig: Config["review"] = ReviewConfigSchema.parse(
+		options.config?.review ?? {},
+	);
 	const layerAgent = options.layerAgent ?? options.reviewAgent;
 	const chatAgent = options.reviewAgent;
 	function defaultSelection(): AgentSelection {
 		return {
 			agent: settings.review.agent,
 			model: settings.review.model ?? null,
+			effort: settings.review.effort,
 		};
+	}
+	const modelEffortCatalogs = new Map<
+		PromptAgentName,
+		Promise<Map<string, readonly string[]>>
+	>();
+	function ompModelCatalogConfig(): OmpModelCatalogConfig {
+		if (settings.review.agent !== "omp") return {};
+		return {
+			review: {
+				agent: "omp",
+				binary: persistedReviewConfig.binary,
+			},
+		};
+	}
+	function modelEffortsFor(
+		agent: PromptAgentName,
+	): Promise<Map<string, readonly string[]>> {
+		let catalog = modelEffortCatalogs.get(agent);
+		if (!catalog) {
+			catalog =
+				agent === "omp"
+					? discoverOmpModels(
+							ompModelCatalogConfig(),
+							options.ompModelCatalogProcessRunner,
+						).then(
+							(models) =>
+								new Map(
+									models.map(({ id, efforts }) => [id, efforts] as const),
+								),
+						)
+					: agent === "codex"
+						? Promise.resolve(
+								new Map(
+									Object.entries(CODEX_EFFORTS_BY_MODEL).map(
+										([id, efforts]) => [id, efforts] as const,
+									),
+								),
+							)
+						: discoverClaudeModels({
+								apiKey: process.env.ANTHROPIC_API_KEY ?? null,
+								fetcher: options.claudeModelCatalogFetcher,
+							}).then(
+								({ models }) =>
+									new Map(
+										models.map(({ id, efforts }) => [id, efforts] as const),
+									),
+							);
+			modelEffortCatalogs.set(agent, catalog);
+		}
+		return catalog.catch(() => {
+			if (modelEffortCatalogs.get(agent) === catalog) {
+				modelEffortCatalogs.delete(agent);
+			}
+			return new Map<string, readonly string[]>();
+		});
+	}
+	async function effectivePromptSelection(
+		version: PromptVersionMeta,
+	): Promise<AgentSelection> {
+		const fallback = defaultSelection();
+		const selection = effectiveAgentSelection(version, fallback);
+		if (selection.effort === null || selection.model === null) return selection;
+		if (
+			selection.agent === "claude" &&
+			(version.agent !== null ||
+				version.effort !== null ||
+				version.model === null)
+		) {
+			return selection;
+		}
+
+		const modelEfforts = await modelEffortsFor(selection.agent);
+		if (modelEfforts.get(selection.model)?.includes(selection.effort)) {
+			return selection;
+		}
+		if (version.agent === null && version.effort == null) {
+			return { ...selection, effort: null };
+		}
+		throw new PortError(
+			`Effort ${selection.effort} is not supported by model ${selection.model}`,
+		);
 	}
 	async function slotSelection(slot: PromptName): Promise<AgentSelection> {
 		const version = await readPrompt(slot, {
 			preset: presetFor(slot),
 			dir: promptDirOption(),
 		});
-		return effectiveAgentSelection(version, defaultSelection());
+		return effectivePromptSelection(version);
 	}
 	function agentForSelection(
 		selection: AgentSelection,
 	): ReviewAgent | undefined {
+		const originalReview = options.config?.review;
+		const originalAgent = originalReview?.agent ?? "claude";
+		const originalBinary = originalReview?.binary;
+		const binary =
+			!originalBinary || selection.agent !== originalAgent
+				? undefined
+				: selection.agent === settings.review.agent
+					? persistedReviewConfig.binary === originalBinary
+						? undefined
+						: (persistedReviewConfig.binary ?? null)
+					: null;
 		return options.createReviewAgent?.({
 			agent: selection.agent,
+			...(binary === undefined ? {} : { binary }),
 			model: selection.model ?? undefined,
+			...(selection.effort === null ? {} : { effort: selection.effort }),
 		});
 	}
 	async function agentForSlot(
@@ -756,15 +876,14 @@ export function createReviewRoutes(
 	}
 	function codexModelChoices(): Promise<CodexModelChoice[]> {
 		if (!codexModelChoicesPromise) {
-			const configuredReview = options.config?.review;
 			const binary =
-				configuredReview?.agent === "codex"
-					? (configuredReview.binary ?? "codex")
+				settings.review.agent === "codex"
+					? (persistedReviewConfig.binary ?? "codex")
 					: "codex";
 			codexModelChoicesPromise = discoverCodexModels(
 				binary,
 				options.worktreePath ?? process.cwd(),
-				options.codexModelExec ?? defaultAgentExec,
+				options.codexModelCatalogProcessRunner,
 			).catch(() => []);
 		}
 		return codexModelChoicesPromise;
@@ -797,6 +916,7 @@ export function createReviewRoutes(
 				review: {
 					agent: settings.review.agent,
 					model: settings.review.model,
+					effort: settings.review.effort ?? undefined,
 					agents: [...PROMPT_AGENT_NAMES],
 				},
 			});
@@ -806,35 +926,97 @@ export function createReviewRoutes(
 	}
 
 	async function updateReviewSettings(request: Request): Promise<Response> {
-		const factory = options.createReviewAgent;
-		if (!factory)
-			return jsonResponse(
-				{ error: "Review agent selection is unavailable" },
-				501,
-			);
-
 		const parsed = z
 			.object({
 				agent: z.enum(PROMPT_AGENT_NAMES),
-				model: z.string().optional(),
+				model: z.string().nullable().optional(),
+				effort: AgentEffortSchema.nullable().optional(),
+			})
+			.superRefine((selection, context) => {
+				const model = selection.model?.trim() || undefined;
+				if (
+					selection.effort != null &&
+					!isAgentEffort(selection.agent, selection.effort, model)
+				) {
+					context.addIssue({
+						code: "custom",
+						path: ["effort"],
+						message: `Unsupported effort for ${selection.agent}`,
+					});
+				}
 			})
 			.safeParse(await parseBody(request));
 		if (!parsed.success)
 			return jsonResponse({ error: parsed.error.message }, 400);
 
+		if (!options.createReviewAgent)
+			return jsonResponse(
+				{ error: "Review agent selection is unavailable" },
+				501,
+			);
 		const model = parsed.data.model?.trim() || undefined;
-		settings.review = { agent: parsed.data.agent, model };
+		const agentChanged = parsed.data.agent !== settings.review.agent;
+		const agentOrModelChanged = agentChanged || model !== settings.review.model;
+		if (agentOrModelChanged) {
+			const incompatiblePrompts: Array<{
+				slot: PromptName;
+				effort: AgentEffort;
+			}> = [];
+			for (const slot of PROMPT_NAMES) {
+				if (!slot.startsWith("review-")) continue;
+				const prompt = await readPrompt(slot, {
+					preset: presetFor(slot),
+					dir: promptDirOption(),
+				});
+				if (
+					prompt.agent === null &&
+					prompt.effort !== null &&
+					!isAgentEffort(
+						parsed.data.agent,
+						prompt.effort,
+						prompt.model ?? model,
+					)
+				) {
+					incompatiblePrompts.push({ slot, effort: prompt.effort });
+				}
+			}
+			if (incompatiblePrompts.length > 0) {
+				const details = incompatiblePrompts
+					.map(({ slot, effort }) => `${slot} (${effort})`)
+					.join(", ");
+				return jsonResponse(
+					{
+						error: `Cannot change the default agent or model: active default-agent prompt effort is unsupported for ${details}. Change or clear those prompt efforts, or assign those prompts an explicit agent.`,
+					},
+					400,
+				);
+			}
+		}
 
-		const { model: _existingModel, ...existingReview } =
-			options.config?.review ?? {};
+		const effort = parsed.data.effort ?? null;
+		const {
+			model: _existingModel,
+			effort: _existingEffort,
+			...existingReview
+		} = persistedReviewConfig;
+		const { binary: _existingBinary, ...reviewWithoutBinary } = existingReview;
 		const review = {
-			...existingReview,
+			...(agentChanged ? reviewWithoutBinary : existingReview),
 			agent: parsed.data.agent,
 			...(model === undefined ? {} : { model }),
+			...(effort === null ? {} : { effort }),
 		};
-		await options.persistConfig?.({ review: review as Config["review"] });
+		await options.persistConfig?.({ review });
+		persistedReviewConfig = review;
+		modelEffortCatalogs.clear();
+		codexModelChoicesPromise = null;
 
-		return jsonResponse({ agent: parsed.data.agent, model });
+		settings.review = { agent: parsed.data.agent, model, effort };
+		return jsonResponse({
+			agent: parsed.data.agent,
+			model,
+			effort: effort ?? undefined,
+		});
 	}
 
 	async function updateAppearanceSettings(request: Request): Promise<Response> {
@@ -886,6 +1068,7 @@ export function createReviewRoutes(
 				version: prompt.version,
 				agent: prompt.agent,
 				model: prompt.model,
+				effort: prompt.effort,
 				versions,
 			});
 		} catch (error) {
@@ -934,7 +1117,41 @@ export function createReviewRoutes(
 			}
 			const model =
 				typeof rawModel === "string" ? rawModel.trim() || null : null;
-
+			const rawEffort = body.effort;
+			if (
+				rawEffort !== undefined &&
+				rawEffort !== null &&
+				typeof rawEffort !== "string"
+			) {
+				throw new PortError("Prompt effort must be a string or null");
+			}
+			const effort =
+				typeof rawEffort === "string" && rawEffort.length > 0
+					? AgentEffortSchema.parse(rawEffort)
+					: null;
+			const selectedAgent = agent ?? settings.review.agent;
+			const selectedModel =
+				agent === null ? (model ?? settings.review.model) : model;
+			if (
+				effort !== null &&
+				!isAgentEffort(selectedAgent, effort, selectedModel)
+			) {
+				throw new PortError(
+					`Prompt effort is not supported by ${selectedAgent}`,
+				);
+			}
+			if (
+				effort !== null &&
+				selectedModel !== null &&
+				selectedAgent !== "claude"
+			) {
+				const supportedEfforts = await modelEffortsFor(selectedAgent);
+				if (!supportedEfforts.get(selectedModel)?.includes(effort)) {
+					throw new PortError(
+						`Prompt effort ${effort} is not supported by model ${selectedModel}`,
+					);
+				}
+			}
 			const presetValue =
 				body.preset === undefined ? presetFor(slot) : body.preset;
 			if (typeof presetValue !== "string" || presetValue.length === 0)
@@ -947,7 +1164,8 @@ export function createReviewRoutes(
 			if (
 				body.text.trim() === latest.text.trim() &&
 				agent === latest.agent &&
-				model === latest.model
+				model === latest.model &&
+				effort === latest.effort
 			)
 				return jsonResponse({ version: latest.version, saved: false });
 
@@ -956,6 +1174,7 @@ export function createReviewRoutes(
 				text: body.text,
 				agent,
 				model,
+				effort,
 				dir: promptDirOption(),
 			});
 			return jsonResponse({ version, saved: true });
@@ -990,6 +1209,7 @@ export function createReviewRoutes(
 				text: prompt.text,
 				agent: prompt.agent,
 				model: prompt.model,
+				effort: prompt.effort,
 				dir,
 			});
 			return jsonResponse({ presets: await listPresets(slot, dir) });
@@ -1048,6 +1268,7 @@ export function createReviewRoutes(
 				text: prompt.text,
 				agent: prompt.agent,
 				model: prompt.model,
+				effort: prompt.effort,
 				dir: promptDirOption(),
 			});
 			return jsonResponse({ version });
@@ -1072,6 +1293,7 @@ export function createReviewRoutes(
 				text: DEFAULT_PROMPTS[slot],
 				agent: null,
 				model: null,
+				effort: null,
 				dir: promptDirOption(),
 			});
 			return jsonResponse({ version });
@@ -1388,6 +1610,32 @@ export function createReviewRoutes(
 
 	function requireChat(state: ReviewState, chatId: string): ChatMeta | null {
 		return state.chats.find((chat) => chat.id === chatId) ?? null;
+	}
+
+	async function bindChatSelection(
+		state: ReviewState,
+		chatId: string,
+		hasTranscript: boolean,
+	): Promise<{ state: ReviewState; chat: ChatMeta }> {
+		let chat = requireChat(state, chatId);
+		if (!chat) throw new Error(`Unknown chat: ${chatId}`);
+		if (chat.agent === null && options.createReviewAgent) {
+			const binding =
+				hasTranscript || chat.sessionId !== null
+					? defaultSelection()
+					: await slotSelection("review-chat");
+			state = await mutateState((base) => ({
+				...base,
+				chats: base.chats.map((entry) =>
+					entry.id === chatId && entry.agent === null
+						? { ...entry, ...binding }
+						: entry,
+				),
+			}));
+			chat = requireChat(state, chatId);
+			if (!chat) throw new Error(`Unknown chat: ${chatId}`);
+		}
+		return { state, chat };
 	}
 
 	function diffForDraft(draft: Draft): ParsedFileDiff | null {
@@ -1724,21 +1972,13 @@ export function createReviewRoutes(
 			}
 			if (chat.agent === null && options.createReviewAgent) {
 				const entries = await store.readChat(input.chatId);
-				const binding =
-					entries.length === 0 && chat.sessionId === null
-						? await slotSelection("review-chat")
-						: defaultSelection();
-				chatState = await mutateState((base) => ({
-					...base,
-					chats: base.chats.map((entry) =>
-						entry.id === input.chatId ? { ...entry, ...binding } : entry,
-					),
-				}));
-				chat = requireChat(chatState, input.chatId);
-				if (!chat) {
-					release();
-					return chatErrorStream(`Unknown chat: ${input.chatId}`);
-				}
+				const binding = await bindChatSelection(
+					chatState,
+					input.chatId,
+					entries.length > 0,
+				);
+				chatState = binding.state;
+				chat = binding.chat;
 			}
 			if (chat.title === "") {
 				const title = deriveChatTitle(input.message);
@@ -1760,6 +2000,7 @@ export function createReviewRoutes(
 					: agentForSelection({
 							agent: chat.agent,
 							model: chat.model,
+							effort: chat.effort,
 						})
 				: chatAgent;
 			if (!agent) {
@@ -1871,19 +2112,20 @@ export function createReviewRoutes(
 		return emptyResponse(204);
 	}
 	async function createChat(): Promise<Response> {
-		const binding = options.createReviewAgent
-			? await slotSelection("review-chat")
-			: { agent: null, model: null };
-		const chat = createChatMeta(undefined, binding);
-		const next = await mutateState((base) => ({
-			...base,
-			chats: [...base.chats, chat],
-			activeChatId: chat.id,
-		}));
-		return jsonResponse(
-			{ chats: next.chats, activeChatId: next.activeChatId },
-			201,
-		);
+		try {
+			const binding = options.createReviewAgent
+				? await slotSelection("review-chat")
+				: { agent: null, model: null, effort: null };
+			const chat = createChatMeta(undefined, binding);
+			const next = await mutateState((base) => ({
+				...base,
+				chats: [...base.chats, chat],
+				activeChatId: chat.id,
+			}));
+			return jsonResponse({ chats: next.chats, activeChatId: chat.id }, 201);
+		} catch (error) {
+			return promptErrorResponse(error);
+		}
 	}
 
 	async function explainComment(request: Request): Promise<Response> {
@@ -1909,7 +2151,7 @@ export function createReviewRoutes(
 			const message = buildExplainMessage({ prefix, discussion, diffs });
 			const binding = options.createReviewAgent
 				? await slotSelection("review-chat")
-				: { agent: null, model: null };
+				: { agent: null, model: null, effort: null };
 			const chat: ChatMeta = {
 				...createChatMeta(undefined, binding),
 				title: explainChatTitle(discussion),
@@ -1929,7 +2171,7 @@ export function createReviewRoutes(
 				201,
 			);
 		} catch (error) {
-			return jsonResponse({ error: errorMessage(error) }, 500);
+			return promptErrorResponse(error);
 		}
 	}
 
@@ -1980,7 +2222,7 @@ export function createReviewRoutes(
 		const store = options.store;
 		if (!store) return commentSseError("Review store is unavailable", 503);
 
-		const state = await currentState();
+		let state = await currentState();
 		const draft = state.drafts.find((candidate) => candidate.id === draftId);
 		if (!draft) return commentSseError("Draft not found", 404);
 		if (draft.status === "posted") {
@@ -1993,7 +2235,7 @@ export function createReviewRoutes(
 			return commentSseError("Comment is already generating", 409);
 		}
 
-		const chat = state.chats.find((candidate) => candidate.id === chatId);
+		let chat = state.chats.find((candidate) => candidate.id === chatId);
 		if (!chat) return commentSseError(`Unknown chat: ${chatId}`, 404);
 		if (activeTurns.has(chatId)) {
 			return commentSseError("Wait for the chat reply to finish", 409);
@@ -2008,12 +2250,34 @@ export function createReviewRoutes(
 			return commentSseError("Selected chat has no replies yet", 409);
 		}
 
+		let promptText: string;
 		let agent: ReviewAgent | undefined;
 		try {
-			agent = await agentForSlot(
-				"review-comment-from-chat",
-				options.reviewAgent,
+			const binding = await bindChatSelection(
+				state,
+				chatId,
+				entries.length > 0,
 			);
+			state = binding.state;
+			chat = binding.chat;
+			const persistedSelection =
+				chat.agent === null
+					? undefined
+					: {
+							agent: chat.agent,
+							model: chat.model,
+							effort: chat.effort,
+						};
+			const prompt = await readPrompt("review-comment-from-chat", {
+				preset: presetFor("review-comment-from-chat"),
+				dir: promptDirOption(),
+			});
+			promptText = prompt.text;
+			agent = options.createReviewAgent
+				? agentForSelection(
+						persistedSelection ?? (await effectivePromptSelection(prompt)),
+					)
+				: options.reviewAgent;
 		} catch (error) {
 			return commentSseError(errorMessage(error), 500);
 		}
@@ -2023,10 +2287,6 @@ export function createReviewRoutes(
 		activeCommentGenerations.set(draftId, controller);
 		let removeDisconnectListener: (() => void) | undefined;
 		try {
-			const prompt = await readPrompt("review-comment-from-chat", {
-				preset: presetFor("review-comment-from-chat"),
-				dir: promptDirOption(),
-			});
 			const chatIndex = state.chats.findIndex(
 				(candidate) => candidate.id === chatId,
 			);
@@ -2058,7 +2318,7 @@ export function createReviewRoutes(
 						agent,
 						worktreePath: state.worktreePath,
 						runDir,
-						promptText: prompt.text,
+						promptText,
 						conversationMarkdown,
 						timeoutMs:
 							options.commentFromChatTimeoutMs ?? COMMENT_FROM_CHAT_TIMEOUT_MS,
@@ -2639,6 +2899,37 @@ export function createReviewRoutes(
 					return deleteComment(draftId);
 				return emptyResponse(404);
 			}
+			if (request.method === "GET" && url.pathname === "/api/settings/models") {
+				const agents = url.searchParams.getAll("agent");
+				const agent = agents.length === 1 ? agents[0] : undefined;
+				if (agent !== "omp" && agent !== "claude")
+					return jsonResponse({ error: "Invalid agent" }, 400);
+
+				if (agent === "omp") {
+					try {
+						const models = await discoverOmpModels(
+							ompModelCatalogConfig(),
+							options.ompModelCatalogProcessRunner,
+						);
+						return jsonResponse({ models, source: "omp" });
+					} catch {
+						return jsonResponse(
+							{ error: "OMP model discovery failed; retry the request." },
+							503,
+						);
+					}
+				}
+
+				const catalog = await discoverClaudeModels({
+					apiKey: process.env.ANTHROPIC_API_KEY ?? null,
+					fetcher: options.claudeModelCatalogFetcher,
+				});
+				return jsonResponse({
+					models: catalog.models,
+					source: catalog.source,
+					...(catalog.warning ? { warning: catalog.warning } : {}),
+				});
+			}
 			if (request.method === "GET" && url.pathname === "/api/settings") {
 				return settingsSnapshot();
 			}
@@ -2652,7 +2943,7 @@ export function createReviewRoutes(
 				request.method === "POST" &&
 				url.pathname === "/api/settings/review"
 			) {
-				return updateReviewSettings(request);
+				return await updateReviewSettings(request);
 			}
 			if (
 				request.method === "GET" &&

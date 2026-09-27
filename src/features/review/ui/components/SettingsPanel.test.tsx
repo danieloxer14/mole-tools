@@ -6,7 +6,6 @@ import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import { applyColorTheme } from "../color-theme";
 import {
 	isSaveDisabled,
-	MODEL_QUICK_PICKS,
 	type PromptEditorValue,
 	type PromptSnapshot,
 	SettingsPanel,
@@ -15,7 +14,6 @@ import {
 	SLOT_LABELS,
 	VISIBLE_SLOTS,
 } from "./SettingsPanel";
-
 import { Dialog, DialogContent } from "./ui/dialog";
 
 const initialSettings: SettingsSnapshot = {
@@ -44,6 +42,7 @@ const initialPrompt: PromptSnapshot = {
 	versions: [1, 2, 3],
 	agent: "omp",
 	model: "sonnet",
+	effort: null,
 };
 function render(prompt: PromptSnapshot = initialPrompt): string {
 	return renderToStaticMarkup(
@@ -67,21 +66,20 @@ function jsonResponse(value: unknown, status = 200): Response {
 	});
 }
 
-function setControlValue(
-	element: HTMLInputElement | HTMLSelectElement | null,
+function changeSelect(
+	container: ParentNode,
+	selector: string,
 	value: string,
-	eventName: "change" | "input",
 ): void {
-	if (!element) return;
-	if (element instanceof window.HTMLInputElement) {
-		Object.getOwnPropertyDescriptor(
-			window.HTMLInputElement.prototype,
-			"value",
-		)?.set?.call(element, value);
-	} else {
-		element.value = value;
-	}
-	element.dispatchEvent(new window.Event(eventName, { bubbles: true }));
+	const select = container.querySelector<HTMLSelectElement>(selector);
+	if (!select) throw new Error(`Missing select ${selector}`);
+	select.value = value;
+	select.dispatchEvent(new window.Event("change", { bubbles: true }));
+}
+
+async function flushReact(): Promise<void> {
+	await Bun.sleep(0);
+	await Bun.sleep(0);
 }
 
 test("keeps visible slot labels in order and shows active preset and latest version", () => {
@@ -169,11 +167,12 @@ test("description follows the selected slot, not the first visible one", () => {
 		escapedText(SLOT_DESCRIPTIONS["review-layers-plan"]),
 	);
 });
-test("isSaveDisabled covers unchanged, changed, and pending values", () => {
+test("isSaveDisabled covers unchanged and changed text, agent, model, and effort", () => {
 	const loaded: PromptEditorValue = {
 		text: "same",
 		agent: "default",
 		model: "sonnet",
+		effort: "",
 	};
 	expect(isSaveDisabled(loaded, { ...loaded }, false)).toBe(true);
 	expect(isSaveDisabled(loaded, { ...loaded, agent: "omp" }, false)).toBe(
@@ -185,6 +184,9 @@ test("isSaveDisabled covers unchanged, changed, and pending values", () => {
 	expect(isSaveDisabled(loaded, { ...loaded, model: " sonnet " }, false)).toBe(
 		true,
 	);
+	expect(isSaveDisabled(loaded, { ...loaded, effort: "high" }, false)).toBe(
+		false,
+	);
 	expect(isSaveDisabled(loaded, { ...loaded, text: "changed" }, false)).toBe(
 		false,
 	);
@@ -192,7 +194,7 @@ test("isSaveDisabled covers unchanged, changed, and pending values", () => {
 		true,
 	);
 });
-test("renders version agent and model with default label", () => {
+test("renders version agent, model, and effort dropdowns with inherited defaults", () => {
 	const settings: SettingsSnapshot = {
 		...initialSettings,
 		review: { ...initialSettings.review, agent: "claude" },
@@ -208,8 +210,13 @@ test("renders version agent and model with default label", () => {
 
 	expect(markup).toContain('<option value="default">Default (claude)</option>');
 	expect(markup).toContain('<option value="omp" selected="">omp</option>');
-	expect(markup).toContain('id="settings-prompt-model"');
+	expect(markup).toContain('<select id="settings-prompt-model"');
+	expect(markup).toContain('<select id="settings-prompt-effort"');
 	expect(markup).toContain('value="sonnet"');
+	expect(markup).toContain(
+		'<fieldset class="min-w-0 flex flex-wrap items-end gap-3">',
+	);
+	expect(markup).not.toContain('<input id="settings-prompt-model"');
 });
 test("save posts agent and model", async () => {
 	const originalFetch = globalThis.fetch;
@@ -223,6 +230,12 @@ test("save posts agent and model", async () => {
 	globalThis.fetch = (async (input: string, init?: RequestInit) => {
 		const url = String(input);
 		calls.push({ url, init });
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [{ id: "sonnet", label: "Sonnet", efforts: ["low", "high"] }],
+				source: "omp",
+			});
+		}
 		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST") {
 			return jsonResponse({ version: 4, saved: true });
@@ -275,6 +288,9 @@ test("save posts agent and model", async () => {
 			),
 		);
 		await act(async () => {
+			await flushReact();
+		});
+		await act(async () => {
 			setValue(
 				container.querySelector("#settings-prompt-agent"),
 				"omp",
@@ -283,7 +299,7 @@ test("save posts agent and model", async () => {
 			setValue(
 				container.querySelector("#settings-prompt-model"),
 				"sonnet",
-				"input",
+				"change",
 			);
 			await Bun.sleep(0);
 		});
@@ -298,6 +314,7 @@ test("save posts agent and model", async () => {
 			text: "loaded prompt text",
 			agent: "omp",
 			model: "sonnet",
+			effort: null,
 		});
 
 		await act(async () => {
@@ -308,7 +325,7 @@ test("save posts agent and model", async () => {
 				"default",
 				"change",
 			);
-			setValue(container.querySelector("#settings-prompt-model"), "", "input");
+			setValue(container.querySelector("#settings-prompt-model"), "", "change");
 			await Bun.sleep(0);
 		});
 		await act(async () => {
@@ -320,6 +337,7 @@ test("save posts agent and model", async () => {
 			text: "loaded prompt text",
 			agent: null,
 			model: null,
+			effort: null,
 		});
 	} finally {
 		act(() => root.unmount());
@@ -328,36 +346,144 @@ test("save posts agent and model", async () => {
 	}
 });
 
-test("disables unchanged saves and renders review agent options and model", () => {
-	const markup = render();
-	expect(markup).toContain('rows="15"');
+test("default review controls live only in General", () => {
+	const prompts = render();
+	expect(prompts).toContain('id="settings-prompt-model"');
+	expect(prompts).not.toContain("Default Agent");
+	expect(prompts).not.toContain("Default model");
+	expect(prompts).not.toContain("Default effort");
+	expect(prompts).not.toContain('id="settings-default-agent"');
+	expect(prompts).not.toContain('id="settings-default-model"');
+	expect(prompts).not.toContain('id="settings-default-effort"');
 
-	expect(markup).toMatch(
-		/<button[^>]*disabled(?:="")?[^>]*>Save as new version<\/button>/,
+	const general = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+		}),
 	);
-	expect(markup).toContain('<option value="omp" selected="">omp</option>');
-	expect(markup).toContain('<option value="claude">claude</option>');
-	expect(markup).toContain('value="claude-sonnet-4"');
-	expect(markup).toContain('<select id="settings-model-quickpick"');
-	expect(markup).toMatch(
-		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="" selected="">Custom…<\/option>\s*<\/select>/,
+	expect(general).toContain('id="settings-default-agent"');
+	expect(general).toContain('id="settings-default-model"');
+	expect(general).toContain('id="settings-default-effort"');
+	expect(general).toMatch(
+		/<fieldset class="min-w-0 flex flex-wrap items-end gap-3"><legend class="sr-only">Review defaults<\/legend>[\s\S]*?id="settings-default-agent"[\s\S]*?id="settings-default-model"[\s\S]*?id="settings-default-effort"[\s\S]*?<\/fieldset>/,
 	);
-	for (const model of MODEL_QUICK_PICKS) {
-		expect(markup).not.toContain(`<option value="${model}">`);
-	}
+	expect(general).toContain("Default Agent");
+	expect(general).toContain("Default model");
+	expect(general).toContain("Default effort");
+	expect(general).toContain(">Save</button>");
+	expect(general).toContain("claude-sonnet-4 (current custom model)");
+});
+// Happy DOM exercises narrow-screen navigation but does not prove pixel geometry.
+test("375px settings controls stay keyboard and scroll reachable", async () => {
+	const scriptPath = new URL("./SettingsPanel.375px.smoke.tsx", import.meta.url)
+		.pathname;
+	const child = Bun.spawn(
+		["bun", "run", "--preload=./test/setup-dom.ts", scriptPath],
+		{
+			cwd: process.cwd(),
+			stdout: "pipe",
+			stderr: "pipe",
+		},
+	);
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	if (exitCode !== 0)
+		throw new Error(`Happy DOM viewport smoke failed:\n${stdout}\n${stderr}`);
+	expect(stdout).toContain("Happy DOM 375px settings smoke passed");
 });
 
-test("renders codex options for review and prompt agents", () => {
-	const markup = render();
-	expect(markup.split('<option value="codex">codex</option>').length - 1).toBe(
-		2,
-	);
-});
+test("General loads selected-agent catalog, shows errors, and saves persisted defaults", async () => {
+	const originalFetch = globalThis.fetch;
+	const calls: Array<{ url: string; init?: RequestInit }> = [];
+	let persistedSettings = initialSettings;
+	let failNextSave = true;
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		calls.push({ url, init });
+		if (url.includes("/api/settings/models?")) {
+			const agent = new URL(url, "http://settings.test").searchParams.get(
+				"agent",
+			);
+			return jsonResponse(
+				agent === "claude"
+					? {
+							models: [
+								{
+									id: "claude-model-a",
+									label: "Claude Model A",
+									efforts: ["low", "high"],
+								},
+							],
+							source: "anthropic-api",
+							warning: "API-key entitlement controls model availability.",
+						}
+					: {
+							models: [
+								{
+									id: "omp-model-a",
+									label: "OMP Model A",
+									efforts: ["minimal", "high"],
+								},
+							],
+							source: "omp",
+						},
+			);
+		}
+		if (url.includes("/api/settings/review") && init?.method === "POST") {
+			if (failNextSave) {
+				failNextSave = false;
+				return jsonResponse({ error: "Settings write failed" }, 500);
+			}
+			const body = JSON.parse(String(init.body)) as {
+				agent: "omp" | "claude";
+				model: string | null;
+				effort: string | null;
+			};
+			persistedSettings = {
+				...persistedSettings,
+				review: {
+					...persistedSettings.review,
+					agent: body.agent,
+					model: body.model ?? undefined,
+					effort: (body.effort ??
+						undefined) as SettingsSnapshot["review"]["effort"],
+				},
+			};
+			return jsonResponse({ saved: true });
+		}
+		if (url.includes("/api/settings")) return jsonResponse(persistedSettings);
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
 
-test("keeps codex selected for review and prompt agents", () => {
 	const container = document.createElement("div");
 	const root = createRoot(container);
 	document.body.append(container);
+	const clickTab = async (label: string) => {
+		const tab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('button[role="tab"]'),
+		).find((candidate) => candidate.textContent === label);
+		await act(async () => {
+			tab?.click();
+			await flushReact();
+		});
+	};
+	const save = async () => {
+		const button = Array.from(container.querySelectorAll("button")).find(
+			(candidate) => candidate.textContent === "Save",
+		);
+		await act(async () => {
+			button?.click();
+			await flushReact();
+		});
+	};
 
 	try {
 		act(() =>
@@ -370,24 +496,402 @@ test("keeps codex selected for review and prompt agents", () => {
 				}),
 			),
 		);
-		for (const id of ["#settings-agent", "#settings-prompt-agent"]) {
-			const select = container.querySelector<HTMLSelectElement>(id);
-			if (!select) throw new Error(`Missing select ${id}`);
-			act(() => {
-				select.value = "codex";
-				select.dispatchEvent(new window.Event("change", { bubbles: true }));
-			});
-			expect(container.querySelector<HTMLSelectElement>(id)?.value).toBe(
-				"codex",
-			);
-		}
+		await clickTab("General");
+
+		const ompRequest = calls.find((call) =>
+			call.url.includes("/api/settings/models?agent=omp"),
+		);
+		expect(ompRequest).toBeDefined();
+		expect(new Headers(ompRequest?.init?.headers).get("X-Mole-Token")).toBe(
+			"settings-test-token",
+		);
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-model")
+				?.value,
+		).toBe("claude-sonnet-4");
+
+		await act(async () => {
+			changeSelect(container, "#settings-default-agent", "claude");
+			await flushReact();
+		});
+		const modelSelect = container.querySelector<HTMLSelectElement>(
+			"#settings-default-model",
+		);
+		expect(
+			Array.from(modelSelect?.options ?? []).map((option) => option.value),
+		).toContain("claude-model-a");
+		expect(container.textContent).toContain("Anthropic API");
+		expect(container.textContent).toContain(
+			"API-key entitlement controls model availability.",
+		);
+		await act(async () => {
+			changeSelect(container, "#settings-default-model", "claude-model-a");
+			await flushReact();
+		});
+		const effortSelect = container.querySelector<HTMLSelectElement>(
+			"#settings-default-effort",
+		);
+		expect(
+			Array.from(effortSelect?.options ?? []).map((option) => option.value),
+		).toEqual(["", "low", "high"]);
+		await act(async () => {
+			changeSelect(container, "#settings-default-effort", "high");
+			await flushReact();
+		});
+
+		await save();
+		expect(container.textContent).toContain("Settings write failed");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-model")
+				?.value,
+		).toBe("claude-model-a");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-effort")
+				?.value,
+		).toBe("high");
+
+		await save();
+		expect(
+			calls
+				.filter(
+					(call) =>
+						call.url.includes("/api/settings/review") &&
+						call.init?.method === "POST",
+				)
+				.map((call) => JSON.parse(String(call.init?.body))),
+		).toEqual([
+			{
+				agent: "claude",
+				model: "claude-model-a",
+				effort: "high",
+			},
+			{
+				agent: "claude",
+				model: "claude-model-a",
+				effort: "high",
+			},
+		]);
+		expect(
+			calls.some(
+				(call) =>
+					call.url.includes("/api/settings?") && call.init?.method !== "POST",
+			),
+		).toBe(true);
+		expect(persistedSettings.review).toMatchObject({
+			agent: "claude",
+			model: "claude-model-a",
+			effort: "high",
+		});
+		expect(container.textContent).toContain("Saved review defaults");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-agent")
+				?.value,
+		).toBe("claude");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-model")
+				?.value,
+		).toBe("claude-model-a");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-effort")
+				?.value,
+		).toBe("high");
 	} finally {
 		act(() => root.unmount());
 		container.remove();
+		globalThis.fetch = originalFetch;
 	}
 });
 
-test("styles prompt text like Skills with editor spacing", () => {
+test("General ignores stale catalog responses after agent switch", async () => {
+	const originalFetch = globalThis.fetch;
+	let resolveOmp: ((response: Response) => void) | undefined;
+	let resolveClaude: ((response: Response) => void) | undefined;
+	const ompResponse = new Promise<Response>((resolve) => {
+		resolveOmp = resolve;
+	});
+	const claudeResponse = new Promise<Response>((resolve) => {
+		resolveClaude = resolve;
+	});
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?agent=omp")) return ompResponse;
+		if (url.includes("/api/settings/models?agent=claude"))
+			return claudeResponse;
+		if (url.includes("/api/settings")) return jsonResponse(initialSettings);
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt,
+					initialTab: "general",
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+		expect(resolveOmp).toBeDefined();
+		await act(async () => {
+			changeSelect(container, "#settings-default-agent", "claude");
+			await flushReact();
+		});
+		expect(resolveClaude).toBeDefined();
+
+		await act(async () => {
+			resolveClaude?.(
+				jsonResponse({
+					models: [{ id: "claude-current", label: "Claude", efforts: ["low"] }],
+					source: "anthropic-api",
+				}),
+			);
+			await flushReact();
+		});
+		await act(async () => {
+			resolveOmp?.(
+				jsonResponse({
+					models: [
+						{ id: "omp-stale", label: "Stale OMP", efforts: ["minimal"] },
+					],
+					source: "omp",
+				}),
+			);
+			await flushReact();
+		});
+
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-agent")
+				?.value,
+		).toBe("claude");
+		const models = Array.from(
+			container.querySelector<HTMLSelectElement>("#settings-default-model")
+				?.options ?? [],
+		).map((option) => option.value);
+		expect(models).toContain("claude-current");
+		expect(models).not.toContain("omp-stale");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("loads and selects Codex models in General and prompt settings", async () => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/codex-models")) {
+			return jsonResponse({
+				models: [
+					{
+						id: "gpt-6-astra",
+						label: "GPT-6 Astra",
+						efforts: ["low", "high"],
+					},
+				],
+			});
+		}
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [],
+				source: "omp",
+			});
+		}
+		if (url.includes("/api/settings")) return jsonResponse(initialSettings);
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt,
+					initialTab: "general",
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+		await act(async () => {
+			changeSelect(container, "#settings-default-agent", "codex");
+			await flushReact();
+		});
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-model")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toContain("gpt-6-astra");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "low", "high"]);
+
+		const promptsTab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('button[role="tab"]'),
+		).find((tab) => tab.textContent === "Prompts");
+		await act(async () => {
+			promptsTab?.click();
+			await flushReact();
+		});
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-agent", "codex");
+			await flushReact();
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("codex");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "low", "high"]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("General preserves custom model and effort through catalog failure and retry", async () => {
+	const originalFetch = globalThis.fetch;
+	let catalogRequests = 0;
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			model: "custom-model",
+			effort: "high",
+		},
+	};
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?")) {
+			catalogRequests += 1;
+			return catalogRequests === 1
+				? jsonResponse({ error: "Catalog offline" }, 503)
+				: jsonResponse({
+						models: [
+							{
+								id: "omp-new-model",
+								label: "New OMP Model",
+								efforts: ["minimal"],
+							},
+						],
+						source: "omp",
+					});
+		}
+		if (url.includes("/api/settings")) return jsonResponse(settings);
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt,
+					initialTab: "general",
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+
+		expect(container.textContent).toContain("Catalog offline");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-model")
+				?.value,
+		).toBe("custom-model");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-model")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toContain("custom-model");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-effort")
+				?.value,
+		).toBe("high");
+
+		const retryButton = Array.from(
+			container.querySelectorAll<HTMLButtonElement>("button"),
+		).find((button) => button.textContent === "Retry");
+		await act(async () => {
+			retryButton?.click();
+			await flushReact();
+		});
+		expect(container.textContent).not.toContain("Catalog offline");
+		expect(container.textContent).toContain("configured OMP executable");
+		expect(catalogRequests).toBe(2);
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-model")
+				?.value,
+		).toBe("custom-model");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-model")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toContain("custom-model");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-effort")
+				?.value,
+		).toBe("high");
+
+		await act(async () => {
+			changeSelect(container, "#settings-default-model", "omp-new-model");
+			await flushReact();
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-default-effort")
+				?.value,
+		).toBe("");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "minimal"]);
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-model")
+					?.options ?? [],
+			).map((option) => option.value),
+		).not.toContain("custom-model");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("styles prompt heading with editor spacing", () => {
 	const markup = render();
 
 	expect(markup).toContain(
@@ -396,301 +900,6 @@ test("styles prompt text like Skills with editor spacing", () => {
 	expect(markup).toMatch(
 		/<div class="space-y-2"><label class="block text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea(?=[^>]*class="[^"]*min-h-64 font-mono text-sm")(?=[^>]*id="settings-prompt")[^>]*>/,
 	);
-});
-
-test("quickpick and text input both reflect a listed Claude model", () => {
-	const settings: SettingsSnapshot = {
-		...initialSettings,
-		review: { ...initialSettings.review, agent: "claude", model: "sonnet" },
-	};
-	const markup = renderToStaticMarkup(
-		createElement(SettingsPanel, {
-			token: "settings-test-token",
-			onClose: () => {},
-			initialSettings: settings,
-			initialPrompt,
-		}),
-	);
-
-	expect(markup).toContain('value="sonnet"');
-	expect(markup).toMatch(
-		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="">Custom…<\/option>\s*<option value="sonnet" selected="">sonnet<\/option>/,
-	);
-	for (const model of MODEL_QUICK_PICKS) {
-		expect(markup).toContain(`<option value="${model}"`);
-		expect(markup).toContain(`>${model}</option>`);
-	}
-});
-
-test("shows configured Codex model without Claude quick picks", () => {
-	const settings: SettingsSnapshot = {
-		...initialSettings,
-		review: {
-			...initialSettings.review,
-			agent: "codex",
-			model: "configured-codex-model",
-		},
-	};
-	const markup = renderToStaticMarkup(
-		createElement(SettingsPanel, {
-			token: "settings-test-token",
-			onClose: () => {},
-			initialSettings: settings,
-			initialPrompt,
-		}),
-	);
-
-	expect(markup).toContain('<option value="codex" selected="">codex</option>');
-	expect(markup).toContain('value="configured-codex-model"');
-	expect(markup).toContain('placeholder="Codex CLI default"');
-	expect(markup).toMatch(
-		/<select[^>]*id="settings-model-quickpick"[^>]*>\s*<option value="">Codex CLI default<\/option>\s*<option value="configured-codex-model" selected="">Custom…<\/option>/,
-	);
-	for (const model of MODEL_QUICK_PICKS) {
-		expect(markup).not.toContain(`<option value="${model}">`);
-	}
-});
-
-test("shows discovered Codex labels and saves the selected slug", async () => {
-	const originalFetch = globalThis.fetch;
-	const calls: Array<{ url: string; init?: RequestInit }> = [];
-	const settings: SettingsSnapshot = {
-		...initialSettings,
-		review: {
-			...initialSettings.review,
-			agent: "codex",
-			model: "configured-codex-model",
-		},
-	};
-	globalThis.fetch = (async (input: string, init?: RequestInit) => {
-		const url = String(input);
-		calls.push({ url, init });
-		if (url.includes("/api/settings/codex-models")) {
-			return jsonResponse({
-				models: [
-					{ id: "gpt-6-astra", label: "GPT-6-Astra" },
-					{ id: "gpt-6-sol", label: "GPT-6-Sol" },
-					{ id: "gpt-6-luna", label: "GPT-6-Luna" },
-				],
-			});
-		}
-		if (init?.method === "POST")
-			return jsonResponse({ agent: "codex", model: "gpt-6-astra" });
-		return jsonResponse(settings);
-	}) as unknown as typeof fetch;
-
-	const container = document.createElement("div");
-	const root = createRoot(container);
-	document.body.append(container);
-	try {
-		act(() =>
-			root.render(
-				createElement(SettingsPanel, {
-					token: "settings-test-token",
-					onClose: () => {},
-					initialSettings: settings,
-					initialPrompt,
-				}),
-			),
-		);
-		await act(async () => {
-			await Bun.sleep(0);
-			await Bun.sleep(0);
-		});
-		const quickpick = container.querySelector<HTMLSelectElement>(
-			"#settings-model-quickpick",
-		);
-		const model = container.querySelector<HTMLInputElement>("#settings-model");
-		const saveButton = Array.from(container.querySelectorAll("button")).find(
-			(button) => button.textContent?.includes("Save review agent"),
-		);
-		if (!quickpick || !model || !saveButton) {
-			throw new Error("Missing review model controls");
-		}
-		expect(
-			Array.from(quickpick.options, (option) => option.textContent),
-		).toEqual([
-			"Codex CLI default",
-			"GPT-6-Astra",
-			"GPT-6-Sol",
-			"GPT-6-Luna",
-			"Custom…",
-		]);
-		expect(quickpick.value).toBe("configured-codex-model");
-		expect(model.value).toBe("configured-codex-model");
-
-		await act(async () => {
-			setControlValue(model, "typed-codex-custom", "input");
-			await Bun.sleep(0);
-		});
-		expect(quickpick.value).toBe("typed-codex-custom");
-		expect(model.value).toBe("typed-codex-custom");
-
-		await act(async () => {
-			setControlValue(quickpick, "gpt-6-astra", "change");
-			await Bun.sleep(0);
-		});
-		expect(quickpick.value).toBe("gpt-6-astra");
-		expect(model.value).toBe("gpt-6-astra");
-		await act(async () => {
-			saveButton.click();
-			await Bun.sleep(0);
-			await Bun.sleep(0);
-		});
-		const saveRequest = calls.find(
-			(call) =>
-				call.init?.method === "POST" &&
-				call.url.includes("/api/settings/review"),
-		);
-		expect(JSON.parse(String(saveRequest?.init?.body))).toEqual({
-			agent: "codex",
-			model: "gpt-6-astra",
-		});
-	} finally {
-		act(() => root.unmount());
-		container.remove();
-		globalThis.fetch = originalFetch;
-	}
-});
-
-test("keeps unsaved models isolated when switching review agents", async () => {
-	const settings: SettingsSnapshot = {
-		...initialSettings,
-		review: { ...initialSettings.review, agent: "claude", model: "sonnet" },
-	};
-	const container = document.createElement("div");
-	const root = createRoot(container);
-	document.body.append(container);
-
-	try {
-		act(() =>
-			root.render(
-				createElement(SettingsPanel, {
-					token: "settings-test-token",
-					onClose: () => {},
-					initialSettings: settings,
-					initialPrompt,
-				}),
-			),
-		);
-		const agent = container.querySelector<HTMLSelectElement>("#settings-agent");
-		const model = container.querySelector<HTMLInputElement>("#settings-model");
-		const quickpick = container.querySelector<HTMLSelectElement>(
-			"#settings-model-quickpick",
-		);
-		if (!agent || !model || !quickpick) {
-			throw new Error("Missing review model controls");
-		}
-		const changeValue = async (
-			element: HTMLInputElement | HTMLSelectElement,
-			value: string,
-			eventName: "change" | "input",
-		) => {
-			await act(async () => {
-				setControlValue(element, value, eventName);
-				await Bun.sleep(0);
-			});
-		};
-
-		expect(model.value).toBe("sonnet");
-		expect(quickpick.value).toBe("sonnet");
-		await changeValue(agent, "codex", "change");
-		expect(model.value).toBe("");
-		expect(model.placeholder).toBe("Codex CLI default");
-		expect(quickpick.value).toBe("");
-		expect(
-			Array.from(quickpick.options, (option) => option.textContent),
-		).toEqual(["Codex CLI default"]);
-
-		await changeValue(model, "configured-codex-model", "input");
-		expect(quickpick.value).toBe("configured-codex-model");
-		await changeValue(agent, "claude", "change");
-		expect(model.value).toBe("sonnet");
-		expect(model.placeholder).toBe("");
-		expect(quickpick.value).toBe("sonnet");
-
-		await changeValue(agent, "codex", "change");
-		expect(model.value).toBe("configured-codex-model");
-		expect(quickpick.value).toBe("configured-codex-model");
-		await changeValue(quickpick, "", "change");
-		expect(model.value).toBe("");
-		expect(model.placeholder).toBe("Codex CLI default");
-		expect(
-			Array.from(quickpick.options, (option) => option.textContent),
-		).toEqual(["Codex CLI default"]);
-	} finally {
-		act(() => root.unmount());
-		container.remove();
-	}
-});
-
-test("saving Codex CLI default omits model from review settings request", async () => {
-	const originalFetch = globalThis.fetch;
-	const calls: Array<{ url: string; init?: RequestInit }> = [];
-	const settings: SettingsSnapshot = {
-		...initialSettings,
-		review: {
-			...initialSettings.review,
-			agent: "codex",
-			model: "configured-codex-model",
-		},
-	};
-	globalThis.fetch = (async (input: string, init?: RequestInit) => {
-		calls.push({ url: String(input), init });
-		if (init?.method === "POST") return jsonResponse({ agent: "codex" });
-		return jsonResponse(settings);
-	}) as unknown as typeof fetch;
-
-	const container = document.createElement("div");
-	const root = createRoot(container);
-	document.body.append(container);
-
-	try {
-		act(() =>
-			root.render(
-				createElement(SettingsPanel, {
-					token: "settings-test-token",
-					onClose: () => {},
-					initialSettings: settings,
-					initialPrompt,
-				}),
-			),
-		);
-		const quickpick = container.querySelector<HTMLSelectElement>(
-			"#settings-model-quickpick",
-		);
-		const model = container.querySelector<HTMLInputElement>("#settings-model");
-		const saveButton = Array.from(container.querySelectorAll("button")).find(
-			(button) => button.textContent?.includes("Save review agent"),
-		);
-		if (!quickpick || !model || !saveButton) {
-			throw new Error("Missing review model save controls");
-		}
-
-		await act(async () => {
-			setControlValue(quickpick, "", "change");
-			await Bun.sleep(0);
-		});
-		expect(model.value).toBe("");
-		await act(async () => {
-			saveButton.click();
-			await Bun.sleep(0);
-			await Bun.sleep(0);
-		});
-
-		const saveRequest = calls.find(
-			(call) =>
-				call.init?.method === "POST" &&
-				call.url.includes("/api/settings/review"),
-		);
-		expect(JSON.parse(String(saveRequest?.init?.body))).toEqual({
-			agent: "codex",
-		});
-	} finally {
-		act(() => root.unmount());
-		container.remove();
-		globalThis.fetch = originalFetch;
-	}
 });
 
 test("falls back to Claude when the settings snapshot omits the review agent", () => {
@@ -709,6 +918,7 @@ test("falls back to Claude when the settings snapshot omits the review agent", (
 			onClose: () => {},
 			initialSettings: settings,
 			initialPrompt,
+			initialTab: "general",
 		}),
 	);
 	expect(markup).toContain(
@@ -724,10 +934,10 @@ test("only renders rollback for a non-latest version", () => {
 	);
 });
 
-test("keeps settings controls reachable in responsive bounded layout", () => {
+test("keeps prompt settings controls reachable in responsive bounded layout", () => {
 	const markup = render();
 
-	expect(markup).toContain("flex h-full min-h-0 flex-col");
+	expect(markup).toContain("flex h-full min-h-0 min-w-0 flex-col");
 	expect(markup).toContain("grid-cols-1");
 	expect(markup).toContain("md:grid-cols-[14rem_minmax(0,1fr)]");
 	expect(markup).toMatch(
@@ -735,22 +945,38 @@ test("keeps settings controls reachable in responsive bounded layout", () => {
 	);
 	expect(markup).toContain("overflow-auto");
 	expect(markup).toContain('<nav class="space-y-1" aria-label="Prompt slots">');
+	expect(markup).not.toContain('<input id="settings-prompt-model"');
 	expect(markup).toMatch(
-		/<nav class="space-y-1" aria-label="Prompt slots">[\s\S]*<\/nav><section class="min-w-0 space-y-4 md:border-l md:pl-6"/,
+		/<fieldset class="min-w-0 flex flex-wrap items-end gap-3"><legend class="sr-only">Prompt agent, model, and effort<\/legend>[\s\S]*?id="settings-prompt-agent"[\s\S]*?id="settings-prompt-model"[\s\S]*?id="settings-prompt-effort"[\s\S]*?<\/fieldset>/,
 	);
-
-	expect(markup).toContain('<input id="settings-prompt-model"');
 	for (const id of [
 		"settings-preset",
 		"settings-version",
 		"settings-prompt-agent",
-		"settings-agent",
-		"settings-model-quickpick",
+		"settings-prompt-model",
+		"settings-prompt-effort",
 	]) {
 		expect(markup).toContain(`<select id="${id}"`);
 	}
-	expect(markup).toContain('<option value="default">default (active)</option>');
-	expect(markup).toContain('<option value="omp" selected="">omp</option>');
+	expect(markup).not.toContain('id="settings-default-agent"');
+
+	const general = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+		}),
+	);
+	expect(general).toContain('class="min-w-0 flex flex-wrap items-end gap-3"');
+	for (const id of [
+		"settings-default-agent",
+		"settings-default-model",
+		"settings-default-effort",
+	]) {
+		expect(general).toContain(`<select id="${id}"`);
+	}
 });
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -861,20 +1087,23 @@ test("settings dialog closes through icon, Escape, and backdrop with focus retur
 		container.remove();
 	}
 });
-test("renders Prompts, Skills and Appearance tabs with Prompts selected", () => {
+test("renders General, Prompts, Skills and Appearance tabs with Prompts selected", () => {
 	const markup = render();
 
 	const tabs = Array.from(
 		markup.matchAll(/<button[^>]*role="tab"[^>]*>([^<]+)<\/button>/g),
 	);
 	expect(tabs.map((tab) => tab[1])).toEqual([
+		"General",
 		"Prompts",
 		"Skills",
 		"Appearance",
 	]);
-	expect(tabs[0]?.[0]).toContain('aria-selected="true"');
+	expect(tabs[1]?.[0]).toContain('aria-selected="true"');
 	expect(
-		tabs.slice(1).every((tab) => tab[0]?.includes('aria-selected="false"')),
+		tabs
+			.filter((_, index) => index !== 1)
+			.every((tab) => tab[0]?.includes('aria-selected="false"')),
 	).toBe(true);
 });
 
@@ -887,6 +1116,9 @@ test("applies and saves a selected color theme", async () => {
 		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
 		if (init?.method === "POST" && url.includes("/api/settings/appearance")) {
 			return jsonResponse({ colorTheme: "light" });
+		}
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({ models: [], source: "omp" });
 		}
 		return jsonResponse(initialSettings);
 	}) as unknown as typeof fetch;
@@ -985,6 +1217,9 @@ test("restores the color theme after a failed save and permits re-entry", async 
 				});
 			}
 			return jsonResponse({ colorTheme: "light" });
+		}
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({ models: [], source: "omp" });
 		}
 		return jsonResponse(initialSettings);
 	}) as unknown as typeof fetch;
@@ -1109,5 +1344,794 @@ test("restores the color theme after a failed save and permits re-entry", async 
 		container.remove();
 		document.documentElement.className = "";
 		globalThis.fetch = originalFetch;
+	}
+});
+test("saves effort-only prompt override while leaving inherited agent and model unset", async () => {
+	const originalFetch = globalThis.fetch;
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			agent: "omp",
+			model: "sonnet",
+			effort: "low",
+		},
+	};
+	let savedPrompt: PromptSnapshot = {
+		...initialPrompt,
+		text: "Loaded prompt",
+		preset: "default",
+		version: 1,
+		versions: [1],
+		agent: null,
+		model: null,
+		effort: null,
+	};
+	const writes: unknown[] = [];
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [
+					{ id: "sonnet", label: "Sonnet", efforts: ["low", "high"] },
+					{ id: "opus", label: "Opus", efforts: ["low"] },
+				],
+				source: "omp",
+			});
+		}
+		if (url.includes("/api/prompts/") && init?.method === "POST") {
+			const body = JSON.parse(String(init.body)) as {
+				text: string;
+				preset: string;
+				agent: PromptSnapshot["agent"];
+				model: string | null;
+				effort: PromptSnapshot["effort"];
+			};
+			writes.push(body);
+			savedPrompt = { ...body, version: 2, versions: [1, 2] };
+			return jsonResponse({ version: 2, saved: true });
+		}
+		if (url.includes("/api/settings")) return jsonResponse(settings);
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
+		if (url.includes("/api/prompts/")) return jsonResponse(savedPrompt);
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+
+	const initial: PromptSnapshot = {
+		text: "Loaded prompt",
+		preset: "default",
+		version: 1,
+		versions: [1],
+		agent: null,
+		model: null,
+		effort: null,
+	};
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const saveButton = () =>
+		Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+			(button) => button.textContent?.includes("Save as new version"),
+		);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt: initial,
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("default");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+				?.value,
+		).toBe("");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+				?.value,
+		).toBe("");
+		expect(container.textContent).toContain("Default (sonnet)");
+		expect(container.textContent).toContain("Default (low)");
+		expect(saveButton()?.disabled).toBe(true);
+
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-effort", "high");
+			await flushReact();
+		});
+		expect(saveButton()?.disabled).toBe(false);
+
+		await act(async () => {
+			saveButton()?.click();
+			await flushReact();
+		});
+
+		expect(writes).toEqual([
+			{
+				preset: "default",
+				text: "Loaded prompt",
+				agent: null,
+				model: null,
+				effort: "high",
+			},
+		]);
+		expect(savedPrompt.version).toBe(2);
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-version")?.value,
+		).toBe("2");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("default");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+				?.value,
+		).toBe("");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+				?.value,
+		).toBe("high");
+		expect(saveButton()?.disabled).toBe(true);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("explicit prompt agent uses CLI defaults and ignores stale catalog responses", async () => {
+	const originalFetch = globalThis.fetch;
+	let resolveOmp: ((response: Response) => void) | undefined;
+	let resolveClaude: ((response: Response) => void) | undefined;
+	const ompResponse = new Promise<Response>((resolve) => {
+		resolveOmp = resolve;
+	});
+	const claudeResponse = new Promise<Response>((resolve) => {
+		resolveClaude = resolve;
+	});
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			agent: "omp",
+			model: "inherited-sonnet",
+			effort: "high",
+		},
+	};
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?agent=omp")) return ompResponse;
+		if (url.includes("/api/settings/models?agent=claude"))
+			return claudeResponse;
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+
+	const initial: PromptSnapshot = {
+		text: "Unchanged prompt",
+		preset: "default",
+		version: 1,
+		versions: [1],
+		agent: null,
+		model: null,
+		effort: null,
+	};
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt: initial,
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+		expect(resolveOmp).toBeDefined();
+
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-agent", "claude");
+			await flushReact();
+		});
+		expect(resolveClaude).toBeDefined();
+
+		await act(async () => {
+			resolveClaude?.(
+				jsonResponse({
+					models: [
+						{ id: "claude-only", label: "Claude model", efforts: ["low"] },
+					],
+					source: "claude-aliases",
+				}),
+			);
+			await flushReact();
+		});
+		await act(async () => {
+			resolveOmp?.(
+				jsonResponse({
+					models: [
+						{ id: "omp-stale", label: "Stale OMP model", efforts: ["high"] },
+					],
+					source: "omp",
+				}),
+			);
+			await flushReact();
+		});
+
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("claude");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+				?.value,
+		).toBe("");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "claude-only"]);
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "low"]);
+		expect(container.textContent).toContain("Default (agent default)");
+		expect(container.textContent).not.toContain("inherited-sonnet");
+		expect(container.textContent).not.toContain("omp-stale");
+		expect(
+			container.querySelector<HTMLTextAreaElement>("#settings-prompt")?.value,
+		).toBe("Unchanged prompt");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("prompt effort choices follow selected model compatibility", async () => {
+	const originalFetch = globalThis.fetch;
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: { ...initialSettings.review, agent: "omp", model: "sonnet" },
+	};
+	const initial: PromptSnapshot = {
+		text: "Prompt",
+		preset: "default",
+		version: 1,
+		versions: [1],
+		agent: "omp",
+		model: "sonnet",
+		effort: "high",
+	};
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [
+					{ id: "sonnet", label: "Sonnet", efforts: ["low", "high"] },
+					{ id: "opus", label: "Opus", efforts: [] },
+				],
+				source: "omp",
+			});
+		}
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt: initial,
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "low", "high"]);
+
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-model", "opus");
+			await flushReact();
+		});
+		const effortSelect = container.querySelector<HTMLSelectElement>(
+			"#settings-prompt-effort",
+		);
+		expect(effortSelect?.value).toBe("high");
+		expect(
+			Array.from(effortSelect?.options ?? []).map((option) => option.value),
+		).toEqual(["", "high"]);
+		expect(container.textContent).toContain(
+			"The saved effort is not listed as compatible with this model",
+		);
+		expect(
+			Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+				(button) => button.textContent?.includes("Save as new version"),
+			)?.disabled,
+		).toBe(true);
+
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-effort", "");
+			await flushReact();
+		});
+		expect(effortSelect?.value).toBe("");
+		expect(
+			Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+				(button) => button.textContent?.includes("Save as new version"),
+			)?.disabled,
+		).toBe(false);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+test("omits incompatible inherited effort from prompt choices and saves", async () => {
+	const originalFetch = globalThis.fetch;
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		review: {
+			...initialSettings.review,
+			agent: "omp",
+			model: "global-model",
+			effort: "high",
+		},
+	};
+	let savedPrompt: PromptSnapshot = {
+		text: "Prompt",
+		preset: "default",
+		version: 1,
+		versions: [1],
+		agent: null,
+		model: "prompt-model",
+		effort: null,
+	};
+	const writes: unknown[] = [];
+	globalThis.fetch = (async (input: string, init?: RequestInit) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [
+					{ id: "global-model", label: "Global", efforts: ["high"] },
+					{ id: "prompt-model", label: "Prompt", efforts: ["low"] },
+				],
+				source: "omp",
+			});
+		}
+		if (url.includes("/api/prompts/") && init?.method === "POST") {
+			const body = JSON.parse(String(init.body)) as Omit<
+				PromptSnapshot,
+				"version" | "versions"
+			>;
+			writes.push(body);
+			savedPrompt = {
+				...body,
+				version: 2,
+				versions: [1, 2],
+			};
+			return jsonResponse({ version: 2, saved: true });
+		}
+		if (url.includes("/api/settings")) return jsonResponse(settings);
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
+		if (url.includes("/api/prompts/")) return jsonResponse(savedPrompt);
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const saveButton = () =>
+		Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+			(button) => button.textContent?.includes("Save as new version"),
+		);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt: savedPrompt,
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+
+		const effortSelect = container.querySelector<HTMLSelectElement>(
+			"#settings-prompt-effort",
+		);
+		expect(
+			Array.from(effortSelect?.options ?? []).map((option) => option.value),
+		).toEqual(["", "low"]);
+		expect(effortSelect?.value).toBe("");
+		expect(container.textContent).toContain("Default (agent default)");
+		expect(container.textContent).toContain(
+			"The selected model does not list the inherited effort as compatible",
+		);
+		expect(saveButton()?.disabled).toBe(true);
+
+		const promptEditor =
+			container.querySelector<HTMLTextAreaElement>("#settings-prompt");
+		if (!promptEditor) throw new Error("Missing prompt editor");
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(
+				window.HTMLTextAreaElement.prototype,
+				"value",
+			)?.set?.call(promptEditor, "Edited prompt");
+			promptEditor.dispatchEvent(new window.Event("input", { bubbles: true }));
+			await flushReact();
+		});
+		expect(saveButton()?.disabled).toBe(false);
+
+		await act(async () => {
+			saveButton()?.click();
+			await flushReact();
+		});
+
+		expect(writes).toEqual([
+			{
+				preset: "default",
+				text: "Edited prompt",
+				agent: null,
+				model: "prompt-model",
+				effort: null,
+			},
+		]);
+		expect(savedPrompt).toMatchObject({
+			agent: null,
+			model: "prompt-model",
+			effort: null,
+		});
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("slot, preset, and version changes restore each prompt metadata triple", async () => {
+	const originalFetch = globalThis.fetch;
+	const settings: SettingsSnapshot = {
+		...initialSettings,
+		slots: initialSettings.slots.map((slot) =>
+			slot.slot === "review-layers-code"
+				? {
+						...slot,
+						activePreset: "default",
+						presets: [
+							{ name: "default", latest: 2 },
+							{ name: "alternate", latest: 1 },
+						],
+					}
+				: slot,
+		),
+		review: {
+			...initialSettings.review,
+			agent: "omp",
+			model: "sonnet",
+			effort: "high",
+		},
+	};
+	const snapshots: Record<string, PromptSnapshot> = {
+		"review-layers-code|default|1": {
+			text: "Code version one",
+			preset: "default",
+			version: 1,
+			versions: [1, 2],
+			agent: null,
+			model: null,
+			effort: null,
+		},
+		"review-layers-code|alternate|1": {
+			text: "Alternate prompt",
+			preset: "alternate",
+			version: 1,
+			versions: [1],
+			agent: "claude",
+			model: "claude-sonnet",
+			effort: "medium",
+		},
+		"review-layers-plan|default|1": {
+			text: "Plan prompt",
+			preset: "default",
+			version: 1,
+			versions: [1],
+			agent: null,
+			model: null,
+			effort: "low",
+		},
+	};
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?")) {
+			const agent = new URL(url, "http://settings.test").searchParams.get(
+				"agent",
+			);
+			return jsonResponse({
+				models:
+					agent === "claude"
+						? [
+								{
+									id: "claude-sonnet",
+									label: "Claude Sonnet",
+									efforts: ["medium"],
+								},
+							]
+						: [{ id: "sonnet", label: "Sonnet", efforts: ["low", "high"] }],
+				source: agent === "claude" ? "claude-aliases" : "omp",
+			});
+		}
+		if (url.includes("/api/skills")) return jsonResponse({ skills: [] });
+		if (url.includes("/api/prompts/")) {
+			const parsed = new URL(url, "http://settings.test");
+			const slot = parsed.pathname.split("/").at(-1);
+			const preset = parsed.searchParams.get("preset") ?? "default";
+			const version =
+				Number(parsed.searchParams.get("rev")) ||
+				(slot === "review-layers-code" && preset === "default" ? 2 : 1);
+			const snapshot = snapshots[`${slot}|${preset}|${version}`];
+			if (!snapshot) throw new Error(`Unexpected prompt request: ${url}`);
+			return jsonResponse(snapshot);
+		}
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+
+	const initial: PromptSnapshot = {
+		text: "Code version two",
+		preset: "default",
+		version: 2,
+		versions: [1, 2],
+		agent: "omp",
+		model: "sonnet",
+		effort: "high",
+	};
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const saveButton = () =>
+		Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+			(button) => button.textContent?.includes("Save as new version"),
+		);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings: settings,
+					initialPrompt: initial,
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-effort", "low");
+			await flushReact();
+		});
+		expect(saveButton()?.disabled).toBe(false);
+		await act(async () => {
+			changeSelect(container, "#settings-version", "1");
+			await flushReact();
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("default");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+				?.value,
+		).toBe("");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+				?.value,
+		).toBe("");
+		expect(saveButton()?.disabled).toBe(true);
+
+		await act(async () => {
+			changeSelect(container, "#settings-preset", "alternate");
+			await flushReact();
+			await flushReact();
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("claude");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+				?.value,
+		).toBe("claude-sonnet");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+				?.value,
+		).toBe("medium");
+		expect(saveButton()?.disabled).toBe(true);
+
+		const planSlot = Array.from(
+			container.querySelectorAll<HTMLButtonElement>(
+				'nav[aria-label="Prompt slots"] button',
+			),
+		).find((button) => button.textContent?.includes("Review layers (plan)"));
+		await act(async () => {
+			planSlot?.click();
+			await flushReact();
+			await flushReact();
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("default");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-model")
+				?.value,
+		).toBe("");
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+				?.value,
+		).toBe("low");
+		expect(saveButton()?.disabled).toBe(true);
+		expect(
+			container.querySelector<HTMLTextAreaElement>("#settings-prompt")?.value,
+		).toBe("Plan prompt");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
+// JSDOM lacks layout; this checks focus and responsive scroll/wrap structure,
+// not pixel geometry.
+test("General and prompt controls stay keyboard and scroll reachable at 375px", async () => {
+	const originalFetch = globalThis.fetch;
+	const widthDescriptor = Object.getOwnPropertyDescriptor(window, "innerWidth");
+	Object.defineProperty(window, "innerWidth", {
+		configurable: true,
+		value: 375,
+	});
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [{ id: "omp-model", label: "OMP model", efforts: ["high"] }],
+				source: "omp",
+			});
+		}
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const focusControls = (selectors: string[]) => {
+		for (const selector of selectors) {
+			const control = container.querySelector<HTMLSelectElement>(selector);
+			if (!control) throw new Error(`Missing keyboard control ${selector}`);
+			expect(control.tabIndex).toBe(0);
+			expect(
+				container.querySelector(`label[for="${control.id}"]`),
+			).not.toBeNull();
+			control.focus();
+			expect(document.activeElement).toBe(control);
+		}
+	};
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt,
+					initialTab: "general",
+				}),
+			),
+		);
+		await act(async () => {
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		expect(window.innerWidth).toBe(375);
+		const generalRow = container
+			.querySelector("#settings-default-agent")
+			?.closest("fieldset");
+		expect(generalRow?.className).toContain("flex-wrap");
+		expect(generalRow?.className).toContain("min-w-0");
+		const generalScrollPanel = container
+			.querySelector("#settings-default-agent")
+			?.closest<HTMLElement>('[data-slot="tabs-content"]');
+		expect(generalScrollPanel?.className).toContain("overflow-auto");
+		focusControls([
+			"#settings-default-agent",
+			"#settings-default-model",
+			"#settings-default-effort",
+		]);
+
+		const generalTab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+		).find((tab) => tab.textContent === "General");
+		const promptsTab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+		).find((tab) => tab.textContent === "Prompts");
+		if (!generalTab || !promptsTab)
+			throw new Error("Settings navigation tabs are missing");
+		generalTab.focus();
+		await act(async () => {
+			generalTab.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "ArrowRight",
+					cancelable: true,
+					bubbles: true,
+				}),
+			);
+			await Promise.resolve();
+		});
+		expect(document.activeElement).toBe(promptsTab);
+		expect(promptsTab.getAttribute("aria-selected")).toBe("false");
+		await act(async () => {
+			promptsTab.click();
+			await Promise.resolve();
+		});
+		expect(promptsTab.getAttribute("aria-selected")).toBe("true");
+
+		const promptEffort = container.querySelector("#settings-prompt-effort");
+		const promptRow = promptEffort?.closest("fieldset");
+		expect(promptRow?.className).toContain("flex-wrap");
+		expect(promptRow?.className).toContain("min-w-0");
+		const promptScrollPanel =
+			promptEffort?.closest<HTMLElement>(".overflow-auto");
+		expect(promptScrollPanel?.className).toContain("grid-cols-1");
+		focusControls([
+			"#settings-prompt-agent",
+			"#settings-prompt-model",
+			"#settings-prompt-effort",
+		]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+		if (widthDescriptor) {
+			Object.defineProperty(window, "innerWidth", widthDescriptor);
+		}
 	}
 });
