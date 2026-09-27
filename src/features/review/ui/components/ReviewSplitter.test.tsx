@@ -1,6 +1,6 @@
+import { afterEach, expect, test } from "bun:test";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test } from "bun:test";
 import { ReviewSplitter } from "./ReviewSplitter";
 
 const roots: Array<{ container: HTMLDivElement; root: Root }> = [];

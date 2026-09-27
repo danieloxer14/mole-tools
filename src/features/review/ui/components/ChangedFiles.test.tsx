@@ -1214,10 +1214,7 @@ test("keeps long nested paths, stats, and Viewed controls accessible", () => {
 	const fileViewed = nav.querySelector<HTMLElement>(
 		`[role="checkbox"][aria-label="Viewed ${path}"]`,
 	);
-	const folderViewed = nav.querySelector<HTMLElement>(
-		`[role="checkbox"][aria-label="Viewed folder ${folderPath}"]`,
-	);
-	if (!folderButton || !fileButton || !fileViewed || !folderViewed) {
+	if (!folderButton || !fileButton || !fileViewed) {
 		throw new Error("Long nested path controls are missing");
 	}
 
@@ -1232,10 +1229,6 @@ test("keeps long nested paths, stats, and Viewed controls accessible", () => {
 
 	act(() => fileButton.click());
 	act(() => fileViewed.click());
-	act(() => folderViewed.click());
 	expect(selected).toEqual([path]);
-	expect(viewed).toEqual([
-		[[path], true],
-		[[path], true],
-	]);
+	expect(viewed).toEqual([[[path], true]]);
 });

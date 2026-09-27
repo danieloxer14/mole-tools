@@ -112,12 +112,9 @@ export function assertAgentEffort(
 ): void {
 	if (!isAgentEffort(agent, value, model)) {
 		const supported =
-			agent === "codex"
-				? codexEffortsForModel(model)
-				: EFFORTS_BY_AGENT[agent];
+			agent === "codex" ? codexEffortsForModel(model) : EFFORTS_BY_AGENT[agent];
 		throw new TypeError(
 			`${agent} effort must be one of: ${supported.join(", ")}`,
 		);
 	}
 }
-

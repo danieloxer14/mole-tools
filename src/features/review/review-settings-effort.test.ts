@@ -324,7 +324,9 @@ describe("global review effort settings", () => {
 	});
 
 	test("normalizes model before checking model-specific effort", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-settings-model-trim-"));
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-settings-model-trim-"),
+		);
 		try {
 			const { routes, persisted } = makeRoutes(dir);
 			const response = await routes(

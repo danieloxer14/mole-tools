@@ -554,7 +554,6 @@ function ChangedFilesFolder({
 						</Button>
 					}
 				/>
-
 			</div>
 			<CollapsibleContent id={controlsId} keepMounted className="min-w-0">
 				{node.children.map((child) =>

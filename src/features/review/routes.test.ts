@@ -13,10 +13,10 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { FakeReviewAgent } from "../../../test/fakes/FakeReviewAgent";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
-import type { AgentExec } from "../../adapters/agent/exec";
 import type { CodexModelCatalogProcessRunner } from "../../adapters/agent/codex-models";
-import { OmpAgentAdapter } from "../../adapters/agent/omp";
+import type { AgentExec } from "../../adapters/agent/exec";
 import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
+import { OmpAgentAdapter } from "../../adapters/agent/omp";
 import type { Config } from "../../adapters/config/schema";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import { SkillStore } from "../../adapters/skills/store";
@@ -4531,7 +4531,7 @@ describe("Codex model settings API", () => {
 			state: state(),
 			worktreePath: "/tmp/codex-worktree",
 			config: { review: { agent: "codex", binary: "/opt/codex" } },
-			codexModelCatalogProcessRunner: exec,
+			codexModelCatalogProcessRunner: runner,
 		});
 		const path = `/api/settings/codex-models?t=${token}`;
 
@@ -4569,7 +4569,7 @@ describe("Codex model settings API", () => {
 			token,
 			state: state(),
 			config: { review: { agent: "claude", binary: "/opt/claude" } },
-			codexModelCatalogProcessRunner: exec,
+			codexModelCatalogProcessRunner: runner,
 		});
 
 		const response = await routes(
@@ -4716,7 +4716,15 @@ describe("review agent settings API", () => {
 			});
 			expect(factoryCalls).toEqual([]);
 			expect(persisted).toEqual([
-				{ review: { agent: "codex", model: "gpt-5.2" } },
+				{
+					review: {
+						agent: "codex",
+						model: "gpt-5.2",
+						layerTimeoutSeconds: 600,
+						largeFileLineThreshold: 800,
+						maxLayerPromptBytes: 100_000,
+					},
+				},
 			]);
 
 			const chatResponse = await routes(chatRequest({ message: "Use codex" }));
@@ -4830,9 +4838,7 @@ describe("review agent settings API", () => {
 	});
 
 	test("validates active prompt effort against requested Codex model", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-agent-codex-model-"),
-		);
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-agent-codex-model-"));
 		try {
 			const promptDir = join(dir, "review-layers-code", "default");
 			await mkdir(promptDir, { recursive: true });
@@ -5557,9 +5563,7 @@ describe("chat binding", () => {
 					return {
 						stdout: new TextEncoder().encode(
 							JSON.stringify({
-								models: [
-									{ selector: "prompt-model", thinking: ["high"] },
-								],
+								models: [{ selector: "prompt-model", thinking: ["high"] }],
 							}),
 						),
 						stderr: new Uint8Array(),

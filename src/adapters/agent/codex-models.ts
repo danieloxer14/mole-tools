@@ -1,7 +1,4 @@
-import {
-	CODEX_EFFORTS_BY_MODEL,
-	type CodexEffort,
-} from "./effort";
+import { CODEX_EFFORTS_BY_MODEL, type CodexEffort } from "./effort";
 
 export interface CodexModelChoice {
 	id: string;
@@ -95,9 +92,7 @@ export async function discoverCodexModels(
 		)
 			throw new Error("Codex model catalog output exceeded 2 MiB");
 		if (result.exitCode !== 0)
-			throw new Error(
-				`Codex debug models exited with code ${result.exitCode}`,
-			);
+			throw new Error(`Codex debug models exited with code ${result.exitCode}`);
 
 		let output: string;
 		try {
@@ -110,9 +105,7 @@ export async function discoverCodexModels(
 	const timeout = new Promise<CodexModelChoice[]>((_, reject) => {
 		timeoutId = setTimeout(() => {
 			controller.abort();
-			reject(
-				new Error(`Codex debug models timed out after ${timeoutMs} ms`),
-			);
+			reject(new Error(`Codex debug models timed out after ${timeoutMs} ms`));
 		}, timeoutMs);
 	});
 
@@ -123,10 +116,7 @@ export async function discoverCodexModels(
 	}
 }
 
-function supportedEfforts(
-	modelId: string,
-	metadata: unknown,
-): CodexEffort[] {
+function supportedEfforts(modelId: string, metadata: unknown): CodexEffort[] {
 	if (!Array.isArray(metadata)) return [];
 	const reported = new Set<string>();
 	for (const level of metadata) {
@@ -135,9 +125,7 @@ function supportedEfforts(
 	}
 
 	const safeEfforts =
-		CODEX_EFFORTS_BY_MODEL[
-			modelId as keyof typeof CODEX_EFFORTS_BY_MODEL
-		];
+		CODEX_EFFORTS_BY_MODEL[modelId as keyof typeof CODEX_EFFORTS_BY_MODEL];
 	return safeEfforts?.filter((effort) => reported.has(effort)) ?? [];
 }
 

@@ -1,6 +1,6 @@
 import { ClaudeAgentAdapter } from "../adapters/agent/claude";
-import type { AgentEffort } from "../adapters/agent/effort";
 import { CodexAgentAdapter } from "../adapters/agent/codex";
+import type { AgentEffort } from "../adapters/agent/effort";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import {
 	type Config,
