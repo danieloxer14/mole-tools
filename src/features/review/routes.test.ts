@@ -412,6 +412,217 @@ describe("review routes", () => {
 		);
 		expect(authorized.status).toBe(200);
 	});
+
+	test("streams authenticated project-upload ranges as binary media", async () => {
+		const secret = "0123456789abcdef0123456789abcdef";
+		let authHostname: string | undefined;
+		let upstreamUrl: string | undefined;
+		let upstreamHeaders: Headers | undefined;
+		const binary = new Uint8Array([0, 127, 128, 255]);
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			gitHost: {
+				getGitLabAuthToken: async (hostname) => {
+					authHostname = hostname;
+					return "private-gitlab-token";
+				},
+			},
+			gitLabMediaFetch: async (input, init) => {
+				upstreamUrl = String(input);
+				upstreamHeaders = new Headers(init?.headers);
+				return new Response(binary, {
+					status: 206,
+					headers: {
+						"content-type": "video/webm",
+						"content-length": String(binary.byteLength),
+						"content-range": "bytes 3-6/12",
+						"accept-ranges": "bytes",
+						"cache-control": "private, max-age=0",
+						etag: '"upload-etag"',
+						"last-modified": "Wed, 21 Oct 2015 07:28:00 GMT",
+						"set-cookie": "gitlab-session=never-forward",
+						"x-gitlab-internal": "never-forward",
+					},
+				});
+			},
+		});
+
+		const response = await routes(
+			request(`/api/description-media/${secret}/clip%20one.webm?t=${token}`, {
+				headers: { Range: "bytes=3-6" },
+			}),
+		);
+
+		expect(authHostname).toBe("gitlab.example.com");
+		expect(upstreamUrl).toBe(
+			`https://gitlab.example.com/api/v4/projects/group%2Fproject/uploads/${secret}/clip%20one.webm`,
+		);
+		expect(upstreamHeaders?.get("PRIVATE-TOKEN")).toBe("private-gitlab-token");
+		expect(upstreamHeaders?.get("Range")).toBe("bytes=3-6");
+		expect(response.status).toBe(206);
+		expect(response.headers.get("content-type")).toBe("video/webm");
+		expect(response.headers.get("content-length")).toBe("4");
+		expect(response.headers.get("content-range")).toBe("bytes 3-6/12");
+		expect(response.headers.get("accept-ranges")).toBe("bytes");
+		expect(response.headers.get("cache-control")).toBe("private, max-age=0");
+		expect(response.headers.get("etag")).toBe('"upload-etag"');
+		expect(response.headers.get("last-modified")).toBe(
+			"Wed, 21 Oct 2015 07:28:00 GMT",
+		);
+		expect(response.headers.get("set-cookie")).toBeNull();
+		expect(response.headers.get("PRIVATE-TOKEN")).toBeNull();
+		expect(response.headers.get("x-gitlab-internal")).toBeNull();
+		expect(new Uint8Array(await response.arrayBuffer())).toEqual(binary);
+	});
+
+	test("rejects untrusted media paths and missing local tokens", async () => {
+		const secret = "0123456789abcdef0123456789abcdef";
+		let authCalls = 0;
+		let fetchCalls = 0;
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			gitHost: {
+				getGitLabAuthToken: async () => {
+					authCalls++;
+					return "private-gitlab-token";
+				},
+			},
+			gitLabMediaFetch: async () => {
+				fetchCalls++;
+				return new Response("should not fetch");
+			},
+		});
+
+		for (const path of [
+			`/api/description-media/not-a-secret/clip.webm?t=${token}`,
+			`/api/description-media/${secret}/%2E%2E%2Fescape.webm?t=${token}`,
+			`/api/description-media/${secret}/clip.webm/extra?t=${token}`,
+			`/api/description-media/${secret}/https%3A%2F%2Fevil.example%2Fclip.webm?t=${token}`,
+		]) {
+			expect((await routes(request(path))).status).toBe(404);
+		}
+		expect(
+			(
+				await routes(
+					request(`/api/description-media/${secret}/clip.webm?t=wrong-token`),
+				)
+			).status,
+		).toBe(401);
+		expect(authCalls).toBe(0);
+		expect(fetchCalls).toBe(0);
+	});
+
+	test("keeps self-managed GitLab deployment prefixes in media API URLs", async () => {
+		const secret = "0123456789abcdef0123456789abcdef";
+		const persisted = state();
+		persisted.mr.webUrl =
+			"https://gitlab.example.com/gitlab/group/project/-/merge_requests/42";
+		let upstreamUrl: string | undefined;
+		const routes = createReviewRoutes({
+			token,
+			state: persisted,
+			gitHost: {
+				getGitLabAuthToken: async () => "private-gitlab-token",
+			},
+			gitLabMediaFetch: async (input) => {
+				upstreamUrl = String(input);
+				return new Response(new Uint8Array([1]), {
+					headers: { "content-type": "image/png" },
+				});
+			},
+		});
+
+		const response = await routes(
+			request(`/api/description-media/${secret}/poster.png?t=${token}`),
+		);
+
+		expect(response.status).toBe(200);
+		expect(upstreamUrl).toBe(
+			`https://gitlab.example.com/gitlab/api/v4/projects/group%2Fproject/uploads/${secret}/poster.png`,
+		);
+	});
+	test("rejects persisted merge-request URLs that do not match the project", async () => {
+		const secret = "0123456789abcdef0123456789abcdef";
+		const persisted = state();
+		persisted.mr.webUrl =
+			"https://attacker.example/group/project/-/merge_requests/42";
+		let authCalls = 0;
+		let fetchCalls = 0;
+		const routes = createReviewRoutes({
+			token,
+			state: persisted,
+			gitHost: {
+				getGitLabAuthToken: async () => {
+					authCalls++;
+					return "private-gitlab-token";
+				},
+			},
+			gitLabMediaFetch: async () => {
+				fetchCalls++;
+				return new Response("should not fetch");
+			},
+		});
+
+		const response = await routes(
+			request(`/api/description-media/${secret}/clip.webm?t=${token}`),
+		);
+
+		expect(response.status).toBe(503);
+		expect(await response.json()).toEqual({
+			error: "GitLab media project metadata is invalid",
+		});
+		expect(authCalls).toBe(0);
+		expect(fetchCalls).toBe(0);
+	});
+
+	test("returns unavailable when GitLab token lookup returns no token", async () => {
+		const secret = "0123456789abcdef0123456789abcdef";
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			gitHost: { getGitLabAuthToken: async () => null },
+		});
+
+		const response = await routes(
+			request(`/api/description-media/${secret}/clip.webm?t=${token}`),
+		);
+
+		expect(response.status).toBe(503);
+		expect(await response.json()).toEqual({
+			error: "GitLab auth token unavailable",
+		});
+	});
+
+	test("returns unavailable when host adapter has no authenticated media access", async () => {
+		const secret = "0123456789abcdef0123456789abcdef";
+		const routes = createReviewRoutes({ token, state: state() });
+
+		const response = await routes(
+			request(`/api/description-media/${secret}/clip.webm?t=${token}`),
+		);
+
+		expect(response.status).toBe(503);
+		expect(await response.json()).toEqual({
+			error: "Authenticated GitLab media is unsupported by this host",
+		});
+	});
+
+	test("GET /api/state returns MR description", async () => {
+		const persisted = state();
+		persisted.mr.description = "Body";
+		const routes = createReviewRoutes({ token, state: persisted });
+
+		const response = await routes(
+			request("/api/state", { headers: { "X-Mole-Token": token } }),
+		);
+
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as ReviewState;
+		expect(body.mr.description).toBe("Body");
+	});
+
 	test("serves canonical diffs by default and caches hidden toggles", async () => {
 		const canonical = [
 			rawDiff("src/whitespace.ts", "@@ -1 +1 @@\n-old  \n+new\n"),
@@ -997,6 +1208,43 @@ describe("review routes", () => {
 		}
 	});
 
+	test("rejects incomplete description tags without appending", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-invalid-description-tag-"),
+		);
+		try {
+			const paths = chatPaths(dir);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths,
+				promptText: "Test chat prompt.",
+				reviewAgent: new StreamChatAgent(),
+			});
+
+			const response = await routes(
+				chatRequest({
+					message: "Review this description",
+					tags: [{ kind: "description", startLine: 3, quote: "Body" }],
+					openFile: null,
+				}),
+			);
+			const body = await response.text();
+
+			expect(body).toContain("Invalid chat tag at index 0");
+			expect(body.endsWith("event: done\ndata: null\n\n")).toBe(true);
+			expect(await store.readChat("chat-a")).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("persists file tags through /api/chat into transcript and prompt file", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-file-tags-"));
 		const fileTag = { kind: "file" as const, path: "src/whole.ts" };
@@ -1037,6 +1285,59 @@ describe("review routes", () => {
 			expect(await prompt.text()).toContain('"kind": "file"');
 			expect(await prompt.text()).toContain('"path": "src/whole.ts"');
 			expect(await prompt.text()).toContain("inspect the entire file");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists description tags through /api/chat", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-chat-description-tags-"),
+		);
+		const descriptionTag = {
+			kind: "description" as const,
+			startLine: 3,
+			endLine: 5,
+			quote: "Body",
+		};
+		try {
+			const paths = chatPaths(dir);
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({
+				token,
+				store,
+				paths,
+				promptText: "Test chat prompt.",
+				reviewAgent: new StreamChatAgent(),
+			});
+
+			const response = await routes(
+				chatRequest({
+					message: "Review these description lines",
+					tags: [descriptionTag],
+					openFile: null,
+				}),
+			);
+			const body = await response.text();
+
+			expect(body.endsWith("event: done\ndata: null\n\n")).toBe(true);
+
+			const entries = await store.readChat("chat-a");
+			const user = entries.find((entry) => entry.role === "user");
+			expect(user?.tags).toEqual([descriptionTag]);
+
+			const written = (await readdir(join(dir, "prompt"))).sort() as string[];
+			expect(written.length).toBe(1);
+			const prompt = await Bun.file(join(dir, "prompt", written[0])).text();
+			expect(prompt).toContain('"kind": "description"');
+			expect(prompt).toContain(
+				'A tag with kind "description" refers to the merge request description, never a file: with startLine/endLine it names an inclusive source-line range of the description Markdown, without them it means the entire description; its quote carries the tagged text.',
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

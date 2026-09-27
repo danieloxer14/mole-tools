@@ -4,12 +4,18 @@ import type { MrApprovalState } from "../../../../ports/git-host";
 import { IconButton } from "./IconButton";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import {
+	SegmentedToggleGroup,
+	SegmentedToggleGroupItem,
+} from "./ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type ApprovalAction = "approve" | "unapprove";
-
+export type ReviewView = "code" | "overview";
 export interface MrHeaderProps {
 	mr: { iid: number; title: string; webUrl: string };
+	view: ReviewView;
+	onViewChange: (view: ReviewView) => void;
 	headSha: string;
 	filesChanged: number;
 	insertions: number;
@@ -80,6 +86,8 @@ export function approveTooltip(
 
 export function MrHeader({
 	mr,
+	view,
+	onViewChange,
 	headSha,
 	filesChanged,
 	insertions,
@@ -143,9 +151,34 @@ export function MrHeader({
 		</Button>
 	);
 	return (
-		<header className="flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto border-b bg-card px-4 py-3">
+		<header className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 overflow-x-auto border-b bg-card px-3 py-2 lg:flex-nowrap lg:px-4 lg:py-3">
+			<SegmentedToggleGroup
+				className="shrink-0"
+				aria-label="Review view"
+				multiple={false}
+				value={[view]}
+				onValueChange={(values) => {
+					const next = values[0];
+					if (next === "code" || next === "overview") onViewChange(next);
+				}}
+			>
+				<SegmentedToggleGroupItem
+					value="code"
+					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
+					aria-pressed={view === "code"}
+				>
+					Code
+				</SegmentedToggleGroupItem>
+				<SegmentedToggleGroupItem
+					value="overview"
+					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
+					aria-pressed={view === "overview"}
+				>
+					Overview
+				</SegmentedToggleGroupItem>
+			</SegmentedToggleGroup>
 			<h1
-				className="min-w-0 shrink truncate text-lg font-semibold tracking-tight"
+				className="min-w-0 basis-full break-words text-lg font-semibold tracking-tight lg:flex-1 lg:basis-auto lg:truncate"
 				title={mr.title}
 			>
 				{headerTitle(mr.title, mr.iid)}

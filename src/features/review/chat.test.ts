@@ -329,6 +329,24 @@ describe("chat prompt construction", () => {
 		expect(message).toContain("(none)");
 	});
 
+	test("includes description tags and their semantics in the user message", () => {
+		const descriptionTag = {
+			kind: "description" as const,
+			startLine: 3,
+			endLine: 5,
+			quote: "Body",
+		};
+		const message = buildChatMessage({
+			message: "Review this description section",
+			tags: [descriptionTag],
+		});
+
+		expect(message).toContain('"kind": "description"');
+		expect(message).toContain(
+			'A tag with kind "description" refers to the merge request description',
+		);
+	});
+
 	test("includes the current review discussions in the first turn", () => {
 		const prompt = buildChatPrompt({
 			firstTurn: true,

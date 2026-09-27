@@ -57,6 +57,7 @@ function reviewState(overrides: Partial<ReviewState> = {}): ReviewState {
 			iid: 42,
 			webUrl: "https://gitlab.example.com/group/project/-/merge_requests/42",
 			title: "Add feature",
+			description: "",
 			sourceBranch: "feature",
 			targetBranch: "main",
 		},

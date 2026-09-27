@@ -107,6 +107,7 @@ export const ReviewStateSchema = z.object({
 		iid: z.number().int().positive(),
 		webUrl: z.string(),
 		title: z.string(),
+		description: z.string().default(""),
 		sourceBranch: z.string(),
 		targetBranch: z.string(),
 	}),

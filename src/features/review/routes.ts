@@ -61,7 +61,7 @@ import type { FileDiff, Vcs } from "../../ports/vcs";
 import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
 import { buildPosition } from "../../shared/gitlab-position";
-import type { MrRef } from "../../shared/mr-url";
+import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
 import {
 	expandSkillTokens,
 	findSkillTokenCandidates,
@@ -145,8 +145,10 @@ export interface ReviewRoutesOptions {
 			| "fetchApprovalState"
 			| "approveMr"
 			| "unapproveMr"
+			| "getGitLabAuthToken"
 		>
 	>;
+	gitLabMediaFetch?: typeof fetch;
 	getFileContents?: (request: ReviewFileRequest) => Promise<string | null>;
 	worktreePath?: string;
 	largeFileLineThreshold?: number;
@@ -226,6 +228,142 @@ function hasToken(request: Request, token: string): boolean {
 		url.searchParams.get("t") === token ||
 		request.headers.get("x-mole-token") === token
 	);
+}
+
+interface DescriptionUpload {
+	secret: string;
+	filename: string;
+}
+
+function parseDescriptionUpload(pathname: string): DescriptionUpload | null {
+	const prefix = "/api/description-media/";
+	if (!pathname.startsWith(prefix)) return null;
+	const segments = pathname.slice(prefix.length).split("/");
+	if (segments.length !== 2) return null;
+	const [secret, encodedFilename] = segments;
+	if (!secret || !/^[a-f0-9]{32}$/i.test(secret) || !encodedFilename) {
+		return null;
+	}
+
+	let filename: string;
+	try {
+		filename = decodeURIComponent(encodedFilename);
+	} catch {
+		return null;
+	}
+	if (
+		filename === "" ||
+		filename === "." ||
+		filename === ".." ||
+		Array.from(filename).some(
+			(character) =>
+				character === "/" ||
+				character === "\\" ||
+				character <= "\u001f" ||
+				character === "\u007f",
+		)
+	) {
+		return null;
+	}
+	return { secret, filename };
+}
+
+interface GitLabProjectApi {
+	origin: string;
+	hostname: string;
+	pathPrefix: string;
+}
+
+function validatedGitLabProjectApi(
+	mr: ReviewState["mr"],
+): GitLabProjectApi | null {
+	if (
+		mr.host.trim() !== mr.host ||
+		mr.webUrl.trim() !== mr.webUrl ||
+		mr.projectPath.trim() !== mr.projectPath ||
+		mr.projectPath.startsWith("/") ||
+		mr.projectPath.endsWith("/")
+	) {
+		return null;
+	}
+	const projectSegments = mr.projectPath.split("/");
+	if (
+		projectSegments.some(
+			(segment) =>
+				segment === "" ||
+				segment === "." ||
+				segment === ".." ||
+				Array.from(segment).some(
+					(character) =>
+						character === "/" ||
+						character === "\\" ||
+						character === "?" ||
+						character === "#" ||
+						character <= "\u001f" ||
+						character === "\u007f",
+				),
+		)
+	) {
+		return null;
+	}
+
+	let webUrl: URL;
+	try {
+		webUrl = new URL(mr.webUrl);
+	} catch {
+		return null;
+	}
+	if (
+		(webUrl.protocol !== "http:" && webUrl.protocol !== "https:") ||
+		webUrl.username !== "" ||
+		webUrl.password !== "" ||
+		webUrl.host.toLowerCase() !== mr.host.toLowerCase()
+	) {
+		return null;
+	}
+
+	const mrRoute = `/${projectSegments.map(encodeURIComponent).join("/")}/-/merge_requests/${mr.iid}`;
+	const pathname = webUrl.pathname.endsWith("/")
+		? webUrl.pathname.slice(0, -1)
+		: webUrl.pathname;
+	if (!pathname.endsWith(mrRoute)) return null;
+	const pathPrefix = pathname.slice(0, pathname.length - mrRoute.length);
+	if (
+		(pathPrefix !== "" &&
+			(!pathPrefix.startsWith("/") ||
+				pathPrefix.startsWith("//") ||
+				pathPrefix.endsWith("/"))) ||
+		pathPrefix
+			.split("/")
+			.slice(1)
+			.some((segment) => {
+				if (segment === "") return true;
+				try {
+					const decoded = decodeURIComponent(segment);
+					return (
+						decoded === "." ||
+						decoded === ".." ||
+						Array.from(decoded).some(
+							(character) =>
+								character === "/" ||
+								character === "\\" ||
+								character <= "\u001f" ||
+								character === "\u007f",
+						)
+					);
+				} catch {
+					return true;
+				}
+			})
+	) {
+		return null;
+	}
+
+	return {
+		origin: webUrl.origin,
+		hostname: webUrl.host,
+		pathPrefix,
+	};
 }
 
 async function parseBody(
@@ -1343,6 +1481,83 @@ export function createReviewRoutes(
 		if (!fallbackState) throw new Error("Review state is unavailable");
 		fallbackState = recoverOrphanedLayerRun(fallbackState);
 		return fallbackState;
+	}
+
+	async function descriptionMedia(request: Request): Promise<Response> {
+		if (request.method !== "GET") return emptyResponse(404);
+		const url = new URL(request.url);
+		const upload = parseDescriptionUpload(url.pathname);
+		if (!upload) return emptyResponse(404);
+
+		const state = await currentState();
+		const target = validatedGitLabProjectApi(state.mr);
+		if (!target) {
+			return jsonResponse(
+				{ error: "GitLab media project metadata is invalid" },
+				503,
+			);
+		}
+
+		const gitHost = options.gitHost;
+		if (!gitHost?.getGitLabAuthToken) {
+			return jsonResponse(
+				{ error: "Authenticated GitLab media is unsupported by this host" },
+				503,
+			);
+		}
+		let authToken: string | null;
+		try {
+			authToken = await gitHost.getGitLabAuthToken(target.hostname);
+		} catch {
+			authToken = null;
+		}
+		const token = authToken?.trim();
+		if (!token || /[\r\n]/.test(token)) {
+			return jsonResponse({ error: "GitLab auth token unavailable" }, 503);
+		}
+
+		const upstreamUrl = new URL(
+			`${target.pathPrefix}/api/v4/projects/${encodeProjectPath(
+				state.mr.projectPath,
+			)}/uploads/${upload.secret}/${encodeURIComponent(upload.filename)}`,
+			target.origin,
+		);
+		const headers = new Headers({ "PRIVATE-TOKEN": token });
+		const range = request.headers.get("range");
+		if (range !== null) headers.set("Range", range);
+
+		let upstream: Response;
+		try {
+			upstream = await (options.gitLabMediaFetch ?? fetch)(upstreamUrl, {
+				method: "GET",
+				headers,
+				redirect: "manual",
+				signal: request.signal,
+			});
+		} catch {
+			return jsonResponse({ error: "GitLab media request failed" }, 502);
+		}
+		if (upstream.status >= 300 && upstream.status < 400) {
+			return jsonResponse({ error: "GitLab media request failed" }, 502);
+		}
+
+		const responseHeaders = new Headers();
+		for (const name of [
+			"content-type",
+			"content-length",
+			"content-range",
+			"accept-ranges",
+			"cache-control",
+			"etag",
+			"last-modified",
+		]) {
+			const value = upstream.headers.get(name);
+			if (value !== null) responseHeaders.set(name, value);
+		}
+		return new Response(upstream.body, {
+			status: upstream.status,
+			headers: responseHeaders,
+		});
 	}
 
 	async function saveState(next: ReviewState): Promise<void> {
@@ -2565,6 +2780,12 @@ export function createReviewRoutes(
 		}
 
 		try {
+			if (
+				url.pathname === "/api/description-media" ||
+				url.pathname.startsWith("/api/description-media/")
+			) {
+				return await descriptionMedia(request);
+			}
 			if (request.method === "GET" && url.pathname === "/api/state") {
 				return jsonResponse(await apiState());
 			}

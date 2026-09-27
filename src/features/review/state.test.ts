@@ -107,6 +107,25 @@ test("defaults the whitespace preference for legacy state", () => {
 	).toBe(false);
 });
 
+test("defaults missing MR description to empty string", () => {
+	const current = state();
+	const legacy = { ...current, mr: { ...current.mr } };
+	delete (legacy.mr as Partial<ReviewState["mr"]>).description;
+
+	expect(ReviewStateSchema.parse(legacy).mr.description).toBe("");
+});
+
+test("rejects non-string MR description", () => {
+	const current = state();
+
+	expect(
+		ReviewStateSchema.safeParse({
+			...current,
+			mr: { ...current.mr, description: 42 },
+		}).success,
+	).toBe(false);
+});
+
 test("accepts Codex chat metadata", () => {
 	expect(
 		ChatMetaSchema.parse({
