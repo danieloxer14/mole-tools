@@ -80,9 +80,11 @@ versions without effort keep that field unset.
 
 The Settings dialog opens on **Prompts** and also offers **General**, **Skills**,
 and **Appearance**. **General** has the global **Default Agent**, **Default
-model**, and **Default effort** controls. Each editable review prompt version
-has Agent, Model, and Effort dropdowns. Selections affect future layer runs;
-use **Regenerate** to rebuild cached layers.
+model**, and **Default effort** controls, plus **Show whitespace changes**.
+That toggle applies immediately to the current review and is not saved with
+review defaults. Each editable review prompt version has Agent, Model, and
+Effort dropdowns. Selections affect future layer runs; use **Regenerate** to
+rebuild cached layers.
 
 For OMP, the server runs `models --json` with the selected OMP executable; the
 dropdown lists its model selectors and only effort values advertised for the

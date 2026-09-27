@@ -1999,13 +1999,6 @@ function ReviewApp() {
 										viewedFiles: { paths, viewed },
 									});
 								}}
-								showWhitespaceChanges={data.showWhitespaceChanges}
-								whitespaceChanging={whitespaceChanging}
-								syncing={syncing}
-								refreshing={refreshing}
-								onShowWhitespaceChangesChange={
-									handleShowWhitespaceChangesChange
-								}
 							/>
 						}
 						selectedPath={selectedPath}
@@ -2209,6 +2202,11 @@ function ReviewApp() {
 						token={token}
 						onClose={() => setSettingsOpen(false)}
 						initialTab={settingsInitialTab}
+						whitespace={{
+							showWhitespaceChanges: data.showWhitespaceChanges,
+							disabled: whitespaceChanging || syncing || refreshing,
+							onShowWhitespaceChangesChange: handleShowWhitespaceChangesChange,
+						}}
 					/>
 				</DialogContent>
 			</Dialog>
