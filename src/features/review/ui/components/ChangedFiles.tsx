@@ -25,6 +25,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "./ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 const TREE_ROOT_INDENT_REM = 0.5;
 // Each displayed level advances by half a rem; cap keeps deep paths readable.
@@ -463,19 +464,20 @@ function ChangedFileRow({
 					−{entry.file.deletions}
 				</span>
 			</span>
-			<div
-				className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground"
-				title="Mark file viewed"
-			>
-				<Checkbox
-					checked={viewedFiles.includes(entry.path)}
-					aria-label={`Viewed ${entry.path}`}
-					onCheckedChange={(checked) =>
-						onViewedChange([entry.path], checked === true)
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Checkbox
+							checked={viewedFiles.includes(entry.path)}
+							aria-label={`Viewed ${entry.path}`}
+							onCheckedChange={(checked) =>
+								onViewedChange([entry.path], checked === true)
+							}
+						/>
 					}
 				/>
-				<span className="min-w-0 break-all">Viewed</span>
-			</div>
+				<TooltipContent>Viewed</TooltipContent>
+			</Tooltip>
 		</div>
 	);
 }
