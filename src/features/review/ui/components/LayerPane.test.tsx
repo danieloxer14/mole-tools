@@ -246,10 +246,8 @@ test("keeps file and layer state across accessible sidebar tab switches", () => 
 	const filePaths = ["src/routes/route.ts", "web/route.ts"];
 	const fileSelections: string[] = [];
 	const viewedChanges: Array<[readonly string[], boolean]> = [];
-	const whitespaceChanges: boolean[] = [];
 	let selectedPath: string | null = filePaths[0] ?? null;
 	let viewedFiles: string[] = [];
-	let showWhitespaceChanges = true;
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -276,11 +274,6 @@ test("keeps file and layer state across accessible sidebar tab switches", () => 
 						selectedPath={selectedPath}
 						onSelectFile={onSelectFile}
 						onViewedChange={onViewedChange}
-						showWhitespaceChanges={showWhitespaceChanges}
-						onShowWhitespaceChangesChange={(show) => {
-							whitespaceChanges.push(show);
-							showWhitespaceChanges = show;
-						}}
 					/>
 				}
 				selectedPath={selectedPath}
@@ -350,17 +343,8 @@ test("keeps file and layer state across accessible sidebar tab switches", () => 
 			?.click(),
 	);
 	act(render);
-	act(() =>
-		container
-			.querySelector<HTMLElement>(
-				'[role="checkbox"][aria-label="Show whitespace changes"]',
-			)
-			?.click(),
-	);
-	act(render);
 	expect(fileSelections).toEqual(["src/routes/route.ts"]);
 	expect(viewedChanges).toEqual([[["src/routes/route.ts"], true]]);
-	expect(whitespaceChanges).toEqual([false]);
 
 	const srcRoutesFolder = nav.querySelector<HTMLButtonElement>(
 		'button[aria-label="Collapse src/routes"]',

@@ -20,11 +20,6 @@ const defaultProps: ChangedFilesHeaderProps = {
 	total: 3,
 	mode: "list",
 	onModeChange: noop,
-	showWhitespaceChanges: true,
-	whitespaceChanging: false,
-	syncing: false,
-	refreshing: false,
-	onShowWhitespaceChangesChange: noop,
 };
 
 afterEach(() => {
@@ -39,6 +34,12 @@ function markup(overrides: Partial<ChangedFilesHeaderProps> = {}): string {
 		<ChangedFilesHeader {...defaultProps} {...overrides} />,
 	);
 }
+test("does not render a whitespace control", () => {
+	const html = markup();
+
+	expect(html).not.toContain("Show whitespace changes");
+	expect(html).not.toContain('role="checkbox"');
+});
 
 function renderInteractive(): HTMLDivElement {
 	const container = document.createElement("div");
@@ -148,52 +149,4 @@ test("shows a custom tooltip on focus instead of a native title", async () => {
 	);
 	expect(tooltips).toHaveLength(1);
 	expect(tooltips[0]?.textContent).toBe("List view");
-});
-
-test("renders a controlled accessible whitespace checkbox", () => {
-	const checked = markup({ showWhitespaceChanges: true });
-	const unchecked = markup({ showWhitespaceChanges: false });
-
-	expect(checked).toContain('role="checkbox"');
-	expect(checked).toContain('aria-label="Show whitespace changes"');
-	expect(checked).toContain('aria-checked="true"');
-	expect(checked).toContain("Show whitespace changes");
-	expect(unchecked).toContain('aria-checked="false"');
-});
-
-test("disables the whitespace checkbox while changing or syncing", () => {
-	expect(markup({ whitespaceChanging: true })).toContain("disabled");
-	expect(markup({ syncing: true })).toContain("disabled");
-	expect(markup({ refreshing: true })).toContain("disabled");
-});
-
-test("emits the next controlled boolean when toggled", async () => {
-	const changes: boolean[] = [];
-	const container = document.createElement("div");
-	document.body.append(container);
-	const root = createRoot(container);
-	roots.push(root);
-	act(() => {
-		root.render(
-			<ChangedFilesHeader
-				{...defaultProps}
-				onShowWhitespaceChangesChange={(show) => changes.push(show)}
-			/>,
-		);
-	});
-	const checkbox = container.querySelector('[role="checkbox"]');
-
-	expect(checkbox).not.toBeNull();
-	await act(async () => {
-		(checkbox as HTMLElement).click();
-	});
-
-	expect(changes).toEqual([false]);
-});
-
-test("keeps the whitespace control available with no visible files", () => {
-	const html = markup({ viewedCount: 0, total: 0 });
-
-	expect(html).toContain("0/0 files");
-	expect(html).toContain('aria-label="Show whitespace changes"');
 });
