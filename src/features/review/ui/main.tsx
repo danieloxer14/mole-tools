@@ -12,7 +12,11 @@ import { createRoot } from "react-dom/client";
 import type { HostDiscussion, MrApprovalState } from "../../../ports/git-host";
 import { splitSourceLines } from "../../../shared/diff-context";
 import type { ParsedFileDiff } from "../../../shared/diff-parse";
-import { type ChatTag, chatTagsEqual } from "../chat-tags";
+import {
+	type ChatTag,
+	chatTagsEqual,
+	type DescriptionChatTag,
+} from "../chat-tags";
 import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { Draft, LineSelection } from "../state";
 import type { ChatEntry, ChatEntryWithOptimistic } from "../store";
@@ -43,7 +47,13 @@ import {
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
 import { LayerPane } from "./components/LayerPane";
-import { type ApprovalAction, MrHeader, tabTitle } from "./components/MrHeader";
+import {
+	type ApprovalAction,
+	MrHeader,
+	type ReviewView,
+	tabTitle,
+} from "./components/MrHeader";
+import { OverviewPane } from "./components/OverviewPane";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";
@@ -56,6 +66,7 @@ import {
 	DialogTitle,
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
+import { projectWebUrl } from "./description-media";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
@@ -411,6 +422,7 @@ function ReviewApp() {
 	const reviewShell = useRef<HTMLElement | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
+	const [reviewView, setReviewView] = useState<ReviewView>("code");
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
 	const [fileViewModes, setFileViewModes] = useState<
 		Record<string, FileViewMode>
@@ -948,6 +960,7 @@ function ReviewApp() {
 		const match = resolveFileRef(ref, files);
 		if (match) {
 			setExternalFile(null);
+			setReviewView("code");
 			selectFile(match);
 			return;
 		}
@@ -1911,6 +1924,14 @@ function ReviewApp() {
 				: [...current.tags, tag],
 		}));
 	};
+	const handleDescriptionTag = (tag: DescriptionChatTag) => {
+		if (!activeChatId) return;
+		patchChat(activeChatId, (current) => ({
+			tags: current.tags.some((candidate) => chatTagsEqual(candidate, tag))
+				? current.tags
+				: [...current.tags, tag],
+		}));
+	};
 	const removeChatTag = (tag: ChatTag) => {
 		if (!activeChatId) return;
 		patchChat(activeChatId, (current) => ({
@@ -1934,6 +1955,8 @@ function ReviewApp() {
 		>
 			<MrHeader
 				mr={data.mr}
+				view={reviewView}
+				onViewChange={setReviewView}
 				headSha={data.revision.headSha}
 				filesChanged={changedFileTotal}
 				insertions={lineTotals.insertions}
@@ -1951,48 +1974,57 @@ function ReviewApp() {
 					setSettingsOpen(true);
 				}}
 			/>
+			<Toasts toasts={toasts} onDismiss={dismissToast} />
 			<div
-				className="grid min-h-0 min-w-0 flex-1 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)]"
+				className={
+					reviewView === "overview"
+						? "grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(480px,1fr)_auto_var(--right-column-width)]"
+						: "grid min-h-0 min-w-0 flex-1 grid-cols-[var(--left-column-width)_auto_minmax(480px,1fr)_auto_var(--right-column-width)]"
+				}
 				ref={reviewShell}
 			>
-				<LayerPane
-					state={data}
-					files={files}
-					filesContent={
-						<ChangedFiles
-							files={data.diff}
-							viewedFiles={data.viewedFiles}
-							selectedPath={selectedPath}
-							onSelectFile={selectFile}
-							onViewedChange={(paths, viewed) => {
-								saveProgress({
-									viewedFiles: { paths, viewed },
-								});
-							}}
-							showWhitespaceChanges={data.showWhitespaceChanges}
-							whitespaceChanging={whitespaceChanging}
-							syncing={syncing}
-							refreshing={refreshing}
-							onShowWhitespaceChangesChange={handleShowWhitespaceChangesChange}
-						/>
-					}
-					selectedPath={selectedPath}
-					onSelectFile={selectFile}
-					onSelectLayer={selectLayer}
-					onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
-					layerAction={layerAction}
-					actionError={progressError}
-					externallyDisabled={refreshing}
-					onRegenerate={() => runLayerAction("regenerate")}
-					onRetry={() => runLayerAction("retry")}
-				/>
+				<div className={reviewView === "overview" ? "hidden" : "contents"}>
+					<LayerPane
+						state={data}
+						files={files}
+						filesContent={
+							<ChangedFiles
+								files={data.diff}
+								viewedFiles={data.viewedFiles}
+								selectedPath={selectedPath}
+								onSelectFile={selectFile}
+								onViewedChange={(paths, viewed) => {
+									saveProgress({
+										viewedFiles: { paths, viewed },
+									});
+								}}
+								showWhitespaceChanges={data.showWhitespaceChanges}
+								whitespaceChanging={whitespaceChanging}
+								syncing={syncing}
+								refreshing={refreshing}
+								onShowWhitespaceChangesChange={
+									handleShowWhitespaceChangesChange
+								}
+							/>
+						}
+						selectedPath={selectedPath}
+						onSelectFile={selectFile}
+						onSelectLayer={selectLayer}
+						onToggleDone={(id, done) => saveProgress({ layerId: id, done })}
+						layerAction={layerAction}
+						actionError={progressError}
+						externallyDisabled={refreshing}
+						onRegenerate={() => runLayerAction("regenerate")}
+						onRetry={() => runLayerAction("retry")}
+					/>
+				</div>
 				<hr
 					aria-label="Resize review layers column"
 					aria-orientation="vertical"
 					aria-valuemax={leftColumnMaximum}
 					aria-valuemin={columnMinimums.left}
 					aria-valuenow={columnWidths.left}
-					className="m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none"
+					className={`m-0 h-full w-1 cursor-col-resize border-0 bg-border transition-colors duration-150 hover:bg-primary/60 focus-visible:bg-primary focus-visible:outline-none${reviewView === "overview" ? " hidden" : ""}`}
 					onKeyDown={(event) => handleSplitterKeyDown(event, "left")}
 					onPointerCancel={splitterResize.onPointerEnd}
 					onPointerDown={(event) =>
@@ -2002,8 +2034,13 @@ function ReviewApp() {
 					onPointerUp={splitterResize.onPointerEnd}
 					onLostPointerCapture={splitterResize.onLostPointerCapture}
 				/>
-				<section className="flex min-h-0 min-w-0 flex-col">
-					<Toasts toasts={toasts} onDismiss={dismissToast} />
+				<section
+					className={
+						reviewView === "overview"
+							? "hidden"
+							: "flex min-h-0 min-w-0 flex-col"
+					}
+				>
 					<DiffView
 						key={selectedPath ?? "empty"}
 						file={selectedFile}
@@ -2049,6 +2086,16 @@ function ReviewApp() {
 						}}
 					/>
 				</section>
+				{reviewView === "overview" ? (
+					<OverviewPane
+						description={data.mr.description}
+						projectWebUrl={projectWebUrl(data.mr)}
+						discussions={generalDiscussions(data.discussions)}
+						onTagDescription={handleDescriptionTag}
+						onExplainDiscussion={explainDiscussion}
+						explainDisabled={creatingChat}
+					/>
+				) : null}
 				<hr
 					aria-label="Resize chat column"
 					aria-orientation="vertical"
@@ -2069,9 +2116,6 @@ function ReviewApp() {
 					skills={skills}
 					transcript={activeChat.entries}
 					tags={activeChat.tags}
-					discussions={generalDiscussions(data.discussions)}
-					onExplainDiscussion={explainDiscussion}
-					explainDisabled={creatingChat}
 					streamingSegments={activeChat.streamingSegments}
 					tools={activeChat.tools}
 					error={activeChat.error ?? commentError}

@@ -109,6 +109,82 @@ function rawDiff(path: string, patchText: string) {
 }
 
 describe("setupReview chat state", () => {
+	test("persists MR description on first setup", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-setup-description-"));
+		try {
+			const paths = pathsFor(dir);
+			const result = await runSetup(paths, {
+				mr: { ...mergeRequest(), description: "Body" },
+			});
+
+			expect(result.state.mr.description).toBe("Body");
+			expect((await new ReviewStore(paths).read())?.mr.description).toBe(
+				"Body",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("refreshes MR description on rerun and clears omitted input", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-setup-description-rerun-"),
+		);
+		try {
+			const paths = pathsFor(dir);
+			await runSetup(paths, {
+				mr: { ...mergeRequest(), description: "Original" },
+			});
+
+			const updated = await runSetup(paths, {
+				mr: { ...mergeRequest(), description: "Updated" },
+			});
+			expect(updated.state.mr.description).toBe("Updated");
+
+			const cleared = await runSetup(paths);
+			expect(cleared.state.mr.description).toBe("");
+			expect((await new ReviewStore(paths).read())?.mr.description).toBe("");
+
+			const refreshed = await runSetup(paths, {
+				mr: { ...mergeRequest(), description: "Refreshed" },
+				refresh: true,
+			});
+			expect(refreshed.state.mr.description).toBe("Refreshed");
+
+			const refreshCleared = await runSetup(paths, { refresh: true });
+			expect(refreshCleared.state.mr.description).toBe("");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("replaces missing legacy description on setup re-run", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-setup-legacy-description-"),
+		);
+		try {
+			const paths = pathsFor(dir);
+			await runSetup(paths);
+			const legacy = JSON.parse(
+				await Bun.file(paths.statePath).text(),
+			) as Record<string, unknown>;
+			expect((legacy.mr as Record<string, unknown>).description).toBe("");
+			delete (legacy.mr as Record<string, unknown>).description;
+			await Bun.write(paths.statePath, `${JSON.stringify(legacy)}\n`);
+
+			const result = await runSetup(paths, {
+				mr: { ...mergeRequest(), description: "Fresh body" },
+			});
+
+			expect(result.state.mr.description).toBe("Fresh body");
+			expect((await new ReviewStore(paths).read())?.mr.description).toBe(
+				"Fresh body",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("seeds one generated active chat for a new review", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-setup-new-"));
 		try {
@@ -383,6 +459,58 @@ describe("syncReview viewed files", () => {
 		}
 	});
 });
+
+describe("syncReview MR description", () => {
+	test("replaces supplied description and keeps it when the next input omits it", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-description-"));
+		try {
+			const paths = pathsFor(dir);
+			const existing = stateFor(paths);
+			existing.mr.description = "Original";
+			const store = new ReviewStore(paths);
+			await store.write(existing);
+
+			const syncInput = {
+				vcs: new FakeVcs({
+					repoRoot: paths.repoPath,
+					worktrees: [],
+					mergeBase: "base-2",
+					diffRange: [],
+				}),
+				ref,
+				mr: {
+					...mergeRequest(),
+					headSha: "head-2",
+					diffRefs: {
+						baseSha: "base-2",
+						startSha: "base-2",
+						headSha: "head-2",
+					},
+				},
+				store,
+				paths,
+			};
+
+			const updated = await syncReview({
+				...syncInput,
+				mr: { ...syncInput.mr, description: "Updated" },
+				state: existing,
+			});
+			expect(updated.state.mr.description).toBe("Updated");
+			expect((await store.read())?.mr.description).toBe("Updated");
+
+			const retained = await syncReview({
+				...syncInput,
+				state: updated.state,
+			});
+			expect(retained.state.mr.description).toBe("Updated");
+			expect((await store.read())?.mr.description).toBe("Updated");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 test("defaults new state and preserves an explicit hidden choice through sync", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "mole-review-whitespace-state-"));
 	try {

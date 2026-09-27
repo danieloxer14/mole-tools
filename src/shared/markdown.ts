@@ -92,15 +92,17 @@ export interface WrappedMarkdownBlocks {
 
 /**
  * Wraps each rendered block in a `.markdown-block` container carrying its
- * source line range as data attributes, plus a Tag/Comment action pair for
- * blocks whose range was recovered. Pure string assembly (no DOM), so it is
- * unit-testable under `bun:test` without the DOMPurify/DOM dependency that
- * `renderMarkdownHtml`/`renderMarkdownBlocks`' sanitizing callers need.
- * Callers must sanitize the returned `html` before rendering it.
+ * source line range as data attributes, plus a Tag action and an optional
+ * Comment action for blocks whose range was recovered. Pure string assembly
+ * (no DOM), so it is unit-testable under `bun:test` without the DOMPurify/DOM
+ * dependency that `renderMarkdownHtml`/`renderMarkdownBlocks`' sanitizing
+ * callers need. Callers must sanitize the returned `html` before rendering it.
  */
 export function wrapMarkdownBlocksWithActions(
 	blocks: readonly MarkdownBlockSpan[],
+	options: { comment?: boolean } = {},
 ): WrappedMarkdownBlocks {
+	const comment = options.comment ?? true;
 	const blockRanges = new Map<string, { startLine: number; endLine: number }>();
 	const html = blocks
 		.map((block) => {
@@ -111,7 +113,10 @@ export function wrapMarkdownBlocksWithActions(
 				startLine: block.startLine,
 				endLine: block.endLine,
 			});
-			return `<div class="markdown-block" data-block-id="${block.id}" data-source-line-start="${block.startLine}" data-source-line-end="${block.endLine}"><span class="markdown-block-actions"><button type="button" class="markdown-block-tag" data-block-id="${block.id}">Tag</button><button type="button" class="markdown-block-comment" data-block-id="${block.id}">Comment</button></span>${block.html}</div>`;
+			const commentButton = comment
+				? `<button type="button" class="markdown-block-comment" data-block-id="${block.id}">Comment</button>`
+				: "";
+			return `<div class="markdown-block" data-block-id="${block.id}" data-source-line-start="${block.startLine}" data-source-line-end="${block.endLine}"><span class="markdown-block-actions"><button type="button" class="markdown-block-tag" data-block-id="${block.id}">Tag</button>${commentButton}</span>${block.html}</div>`;
 		})
 		.join("");
 	return { html, blockRanges };

@@ -2,13 +2,10 @@ import {
 	Bot,
 	Check,
 	ChevronDown,
-	CircleCheck,
-	CircleDot,
 	Eraser,
 	Loader2,
 	Plus,
 	SendHorizontal,
-	Sparkles,
 	Square,
 	Wrench,
 	X,
@@ -23,7 +20,6 @@ import {
 	useRef,
 } from "react";
 import type { PromptAgentName } from "../../../../adapters/prompts/frontmatter";
-import type { HostDiscussion } from "../../../../ports/git-host";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import {
 	collapseSkillText,
@@ -34,11 +30,10 @@ import {
 } from "../../../../shared/skills";
 import {
 	type ChatTag,
+	isDescriptionChatTag,
 	isFileChatTag,
 	isMarkdownChatTag,
 } from "../../chat-tags";
-import type { ChatEntryWithOptimistic } from "../../store";
-import { CommentMarkdown } from "./CommentMarkdown";
 import { composerEnterAction } from "./composer-keydown";
 import { IconButton } from "./IconButton";
 import { SkillTextarea } from "./SkillTextarea";
@@ -49,11 +44,6 @@ import {
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import {
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
-} from "./ui/collapsible";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -80,9 +70,6 @@ export interface ChatSummary {
 export interface ChatPaneProps {
 	transcript: readonly ChatEntryWithOptimistic[];
 	tags: readonly ChatTag[];
-	discussions?: readonly HostDiscussion[];
-	onExplainDiscussion?: (discussionId: string) => void;
-	explainDisabled?: boolean;
 	streamingSegments: readonly string[];
 	tools: readonly ChatToolActivity[];
 	error: string | null;
@@ -107,6 +94,10 @@ export interface ChatPaneProps {
 }
 
 function tagLabel(tag: ChatTag): string {
+	if (isDescriptionChatTag(tag))
+		return tag.startLine === undefined
+			? "MR description (whole)"
+			: `MR description:${tag.startLine}-${tag.endLine}`;
 	if (isFileChatTag(tag)) return `${tag.path} (whole file)`;
 	return isMarkdownChatTag(tag)
 		? `${tag.path}:${tag.startLine}-${tag.endLine}`
@@ -114,6 +105,10 @@ function tagLabel(tag: ChatTag): string {
 }
 
 function tagKey(tag: ChatTag): string {
+	if (isDescriptionChatTag(tag))
+		return tag.startLine === undefined
+			? "description-whole"
+			: `description-${tag.startLine}-${tag.endLine}`;
 	if (isFileChatTag(tag)) return `${tag.path}-file`;
 	return isMarkdownChatTag(tag)
 		? `${tag.path}-markdown-${tag.startLine}-${tag.endLine}`
@@ -276,9 +271,6 @@ export function chatLabel(chat: ChatSummary, index: number): string {
 export function ChatPane({
 	transcript,
 	tags,
-	discussions = [],
-	onExplainDiscussion,
-	explainDisabled = false,
 	streamingSegments = [],
 	tools = [],
 	error,
@@ -386,101 +378,6 @@ export function ChatPane({
 	};
 	return (
 		<aside className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-sidebar">
-			{discussions.length > 0 ? (
-				<Collapsible className="min-w-0 shrink-0 border-b">
-					<CollapsibleTrigger
-						aria-label="General discussions"
-						aria-controls="general-discussions"
-						render={
-							<button
-								type="button"
-								className="group flex w-full items-center gap-2 px-4 py-2 text-sm font-medium transition-colors duration-150 hover:bg-muted/60"
-							>
-								<ChevronDown
-									className="size-4 shrink-0 -rotate-90 transition-transform duration-200 ease-out group-data-[panel-open]:rotate-0"
-									aria-hidden
-								/>
-								<span className="min-w-0 flex-1 truncate text-left">
-									General discussions
-								</span>
-								<Badge variant="outline">{discussions.length}</Badge>
-							</button>
-						}
-					/>
-					<CollapsibleContent
-						keepMounted
-						id="general-discussions"
-						className="min-h-0 min-w-0 max-h-[40vh] max-w-full space-y-2 overflow-x-hidden overflow-y-auto px-4 pb-2"
-					>
-						{discussions.map((discussion) => (
-							<article
-								className="min-w-0 max-w-full overflow-hidden rounded-md border border-l-2 bg-card p-3 shadow-xs data-[resolved=true]:border-l-success data-[resolved=false]:border-l-warning"
-								key={discussion.id}
-								data-discussion-id={discussion.id}
-								data-resolved={discussion.resolved ? "true" : "false"}
-							>
-								<div className="flex min-w-0 flex-wrap items-start gap-2">
-									{discussion.resolved ? (
-										<CircleCheck
-											className="mt-0.5 size-4 shrink-0 text-success"
-											aria-hidden
-										/>
-									) : (
-										<CircleDot
-											className="mt-0.5 size-4 shrink-0 text-warning"
-											aria-hidden
-										/>
-									)}
-									<strong className="min-w-0 flex-1 break-words whitespace-normal text-sm font-medium [overflow-wrap:anywhere]">
-										{discussion.resolved ? "Resolved" : "Unresolved"} discussion
-									</strong>
-									{onExplainDiscussion ? (
-										<div
-											className="flex min-w-0 shrink-0 items-center gap-1"
-											data-action-group="discussion-actions"
-										>
-											<Button
-												type="button"
-												variant="default"
-												size="xs"
-												data-action="explain"
-												disabled={explainDisabled}
-												aria-busy={explainDisabled ? "true" : undefined}
-												onClick={() => onExplainDiscussion(discussion.id)}
-											>
-												{explainDisabled ? (
-													<Loader2 className="animate-spin" aria-hidden />
-												) : (
-													<Sparkles aria-hidden />
-												)}
-												Explain
-											</Button>
-										</div>
-									) : null}
-								</div>
-								<div className="min-w-0 max-w-full divide-y divide-border">
-									{discussion.notes.map((note) => (
-										<div
-											key={note.id}
-											className="min-w-0 max-w-full overflow-hidden py-2 text-sm"
-										>
-											<div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs text-muted-foreground">
-												<span className="min-w-0 break-words [overflow-wrap:anywhere]">
-													{note.author}
-												</span>
-												<span className="break-words [overflow-wrap:anywhere]">
-													· {new Date(note.createdAt).toLocaleTimeString()}
-												</span>
-											</div>
-											<CommentMarkdown body={note.body} />
-										</div>
-									))}
-								</div>
-							</article>
-						))}
-					</CollapsibleContent>
-				</Collapsible>
-			) : null}
 			<header className="min-w-0 shrink-0 space-y-3 border-b px-4 py-3">
 				<div className="flex items-center justify-between gap-2">
 					<div className="flex items-center gap-2">
@@ -712,11 +609,13 @@ export function ChatPane({
 									variant="secondary"
 									className="h-auto max-w-full min-w-0 shrink justify-start gap-1 overflow-visible text-left whitespace-normal break-words font-mono text-[11px] leading-normal animate-in zoom-in-95 fade-in duration-150 ease-out [overflow-wrap:anywhere]"
 									title={
-										isFileChatTag(tag)
-											? "Whole file"
-											: isMarkdownChatTag(tag)
-												? (tag.quote ?? "")
-												: tag.hunk
+										isDescriptionChatTag(tag)
+											? tag.quote
+											: isFileChatTag(tag)
+												? "Whole file"
+												: isMarkdownChatTag(tag)
+													? (tag.quote ?? "")
+													: tag.hunk
 									}
 								>
 									<span className="min-w-0 break-words whitespace-normal text-left [overflow-wrap:anywhere]">

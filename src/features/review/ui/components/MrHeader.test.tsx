@@ -12,6 +12,7 @@ import {
 	headerTitle,
 	MrHeader,
 	type MrHeaderProps,
+	type ReviewView,
 	shaButtonLabel,
 	shortSha,
 	tabTitle,
@@ -48,6 +49,8 @@ const base: MrHeaderProps = {
 		title: "Add review header",
 		webUrl: "https://gitlab.example.test/group/project/-/merge_requests/42",
 	},
+	view: "code",
+	onViewChange: () => {},
 	headSha: "1234567890abcdef1234567890abcdef12345678",
 	filesChanged: 3,
 	insertions: 12,
@@ -148,6 +151,60 @@ test("does not report copied when clipboard write fails", async () => {
 		await Promise.resolve();
 	});
 	expect(rendered.container.textContent).not.toContain("Copied");
+});
+
+test("renders Review view toggle first with the active option pressed", () => {
+	const header = render().querySelector("header");
+	const toggle = header?.firstElementChild;
+	const defaultOptions = Array.from(toggle?.querySelectorAll("button") ?? []);
+	const code = defaultOptions.find(
+		(button) => button.textContent?.trim() === "Code",
+	);
+	const defaultOverview = defaultOptions.find(
+		(button) => button.textContent?.trim() === "Overview",
+	);
+	const overviewHeader = render({ view: "overview" }).querySelector("header");
+	const overviewToggle = overviewHeader?.firstElementChild;
+	const overview = Array.from(
+		overviewToggle?.querySelectorAll("button") ?? [],
+	).find((button) => button.textContent?.trim() === "Overview");
+
+	expect(toggle?.getAttribute("data-slot")).toBe("toggle-group");
+	expect(toggle?.getAttribute("aria-label")).toBe("Review view");
+	expect(code?.getAttribute("aria-pressed")).toBe("true");
+	expect(defaultOverview?.getAttribute("aria-pressed")).toBe("false");
+	expect(overview?.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("selecting Overview reports the overview view", () => {
+	const changes: ReviewView[] = [];
+	const { container } = renderInteractive({
+		onViewChange: (view) => changes.push(view),
+	});
+	const toggle = container.querySelector('[aria-label="Review view"]');
+	const overview = Array.from(toggle?.querySelectorAll("button") ?? []).find(
+		(button) => button.textContent?.trim() === "Overview",
+	);
+
+	act(() => overview?.click());
+
+	expect(changes).toEqual(["overview"]);
+});
+
+test("ignores the empty selection when the active Code option is clicked", () => {
+	const changes: ReviewView[] = [];
+	const { container } = renderInteractive({
+		onViewChange: (view) => changes.push(view),
+	});
+	const code = Array.from(
+		container
+			.querySelector('[aria-label="Review view"]')
+			?.querySelectorAll("button") ?? [],
+	).find((button) => button.textContent?.trim() === "Code");
+
+	act(() => code?.click());
+
+	expect(changes).toEqual([]);
 });
 
 test("renders title, sha identity, approved pill, and GitLab link", () => {

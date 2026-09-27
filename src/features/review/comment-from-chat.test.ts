@@ -148,6 +148,42 @@ describe("comment from chat", () => {
 		);
 	});
 
+	test("conversation markdown labels whole and ranged description tags", () => {
+		const descriptionEntry: ChatEntry = {
+			role: "user",
+			text: "Review this description.",
+			tags: [
+				{ kind: "description", quote: "Whole body" },
+				{
+					kind: "description",
+					startLine: 3,
+					endLine: 5,
+					quote: "Block",
+				},
+				{
+					kind: "description",
+					startLine: 3,
+					endLine: 3,
+					quote: "Single line",
+				},
+			],
+			skills: [],
+			at: "2026-01-01T00:00:00.000Z",
+			sessionId: null,
+			partial: false,
+		};
+		const markdown = buildCommentConversationMarkdown({
+			draft: lineDraft,
+			chatLabel: "Review chat",
+			entries: [descriptionEntry],
+			diffs: [diff],
+		});
+
+		expect(markdown).toContain(
+			"Context: MR description (whole); MR description lines 3-5 (Markdown); MR description lines 3 (Markdown)",
+		);
+	});
+
 	test("markdown anchor renders quoted lines", () => {
 		const draft: Draft = {
 			...lineDraft,
