@@ -377,6 +377,150 @@ test("default review controls live only in General", () => {
 	expect(general).toContain(">Save</button>");
 	expect(general).toContain("claude-sonnet-4 (current custom model)");
 });
+
+test("General hosts the whitespace toggle independent of settings load", async () => {
+	const changes: boolean[] = [];
+	const whitespace = {
+		showWhitespaceChanges: true,
+		disabled: false,
+		onShowWhitespaceChangesChange: (show: boolean) => changes.push(show),
+	};
+	const general = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+			whitespace,
+		}),
+	);
+	expect(general).toContain('aria-label="Show whitespace changes"');
+	expect(general).toContain('aria-checked="true"');
+	expect(general).toContain('id="settings-show-whitespace-changes"');
+	expect(general).toContain(
+		'<label for="settings-show-whitespace-changes">Show whitespace changes</label>',
+	);
+	expect(general.indexOf("settings-show-whitespace-changes")).toBeLessThan(
+		general.indexOf("settings-default-agent"),
+	);
+
+	const disabled = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+			whitespace: {
+				...whitespace,
+				showWhitespaceChanges: false,
+				disabled: true,
+			},
+		}),
+	);
+	const disabledContainer = document.createElement("div");
+	disabledContainer.innerHTML = disabled;
+	const checkbox = disabledContainer.querySelector<HTMLElement>(
+		'[role="checkbox"][aria-label="Show whitespace changes"]',
+	);
+	const input = disabledContainer.querySelector<HTMLInputElement>(
+		"#settings-show-whitespace-changes",
+	);
+	expect(checkbox?.getAttribute("aria-checked")).toBe("false");
+	expect(input?.checked).toBe(false);
+	expect(input?.disabled).toBe(true);
+	expect(checkbox?.getAttribute("aria-disabled")).toBe("true");
+	expect(checkbox?.hasAttribute("data-disabled")).toBe(true);
+
+	const loading = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialPrompt,
+			initialTab: "general",
+			whitespace,
+		}),
+	);
+	expect(loading).toContain("Loading settings…");
+	expect(loading).toContain('aria-label="Show whitespace changes"');
+
+	const prompts = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			whitespace,
+		}),
+	);
+	expect(prompts).not.toContain("Show whitespace changes");
+	for (const initialTab of ["skills", "appearance"] as const) {
+		const otherTab = renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialSettings,
+				initialPrompt,
+				initialTab,
+				whitespace,
+			}),
+		);
+		expect(otherTab).not.toContain("Show whitespace changes");
+	}
+	const omitted = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+		}),
+	);
+	expect(omitted).not.toContain("Show whitespace changes");
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async () =>
+		jsonResponse({ error: "Settings unavailable" }, 503)) as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialPrompt,
+					initialTab: "general",
+					whitespace,
+				}),
+			),
+		);
+		const checkbox = container.querySelector<HTMLInputElement>(
+			"#settings-show-whitespace-changes",
+		);
+		expect(checkbox).not.toBeNull();
+		await act(async () => {
+			await flushReact();
+		});
+		expect(container.textContent).toContain("Settings unavailable");
+		expect(container.querySelector("#settings-show-whitespace-changes")).toBe(
+			checkbox,
+		);
+
+		act(() =>
+			container
+				.querySelector<HTMLElement>("#settings-show-whitespace-changes")
+				?.click(),
+		);
+		expect(changes).toEqual([false]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
 // Happy DOM exercises narrow-screen navigation but does not prove pixel geometry.
 test("375px settings controls stay keyboard and scroll reachable", async () => {
 	const scriptPath = new URL("./SettingsPanel.375px.smoke.tsx", import.meta.url)

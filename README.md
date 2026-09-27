@@ -117,8 +117,10 @@ for OMP and Claude, or `codex exec -m <name>` for Codex. OMP effort is sent as
 `-c` option is not an OMP effort flag.
 
 The **Settings** dialog has a **General** tab for global **Default Agent**,
-**Default model**, and **Default effort** controls. **Prompts** manages the five
-review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`,
+**Default model**, and **Default effort** controls. **Show whitespace changes**
+also lives under **General** and applies immediately to the current review;
+it is not saved with review defaults. **Prompts** manages the five review prompts
+(`review-layers-code`, `review-layers-plan`, `review-chat`,
 `review-explain-comment`, and `review-comment-from-chat`); each version has
 Agent, Model, and Effort controls. Changes affect future layer runs and new
 chat bindings; use **Regenerate** to rebuild cached layers.
@@ -435,13 +437,15 @@ discussion summaries remain plain text.
 
 The **Settings** dialog has four tabs: **General**, **Prompts**, **Skills**, and
 **Appearance**; it opens on **Prompts**. **General** contains **Default Agent**,
-**Default model**, and **Default effort**. The **Prompts** tab manages the five
-review prompt slots (`review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`) and their preset versions,
-each with Agent, Model, and Effort dropdowns. OMP models come from the selected
-executable's `models --json` catalog; Claude uses the Anthropic Models API with
-a server `ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key
-entitlement does not establish Claude CLI access, and aliases are not a full
+**Default model**, **Default effort**, and **Show whitespace changes**. That
+toggle applies immediately to the current review, not review defaults. The
+**Prompts** tab manages the five review prompt slots (`review-layers-code`,
+`review-layers-plan`, `review-chat`, `review-explain-comment`,
+`review-comment-from-chat`) and their preset versions, each with Agent, Model,
+and Effort dropdowns. OMP models come from the selected executable's
+`models --json` catalog; Claude uses the Anthropic Models API with a server
+`ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key entitlement does
+not establish Claude CLI access, and aliases are not a full
 CLI catalog. Optional effort choices are model-compatible; OMP sends
 `--thinking`, Claude sends `--effort` (not Codex `-c`).
 

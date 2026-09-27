@@ -223,11 +223,6 @@ export interface ChangedFilesProps {
 	selectedPath: string | null;
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
-	showWhitespaceChanges?: boolean;
-	whitespaceChanging?: boolean;
-	syncing?: boolean;
-	refreshing?: boolean;
-	onShowWhitespaceChangesChange?: (show: boolean) => void;
 }
 
 export interface ChangedFileEntry {
@@ -595,11 +590,6 @@ export function ChangedFiles({
 	selectedPath,
 	onSelectFile,
 	onViewedChange,
-	showWhitespaceChanges = true,
-	whitespaceChanging = false,
-	syncing = false,
-	refreshing = false,
-	onShowWhitespaceChangesChange = () => {},
 }: ChangedFilesProps): ReactElement {
 	const [mode, setMode] = useState<ChangedFilesMode>("list");
 	const [collapsedFolderPaths, setCollapsedFolderPaths] = useState<Set<string>>(
@@ -794,11 +784,6 @@ export function ChangedFiles({
 				total={changedFileCount(paths)}
 				mode={mode}
 				onModeChange={setMode}
-				showWhitespaceChanges={showWhitespaceChanges}
-				whitespaceChanging={whitespaceChanging}
-				syncing={syncing}
-				refreshing={refreshing}
-				onShowWhitespaceChangesChange={onShowWhitespaceChangesChange}
 			/>
 			<nav
 				className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
