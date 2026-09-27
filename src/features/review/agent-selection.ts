@@ -37,8 +37,11 @@ export function effectiveAgentSelection(
 				};
 	if (
 		selection.effort !== null &&
-		!isAgentEffort(selection.agent, selection.effort)
+		!isAgentEffort(selection.agent, selection.effort, selection.model)
 	) {
+		if (version.agent === null && version.effort == null) {
+			return { ...selection, effort: null };
+		}
 		throw new TypeError(`Unsupported effort for ${selection.agent}`);
 	}
 	if (

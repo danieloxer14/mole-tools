@@ -4,6 +4,8 @@ import { ClaudeAgentAdapter } from "./claude";
 import {
 	AgentEffortSchema,
 	CLAUDE_EFFORTS,
+	CODEX_EFFORTS,
+	codexEffortsForModel,
 	isAgentEffort,
 	OMP_EFFORTS,
 } from "./effort";
@@ -36,6 +38,64 @@ describe("agent effort levels", () => {
 		expect(CLAUDE_EFFORTS).toEqual(["low", "medium", "high", "xhigh", "max"]);
 	});
 
+	test("defines model-specific Codex reasoning levels", () => {
+		expect(CODEX_EFFORTS).toEqual([
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+			"max",
+			"ultra",
+		]);
+		for (const model of [
+			"gpt-6-sol",
+			"gpt-6-astra",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+		]) {
+			expect(codexEffortsForModel(model)).toEqual(CODEX_EFFORTS);
+		}
+		for (const model of ["gpt-6-luna", "gpt-5.6-luna"]) {
+			expect(codexEffortsForModel(model)).toEqual([
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			]);
+		}
+		expect(codexEffortsForModel("gpt-5.5")).toEqual([
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+		]);
+		expect(codexEffortsForModel("unknown-model")).toEqual([]);
+	});
+
+	test("accepts Codex effort only when supported by selected model", () => {
+		expect(AgentEffortSchema.safeParse("ultra").success).toBe(true);
+		expect(isAgentEffort("codex", "ultra", "gpt-6-astra")).toBe(true);
+		expect(isAgentEffort("codex", "ultra", "gpt-6-luna")).toBe(false);
+		expect(isAgentEffort("codex", "max", "gpt-5.5")).toBe(false);
+		expect(isAgentEffort("codex", "low")).toBe(false);
+		expect(
+			ConfigSchema.safeParse({
+				...baseConfig,
+				review: { agent: "codex", model: "gpt-6-astra", effort: "ultra" },
+			}).success,
+		).toBe(true);
+		for (const review of [
+			{ agent: "codex", effort: "low" },
+			{ agent: "codex", model: "gpt-6-luna", effort: "ultra" },
+			{ agent: "codex", model: "gpt-5.5", effort: "max" },
+			{ agent: "codex", model: "unknown-model", effort: "high" },
+		]) {
+			expect(ConfigSchema.safeParse({ ...baseConfig, review }).success).toBe(
+				false,
+			);
+		}
+	});
 	test("validates only each agent's supported efforts", () => {
 		for (const effort of OMP_EFFORTS) {
 			expect(isAgentEffort("omp", effort)).toBe(true);
@@ -63,7 +123,7 @@ describe("agent effort levels", () => {
 	});
 
 	test("rejects unsupported, malformed, and cross-agent efforts", () => {
-		for (const effort of ["ultra", "", null, 1, {}, undefined]) {
+		for (const effort of ["", null, 1, {}, undefined]) {
 			expect(AgentEffortSchema.safeParse(effort).success).toBe(false);
 			expect(isAgentEffort("omp", effort)).toBe(false);
 			expect(isAgentEffort("claude", effort)).toBe(false);

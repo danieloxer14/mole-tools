@@ -37,7 +37,7 @@ function transcriptEntry(
 	};
 }
 
-test("renders general discussions collapsed by default", () => {
+test("does not render a general discussions trigger", () => {
 	const markup = renderToStaticMarkup(
 		<ChatPane
 			transcript={[]}
@@ -55,25 +55,8 @@ test("renders general discussions collapsed by default", () => {
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
-			discussions={[
-				{
-					id: "discussion-1",
-					resolved: false,
-					position: null,
-					notes: [
-						{
-							id: "note-1",
-							author: "reviewer",
-							body: "Please rename this.",
-							createdAt: "2026-08-24T00:00:00Z",
-							system: false,
-						},
-					],
-				},
-			]}
 			streamingSegments={[]}
 			error={null}
 			sending={false}
@@ -84,13 +67,9 @@ test("renders general discussions collapsed by default", () => {
 		/>,
 	);
 
-	const container = parseMarkup(markup);
-	const trigger = container.querySelector<HTMLButtonElement>(
-		'button[aria-label="General discussions"]',
-	);
-	expect(trigger?.getAttribute("aria-expanded")).toBe("false");
-	expect(container.querySelector('[data-resolved="false"]')).not.toBeNull();
-	expect(container.textContent).toContain("Please rename this.");
+	expect(
+		parseMarkup(markup).querySelector('[aria-label="General discussions"]'),
+	).toBeNull();
 });
 
 test("renders one switcher item per chat with active and busy state", async () => {
@@ -161,34 +140,24 @@ test("renders one switcher item per chat with active and busy state", async () =
 	expect(selectedChatId).toBe("chat-1");
 });
 
-test("wires rendered chat header controls to actions", () => {
+test("keeps New chat and removes the general Settings control", () => {
 	let newChatCalls = 0;
-	let settingsCalls = 0;
 	const rendered = renderInteractive({
 		onNewChat: () => {
 			newChatCalls += 1;
-		},
-		onOpenSettings: () => {
-			settingsCalls += 1;
 		},
 	});
 
 	const newChatButton = rendered.container.querySelector<HTMLButtonElement>(
 		'button[aria-label="New chat"]',
 	);
-	const settingsButton = rendered.container.querySelector<HTMLButtonElement>(
-		'button[aria-label="Settings"]',
-	);
 	expect(newChatButton).not.toBeNull();
-	expect(settingsButton).not.toBeNull();
+	expect(
+		rendered.container.querySelector('button[aria-label="Settings"]'),
+	).toBeNull();
 
-	act(() => {
-		newChatButton?.click();
-		settingsButton?.click();
-	});
-
+	act(() => newChatButton?.click());
 	expect(newChatCalls).toBe(1);
-	expect(settingsCalls).toBe(1);
 });
 
 test("disables and marks new chat busy while creating", () => {
@@ -220,7 +189,6 @@ test("renders parent-owned composer draft", () => {
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft="unsent question"
 			onDraftChange={() => {}}
 			streamingSegments={[]}
@@ -538,7 +506,6 @@ function renderComposer(
 			activeChatId="chat-1"
 			onSelectChat={() => {}}
 			onNewChat={() => {}}
-			onOpenSettings={() => {}}
 			draft=""
 			onDraftChange={() => {}}
 			streamingSegments={[]}
@@ -552,6 +519,31 @@ function renderComposer(
 		/>,
 	);
 }
+
+test("renders description context tags with labels and quoted titles", () => {
+	const container = parseMarkup(
+		renderComposer({
+			tags: [
+				{ kind: "description", quote: "Whole body" },
+				{
+					kind: "description",
+					startLine: 3,
+					endLine: 5,
+					quote: "Block",
+				},
+			],
+		}),
+	);
+	const wholeChip = container.querySelector<HTMLElement>(
+		'[title="Whole body"]',
+	);
+	const blockChip = container.querySelector<HTMLElement>('[title="Block"]');
+
+	expect(wholeChip?.textContent).toContain("MR description (whole)");
+	expect(wholeChip?.getAttribute("title")).toBe("Whole body");
+	expect(blockChip?.textContent).toContain("MR description:3-5");
+	expect(blockChip?.getAttribute("title")).toBe("Block");
+});
 
 interface InteractiveRender {
 	container: HTMLDivElement;
@@ -584,7 +576,6 @@ function renderInteractive(
 				activeChatId="chat-1"
 				onSelectChat={() => {}}
 				onNewChat={() => {}}
-				onOpenSettings={() => {}}
 				draft=""
 				onDraftChange={() => {}}
 				streamingSegments={[]}
@@ -657,6 +648,44 @@ test("reopens slash picker after selected skill draft is cleared", () => {
 	rendered.rerender({ draft, skills, onDraftChange });
 	expect(textarea.value).toBe("/");
 	expect(rendered.container.querySelector('[role="listbox"]')).not.toBeNull();
+});
+
+test("opens Skills settings from the skill picker plus button", () => {
+	let draft = "";
+	let openedSkills = false;
+	const onDraftChange = (value: string) => {
+		draft = value;
+	};
+	const onOpenSkillsSettings = () => {
+		openedSkills = true;
+	};
+	const rendered = renderInteractive({
+		draft,
+		skills: [],
+		onDraftChange,
+		onOpenSkillsSettings,
+	});
+	const textarea = rendered.container.querySelector<HTMLTextAreaElement>(
+		'textarea[aria-label="Chat message"]',
+	);
+	if (!textarea) throw new Error("Chat composer did not render a textarea");
+
+	Object.getOwnPropertyDescriptor(
+		window.HTMLTextAreaElement.prototype,
+		"value",
+	)?.set?.call(textarea, "/");
+	textarea.setSelectionRange(1, 1);
+	act(() =>
+		textarea.dispatchEvent(new window.Event("input", { bubbles: true })),
+	);
+	rendered.rerender({ draft, skills: [], onDraftChange, onOpenSkillsSettings });
+
+	const settingsButton = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Open Skills settings"]',
+	);
+	expect(settingsButton).not.toBeNull();
+	act(() => settingsButton?.click());
+	expect(openedSkills).toBe(true);
 });
 
 test("keeps persisted assistant card DOM stable across history refresh", () => {
@@ -840,36 +869,6 @@ test("leaves parent-owned draft clearing to the accepted send path", () => {
 	expect(sends).toBe(1);
 	expect(draftChanges).toBe(0);
 });
-const generalDiscussions = [
-	{
-		id: "discussion-1",
-		resolved: false,
-		position: null,
-		notes: [
-			{
-				id: "note-1",
-				author: "reviewer",
-				body: "Please rename this.",
-				createdAt: "2026-08-24T00:00:00Z",
-				system: false,
-			},
-		],
-	},
-	{
-		id: "discussion-2",
-		resolved: true,
-		position: null,
-		notes: [
-			{
-				id: "note-2",
-				author: "reviewer",
-				body: "Looks good now.",
-				createdAt: "2026-08-24T00:00:00Z",
-				system: false,
-			},
-		],
-	},
-];
 test("exposes semantic message and streaming state", () => {
 	const markup = renderComposer({
 		transcript: [
@@ -928,211 +927,4 @@ test("opens file references from rendered assistant markdown", () => {
 		link?.click();
 	});
 	expect(openedPath).toBe("src/index.ts");
-});
-function renderGeneralDiscussions(
-	props: Partial<Parameters<typeof ChatPane>[0]> = {},
-): string {
-	return renderToStaticMarkup(
-		<ChatPane
-			transcript={[]}
-			tags={[]}
-			chats={[
-				{
-					id: "chat-1",
-					title: "First chat",
-					createdAt: "2026-08-24T00:00:00Z",
-					busy: false,
-					agent: null,
-					model: null,
-				},
-			]}
-			activeChatId="chat-1"
-			onSelectChat={() => {}}
-			onNewChat={() => {}}
-			onOpenSettings={() => {}}
-			draft=""
-			onDraftChange={() => {}}
-			discussions={generalDiscussions}
-			streamingSegments={[]}
-			error={null}
-			sending={false}
-			stopping={false}
-			onSend={() => undefined}
-			onStop={() => {}}
-			onRemoveTag={() => {}}
-			{...props}
-		/>,
-	);
-}
-
-test("renders an Explain button on general discussions when a handler is supplied", () => {
-	const markup = renderGeneralDiscussions({ onExplainDiscussion: () => {} });
-
-	const container = parseMarkup(markup);
-	const buttons = [
-		...container.querySelectorAll<HTMLButtonElement>(
-			'button[data-action="explain"]',
-		),
-	];
-	expect(buttons).toHaveLength(2);
-	for (const id of ["discussion-1", "discussion-2"]) {
-		const card = container.querySelector<HTMLElement>(
-			`[data-discussion-id="${id}"]`,
-		);
-		expect(card).not.toBeNull();
-		expect(card?.querySelector('button[data-action="explain"]')).not.toBeNull();
-		expect(card?.textContent).toContain("Explain");
-	}
-	expect(buttons.every((button) => !button.disabled)).toBe(true);
-});
-
-test("disables general Explain buttons when explainDisabled is set", () => {
-	const markup = renderGeneralDiscussions({
-		onExplainDiscussion: () => {},
-		explainDisabled: true,
-	});
-
-	const container = parseMarkup(markup);
-	const buttons = [
-		...container.querySelectorAll<HTMLButtonElement>(
-			'button[data-action="explain"]',
-		),
-	];
-	expect(buttons).toHaveLength(2);
-	expect(buttons.every((button) => button.disabled)).toBe(true);
-});
-
-test("omits Explain on general discussions when no handler is supplied", () => {
-	const markup = renderGeneralDiscussions();
-
-	const container = parseMarkup(markup);
-	expect(
-		container.querySelector('[data-discussion-id="discussion-1"]'),
-	).not.toBeNull();
-	expect(container.querySelector('button[data-action="explain"]')).toBeNull();
-});
-
-test("renders general discussion Markdown through the sanitized comment renderer", () => {
-	const markup = renderGeneralDiscussions({
-		discussions: [
-			{
-				id: "markdown-general-discussion",
-				resolved: false,
-				position: null,
-				notes: [
-					{
-						id: "markdown-general-note",
-						author: "reviewer",
-						body: [
-							"# General note",
-							"",
-							"_Important_",
-							"",
-							"- item",
-							"",
-							"```text",
-							"general code",
-							"```",
-							"",
-							'<span onclick="alert(1)">click</span>',
-						].join("\n"),
-						createdAt: "2026-01-01T00:00:00.000Z",
-						system: false,
-					},
-				],
-			},
-		],
-	});
-
-	const container = parseMarkup(markup);
-	expect(container.querySelector("h1")?.textContent).toBe("General note");
-	expect(container.querySelector("li")?.textContent).toBe("item");
-	expect(container.querySelector("pre code")?.textContent).toContain(
-		"general code",
-	);
-	expect(container.textContent).toContain("click");
-	expect(container.querySelector("[onclick]")).toBeNull();
-});
-test("bounds long general discussion content and keeps code and table regions internal", () => {
-	const longPath =
-		"packages/review/features/comments/components/very-long-general-file-name.ts";
-	const body = [
-		`Please inspect ${longPath} and https://example.test/${"path-segment".repeat(16)}.`,
-		"",
-		"```text",
-		"long fenced content that remains inside its own scrollable pre region",
-		"```",
-		"",
-		"| file | detail |",
-		"| --- | --- |",
-		`| ${longPath} | table content |`,
-	].join("\n");
-	const markup = renderGeneralDiscussions({
-		discussions: [
-			{
-				...generalDiscussions[0],
-				notes: [{ ...generalDiscussions[0].notes[0], body }],
-			},
-		],
-	});
-	const container = parseMarkup(markup);
-	const card = container.querySelector<HTMLElement>(
-		'[data-discussion-id="discussion-1"]',
-	);
-	const markdown = card?.querySelector<HTMLElement>(".comment-markdown");
-	const tableWrap = markdown?.querySelector<HTMLElement>(
-		".rendered-table-wrap",
-	);
-
-	const panel = container.querySelector<HTMLElement>("#general-discussions");
-	expect(panel?.className).toContain("min-h-0");
-	expect(panel?.className).toContain("max-h-[40vh]");
-	expect(panel?.className).toContain("overflow-x-hidden");
-	expect(panel?.className).toContain("overflow-y-auto");
-	expect(card?.className).toContain("min-w-0");
-	expect(card?.className).toContain("max-w-full");
-	expect(card?.className).toContain("overflow-hidden");
-	expect(markdown?.className).toContain("min-w-0");
-	expect(markdown?.className).toContain("[overflow-wrap:anywhere]");
-	expect(markdown?.querySelector("pre")).not.toBeNull();
-	expect(tableWrap?.className).toContain("max-w-full");
-	expect(container.textContent).toContain(longPath);
-});
-
-test("groups general Explain in compact actions and preserves its callback", () => {
-	let explained = "";
-	const rendered = renderInteractive({
-		discussions: generalDiscussions,
-		onExplainDiscussion: (discussionId) => {
-			explained = discussionId;
-		},
-	});
-	const group = rendered.container.querySelector<HTMLElement>(
-		'[data-action-group="discussion-actions"]',
-	);
-	const button = rendered.container.querySelector<HTMLButtonElement>(
-		'button[data-action="explain"]',
-	);
-
-	expect(group?.className).toContain("flex");
-	expect(group?.className).toContain("shrink-0");
-	expect(button?.className).toContain("bg-primary");
-	act(() => button?.click());
-	expect(explained).toBe("discussion-1");
-});
-
-test("marks general Explain as busy while disabled", () => {
-	const container = parseMarkup(
-		renderGeneralDiscussions({
-			onExplainDiscussion: () => {},
-			explainDisabled: true,
-		}),
-	);
-	const button = container.querySelector<HTMLButtonElement>(
-		'button[data-action="explain"]',
-	);
-
-	expect(button?.disabled).toBe(true);
-	expect(button?.getAttribute("aria-busy")).toBe("true");
-	expect(button?.querySelector("svg.animate-spin")).not.toBeNull();
 });

@@ -202,7 +202,7 @@ export const validateLineTags = validateChatTags;
  * context only.
  */
 const TAG_SEMANTICS =
-	'Tag semantics: tags are agent-chat context only, never host comments. A tag without a kind names an inclusive line range on one side of the diff with its hunk header; a tag with kind "markdown" names an inclusive source-line range of a rendered markdown block; a tag with kind "file" and a path only means inspect the entire file at that path.';
+	'Tag semantics: tags are agent-chat context only, never host comments. A tag without a kind names an inclusive line range on one side of the diff with its hunk header; a tag with kind "markdown" names an inclusive source-line range of a rendered markdown block; a tag with kind "file" and a path only means inspect the entire file at that path. A tag with kind "description" refers to the merge request description, never a file: with startLine/endLine it names an inclusive source-line range of the description Markdown, without them it means the entire description; its quote carries the tagged text.';
 function normalizedMessage(message: unknown): string {
 	if (typeof message !== "string" || message.trim().length === 0) {
 		throw new Error("Chat message must not be empty");

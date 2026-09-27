@@ -12,6 +12,7 @@ import {
 	headerTitle,
 	MrHeader,
 	type MrHeaderProps,
+	type ReviewView,
 	shaButtonLabel,
 	shortSha,
 	tabTitle,
@@ -48,6 +49,8 @@ const base: MrHeaderProps = {
 		title: "Add review header",
 		webUrl: "https://gitlab.example.test/group/project/-/merge_requests/42",
 	},
+	view: "code",
+	onViewChange: () => {},
 	headSha: "1234567890abcdef1234567890abcdef12345678",
 	filesChanged: 3,
 	insertions: 12,
@@ -60,6 +63,7 @@ const base: MrHeaderProps = {
 	refreshing: false,
 	layerGenerating: false,
 	onRefresh: () => {},
+	onOpenSettings: () => {},
 };
 
 function render(overrides: Partial<MrHeaderProps> = {}): HTMLDivElement {
@@ -149,6 +153,84 @@ test("does not report copied when clipboard write fails", async () => {
 	expect(rendered.container.textContent).not.toContain("Copied");
 });
 
+test("renders Review view toggle first with the active option pressed", () => {
+	const header = render().querySelector("header");
+	const toggle = header?.firstElementChild;
+	const defaultOptions = Array.from(toggle?.querySelectorAll("button") ?? []);
+	const code = defaultOptions.find(
+		(button) => button.textContent?.trim() === "Code",
+	);
+	const defaultOverview = defaultOptions.find(
+		(button) => button.textContent?.trim() === "Overview",
+	);
+	const overviewHeader = render({ view: "overview" }).querySelector("header");
+	const overviewToggle = overviewHeader?.firstElementChild;
+	const overview = Array.from(
+		overviewToggle?.querySelectorAll("button") ?? [],
+	).find((button) => button.textContent?.trim() === "Overview");
+
+	expect(toggle?.getAttribute("data-slot")).toBe("toggle-group");
+	expect(toggle?.getAttribute("aria-label")).toBe("Review view");
+	expect(code?.getAttribute("aria-pressed")).toBe("true");
+	expect(defaultOverview?.getAttribute("aria-pressed")).toBe("false");
+	expect(overview?.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("keeps toggle options intrinsic and preserves title on narrow screens", () => {
+	const header = render().querySelector("header");
+	const title = header?.querySelector("h1");
+	const options = Array.from(
+		header?.querySelectorAll('[aria-label="Review view"] button') ?? [],
+	);
+
+	expect(header?.className).toContain("flex-wrap");
+	expect(header?.className).toContain("lg:flex-nowrap");
+	expect(title?.className).toContain("basis-full");
+	expect(title?.className).toContain("break-words");
+	expect(title?.className).toContain("lg:truncate");
+	expect(title?.className).toContain("lg:basis-auto");
+	expect(options).toHaveLength(2);
+	for (const option of options) {
+		expect(option.className).toContain("!flex-none");
+		expect(option.className).toContain("!h-9");
+		expect(option.className).toContain("!min-w-fit");
+		expect(option.className).toContain("!px-4");
+		expect(option.className).toContain("!text-sm");
+		expect(option.className).not.toContain("max-lg:");
+	}
+});
+
+test("selecting Overview reports the overview view", () => {
+	const changes: ReviewView[] = [];
+	const { container } = renderInteractive({
+		onViewChange: (view) => changes.push(view),
+	});
+	const toggle = container.querySelector('[aria-label="Review view"]');
+	const overview = Array.from(toggle?.querySelectorAll("button") ?? []).find(
+		(button) => button.textContent?.trim() === "Overview",
+	);
+
+	act(() => overview?.click());
+
+	expect(changes).toEqual(["overview"]);
+});
+
+test("ignores the empty selection when the active Code option is clicked", () => {
+	const changes: ReviewView[] = [];
+	const { container } = renderInteractive({
+		onViewChange: (view) => changes.push(view),
+	});
+	const code = Array.from(
+		container
+			.querySelector('[aria-label="Review view"]')
+			?.querySelectorAll("button") ?? [],
+	).find((button) => button.textContent?.trim() === "Code");
+
+	act(() => code?.click());
+
+	expect(changes).toEqual([]);
+});
+
 test("renders title, sha identity, approved pill, and GitLab link", () => {
 	const container = render();
 	const title = container.querySelector("h1");
@@ -178,28 +260,23 @@ test("hides the update button when no update is available", () => {
 	).toBeNull();
 });
 
-test("wraps the header when update action reduces metadata space", () => {
+test("keeps review controls when an update is available", () => {
 	const container = render({
 		update: { current: "0.9.0", latest: "0.10.0" },
 	});
 	const header = container.querySelector("header");
-	const metadata = header?.firstElementChild;
-	const metadataRow =
-		container.querySelector("[data-sha-control]")?.parentElement;
+	const viewToggle = header?.querySelector('[aria-label="Review view"]');
+	const title = header?.querySelector("h1");
 	const actionGroup = container.querySelector("[data-header-actions]");
 	const updateButton = container.querySelector<HTMLButtonElement>(
 		"[data-update-available]",
 	);
 
-	expect(header?.className).toContain("flex-wrap");
-	expect(metadata?.className).toContain("min-w-[18rem]");
-	expect(metadata?.className).toContain("flex-1");
-	expect(metadataRow?.className).toContain("flex-wrap");
-	expect(actionGroup?.className).toContain("ml-auto");
-	expect(actionGroup?.className).toContain("shrink-0");
+	expect(viewToggle).not.toBeNull();
+	expect(title?.textContent).toBe("Add review header");
 	expect(updateButton?.textContent).toBe("Update 0.10.0 available");
 	expect(updateButton?.parentElement).toBe(actionGroup);
-	expect(actionGroup?.lastElementChild).toBe(updateButton);
+	expect(actionGroup?.querySelector('[aria-label="Settings"]')).not.toBeNull();
 	expect(
 		container.querySelector('[aria-label="Refresh review and layers"]'),
 	).not.toBeNull();
@@ -211,8 +288,12 @@ test("wraps the header when update action reduces metadata space", () => {
 	expect(container.querySelector("[data-files-changed]")?.textContent).toBe(
 		"3 files changed",
 	);
-	expect(container.querySelector("[data-insertions]")?.textContent).toBe("+12");
-	expect(container.querySelector("[data-deletions]")?.textContent).toBe("−4");
+	expect(container.querySelector("[data-insertions]")?.textContent).toBe(
+		"+12",
+	);
+	expect(container.querySelector("[data-deletions]")?.textContent).toBe(
+		"−4",
+	);
 });
 
 test("renders diff totals right of approval pill with diff colours", () => {
@@ -231,6 +312,32 @@ test("renders diff totals right of approval pill with diff colours", () => {
 	expect(deletions?.textContent).toBe("−4");
 	expect(deletions?.className).toContain("text-destructive");
 	expect(stats?.parentElement).toBe(sha?.parentElement);
+});
+
+test("orders title, commit metadata, and header actions on one line", () => {
+	const container = render({ freshness: { stale: true } });
+	const title = container.querySelector("h1");
+	const sha = container.querySelector('button[aria-label="Copy commit sha"]');
+	const ordered = [
+		title,
+		sha,
+		container.querySelector('[data-freshness="stale"]'),
+		container.querySelector('[data-approval="approved"]'),
+		container.querySelector("[data-files-changed]"),
+		container.querySelector("[data-insertions]"),
+		container.querySelector("[data-deletions]"),
+		container.querySelector('button[aria-label="Refresh review and layers"]'),
+		container.querySelector('a[aria-label="Open in GitLab"]'),
+		container.querySelector('button[aria-label="Unapprove"]'),
+		container.querySelector('button[aria-label="Settings"]'),
+	];
+
+	expect(title?.nextElementSibling?.querySelector("[data-sha-control]")).toBe(
+		sha,
+	);
+	for (let index = 1; index < ordered.length; index += 1) {
+		expectBefore(ordered[index - 1] ?? null, ordered[index] ?? null);
+	}
 });
 
 test("renders diff totals without approval pill", () => {
@@ -296,6 +403,33 @@ test("renders one combined refresh control and stale warning", () => {
 	expect(
 		render({ freshness: null }).querySelector('[data-freshness="stale"]'),
 	).toBeNull();
+});
+
+test("opens header Settings with accessible label and tooltip", async () => {
+	let settingsCalls = 0;
+	const rendered = renderInteractive({
+		onOpenSettings: () => {
+			settingsCalls += 1;
+		},
+	});
+	const button = rendered.container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Settings"]',
+	);
+
+	expect(button?.getAttribute("title")).toBeNull();
+	expect(button?.getAttribute("aria-label")).toBe("Settings");
+	await act(async () => {
+		document.body.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		button?.focus();
+		await Bun.sleep(0);
+	});
+	expect(
+		document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
+	).toBe("Settings");
+	act(() => button?.click());
+	expect(settingsCalls).toBe(1);
 });
 
 test("refresh busy and disabled states reflect combined work", () => {

@@ -294,6 +294,7 @@ function syncedState(
 			iid: input.mr.iid,
 			webUrl: input.mr.webUrl,
 			title: input.mr.title,
+			description: input.mr.description ?? base.mr.description,
 			sourceBranch: input.mr.sourceBranch,
 			targetBranch: input.mr.targetBranch,
 		},
@@ -413,10 +414,26 @@ export async function setupReview(
 			previous.revision.headSha,
 		);
 		const diff = filterDiff(fullDiff, input.config?.diff?.ignore ?? []);
-		if (!modeChanged) return { state: previous, diff, fullDiff, paths };
+		if (!modeChanged) {
+			const description = input.mr.description ?? "";
+			if (previous.mr.description === description) {
+				return { state: previous, diff, fullDiff, paths };
+			}
+
+			const state = ReviewStateSchema.parse({
+				...previous,
+				mr: { ...previous.mr, description },
+			});
+			await store.write(state);
+			return { state, diff, fullDiff, paths };
+		}
 
 		const state = ReviewStateSchema.parse({
 			...previous,
+			mr: {
+				...previous.mr,
+				description: input.mr.description ?? "",
+			},
 			mode,
 			layerStatus: "pending",
 			layerError: null,
@@ -440,7 +457,7 @@ export async function setupReview(
 		return syncReview({
 			vcs: input.vcs,
 			ref: input.ref,
-			mr: input.mr,
+			mr: { ...input.mr, description: input.mr.description ?? "" },
 			state: previous,
 			store,
 			paths,
@@ -489,6 +506,7 @@ export async function setupReview(
 			iid: input.mr.iid,
 			webUrl: input.mr.webUrl,
 			title: input.mr.title,
+			description: input.mr.description ?? "",
 			sourceBranch: input.mr.sourceBranch,
 			targetBranch: input.mr.targetBranch,
 		},

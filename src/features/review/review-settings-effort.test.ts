@@ -127,6 +127,18 @@ function makeRoutes(
 			promptPath: (turnId) => join(promptDir, `${turnId}.md`),
 		},
 		config: { review: initialReview },
+		ompModelCatalogProcessRunner: async () => ({
+			stdout: new TextEncoder().encode(
+				JSON.stringify({
+					models: [
+						{ selector: "old-model", thinking: ["low"] },
+						{ selector: "restored-model", thinking: ["high"] },
+					],
+				}),
+			),
+			stderr: new Uint8Array(),
+			exitCode: 0,
+		}),
 		persistConfig: async (partial) => {
 			persisted.push(partial);
 			await options.persistConfig?.(partial);
@@ -172,7 +184,7 @@ describe("global review effort settings", () => {
 				agent: "omp",
 				model: "old-model",
 				effort: "low",
-				agents: ["omp", "claude"],
+				agents: ["omp", "claude", "codex"],
 			});
 
 			const saved = await routes(
@@ -192,7 +204,6 @@ describe("global review effort settings", () => {
 				{
 					review: {
 						agent: "claude",
-						binary: "custom-review-agent",
 						model: "custom-sonnet",
 						effort: "max",
 						layerTimeoutSeconds: 90,
@@ -205,7 +216,7 @@ describe("global review effort settings", () => {
 				agent: "claude",
 				model: "custom-sonnet",
 				effort: "max",
-				agents: ["omp", "claude"],
+				agents: ["omp", "claude", "codex"],
 			});
 
 			const nextReview = await routes(
@@ -218,6 +229,28 @@ describe("global review effort settings", () => {
 			expect(factoryCalls).toEqual([
 				{ agent: "claude", model: "custom-sonnet", effort: "max" },
 			]);
+
+			const switchedBack = await routes(
+				postSettings({
+					agent: "omp",
+					model: "old-model",
+					effort: "low",
+				}),
+			);
+			expect(switchedBack.status).toBe(200);
+			const nextOmpReview = await routes(
+				new Request(`http://127.0.0.1/api/layers/regenerate?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			expect(nextOmpReview.status).toBe(200);
+			await nextOmpReview.text();
+			expect(factoryCalls.at(-1)).toEqual({
+				agent: "omp",
+				binary: null,
+				model: "old-model",
+				effort: "low",
+			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -245,7 +278,7 @@ describe("global review effort settings", () => {
 			expect(await readReviewSettings(routes)).toEqual({
 				agent: "omp",
 				model: "new-model",
-				agents: ["omp", "claude"],
+				agents: ["omp", "claude", "codex"],
 			});
 
 			const clearModel = await routes(
@@ -255,7 +288,6 @@ describe("global review effort settings", () => {
 			expect(persisted[1]).toEqual({
 				review: {
 					agent: "claude",
-					binary: "custom-review-agent",
 					effort: "high",
 					layerTimeoutSeconds: 90,
 					largeFileLineThreshold: 950,
@@ -265,8 +297,58 @@ describe("global review effort settings", () => {
 			expect(await readReviewSettings(routes)).toEqual({
 				agent: "claude",
 				effort: "high",
-				agents: ["omp", "claude"],
+				agents: ["omp", "claude", "codex"],
 			});
+
+			const updateClaude = await routes(
+				postSettings({
+					agent: "claude",
+					model: "new-sonnet",
+					effort: "high",
+				}),
+			);
+			expect(updateClaude.status).toBe(200);
+			expect(persisted[2]).toEqual({
+				review: {
+					agent: "claude",
+					model: "new-sonnet",
+					effort: "high",
+					layerTimeoutSeconds: 90,
+					largeFileLineThreshold: 950,
+					maxLayerPromptBytes: 50_000,
+				},
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("normalizes model before checking model-specific effort", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-settings-model-trim-"),
+		);
+		try {
+			const { routes, persisted } = makeRoutes(dir);
+			const response = await routes(
+				postSettings({
+					agent: "codex",
+					model: " gpt-6-sol ",
+					effort: "ultra",
+				}),
+			);
+
+			expect(response.status).toBe(200);
+			expect(await response.json()).toMatchObject({
+				agent: "codex",
+				model: "gpt-6-sol",
+				effort: "ultra",
+			});
+			expect(persisted[0]?.review).toMatchObject({
+				agent: "codex",
+				model: "gpt-6-sol",
+				effort: "ultra",
+			});
+			expect(persisted[0]?.review?.binary).toBeUndefined();
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -276,8 +358,14 @@ describe("global review effort settings", () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-settings-invalid-"));
 		try {
 			const { routes, persisted } = makeRoutes(dir);
+			const codexRoutes = makeRoutes(dir);
+			const codexSelection = await codexRoutes.routes(
+				postSettings({ agent: "codex", model: "model" }),
+			);
+			expect(codexSelection.status).toBe(200);
+			expect(codexRoutes.persisted).toHaveLength(1);
+
 			for (const body of [
-				{ agent: "codex", model: "model" },
 				{ agent: "claude", model: 42 },
 				{ agent: "omp", effort: "ultra" },
 				{ agent: "claude", effort: "off" },

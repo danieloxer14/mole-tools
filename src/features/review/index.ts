@@ -34,6 +34,7 @@ interface ReviewGitHost {
 	fetchApprovalState?: NonNullable<Context["gitHost"]>["fetchApprovalState"];
 	approveMr?: NonNullable<Context["gitHost"]>["approveMr"];
 	unapproveMr?: NonNullable<Context["gitHost"]>["unapproveMr"];
+	getGitLabAuthToken?: NonNullable<Context["gitHost"]>["getGitLabAuthToken"];
 }
 export const reviewArgs = z.object({
 	url: z.string().min(1).describe("Full GitLab merge request URL"),
@@ -131,7 +132,8 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 				host?.listDiscussions ||
 				host?.fetchApprovalState ||
 				host?.approveMr ||
-				host?.unapproveMr
+				host?.unapproveMr ||
+				host?.getGitLabAuthToken
 					? {
 							fetchMr: host.fetchMr?.bind(host),
 							createDiscussion: host.createDiscussion?.bind(host),
@@ -139,6 +141,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 							fetchApprovalState: host.fetchApprovalState?.bind(host),
 							approveMr: host.approveMr?.bind(host),
 							unapproveMr: host.unapproveMr?.bind(host),
+							getGitLabAuthToken: host?.getGitLabAuthToken?.bind(host),
 						}
 					: undefined,
 			ref: result.ref,

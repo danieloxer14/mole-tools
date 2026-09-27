@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getReviewPaths } from "./paths";
 import {
 	CHAT_ID_PATTERN,
+	ChatMetaSchema,
 	DraftSelectionSchema,
 	deriveChatTitle,
 	ensureChats,
@@ -104,6 +105,35 @@ test("defaults the whitespace preference for legacy state", () => {
 			showWhitespaceChanges: false,
 		}).showWhitespaceChanges,
 	).toBe(false);
+});
+
+test("defaults missing MR description to empty string", () => {
+	const current = state();
+	const legacy = { ...current, mr: { ...current.mr } };
+	delete (legacy.mr as Partial<ReviewState["mr"]>).description;
+
+	expect(ReviewStateSchema.parse(legacy).mr.description).toBe("");
+});
+
+test("rejects non-string MR description", () => {
+	const current = state();
+
+	expect(
+		ReviewStateSchema.safeParse({
+			...current,
+			mr: { ...current.mr, description: 42 },
+		}).success,
+	).toBe(false);
+});
+
+test("accepts Codex chat metadata", () => {
+	expect(
+		ChatMetaSchema.parse({
+			id: "c1",
+			createdAt: "2026-01-01T00:00:00Z",
+			agent: "codex",
+		}).agent,
+	).toBe("codex");
 });
 
 test("defaults collapsed discussion IDs for legacy v1 state without a version bump", () => {
@@ -319,7 +349,7 @@ describe("ReviewStore", () => {
 				{
 					id: crypto.randomUUID(),
 					createdAt: new Date().toISOString(),
-					agent: "codex",
+					agent: "invalid-agent",
 				},
 			];
 			const raw = JSON.stringify(oldState);

@@ -15,7 +15,6 @@ import {
 	SLOT_LABELS,
 	VISIBLE_SLOTS,
 } from "./SettingsPanel";
-
 import { Dialog, DialogContent } from "./ui/dialog";
 
 const initialSettings: SettingsSnapshot = {
@@ -33,7 +32,7 @@ const initialSettings: SettingsSnapshot = {
 	review: {
 		agent: "omp",
 		model: "claude-sonnet-4",
-		agents: ["omp", "claude"],
+		agents: ["omp", "claude", "codex"],
 	},
 };
 
@@ -380,6 +379,150 @@ test("default review controls live only in General", () => {
 	expect(general).toContain("claude-sonnet-4 (current custom model)");
 });
 
+test("General hosts the whitespace toggle independent of settings load", async () => {
+	const changes: boolean[] = [];
+	const whitespace = {
+		showWhitespaceChanges: true,
+		disabled: false,
+		onShowWhitespaceChangesChange: (show: boolean) => changes.push(show),
+	};
+	const general = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+			whitespace,
+		}),
+	);
+	expect(general).toContain('aria-label="Show whitespace changes"');
+	expect(general).toContain('aria-checked="true"');
+	expect(general).toContain('id="settings-show-whitespace-changes"');
+	expect(general).toContain(
+		'<label for="settings-show-whitespace-changes">Show whitespace changes</label>',
+	);
+	expect(general.indexOf("settings-show-whitespace-changes")).toBeLessThan(
+		general.indexOf("settings-default-agent"),
+	);
+
+	const disabled = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+			whitespace: {
+				...whitespace,
+				showWhitespaceChanges: false,
+				disabled: true,
+			},
+		}),
+	);
+	const disabledContainer = document.createElement("div");
+	disabledContainer.innerHTML = disabled;
+	const checkbox = disabledContainer.querySelector<HTMLElement>(
+		'[role="checkbox"][aria-label="Show whitespace changes"]',
+	);
+	const input = disabledContainer.querySelector<HTMLInputElement>(
+		"#settings-show-whitespace-changes",
+	);
+	expect(checkbox?.getAttribute("aria-checked")).toBe("false");
+	expect(input?.checked).toBe(false);
+	expect(input?.disabled).toBe(true);
+	expect(checkbox?.getAttribute("aria-disabled")).toBe("true");
+	expect(checkbox?.hasAttribute("data-disabled")).toBe(true);
+
+	const loading = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialPrompt,
+			initialTab: "general",
+			whitespace,
+		}),
+	);
+	expect(loading).toContain("Loading settings…");
+	expect(loading).toContain('aria-label="Show whitespace changes"');
+
+	const prompts = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			whitespace,
+		}),
+	);
+	expect(prompts).not.toContain("Show whitespace changes");
+	for (const initialTab of ["skills", "appearance"] as const) {
+		const otherTab = renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialSettings,
+				initialPrompt,
+				initialTab,
+				whitespace,
+			}),
+		);
+		expect(otherTab).not.toContain("Show whitespace changes");
+	}
+	const omitted = renderToStaticMarkup(
+		createElement(SettingsPanel, {
+			token: "settings-test-token",
+			onClose: () => {},
+			initialSettings,
+			initialPrompt,
+			initialTab: "general",
+		}),
+	);
+	expect(omitted).not.toContain("Show whitespace changes");
+
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async () =>
+		jsonResponse({ error: "Settings unavailable" }, 503)) as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialPrompt,
+					initialTab: "general",
+					whitespace,
+				}),
+			),
+		);
+		const checkbox = container.querySelector<HTMLInputElement>(
+			"#settings-show-whitespace-changes",
+		);
+		expect(checkbox).not.toBeNull();
+		await act(async () => {
+			await flushReact();
+		});
+		expect(container.textContent).toContain("Settings unavailable");
+		expect(container.querySelector("#settings-show-whitespace-changes")).toBe(
+			checkbox,
+		);
+
+		act(() =>
+			container
+				.querySelector<HTMLElement>("#settings-show-whitespace-changes")
+				?.click(),
+		);
+		expect(changes).toEqual([false]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test("shows bundled app version last in General with and without loaded settings", () => {
 	const loaded = new DOMParser().parseFromString(
 		renderToStaticMarkup(
@@ -387,6 +530,7 @@ test("shows bundled app version last in General with and without loaded settings
 				token: "settings-test-token",
 				onClose: () => {},
 				initialSettings,
+				initialPrompt,
 				initialTab: "general",
 			}),
 		),
@@ -420,6 +564,7 @@ test("shows bundled app version last in General with and without loaded settings
 		);
 	}
 });
+
 // Happy DOM exercises narrow-screen navigation but does not prove pixel geometry.
 test("375px settings controls stay keyboard and scroll reachable", async () => {
 	const scriptPath = new URL("./SettingsPanel.375px.smoke.tsx", import.meta.url)
@@ -727,6 +872,93 @@ test("General ignores stale catalog responses after agent switch", async () => {
 	}
 });
 
+test("loads and selects Codex models in General and prompt settings", async () => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async (input: string) => {
+		const url = String(input);
+		if (url.includes("/api/settings/codex-models")) {
+			return jsonResponse({
+				models: [
+					{
+						id: "gpt-6-astra",
+						label: "GPT-6 Astra",
+						efforts: ["low", "high"],
+					},
+				],
+			});
+		}
+		if (url.includes("/api/settings/models?")) {
+			return jsonResponse({
+				models: [],
+				source: "omp",
+			});
+		}
+		if (url.includes("/api/settings")) return jsonResponse(initialSettings);
+		return jsonResponse({});
+	}) as unknown as typeof fetch;
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+
+	try {
+		act(() =>
+			root.render(
+				createElement(SettingsPanel, {
+					token: "settings-test-token",
+					onClose: () => {},
+					initialSettings,
+					initialPrompt,
+					initialTab: "general",
+				}),
+			),
+		);
+		await act(async () => {
+			await flushReact();
+		});
+		await act(async () => {
+			changeSelect(container, "#settings-default-agent", "codex");
+			await flushReact();
+		});
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-model")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toContain("gpt-6-astra");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-default-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "low", "high"]);
+
+		const promptsTab = Array.from(
+			container.querySelectorAll<HTMLButtonElement>('button[role="tab"]'),
+		).find((tab) => tab.textContent === "Prompts");
+		await act(async () => {
+			promptsTab?.click();
+			await flushReact();
+		});
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-agent", "codex");
+			await flushReact();
+		});
+		expect(
+			container.querySelector<HTMLSelectElement>("#settings-prompt-agent")
+				?.value,
+		).toBe("codex");
+		expect(
+			Array.from(
+				container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
+					?.options ?? [],
+			).map((option) => option.value),
+		).toEqual(["", "low", "high"]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+		globalThis.fetch = originalFetch;
+	}
+});
 test("General preserves custom model and effort through catalog failure and retry", async () => {
 	const originalFetch = globalThis.fetch;
 	let catalogRequests = 0;
@@ -850,10 +1082,10 @@ test("styles prompt heading with editor spacing", () => {
 	const markup = render();
 
 	expect(markup).toContain(
-		'<label class="text-sm font-medium" for="settings-prompt">Prompt text</label>',
+		'<label class="block text-sm font-medium" for="settings-prompt">Prompt text</label>',
 	);
 	expect(markup).toMatch(
-		/<div class="space-y-2"><label class="text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea/,
+		/<div class="space-y-2"><label class="block text-sm font-medium" for="settings-prompt">Prompt text<\/label><textarea(?=[^>]*class="[^"]*min-h-64 font-mono text-sm")(?=[^>]*id="settings-prompt")[^>]*>/,
 	);
 });
 
@@ -895,6 +1127,9 @@ test("keeps prompt settings controls reachable in responsive bounded layout", ()
 	expect(markup).toContain("flex h-full min-h-0 min-w-0 flex-col");
 	expect(markup).toContain("grid-cols-1");
 	expect(markup).toContain("md:grid-cols-[14rem_minmax(0,1fr)]");
+	expect(markup).toMatch(
+		/class="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-\[14rem_minmax\(0,1fr\)\] md:gap-6"/,
+	);
 	expect(markup).toContain("overflow-auto");
 	expect(markup).toContain('<nav class="space-y-1" aria-label="Prompt slots">');
 	expect(markup).not.toContain('<input id="settings-prompt-model"');
@@ -1581,7 +1816,7 @@ test("prompt effort choices follow selected model compatibility", async () => {
 			return jsonResponse({
 				models: [
 					{ id: "sonnet", label: "Sonnet", efforts: ["low", "high"] },
-					{ id: "opus", label: "Opus", efforts: ["low"] },
+					{ id: "opus", label: "Opus", efforts: [] },
 				],
 				source: "omp",
 			});
@@ -1619,16 +1854,13 @@ test("prompt effort choices follow selected model compatibility", async () => {
 			changeSelect(container, "#settings-prompt-model", "opus");
 			await flushReact();
 		});
+		const effortSelect = container.querySelector<HTMLSelectElement>(
+			"#settings-prompt-effort",
+		);
+		expect(effortSelect?.value).toBe("high");
 		expect(
-			container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
-				?.value,
-		).toBe("");
-		expect(
-			Array.from(
-				container.querySelector<HTMLSelectElement>("#settings-prompt-effort")
-					?.options ?? [],
-			).map((option) => option.value),
-		).toEqual(["", "low"]);
+			Array.from(effortSelect?.options ?? []).map((option) => option.value),
+		).toEqual(["", "high"]);
 		expect(container.textContent).toContain(
 			"The saved effort is not listed as compatible with this model",
 		);
@@ -1637,6 +1869,17 @@ test("prompt effort choices follow selected model compatibility", async () => {
 				(button) => button.textContent?.includes("Save as new version"),
 			)?.disabled,
 		).toBe(true);
+
+		await act(async () => {
+			changeSelect(container, "#settings-prompt-effort", "");
+			await flushReact();
+		});
+		expect(effortSelect?.value).toBe("");
+		expect(
+			Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+				(button) => button.textContent?.includes("Save as new version"),
+			)?.disabled,
+		).toBe(false);
 	} finally {
 		act(() => root.unmount());
 		container.remove();

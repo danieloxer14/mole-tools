@@ -23,6 +23,23 @@ test("wraps a commentable block with Tag and Comment buttons and its source rang
 	expect(html).toContain(`data-block-id="${id}"`);
 });
 
+test("wraps mapped blocks with Tag but no Comment when comments are disabled", () => {
+	const blocks = renderMarkdownBlocks("# Title\n");
+	const { html, blockRanges } = wrapMarkdownBlocksWithActions(blocks, {
+		comment: false,
+	});
+	const defaultOutput = wrapMarkdownBlocksWithActions(blocks);
+	const commentOutput = wrapMarkdownBlocksWithActions(blocks, {
+		comment: true,
+	});
+
+	expect(html).toContain('class="markdown-block-tag"');
+	expect(html).not.toContain('class="markdown-block-comment"');
+	expect(blockRanges).toEqual(defaultOutput.blockRanges);
+	expect(blockRanges.size).toBe(1);
+	expect(commentOutput.html).toBe(defaultOutput.html);
+});
+
 test("wraps a non-commentable block without Tag/Comment affordances", () => {
 	const { html, blockRanges } = wrapMarkdownBlocksWithActions([
 		{

@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEffort } from "../../adapters/agent/effort";
+import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
+import type { PromptAgentName } from "../../adapters/prompts/frontmatter";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -19,12 +21,32 @@ import { type ReviewStateMutation, ReviewStore } from "./store";
 
 const token = "chat-effort-test-token";
 const createdAt = "2026-09-26T00:00:00.000Z";
+const ompModelCatalogProcessRunner: OmpModelCatalogProcessRunner =
+	async () => ({
+		stdout: new TextEncoder().encode(
+			JSON.stringify({
+				models: [
+					{ selector: "chat-model", thinking: ["high"] },
+					{ selector: "explain-model", thinking: ["xhigh"] },
+					{ selector: "prompt-model", thinking: ["high"] },
+					{ selector: "current-prompt-model", thinking: ["high"] },
+					{ selector: "persisted-chat-model", thinking: ["high"] },
+					{ selector: "retry-model", thinking: ["high"] },
+					{ selector: "persisted-model", thinking: ["high"] },
+					{ selector: "stored-model", thinking: [] },
+					{ selector: "later-default-model", thinking: [] },
+				],
+			}),
+		),
+		stderr: new Uint8Array(),
+		exitCode: 0,
+	});
 
 type ChatSeed = Partial<ReviewState["chats"][number]> &
 	Pick<ReviewState["chats"][number], "id">;
 
 type AgentOverride = {
-	agent?: "omp" | "claude";
+	agent?: PromptAgentName;
 	model?: string;
 	effort?: AgentEffort | null;
 };
@@ -146,7 +168,7 @@ function chatRequest(chatId: string, message: string): Request {
 }
 
 function reviewSettingsRequest(
-	agent: "omp" | "claude",
+	agent: PromptAgentName,
 	model: string,
 ): Request {
 	return request("/api/settings/review", { agent, model });
@@ -159,7 +181,7 @@ function commentFromChatRequest(draftId: string, chatId: string): Request {
 async function writePrompt(
 	dir: string,
 	slot: string,
-	metadata: { agent: "omp" | "claude"; model: string; effort: AgentEffort },
+	metadata: { agent: PromptAgentName; model: string; effort: AgentEffort },
 ): Promise<void> {
 	const promptDir = join(dir, slot, "default");
 	await mkdir(promptDir, { recursive: true });
@@ -175,7 +197,7 @@ function makeRoutes(
 	store: ReviewStore,
 	createReviewAgent: AgentFactory,
 	options: {
-		reviewAgent?: "omp" | "claude";
+		reviewAgent?: PromptAgentName;
 		model?: string;
 		effort?: AgentEffort;
 	} = {},
@@ -193,12 +215,13 @@ function makeRoutes(
 			},
 		},
 		createReviewAgent,
+		ompModelCatalogProcessRunner,
 	});
 }
 
 async function updateGlobalSelection(
 	routes: ReviewRouteHandler,
-	agent: "omp" | "claude",
+	agent: PromptAgentName,
 	model: string,
 ): Promise<void> {
 	const response = await routes(reviewSettingsRequest(agent, model));
@@ -318,6 +341,7 @@ describe("chat agent selection persistence", () => {
 						effort: "low",
 					},
 				},
+				ompModelCatalogProcessRunner,
 				createReviewAgent: (override) => {
 					overrides.push(override ?? {});
 					return agent;

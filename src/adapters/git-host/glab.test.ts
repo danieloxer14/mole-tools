@@ -80,6 +80,60 @@ describe("GlabAdapter", () => {
 		});
 	});
 
+	describe("getGitLabAuthToken", () => {
+		test("requests and extracts a host-scoped token from glab auth status", async () => {
+			const glab = makeGlab({
+				"auth status --hostname gitlab.example.com --show-token": ok(
+					"✓ Logged in to gitlab.example.com as reviewer\n✓ Token found: private-token\n",
+				),
+			});
+
+			await expect(glab.getGitLabAuthToken("gitlab.example.com")).resolves.toBe(
+				"private-token",
+			);
+			expect(calls).toEqual([
+				["auth", "status", "--hostname", "gitlab.example.com", "--show-token"],
+			]);
+		});
+
+		test("extracts the token from glab auth status stderr", async () => {
+			const glab = makeGlab({
+				"auth status --hostname gitlab.example.com --show-token": {
+					stdout: "Logged in to gitlab.example.com as reviewer\n",
+					stderr: "✓ Token found: private-token\n",
+					exitCode: 0,
+				},
+			});
+
+			await expect(glab.getGitLabAuthToken("gitlab.example.com")).resolves.toBe(
+				"private-token",
+			);
+		});
+
+		test("returns no token when glab cannot authenticate the host", async () => {
+			const glab = makeGlab({
+				"auth status --hostname gitlab.example.com --show-token":
+					fail("not authenticated"),
+			});
+
+			await expect(glab.getGitLabAuthToken("gitlab.example.com")).resolves.toBe(
+				null,
+			);
+		});
+
+		test("returns no token when authenticated output omits it", async () => {
+			const glab = makeGlab({
+				"auth status --hostname gitlab.example.com --show-token": ok(
+					"Logged in to gitlab.example.com",
+				),
+			});
+
+			await expect(glab.getGitLabAuthToken("gitlab.example.com")).resolves.toBe(
+				null,
+			);
+		});
+	});
+
 	describe("currentUser", () => {
 		test("returns user info from /user response", async () => {
 			const glab = makeGlab({

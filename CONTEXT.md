@@ -29,8 +29,8 @@ Optional command-level documentation colocated on a feature. It may include invo
 Descriptions and examples attached to individual zod argument schemas with `.describe(...)` and `.meta({ examples: [...] })`. This is the canonical place for option-level help text.
 
 ### Interactive review (`mole-tools review`)
-The feature that reviews one GitLab merge request in a local three-column web
-UI. Invoke it as
+The feature that reviews one GitLab merge request in a local web UI with
+`Code` and `Overview` review views. Invoke it as
 `mole-tools review <mr-url> [--mode code|plan] [--no-open] [--refresh]`.
 `--mode` defaults to `code` and selects only the layer prompt; `plan` frames
 the same diff/chat/comment flow around requirements and acceptance criteria.
@@ -100,6 +100,16 @@ A local comment draft anchored to one diff side and inclusive line range.
 New-side anchors use `new_line`; deleted-side anchors use `old_line`. Ranges
 cannot cross sides and must resolve against current diff refs before explicit
 Send posts one GitLab discussion. Existing discussions remain read-only.
+
+### General discussion
+An unpositioned merge-request discussion shown at the bottom of the Overview
+view, with an Explain action that opens a chat asking the agent to explain it.
+
+### Description tag
+A chat tag `{ kind: "description", startLine?, endLine?, quote }` for the MR
+description, never a file path. `startLine` and `endLine` appear together as an
+inclusive source-line range; without them, the tag means the whole description.
+The quote carries the tagged text.
 
 Review comment bodies support GitHub-flavoured Markdown in local previews and
 published positioned/general discussion cards; rendered output is sanitized,

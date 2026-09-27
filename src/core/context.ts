@@ -1,4 +1,5 @@
 import { ClaudeAgentAdapter } from "../adapters/agent/claude";
+import { CodexAgentAdapter } from "../adapters/agent/codex";
 import type { AgentEffort } from "../adapters/agent/effort";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import {
@@ -11,6 +12,7 @@ import { JiraAdapter } from "../adapters/issue-tracker/jira";
 import { OllamaAdapter } from "../adapters/llm/ollama";
 import { PiAdapter } from "../adapters/llm/pi";
 import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
+import type { PromptAgentName } from "../adapters/prompts/frontmatter";
 import { GitAdapter } from "../adapters/vcs/git";
 import type { GitHost } from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
@@ -20,7 +22,8 @@ import type { ReviewAgent } from "../ports/review-agent";
 import type { UiPort } from "../ports/ui";
 import type { Vcs } from "../ports/vcs";
 export interface ReviewAgentOverride {
-	agent?: "omp" | "claude";
+	agent?: PromptAgentName;
+	binary?: string | null;
 	model?: string;
 	effort?: AgentEffort | null;
 }
@@ -134,7 +137,7 @@ export function resolveReviewAgentConfig(
 	config: Config,
 	override?: ReviewAgentOverride,
 ): {
-	agent: "omp" | "claude";
+	agent: PromptAgentName;
 	binary: string;
 	model?: string;
 	effort?: AgentEffort;
@@ -142,7 +145,11 @@ export function resolveReviewAgentConfig(
 	const configured = config.review?.agent ?? "claude";
 	const agent = override?.agent ?? configured;
 	const binary =
-		agent === configured ? (config.review?.binary ?? agent) : agent;
+		override && "binary" in override
+			? (override.binary ?? agent)
+			: agent === configured
+				? (config.review?.binary ?? agent)
+				: agent;
 	const model = override ? override.model : config.review?.model;
 	const effort = override
 		? (override.effort ?? undefined)
@@ -166,6 +173,9 @@ function buildReviewAgent(
 
 	if (agent === "claude") {
 		return new ClaudeAgentAdapter({ binary, model, effort });
+	}
+	if (agent === "codex") {
+		return new CodexAgentAdapter({ binary, model, effort });
 	}
 	return new OmpAgentAdapter({ binary, model, effort });
 }

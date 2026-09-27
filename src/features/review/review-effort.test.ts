@@ -3,9 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAgentAdapter } from "../../adapters/agent/claude";
+import type { AgentEffort } from "../../adapters/agent/effort";
 import type { AgentExec } from "../../adapters/agent/exec";
+import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
 import { OmpAgentAdapter } from "../../adapters/agent/omp";
 import { ConfigSchema } from "../../adapters/config/schema";
+import type { PromptAgentName } from "../../adapters/prompts/frontmatter";
 import { resolveReviewAgentConfig } from "../../core/context";
 import type {
 	AgentEvent,
@@ -19,6 +22,25 @@ import { ReviewStore } from "./store";
 
 const token = "review-effort-test-token";
 
+type OmpModelCatalogFixture = Array<{
+	selector: string;
+	thinking: string[];
+}>;
+
+const defaultOmpModelCatalog: OmpModelCatalogFixture = [
+	{ selector: "global-model", thinking: ["auto"] },
+	{ selector: "prompt-model", thinking: ["high"] },
+];
+
+function modelCatalogRunner(
+	models: OmpModelCatalogFixture = defaultOmpModelCatalog,
+): OmpModelCatalogProcessRunner {
+	return async () => ({
+		stdout: new TextEncoder().encode(JSON.stringify({ models })),
+		stderr: new Uint8Array(),
+		exitCode: 0,
+	});
+}
 function state(): ReviewState {
 	return ReviewStateSchema.parse({
 		version: 1,
@@ -104,10 +126,10 @@ class ChatAgent implements ReviewAgent {
 
 async function runLayerSelection(
 	prompt: string,
-	review: { agent: "omp" | "claude"; model?: string; effort?: "auto" | "high" },
+	review: { agent: PromptAgentName; model?: string; effort?: AgentEffort },
 	modelCatalog?: Array<{ selector: string; thinking: string[] }>,
 ): Promise<
-	Array<{ agent?: "omp" | "claude"; model?: string; effort?: string | null }>
+	Array<{ agent?: PromptAgentName; model?: string; effort?: string | null }>
 > {
 	const dir = await mkdtemp(join(tmpdir(), "mole-review-effort-layer-"));
 	try {
@@ -115,21 +137,11 @@ async function runLayerSelection(
 		await mkdir(activePromptDir, { recursive: true });
 		await writeFile(join(activePromptDir, "001.md"), prompt, "utf8");
 		const factoryCalls: Array<{
-			agent?: "omp" | "claude";
+			agent?: PromptAgentName;
 			model?: string;
 			effort?: string | null;
 		}> = [];
-		const modelCatalogRunner = modelCatalog
-			? {
-					ompModelCatalogProcessRunner: async () => ({
-						stdout: new TextEncoder().encode(
-							JSON.stringify({ models: modelCatalog }),
-						),
-						stderr: new Uint8Array(),
-						exitCode: 0,
-					}),
-				}
-			: {};
+		const selectedModelCatalog = modelCatalog ?? defaultOmpModelCatalog;
 		const agent = new LayerAgent();
 		const routes = createReviewRoutes({
 			token,
@@ -143,7 +155,7 @@ async function runLayerSelection(
 			diff,
 			promptSourceDir: dir,
 			config: { review },
-			...modelCatalogRunner,
+			ompModelCatalogProcessRunner: modelCatalogRunner(selectedModelCatalog),
 			createReviewAgent: (override) => {
 				factoryCalls.push(override ?? {});
 				return agent;
@@ -291,7 +303,7 @@ describe("review effort selection", () => {
 			});
 			await store.write({ ...state(), layerStatus: "ready" });
 			const factoryCalls: Array<{
-				agent?: "omp" | "claude";
+				agent?: PromptAgentName;
 				model?: string;
 				effort?: string | null;
 			}> = [];
@@ -309,6 +321,7 @@ describe("review effort selection", () => {
 				config: {
 					review: { agent: "omp", model: "global-model", effort: "auto" },
 				},
+				ompModelCatalogProcessRunner: modelCatalogRunner(),
 				createReviewAgent: (override) => {
 					factoryCalls.push(override ?? {});
 					return new ChatAgent();
@@ -324,7 +337,7 @@ describe("review effort selection", () => {
 			const createdBody = (await created.json()) as {
 				chats: Array<{
 					id: string;
-					agent: "omp" | "claude" | null;
+					agent: PromptAgentName | null;
 					model: string | null;
 					effort: string | null;
 				}>;

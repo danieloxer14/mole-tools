@@ -27,6 +27,11 @@ function fencedMarkdown(text: string): string {
 }
 
 function tagLabel(tag: ChatEntry["tags"][number]): string {
+	if ("kind" in tag && tag.kind === "description") {
+		return tag.startLine === undefined || tag.endLine === undefined
+			? "MR description (whole)"
+			: `MR description lines ${rangeLabel(tag.startLine, tag.endLine)} (Markdown)`;
+	}
 	if ("kind" in tag && tag.kind === "file") {
 		return `\`${tag.path}\` (whole file)`;
 	}

@@ -54,12 +54,45 @@ export const FileChatTagSchema = z
 	.strict();
 export type FileChatTag = z.infer<typeof FileChatTagSchema>;
 
+/** Chat tag anchored to the merge request description, never a file. */
+export const DescriptionChatTagSchema = z
+	.object({
+		kind: z.literal("description"),
+		startLine: z.number().int().positive().optional(),
+		endLine: z.number().int().positive().optional(),
+		quote: z.string().min(1),
+	})
+	.strict()
+	.refine(
+		(tag) => (tag.startLine === undefined) === (tag.endLine === undefined),
+		{
+			message: "startLine and endLine must both be present or both absent",
+			path: ["endLine"],
+		},
+	)
+	.refine(
+		(tag) =>
+			tag.startLine === undefined ||
+			tag.endLine === undefined ||
+			tag.endLine >= tag.startLine,
+		{
+			message: "endLine must be greater than or equal to startLine",
+			path: ["endLine"],
+		},
+	);
+export type DescriptionChatTag = z.infer<typeof DescriptionChatTagSchema>;
+
 export const ChatTagSchema = z.union([
 	DiffChatTagSchema,
 	MarkdownChatTagSchema,
 	FileChatTagSchema,
+	DescriptionChatTagSchema,
 ]);
 export type ChatTag = z.infer<typeof ChatTagSchema>;
+
+export function isDescriptionChatTag(tag: ChatTag): tag is DescriptionChatTag {
+	return "kind" in tag && tag.kind === "description";
+}
 
 export function isMarkdownChatTag(tag: ChatTag): tag is MarkdownChatTag {
 	return "kind" in tag && tag.kind === "markdown";
@@ -70,10 +103,18 @@ export function isFileChatTag(tag: ChatTag): tag is FileChatTag {
 }
 
 /**
- * Structural equality across all three chat tag variants, for dedup/removal.
- * Path is always shared by the check; only the discriminating fields differ.
+ * Structural equality across all four chat tag variants, for dedup/removal.
+ * Path is shared by the file, markdown and diff variants.
  */
 export function chatTagsEqual(a: ChatTag, b: ChatTag): boolean {
+	if (isDescriptionChatTag(a) || isDescriptionChatTag(b)) {
+		return (
+			isDescriptionChatTag(a) &&
+			isDescriptionChatTag(b) &&
+			a.startLine === b.startLine &&
+			a.endLine === b.endLine
+		);
+	}
 	if (a.path !== b.path) return false;
 	const aFile = isFileChatTag(a);
 	const bFile = isFileChatTag(b);

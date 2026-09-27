@@ -1,6 +1,6 @@
 import type { HostDiscussion, HostNote } from "../../../ports/git-host";
 
-const HIDDEN_SYSTEM_NOTE_PATTERNS: readonly RegExp[] = [
+const HIDDEN_ACTIVITY_NOTE_PATTERNS: readonly RegExp[] = [
 	/^added \d+ commits?\b/i,
 	/^changed title from\b/i,
 	/^changed the description\b/i,
@@ -9,21 +9,19 @@ const HIDDEN_SYSTEM_NOTE_PATTERNS: readonly RegExp[] = [
 	/^marked this merge request as\b/i,
 	/^assigned to\b/i,
 	/^requested review from\b/i,
+	/^left review comments\b/i,
+	/^resolved all threads\b/i,
+	/^approved this merge request\b/i,
 ];
 
-function isHiddenNote(note: HostNote): boolean {
-	return (
-		note.system &&
-		HIDDEN_SYSTEM_NOTE_PATTERNS.some((pattern) =>
-			pattern.test(note.body.trimStart()),
-		)
-	);
+function isHiddenActivityNote(note: HostNote): boolean {
+	const body = note.body.trimStart().replace(/^<p\b[^>]*>\s*/i, "");
+	return HIDDEN_ACTIVITY_NOTE_PATTERNS.some((pattern) => pattern.test(body));
 }
 
 /**
- * General discussions for the chat column: unpositioned only, with the
- * GitLab system activity notes listed in issue #50 removed; discussions left
- * with no notes are dropped.
+ * General discussions for the chat column: unpositioned only, with GitLab
+ * activity-note text excluded; discussions left with no notes are dropped.
  */
 export function generalDiscussions(
 	discussions: readonly HostDiscussion[],
@@ -35,7 +33,9 @@ export function generalDiscussions(
 			continue;
 		}
 
-		const notes = discussion.notes.filter((note) => !isHiddenNote(note));
+		const notes = discussion.notes.filter(
+			(note) => !isHiddenActivityNote(note),
+		);
 		if (notes.length === 0) {
 			continue;
 		}

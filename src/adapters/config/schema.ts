@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentEffortSchema, isAgentEffort } from "../agent/effort";
 import { PresetNameSchema, PromptNameSchema } from "../prompts/defaults";
+import { PROMPT_AGENT_NAMES } from "../prompts/frontmatter";
 
 /** Connection details for a named provider. The map key is the provider identity. */
 export const OllamaProviderSchema = z.object({
@@ -62,7 +63,7 @@ export type ReviewBabysitterConfig = z.infer<
 
 export const ReviewConfigSchema = z
 	.object({
-		agent: z.enum(["omp", "claude"]).default("claude"),
+		agent: z.enum(PROMPT_AGENT_NAMES).default("claude"),
 		binary: z.string().min(1).optional(),
 		model: z.string().min(1).optional(),
 		effort: AgentEffortSchema.optional(),
@@ -73,7 +74,7 @@ export const ReviewConfigSchema = z
 	.superRefine((review, context) => {
 		if (
 			review.effort !== undefined &&
-			!isAgentEffort(review.agent, review.effort)
+			!isAgentEffort(review.agent, review.effort, review.model)
 		) {
 			context.addIssue({
 				code: "custom",

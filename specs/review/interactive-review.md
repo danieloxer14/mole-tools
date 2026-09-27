@@ -31,7 +31,7 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```jsonc
 {
   "review": {
-    "agent": "claude", // "omp" or "claude"; default "claude"
+    "agent": "claude", // "omp", "claude", or "codex"; default "claude"
     "binary": "claude", // optional binary override
     "model": "review-model", // optional; no model flag when omitted
     "effort": "high", // optional; OMP --thinking or Claude --effort
@@ -69,10 +69,7 @@ Review the changed code for correctness and risk.
 ```
 
 With Agent unset or `default`, the version inherits the General default agent,
-model, and effort independently for each blank field. An explicit `omp` or
-`claude` agent uses only that version's Model and Effort; blank values send no
-corresponding flag and use that agent's CLI defaults rather than inheriting
-settings for another agent. Commit and MR prompt slots ignore review
+model, and effort independently for each blank field. An explicit `omp`, `claude`, or `codex` agent uses only that version's Model and Effort; blank values send no corresponding flag and use that agent's CLI defaults rather than inheriting settings for another agent. Commit and MR prompt slots ignore review
 frontmatter and continue to use their `models.*` LLM routes; existing prompt
 versions without effort keep that field unset.
 
@@ -80,12 +77,9 @@ versions without effort keep that field unset.
 
 The Settings dialog opens on **Prompts** and also offers **General**, **Skills**,
 and **Appearance**. **General** has the global **Default Agent**, **Default
-model**, and **Default effort** controls. Each editable review prompt version
-has Agent, Model, and Effort dropdowns. Selections affect future layer runs;
-use **Regenerate** to rebuild cached layers.
+model**, and **Default effort** controls, plus **Show whitespace changes**. That toggle applies immediately to the current review and is not saved with review defaults. Each editable review prompt version has Agent, Model, and Effort dropdowns. Selections affect future layer runs; use **Regenerate** to rebuild cached layers.
 
-The **General** tab shows the installed version (`v<version>`) in small,
-muted-grey text at the bottom-left.
+The **General** tab shows the installed version (`v<version>`) in small, muted-grey text at the bottom-left.
 
 For OMP, the server runs `models --json` with the selected OMP executable; the
 dropdown lists its model selectors and only effort values advertised for the
@@ -99,8 +93,9 @@ Custom saved models remain selectable until changed.
 Effort is optional: unset means no effort flag. OMP effort levels are
 `off|minimal|low|medium|high|xhigh|max|auto`; model compatibility narrows
 available choices. OMP receives `--thinking <level>`. Claude supports
-`low|medium|high|xhigh|max` and receives `--effort <level>`. Codex's `-c` is not
-an OMP flag.
+`low|medium|high|xhigh|max` and receives `--effort <level>`. Codex accepts
+model-specific reasoning levels and receives
+`-c model_reasoning_effort=<level>`.
 
 ## 2. Repository and worktree lifecycle
 
@@ -161,8 +156,8 @@ Implemented HTTP surface:
 | Method + path                                        | Contract                                                                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | `GET /`                                              | Serve embedded React HTML.                                                                                                                                                                                                                                                                                                              |
-| `GET /api/state`                                     | Return persisted state plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here.                                                                                                                                                                         |
-| `GET /api/version`                                   | Return `{ current, latest, updateAvailable }` from the launch-time GitHub release check.                                                                                                                                                                                                                                             |
+| `GET /api/state`                                     | Return persisted state, including `mr.description` (empty for legacy state), plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here. |
+| `GET /api/version`                                   | Return `{ current, latest, updateAvailable }` from the launch-time GitHub release check. |
 | `GET /api/approval`                                  | Return live GitLab approval status for the current user and merge request.                                                                                                                                                                                                                                                              |
 | `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's GitLab approval. |
 | `GET`/`POST /api/refresh`                            | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this check does not mutate the worktree.                                                                                                                                                                                                                          |
@@ -170,6 +165,7 @@ Implemented HTTP surface:
 | `POST /api/progress`                                 | Persist a layer `done` toggle and/or a viewed-file change, returning only updated `layers` and `viewedFiles`; viewed-file changes support one path or a batch `{ viewedFiles: { paths: string[], viewed: boolean } }` applied in one mutation. |
 | `GET /api/file?path=&side=`                          | Return text from the worktree (`new`) or the merge-base revision (`old`); reject traversal outside the worktree.                                                                                                                                                                                                                        |
 | `GET /api/diff?path=`                                | Return the unfiltered parsed file diff for an explicit expansion.                                                                                                                                                                                                                                                                       |
+| `GET /api/description-media/:secret/:filename?t=` | Require the local token and stream a current-project upload through authenticated GitLab API; forward `Range` and safe `206` metadata for media seeking. Unsupported adapters return `503`. |
 | `POST /api/layers/regenerate` or `/api/layers/retry` | Run layer generation and stream status/done frames.                                                                                                                                                                                                                                                                                     |
 | `GET /api/chat?chatId=`                              | Return entries for the selected chat.                                                                                                                                                                                                                                                                                                   |
 | `POST /api/chat`                                     | Accept `{ chatId, message, tags[], openFile }` and stream text/tool/error frames.                                                                                                                                                                                                                                                       |
@@ -183,20 +179,85 @@ Implemented HTTP surface:
 | `DELETE /api/comments/:id`                           | Cancel/remove a local draft.                                                                                                                                                                                                                                                                                                            |
 | `POST /api/comments/:id/send`                        | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread.                                                                                                                       |
 
-## 4. Three-column UI and diff contract
+## 4. Code/Overview UI and diff contract
 
-The page has three working columns:
+The review header sits above the panes and starts with a segmented `Code` /
+`Overview` toggle. `Code` is selected by default; the selection is local and
+is not persisted. At narrow widths, the toggle is compact and the MR title
+receives a full-width row before metadata and header actions; wider layouts keep
+the header on one line.
 
-- **Left — Review layers.** MR title, an Open in GitLab link, live approval
+In `Code` view, the left sidebar holds review layers and the changed-file tree,
+the centre column shows the selected file's diff, and the right column is the
+agent chat. The MR title sits in the header above the panes.
+
+- **Left — Review layers and changed files.** Open in GitLab, live approval
   status with Approve/Remove approval actions, layer status, Regenerate/Retry,
-  manual Done checkboxes, per-layer file chips showing the shortest unique path
   suffix (usually the basename) with the full path in the accessible label and
-  hover tooltip, per-layer file coverage, and a global Viewed-files progress bar.
-- **Centre — Changed files and diff.** The complete changed-file tree remains available even when a layer does not mention a file. Navigation starts in flat list mode by default, with one mutually exclusive segmented List view/Tree view control for switching layouts. Tree folders start expanded and can be collapsed or expanded independently. File rows preserve full-path selection, insertion and deletion statistics, and persisted Viewed state. Selecting a changed file from any surface expands its tree ancestors when needed and scrolls its row into view with `nearest`, so an already-visible row does not move.
-- **Right — Agent chat.** General discussions, Explain per discussion,
-  restored transcript, streaming response/tool activity, context tags (diff
-  line ranges, rendered-markdown block ranges, and whole files), composer,
-  New chat button, chat switcher, and Stop.
+  hover tooltip, per-layer file coverage, and a global Viewed-files progress
+  bar. The complete changed-file tree remains available even when a layer does
+  not mention a file. Navigation starts in grouped list mode: each distinct
+  full parent path has a non-collapsible heading, files display by basename in
+  encounter order, and root-level files appear directly without a synthetic
+  heading. The mutually exclusive segmented List view/Tree view control
+  switches to an expanded-by-default compact tree; each disclosure row joins
+  eligible single-directory chains and stops at a branch or directory
+  containing a direct file, with indentation based on displayed depth.
+  Directory rows disclose descendants only; insertion/deletion statistics and
+  persisted Viewed controls appear on file rows only. Names display in full
+  when they fit and use middle ellipsis while retaining a visible suffix when
+  constrained; controls keep complete paths in accessible labels and tooltips.
+  Navigation scrolls vertically without horizontal overflow, shrinking names
+  before file stats and Viewed controls. Selecting a changed file from any
+  surface expands its displayed tree ancestors when needed and scrolls its row
+  into view with `nearest`, so an already-visible row does not move.
+- **Centre — Diff.** The selected file's diff supports Inline and Side by side
+  layouts, described below.
+- **Right — Agent chat.** Restored transcript, streaming response/tool
+  activity, context tags (diff line ranges, rendered-Markdown block ranges,
+  whole files, and description tags), composer, New chat button, chat switcher,
+  and Stop. General discussions appear in Overview with an Explain action per
+  discussion, not in the agent chat.
+
+In `Overview` view, the left review layers/changed-files pane, its splitter,
+and the centre diff column are replaced by one vertically scrolling page.
+The right splitter and agent chat remain unchanged and resizable. Overview renders
+the MR description as GFM, including headings, lists, tables, Shiki-highlighted
+code, and Mermaid diagrams. Description Markdown has no left inset; code-file
+Markdown retains its existing left inset. Sanitized raw HTML can render images
+with `width` and `height` attributes and raw `<video>`/`<source>` media; scripts,
+iframes, embeds, objects, `<style>` tags, and `style` attributes are stripped.
+Markdown image-syntax links to `.mp4`, `.m4v`, `.mov`, `.webm`, or `.ogv` render
+as `<video controls>`. A GitLab video image followed immediately by
+`{width=<integer> height=<integer>}` applies those values as video dimensions
+and does not render the suffix as text. Relative media and link URLs resolve
+against the GitLab project (`/uploads/…` is project-relative; other `/…` URLs
+are origin-relative); absolute HTTP(S) links open in a new tab with
+`rel="noopener noreferrer"`. Each description block offers `Tag` only, never
+`Comment`. The whole-description button is right-aligned, visibly labeled
+`Tag file`, and accessible as `Tag whole description`; it tags the whole
+description. A whitespace-only description shows `No description provided.`
+and no whole-description tag button. Project-upload media with a 32-hex secret
+uses the authenticated local media route; its GitLab instance and project come
+from persisted MR metadata, never a browser-supplied host or project. The route
+uses `glab auth token` and streams bytes, forwarding `Range` and `206` metadata;
+other media sources, including external GitLab URLs, stay direct.
+
+At the bottom of Overview, `General discussion` has a count badge, the
+read-only discussion cards, and an Explain action for each discussion. It
+excludes known activity-note prefixes for title changes, left review comments,
+resolved threads, and approvals, even when GitLab's `system` flag is false.
+Overview content fills the available center column, including description
+Markdown and media; the Agent pane remains separate and resizable. With no
+discussions, it shows `No general discussion yet.` Agent-generated file links
+that resolve to a changed file switch the view to `Code` and select that file;
+unresolved links still open the external preview dialog in either view.
+
+In Code view, both vertical splitters resize their side on primary-pointer
+drag, including captured movement outside the handle. Matching `pointerup`,
+`pointercancel`, lost pointer capture, or the first matching move without the
+primary button ends the drag; button-up hover after termination does not
+resize. Keyboard controls remain available.
 
 When a newer version is available, the main header's right action group ends
 with an **Update X.Y.Z available** button. It opens an **Update mole-tools**
@@ -230,12 +291,12 @@ Existing GitLab discussions are read-only except for **Explain**, which opens a
 new chat titled after the discussion and asks the agent to explain it (§6).
 Positioned discussions appear below their matching diff lines with
 resolved/unresolved styling, all notes, and an Explain button; unpositioned
-discussions appear in the chat column as General discussions, each with its
+discussions appear in Overview's `General discussion` section, each with its
 own Explain button. Local drafts have no Explain.
 
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
-unpositioned discussions appear in the chat column as General discussions.
+unpositioned discussions appear in Overview's `General discussion` section.
 Every positioned discussion has its own chevron that animates that one
 discussion's notes open and closed; a collapsed discussion stays in the DOM
 but shrinks to a single non-wrapping line showing its Resolved/Open status and
@@ -247,7 +308,8 @@ selection and review reloads.
 
 Published discussion notes render GitHub-flavoured Markdown through the shared
 sanitized comment-rendering boundary, for both positioned notes in the diff
-and general notes in chat. Collapsed discussion summaries remain plain-text
+and general notes in Overview's `General discussion` section. Collapsed
+discussion summaries remain plain-text
 previews rather than rendered Markdown. Local comment drafts start in Write
 mode when empty and Preview mode when they already contain text. Editable
 drafts, including failed drafts, expose a compact segmented Preview/Write icon
@@ -332,7 +394,9 @@ Turn construction is intentionally asymmetric:
   a diff-line tag carries `path`, `side`, inclusive `startLine`/`endLine`, and
   the hunk header; a markdown-block tag carries `kind: "markdown"`, `path`,
   the source-line range, and an optional `quote`; a file tag carries
-  `kind: "file"` and `path` only. Unknown fields and kinds are rejected.
+  `kind: "file"` and `path` only. A description tag carries
+  `kind: "description"`, an optional inclusive `startLine`/`endLine` pair, and
+  a required `quote`. Unknown fields and kinds are rejected.
 - Prompt files are stored under the review's `prompt/` directory. User and
   assistant entries are appended to that chat's `chats/<chatId>.ndjson`;
   each chat owns its provider session id, stored in state and on each
@@ -413,10 +477,15 @@ mouse outside the diff panel commits the last clamped range. Revealed
 inter-hunk context lines have no hunk to clamp to, so they keep tagging one
 line at a time via their own click and are never part of a drag. The diff
 header's `Tag whole file` button adds one path-only `{ kind: "file", path }`
-path — no line range is implied. The button appears for any selected
-non-empty path, binary files included; there is no binary policy, so binary,
-collapsed, stat-only, and renamed files can all be tagged the same way. It
-is deduplicated against existing tags and never creates a GitLab discussion.
+tag — no line range is implied. The button appears for any selected non-empty
+path, binary files included; there is no binary policy, so binary, collapsed,
+stat-only, and renamed files can all be tagged the same way. It is deduplicated
+against existing tags and never creates a GitLab discussion. In Overview,
+`Tag whole description` adds `{ kind: "description", quote }`; Tag on a
+description block (by click, keyboard, or drag across blocks) adds
+`{ kind: "description", startLine, endLine, quote }`. The agent composer labels
+these `MR description (whole)` / `MR description:S-E`; description tags are
+deduplicated against existing tags and never create a GitLab discussion.
 Dragging
 from a rendered-Markdown block's Tag button across later blocks adds one tag
 spanning those blocks' source lines, snapping to block boundaries. Tags can

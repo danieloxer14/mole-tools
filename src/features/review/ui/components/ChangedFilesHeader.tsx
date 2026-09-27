@@ -1,6 +1,5 @@
 import { List, ListTree } from "lucide-react";
 import { ProgressBar } from "./ProgressBar";
-import { Checkbox } from "./ui/checkbox";
 import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
@@ -14,11 +13,6 @@ export interface ChangedFilesHeaderProps {
 	total: number;
 	mode: ChangedFilesMode;
 	onModeChange: (mode: ChangedFilesMode) => void;
-	showWhitespaceChanges: boolean;
-	whitespaceChanging: boolean;
-	syncing: boolean;
-	refreshing: boolean;
-	onShowWhitespaceChangesChange: (show: boolean) => void;
 }
 
 export function viewedFileCount(
@@ -49,82 +43,65 @@ export function ChangedFilesHeader({
 	total,
 	mode,
 	onModeChange,
-	showWhitespaceChanges,
-	whitespaceChanging,
-	syncing,
-	refreshing,
-	onShowWhitespaceChangesChange,
 }: ChangedFilesHeaderProps) {
-	const whitespaceDisabled = whitespaceChanging || syncing || refreshing;
 	return (
 		<div
 			data-region="changed-files"
-			className="flex min-w-0 items-center gap-3 border-t border-b px-4 py-2 text-xs text-muted-foreground"
+			className="flex min-w-0 flex-col gap-2 border-t border-b px-4 pt-3 pb-3 text-xs text-muted-foreground"
 		>
-			<span className="shrink-0">Viewed files</span>
-			<ProgressBar
-				className="min-w-0 flex-1"
-				label="Viewed file coverage"
-				value={viewedCount}
-				max={total}
-			/>
-			<span className="shrink-0 tabular-nums">
-				{viewedCount}/{total} files
-			</span>
-			<SegmentedToggleGroup
-				className="shrink-0"
-				multiple={false}
-				value={[mode]}
-				onValueChange={(values) => {
-					const value = values[0];
-					if (value === "list" || value === "tree") onModeChange(value);
-				}}
-				aria-label="Changed files layout"
-			>
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<SegmentedToggleGroupItem
-								value="list"
-								aria-label="List view"
-								aria-pressed={mode === "list"}
-								data-state={mode === "list" ? "on" : "off"}
-							>
-								<List aria-hidden />
-								<span className="sr-only">List view</span>
-							</SegmentedToggleGroupItem>
-						}
-					/>
-					<TooltipContent>List view</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<SegmentedToggleGroupItem
-								value="tree"
-								aria-label="Tree view"
-								aria-pressed={mode === "tree"}
-								data-state={mode === "tree" ? "on" : "off"}
-							>
-								<ListTree aria-hidden />
-								<span className="sr-only">Tree view</span>
-							</SegmentedToggleGroupItem>
-						}
-					/>
-					<TooltipContent>Tree view</TooltipContent>
-				</Tooltip>
-			</SegmentedToggleGroup>
-			<div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
-				<Checkbox
-					id="show-whitespace-changes"
-					aria-label="Show whitespace changes"
-					checked={showWhitespaceChanges}
-					disabled={whitespaceDisabled}
-					onCheckedChange={(checked) =>
-						onShowWhitespaceChangesChange(checked === true)
-					}
+			<div className="flex min-w-0 items-center gap-2">
+				<SegmentedToggleGroup
+					className="shrink-0"
+					multiple={false}
+					value={[mode]}
+					onValueChange={(values) => {
+						const value = values[0];
+						if (value === "list" || value === "tree") onModeChange(value);
+					}}
+					aria-label="Changed files layout"
+				>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<SegmentedToggleGroupItem
+									value="list"
+									aria-label="List view"
+									aria-pressed={mode === "list"}
+									data-state={mode === "list" ? "on" : "off"}
+								>
+									<List aria-hidden />
+									<span className="sr-only">List view</span>
+								</SegmentedToggleGroupItem>
+							}
+						/>
+						<TooltipContent>List view</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<SegmentedToggleGroupItem
+									value="tree"
+									aria-label="Tree view"
+									aria-pressed={mode === "tree"}
+									data-state={mode === "tree" ? "on" : "off"}
+								>
+									<ListTree aria-hidden />
+									<span className="sr-only">Tree view</span>
+								</SegmentedToggleGroupItem>
+							}
+						/>
+						<TooltipContent>Tree view</TooltipContent>
+					</Tooltip>
+				</SegmentedToggleGroup>
+				<ProgressBar
+					className="min-w-0 flex-1"
+					label="Viewed file coverage"
+					value={viewedCount}
+					max={total}
 				/>
-				<label htmlFor="show-whitespace-changes">Show whitespace changes</label>
+				<span className="shrink-0 whitespace-nowrap tabular-nums">
+					{viewedCount}/{total} files
+				</span>
 			</div>
 		</div>
 	);
