@@ -287,17 +287,7 @@ function syncedState(
 				})();
 	return ReviewStateSchema.parse({
 		...base,
-		mr: {
-			...base.mr,
-			host: input.ref.host,
-			projectPath: input.ref.projectPath,
-			iid: input.mr.iid,
-			webUrl: input.mr.webUrl,
-			title: input.mr.title,
-			description: input.mr.description ?? base.mr.description,
-			sourceBranch: input.mr.sourceBranch,
-			targetBranch: input.mr.targetBranch,
-		},
+		mr: withMergeRequestMetadata(base, input.ref, input.mr).mr,
 		revision: {
 			headSha: input.mr.headSha,
 			mergeBaseSha,
@@ -316,6 +306,65 @@ function syncedState(
 				: { ...draft, staleSince: draft.staleSince ?? syncedAt },
 		),
 	});
+}
+
+export interface ReviewMetadataSyncInput {
+	ref: MrRef;
+	mr: ReviewMergeRequest;
+	state: ReviewState;
+	store?: ReviewStore;
+}
+
+function withMergeRequestMetadata(
+	base: ReviewState,
+	ref: MrRef,
+	mr: ReviewMergeRequest,
+): ReviewState {
+	return ReviewStateSchema.parse({
+		...base,
+		mr: {
+			...base.mr,
+			host: ref.host,
+			projectPath: ref.projectPath,
+			iid: mr.iid,
+			webUrl: mr.webUrl,
+			title: mr.title,
+			description: mr.description ?? base.mr.description ?? "",
+			sourceBranch: mr.sourceBranch,
+			targetBranch: mr.targetBranch,
+		},
+	});
+}
+
+function sameMergeRequestMetadata(
+	left: ReviewState["mr"],
+	right: ReviewState["mr"],
+): boolean {
+	return (
+		left.host === right.host &&
+		left.projectPath === right.projectPath &&
+		left.iid === right.iid &&
+		left.webUrl === right.webUrl &&
+		left.title === right.title &&
+		left.description === right.description &&
+		left.sourceBranch === right.sourceBranch &&
+		left.targetBranch === right.targetBranch
+	);
+}
+
+export async function syncReviewMetadata(
+	input: ReviewMetadataSyncInput,
+): Promise<ReviewState> {
+	if (input.ref.iid !== input.mr.iid) {
+		throw new PortError(
+			`Merge request IID mismatch: URL has ${input.ref.iid}, response has ${input.mr.iid}`,
+		);
+	}
+	const apply = (base: ReviewState): ReviewState =>
+		withMergeRequestMetadata(base, input.ref, input.mr);
+	return input.store
+		? input.store.mutate((current) => apply(current ?? input.state))
+		: apply(input.state);
 }
 
 export async function syncReview(
@@ -414,31 +463,22 @@ export async function setupReview(
 			previous.revision.headSha,
 		);
 		const diff = filterDiff(fullDiff, input.config?.diff?.ignore ?? []);
+		const metadataMr = { ...input.mr, description: input.mr.description ?? "" };
+		const updatedMetadata = withMergeRequestMetadata(
+			previous,
+			input.ref,
+			metadataMr,
+		);
 		if (!modeChanged) {
-			const description = input.mr.description ?? "";
-			if (previous.mr.description === description) {
+			if (sameMergeRequestMetadata(previous.mr, updatedMetadata.mr)) {
 				return { state: previous, diff, fullDiff, paths };
 			}
 
-			const state = ReviewStateSchema.parse({
-				...previous,
-				mr: { ...previous.mr, description },
-			});
-			await store.write(state);
-			return { state, diff, fullDiff, paths };
+			await store.write(updatedMetadata);
+			return { state: updatedMetadata, diff, fullDiff, paths };
 		}
 
-		const state = ReviewStateSchema.parse({
-			...previous,
-			mr: {
-				...previous.mr,
-				description: input.mr.description ?? "",
-			},
-			mode,
-			layerStatus: "pending",
-			layerError: null,
-			layers: [],
-		});
+		const state = ReviewStateSchema.parse({ ...updatedMetadata, mode });
 		await store.write(state);
 		return { state, diff, fullDiff, paths };
 	}

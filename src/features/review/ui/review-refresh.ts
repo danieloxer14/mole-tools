@@ -23,9 +23,7 @@ export async function runReviewRefresh({
 }: ReviewRefreshOperations): Promise<void> {
 	const freshness = await checkFreshness();
 	applyFreshness(freshness);
-	if (freshness.stale) {
-		const syncedState = await sync();
-		applySyncedState(syncedState);
-	}
+	const syncedState = await sync();
+	applySyncedState(syncedState);
 	await regenerate();
 }
