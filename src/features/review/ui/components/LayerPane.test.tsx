@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { marked } from "marked";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -7,7 +8,6 @@ import type { ReviewState } from "../../state";
 import { ChangedFiles } from "./ChangedFiles";
 import {
 	collapseLayerOnDoneTransition,
-	collapseLayerWhenDone,
 	completedLayerCount,
 	LayerPane,
 	layersActionState,
@@ -88,6 +88,12 @@ function reviewState(overrides: Partial<ReviewState> = {}): ReviewState {
 		drafts: [],
 		...overrides,
 	};
+}
+
+function firstLayer(): ReviewState["layers"][number] {
+	const layer = reviewState().layers[0];
+	if (!layer) throw new Error("Expected a layer template");
+	return layer;
 }
 
 function renderLayerPane(
@@ -409,14 +415,87 @@ test("keeps file and layer state across accessible sidebar tab switches", () => 
 });
 
 function layerCardMarkup(markup: string, layerId: string): string {
-	const checkboxIndex = markup.indexOf(`id="layer-done-${layerId}"`);
-	expect(checkboxIndex).toBeGreaterThanOrEqual(0);
-	const start = markup.lastIndexOf("<li ", checkboxIndex);
-	const end = markup.indexOf("</li>", checkboxIndex);
+	const detailsIndex = markup.indexOf(`id="layer-details-${layerId}"`);
+	expect(detailsIndex).toBeGreaterThanOrEqual(0);
+	const start = markup.lastIndexOf("<li ", detailsIndex);
+	const end = markup.indexOf("</li>", detailsIndex);
 	expect(start).toBeGreaterThanOrEqual(0);
 	expect(end).toBeGreaterThan(start);
 	return markup.slice(start, end + "</li>".length);
 }
+
+test("renders layer descriptions as safe compact Markdown with preserved breaks", () => {
+	const description = [
+		"## Summary",
+		"First line",
+		"second line",
+		"",
+		"A second paragraph.",
+		"",
+		"- an item with `inlineCode`",
+
+		"```ts",
+		"const value = 1;",
+		"```",
+		"",
+		'<span onclick="alert(1)" style="color:red">safe text</span>',
+		'[unsafe](javascript:alert("x"))',
+		`long-token-${"x".repeat(240)}`,
+	].join("\n");
+	const state = reviewState({
+		layers: [{ ...firstLayer(), tldr: description }],
+	});
+	const pane = parseMarkup(renderLayerPane({ state }));
+	const markdown = pane.querySelector<HTMLElement>(".layer-markdown");
+
+	expect(markdown?.querySelector("h2")?.textContent).toBe("Summary");
+	expect(markdown?.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+	expect(markdown?.querySelector("br")).not.toBeNull();
+	expect(markdown?.querySelector("li")?.textContent).toContain("inlineCode");
+	expect(markdown?.querySelector("li code")?.textContent).toBe("inlineCode");
+	expect(markdown?.querySelector("pre code")?.textContent).toContain(
+		"const value = 1;",
+	);
+	expect(markdown?.textContent).toContain("safe text");
+	expect(markdown?.querySelector("[onclick], [style]")).toBeNull();
+	expect(markdown?.querySelector("a[href^='javascript:']")).toBeNull();
+	expect(markdown?.innerHTML).not.toContain("<script");
+	expect(markdown?.textContent).toContain(`long-token-${"x".repeat(240)}`);
+});
+
+test("renders legacy plain layer descriptions as text", () => {
+	const state = reviewState({
+		layers: [{ ...firstLayer(), tldr: "Plain line\nsecond line" }],
+	});
+	const markdown = parseMarkup(renderLayerPane({ state })).querySelector(
+		".layer-markdown",
+	);
+
+	expect(markdown?.querySelector("p")?.innerHTML).toBe(
+		"Plain line<br>second line",
+	);
+});
+
+test("falls back to literal layer text when Markdown rendering throws", () => {
+	const state = reviewState({
+		layers: [{ ...firstLayer(), tldr: "line <tag>\nsecond line" }],
+	});
+	const originalParse = marked.parse;
+	let pane: HTMLDivElement | null = null;
+	try {
+		marked.parse = (() => {
+			throw new Error("renderer unavailable");
+		}) as typeof marked.parse;
+		pane = parseMarkup(renderLayerPane({ state }));
+	} finally {
+		marked.parse = originalParse;
+	}
+	const markdown = pane?.querySelector<HTMLElement>(".layer-markdown");
+
+	expect(markdown?.textContent).toBe("line <tag>\nsecond line");
+	expect(markdown?.querySelector("p, tag")).toBeNull();
+	expect(markdown?.classList.contains("layer-markdown-plain")).toBe(true);
+});
 
 test("places layer actions beside each status", () => {
 	const scenarios = [
@@ -531,14 +610,18 @@ test("orders ready completion status, progress, fraction, and regenerate action"
 	const completedCard = layerCardMarkup(readyMarkup, "completed");
 	const staleCard = layerCardMarkup(readyMarkup, "stale");
 	const openCard = layerCardMarkup(readyMarkup, "open");
-	expect(completedCard).toContain('aria-label="Done"');
+	expect(completedCard).toContain('aria-label="Mark Completed not done"');
+	expect(completedCard).toContain('aria-pressed="true"');
 	expect(completedCard).toContain('data-layer-state="done"');
+	expect(staleCard).toContain('aria-label="Mark Stale not done"');
 	expect(staleCard).toContain('data-layer-state="stale"');
 	expect(staleCard).toContain(">Stale</span>");
 	expect(staleCard).toContain("data-done");
 	expect(staleCard).toContain("data-stale");
-	expect(openCard).toContain('aria-label="Open"');
+	expect(openCard).toContain('aria-label="Mark Open done"');
+	expect(openCard).toContain('aria-pressed="false"');
 	expect(openCard).toContain('data-layer-state="open"');
+	expect([...pane.querySelectorAll("button[aria-pressed]")]).toHaveLength(3);
 	expect(completedLayerCount(readyState.layers)).toBe(1);
 });
 
@@ -783,16 +866,16 @@ function renderCollapseLayers(): string {
 	});
 }
 
-test("renders chevron collapse controls before each checkbox", () => {
+test("renders chevron and completion controls for each layer", () => {
 	const markup = renderCollapseLayers();
 	for (const layerId of ["done-layer", "open-layer"]) {
 		const collapseControl = markup.indexOf(
 			`aria-controls="layer-details-${layerId}"`,
 		);
-		const doneCheckbox = markup.indexOf(`id="layer-done-${layerId}"`);
+		const details = markup.indexOf(`id="layer-details-${layerId}"`);
 
 		expect(collapseControl).toBeGreaterThanOrEqual(0);
-		expect(collapseControl).toBeLessThan(doneCheckbox);
+		expect(details).toBeGreaterThan(collapseControl);
 	}
 	expect(markup).toContain('aria-label="Expand Done layer"');
 	expect(markup).toContain('aria-expanded="false"');
@@ -801,7 +884,7 @@ test("renders chevron collapse controls before each checkbox", () => {
 	expect(markup).toContain('data-collapsed="true"');
 	expect(markup).toContain('data-collapsed="false"');
 	expect(markup).not.toContain(">Expand</button>");
-	expect(markup).toContain('aria-label="Mark Done layer done"');
+	expect(markup).toContain('aria-label="Mark Done layer not done"');
 	expect(markup).toContain('aria-label="Mark Open layer done"');
 	expect(markup).toContain(">Done layer</button>");
 	expect(markup).toContain(">Open layer</button>");
@@ -816,20 +899,7 @@ test("renders chevron collapse controls before each checkbox", () => {
 	]);
 });
 
-test("collapses a layer as soon as it is marked done", () => {
-	const collapsed = collapseLayerWhenDone(
-		new Set<string>(),
-		"open-layer",
-		true,
-	);
-
-	expect([...collapsed]).toEqual(["open-layer"]);
-	expect([...collapseLayerWhenDone(collapsed, "open-layer", false)]).toEqual([
-		"open-layer",
-	]);
-});
-
-test("auto-collapses only on false-to-true done transitions", () => {
+test("auto-collapses only on confirmed false-to-true done transitions", () => {
 	const layerId = "open-layer";
 
 	expect([
@@ -852,11 +922,75 @@ test("auto-collapses only on false-to-true done transitions", () => {
 	expect([
 		...collapseLayerOnDoneTransition(manuallyExpanded, layerId, false, true),
 	]).toEqual([layerId]);
+});
 
-	expect([...collapseLayerWhenDone(new Set<string>(), layerId, true)]).toEqual([
-		layerId,
+test("completion button toggles callback once and collapses only after saved state", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	const events: Array<[string, boolean]> = [];
+	const initialState = reviewState();
+	const render = (state: ReviewState, actionError: string | null = null) =>
+		root.render(
+			<LayerPane
+				state={state}
+				files={["src/routes/route.ts", "web/route.ts"]}
+				filesContent={null}
+				selectedPath={null}
+				onSelectFile={() => {}}
+				onSelectLayer={() => {}}
+				onToggleDone={(id, done) => events.push([id, done])}
+				layerAction={null}
+				actionError={actionError}
+				externallyDisabled={false}
+				onRegenerate={() => {}}
+				onRetry={() => {}}
+			/>,
+		);
+
+	act(() => render(initialState));
+	const completion = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Mark Diff done"]',
+	);
+	expect(completion?.type).toBe("button");
+	expect(completion?.getAttribute("aria-pressed")).toBe("false");
+	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
+
+	act(() => {
+		completion?.focus();
+		completion?.dispatchEvent(
+			new window.KeyboardEvent("keydown", {
+				key: "Enter",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	});
+	expect(document.activeElement).toBe(completion);
+	act(() => completion?.click());
+	expect(events).toEqual([["layer-1", true]]);
+	act(() => render(initialState, "Progress save failed"));
+	expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+		"Progress save failed",
+	);
+	expect(completion?.getAttribute("aria-pressed")).toBe("false");
+	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
+
+	const savedState = reviewState({
+		layers: initialState.layers.map((layer) => ({ ...layer, done: true })),
+	});
+	act(() => render(savedState));
+	expect(container.querySelector('[data-collapsed="true"]')).not.toBeNull();
+
+	const uncheck = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Mark Diff not done"]',
+	);
+	act(() => uncheck?.click());
+	expect(events).toEqual([
+		["layer-1", true],
+		["layer-1", false],
 	]);
-	expect([
-		...collapseLayerWhenDone(new Set([layerId]), layerId, false),
-	]).toEqual([layerId]);
+	expect(container.querySelector('[data-collapsed="true"]')).not.toBeNull();
+	expect(uncheck?.getAttribute("aria-pressed")).toBe("true");
 });
