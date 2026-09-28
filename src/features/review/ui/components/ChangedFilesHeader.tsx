@@ -1,11 +1,11 @@
-import { List, ListTree } from "lucide-react";
+import { List, ListTree, Search } from "lucide-react";
 import { ProgressBar } from "./ProgressBar";
+import { Input } from "./ui/input";
 import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
 } from "./ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
-
 export type ChangedFilesMode = "list" | "tree";
 
 export interface ChangedFilesHeaderProps {
@@ -13,6 +13,8 @@ export interface ChangedFilesHeaderProps {
 	total: number;
 	mode: ChangedFilesMode;
 	onModeChange: (mode: ChangedFilesMode) => void;
+	filterQuery: string;
+	onFilterQueryChange: (query: string) => void;
 }
 
 export function viewedFileCount(
@@ -43,6 +45,8 @@ export function ChangedFilesHeader({
 	total,
 	mode,
 	onModeChange,
+	filterQuery,
+	onFilterQueryChange,
 }: ChangedFilesHeaderProps) {
 	return (
 		<div
@@ -102,6 +106,22 @@ export function ChangedFilesHeader({
 				<span className="shrink-0 whitespace-nowrap tabular-nums">
 					{viewedCount}/{total} files
 				</span>
+			</div>
+			<div className="flex min-w-0 items-center rounded-3xl border border-border bg-input/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
+				<div className="relative min-w-0 flex-1">
+					<Search
+						className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground"
+						aria-hidden
+					/>
+					<Input
+						type="text"
+						className="h-8 w-full min-w-0 rounded-none border-0 bg-transparent pl-8 text-sm shadow-none focus-visible:ring-0"
+						placeholder="Filter files"
+						aria-label="Filter files"
+						value={filterQuery}
+						onChange={(event) => onFilterQueryChange(event.target.value)}
+					/>
+				</div>
 			</div>
 		</div>
 	);

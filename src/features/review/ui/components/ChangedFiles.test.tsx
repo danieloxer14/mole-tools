@@ -1265,3 +1265,178 @@ test("keeps long nested paths, stats, and Viewed controls accessible", () => {
 	expect(selected).toEqual([path]);
 	expect(viewed).toEqual([[[path], true]]);
 });
+function setFileFilter(container: HTMLElement, query: string): void {
+	const input = container.querySelector<HTMLInputElement>(
+		'input[aria-label="Filter files"]',
+	);
+	if (!input) throw new Error("File filter input is missing");
+	const setter = Object.getOwnPropertyDescriptor(
+		window.HTMLInputElement.prototype,
+		"value",
+	)?.set;
+	if (!setter) throw new Error("Native input value setter is missing");
+	act(() => {
+		setter.call(input, query);
+		input.dispatchEvent(new window.Event("input", { bubbles: true }));
+	});
+}
+
+test("filters complete effective paths in list and tree without changing global state", () => {
+	const selected: string[] = [];
+	const viewed: Array<[readonly string[], boolean]> = [];
+	const files = [
+		parsedFile("src/Features/Panel.tsx"),
+		parsedFile("src/Features/Panel.test.tsx"),
+		parsedFile("src/Other/Panel.tsx"),
+		parsedFile("lib/shared.ts"),
+		parsedFile("vendor/shared.ts"),
+		parsedFile("renamed/current.ts", { oldPath: "legacy/obsolete.ts" }),
+		parsedFile("removed/deleted.ts", {
+			oldPath: "removed/deleted.ts",
+			newPath: null,
+		}),
+		parsedFile("root.ts"),
+		parsedFile("", { oldPath: "", newPath: "" }),
+	];
+	const rendered = renderInteractive({
+		files,
+		viewedFiles: ["root.ts"],
+		selectedPath: "lib/shared.ts",
+		onSelectFile: (path) => selected.push(path),
+		onViewedChange: (paths, isViewed) => viewed.push([paths, isViewed]),
+	});
+	const nav = changedFilesNav(rendered.container);
+	const progress = rendered.container.querySelector('[role="progressbar"]');
+	const status = rendered.container.querySelector(
+		'[data-region="changed-files"]',
+	);
+	expect(status?.textContent).toContain("1/8 files");
+	expect(progress?.getAttribute("aria-valuenow")).toBe("1");
+	expect(progress?.getAttribute("aria-valuemax")).toBe("8");
+
+	setFileFilter(rendered.container, "src/features");
+	expect(
+		Array.from(nav.querySelectorAll<HTMLElement>("[data-list-group]")).map(
+			(group) => group.dataset.listGroup,
+		),
+	).toEqual(["src/Features"]);
+	expect(
+		Array.from(nav.querySelectorAll<HTMLElement>("[data-file-path]")).map(
+			(row) => row.dataset.filePath,
+		),
+	).toEqual(["src/Features/Panel.tsx", "src/Features/Panel.test.tsx"]);
+	expect(selected).toEqual([]);
+	expect(viewed).toEqual([]);
+	expect(status?.textContent).toContain("1/8 files");
+	expect(progress?.getAttribute("aria-valuenow")).toBe("1");
+	expect(progress?.getAttribute("aria-valuemax")).toBe("8");
+
+	act(() => modeButton(rendered.container, "Tree view").click());
+	expect(
+		rendered.container.querySelector<HTMLInputElement>(
+			'input[aria-label="Filter files"]',
+		)?.value,
+	).toBe("src/features");
+	expect(
+		Array.from(nav.querySelectorAll<HTMLElement>("[data-file-path]")).map(
+			(row) => row.dataset.filePath,
+		),
+	).toEqual(["src/Features/Panel.tsx", "src/Features/Panel.test.tsx"]);
+	expect(
+		Array.from(nav.querySelectorAll<HTMLElement>("[data-folder-row]")).map(
+			(row) => row.getAttribute("data-folder-row"),
+		),
+	).toContain("src/Features");
+	expect(nav.querySelector('[data-directory-path="src/Other"]')).toBeNull();
+	const featuresToggle = nav.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse src/Features"]',
+	);
+	act(() => featuresToggle?.click());
+	expect(
+		nav
+			.querySelector('[data-directory-path="src/Features"]')
+			?.querySelector('[aria-label="Expand src/Features"]'),
+	).not.toBeNull();
+	setFileFilter(rendered.container, "Panel.tsx");
+	expect(
+		nav
+			.querySelector('[data-directory-path="src/Features"]')
+			?.querySelector('[aria-label="Expand src/Features"]'),
+	).not.toBeNull();
+
+	setFileFilter(rendered.container, " ");
+	expect(
+		nav.querySelectorAll("[data-folder-row], [data-file-path]"),
+	).toHaveLength(0);
+	expect(nav.querySelectorAll("[data-list-group]")).toHaveLength(0);
+	expect(status?.textContent).toContain("1/8 files");
+
+	setFileFilter(rendered.container, "obsolete");
+	expect(nav.querySelectorAll("[data-file-path]")).toHaveLength(0);
+	setFileFilter(rendered.container, "current");
+	expect(
+		nav.querySelector('[data-file-path="renamed/current.ts"]'),
+	).not.toBeNull();
+	setFileFilter(rendered.container, "deleted");
+	expect(
+		nav.querySelector('[data-file-path="removed/deleted.ts"]'),
+	).not.toBeNull();
+	setFileFilter(rendered.container, "shared.ts");
+	expect(nav.querySelector('[data-file-path="lib/shared.ts"]')).not.toBeNull();
+	expect(
+		nav.querySelector('[data-file-path="vendor/shared.ts"]'),
+	).not.toBeNull();
+
+	setFileFilter(rendered.container, "lib/shared");
+	const selectedRow = nav.querySelector<HTMLElement>(
+		'[data-file-path="lib/shared.ts"]',
+	);
+	expect(selectedRow?.getAttribute("data-state")).toBe("selected");
+	const selectButton = nav.querySelector<HTMLButtonElement>(
+		'button[aria-label="lib/shared.ts"]',
+	);
+	act(() => selectButton?.click());
+	act(() =>
+		nav
+			.querySelector<HTMLElement>(
+				'[role="checkbox"][aria-label="Viewed lib/shared.ts"]',
+			)
+			?.click(),
+	);
+	expect(selected).toEqual(["lib/shared.ts"]);
+	expect(viewed).toEqual([[["lib/shared.ts"], true]]);
+
+	setFileFilter(rendered.container, "");
+	expect(
+		nav
+			.querySelector('[data-file-path="lib/shared.ts"]')
+			?.getAttribute("data-state"),
+	).toBe("selected");
+	expect(
+		nav.querySelector('[data-file-path="vendor/shared.ts"]'),
+	).not.toBeNull();
+	expect(
+		nav
+			.querySelector('[data-directory-path="src/Features"]')
+			?.querySelector('[aria-label="Expand src/Features"]'),
+	).not.toBeNull();
+
+	setFileFilter(rendered.container, "lib");
+	rendered.rerender({
+		files: [parsedFile("lib/new-data.ts"), parsedFile("elsewhere.ts")],
+	});
+	expect(
+		nav.querySelector('[data-file-path="lib/new-data.ts"]'),
+	).not.toBeNull();
+	expect(nav.querySelector('[data-file-path="elsewhere.ts"]')).toBeNull();
+	expect(
+		rendered.container.querySelector<HTMLInputElement>(
+			'input[aria-label="Filter files"]',
+		)?.value,
+	).toBe("lib");
+	setFileFilter(rendered.container, "");
+	expect(
+		nav.querySelector('[data-file-path="lib/new-data.ts"]'),
+	).not.toBeNull();
+	expect(nav.querySelector('[data-file-path="elsewhere.ts"]')).not.toBeNull();
+});

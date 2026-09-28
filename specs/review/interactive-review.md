@@ -213,6 +213,17 @@ agent chat. The MR title sits in the header above the panes.
   before file stats and Viewed controls. Selecting a changed file from any
   surface expands its displayed tree ancestors when needed and scrolls its row
   into view with `nearest`, so an already-visible row does not move.
+  A full-width **Filter files** text field with a search icon sits directly
+  below the layout toggle, Viewed progress bar, and global viewed/total text.
+  Its transient local query performs untrimmed, case-insensitive literal
+  substring matching against each complete effective path (`newPath`, falling
+  back to `oldPath`); rename searches use destination only and deletions use
+  their old path. List groups and compact-tree folders are pruned unless they
+  contain a matching file, and an empty query restores all valid paths.
+  Filtering never changes global progress/counts, selection or centre diff,
+  Viewed behavior, or folder disclosure state; query survives layout and data
+  changes while the changed-files browser remains mounted and resets on
+  unmount.
 - **Centre — Diff.** The selected file's diff supports Inline and Side by side
   layouts, described below.
 - **Right — Agent chat.** Restored transcript, streaming response/tool
