@@ -268,9 +268,10 @@ excludes known activity-note prefixes for title changes, left review comments,
 resolved threads, and approvals, even when GitLab's `system` flag is false.
 Overview content fills the available center column, including description
 Markdown and media; the Agent pane remains separate and resizable. With no
-discussions, it shows `No general discussion yet.` Agent-generated file links
-that resolve to a changed file switch the view to `Code` and select that file;
-unresolved links still open the external preview dialog in either view.
+discussions, it shows `No general discussion yet.` Agent-authored Markdown links
+with absolute file:line targets under current worktree are normalized for
+in-app navigation: changed files switch view to `Code` and select that file,
+while unchanged files open external preview using worktree-relative path.
 
 In Code view, both vertical splitters resize their side on primary-pointer
 drag, including captured movement outside the handle. Matching `pointerup`,

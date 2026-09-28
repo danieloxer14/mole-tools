@@ -2139,6 +2139,7 @@ function ReviewApp() {
 					onLostPointerCapture={splitterResize.onLostPointerCapture}
 				/>
 				<ChatPane
+					worktreePath={data.worktreePath}
 					skills={skills}
 					transcript={activeChat.entries}
 					tags={activeChat.tags}

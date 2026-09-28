@@ -68,6 +68,7 @@ export interface ChatSummary {
 }
 
 export interface ChatPaneProps {
+	worktreePath: string;
 	transcript: readonly ChatEntryWithOptimistic[];
 	tags: readonly ChatTag[];
 	streamingSegments: readonly string[];
@@ -121,6 +122,76 @@ function tagKey(tag: ChatTag): string {
 // `app/api/[product]/route.ts`.
 const FILE_REF_PATTERN =
 	/(?:[\w.[\]-]+\/)*[\w][\w.-]*\.[A-Za-z]{1,10}:\d+(?:[-\u2010-\u2015]\d+)?/g;
+const FILE_REF_SUFFIX_PATTERN =
+	/^(.*\.[A-Za-z]{1,10}):\d+(?:[-\u2010-\u2015]\d+)?$/;
+const FILE_REF_PATH_PATTERN = /^(?:[\w.[\]-]+\/)*[\w][\w.-]*\.[A-Za-z]{1,10}$/;
+
+export function resolveMarkdownFileHref(
+	href: string,
+	worktreePath: string,
+	pageUrl: string,
+): string | null {
+	try {
+		const isRelative =
+			!/^[a-z][a-z\d+.-]*:/i.test(href) && !href.startsWith("/");
+		let candidate: string;
+
+		if (isRelative) {
+			if (href.includes("?") || href.includes("#")) return null;
+			candidate = decodeURIComponent(href).replace(/^(?:\.\/)+/, "");
+			if (!candidate) return null;
+		} else {
+			const rawPath = href.startsWith("/")
+				? (href.split(/[?#]/, 1)[0] ?? "")
+				: (href.match(/^https?:\/\/[^/?#]*(\/[^?#]*)?/i)?.[1] ?? "/");
+			const rawDecoded = decodeURIComponent(rawPath);
+			if (
+				rawPath
+					.split("/")
+					.some((segment) => segment === "." || segment === "..") ||
+				rawDecoded
+					.split("/")
+					.some((segment) => segment === "." || segment === "..")
+			) {
+				return null;
+			}
+			const url = new URL(href, pageUrl);
+			if (
+				(url.protocol !== "http:" && url.protocol !== "https:") ||
+				(url.hostname !== "127.0.0.1" && url.hostname !== "localhost")
+			) {
+				return null;
+			}
+			candidate = decodeURIComponent(url.pathname);
+			if (
+				candidate
+					.split("/")
+					.some((segment) => segment === "." || segment === "..")
+			)
+				return null;
+		}
+
+		if (
+			candidate
+				.split("/")
+				.some((segment) => segment === "." || segment === "..")
+		)
+			return null;
+		const match = FILE_REF_SUFFIX_PATTERN.exec(candidate);
+		const filePath = match?.[1];
+		const grammarPath = isRelative ? filePath : filePath?.replace(/^\/+/, "");
+		if (!filePath || !grammarPath || !FILE_REF_PATH_PATTERN.test(grammarPath))
+			return null;
+		candidate = filePath;
+		if (isRelative) return candidate;
+
+		const root = worktreePath.replace(/\/+$/, "");
+		if (!root || !candidate.startsWith(`${root}/`)) return null;
+		return candidate.slice(root.length + 1) || null;
+	} catch {
+		return null;
+	}
+}
 
 /**
  * Wraps file:line references inside rendered inline `<code>` spans with a
@@ -168,9 +239,11 @@ function ChatMessageBody({
 	onOpenFileRef,
 	skillRefs,
 	skillNames,
+	worktreePath,
 	optimistic = false,
 }: {
 	text: string;
+	worktreePath: string;
 	sourceText?: string;
 	skillInvocations?: readonly SkillToken[];
 	onOpenFileRef?: (path: string) => void;
@@ -233,11 +306,20 @@ function ChatMessageBody({
 
 	const handleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
 		const target = event.target as HTMLElement;
-		const link = target.closest<HTMLElement>(".file-ref-link");
+		const link = target.closest<HTMLAnchorElement>("a");
 		if (!link) return;
+		const path =
+			link.getAttribute("data-file-path") ??
+			(link.getAttribute("href")
+				? resolveMarkdownFileHref(
+						link.getAttribute("href"),
+						worktreePath,
+						window.location.href,
+					)
+				: null);
+		if (!path) return;
 		event.preventDefault();
-		const path = link.dataset.filePath;
-		if (path) onOpenFileRef?.(path);
+		onOpenFileRef?.(path);
 	};
 
 	if (parsed.error || parsed.html === null) {
@@ -269,6 +351,7 @@ export function chatLabel(chat: ChatSummary, index: number): string {
 }
 
 export function ChatPane({
+	worktreePath,
 	transcript,
 	tags,
 	streamingSegments = [],
@@ -494,6 +577,7 @@ export function ChatPane({
 							</strong>
 							<ChatMessageBody
 								text={entry.text}
+								worktreePath={worktreePath}
 								onOpenFileRef={onOpenFileRef}
 								{...(role === "user"
 									? {
@@ -538,7 +622,11 @@ export function ChatPane({
 									? "Assistant · partial reply"
 									: "Assistant"}
 							</strong>
-							<ChatMessageBody text={segment} onOpenFileRef={onOpenFileRef} />
+							<ChatMessageBody
+								text={segment}
+								worktreePath={worktreePath}
+								onOpenFileRef={onOpenFileRef}
+							/>
 							<span
 								aria-hidden
 								className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary/80 align-text-bottom"
