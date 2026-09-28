@@ -3,9 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatEntry } from "../../store";
-import { ChatPane } from "./ChatPane";
+import { ChatPane, resolveMarkdownFileHref } from "./ChatPane";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
+const TEST_WORKTREE_PATH = "/worktrees/review";
 
 const interactiveRoots: Root[] = [];
 
@@ -40,6 +42,7 @@ function transcriptEntry(
 test("does not render a general discussions trigger", () => {
 	const markup = renderToStaticMarkup(
 		<ChatPane
+			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
 			tags={[]}
 			chats={[
@@ -174,6 +177,7 @@ test("disables and marks new chat busy while creating", () => {
 test("renders parent-owned composer draft", () => {
 	const markup = renderToStaticMarkup(
 		<ChatPane
+			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
 			tags={[]}
 			chats={[
@@ -491,6 +495,7 @@ function renderComposer(
 ): string {
 	return renderToStaticMarkup(
 		<ChatPane
+			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
 			tags={[]}
 			chats={[
@@ -561,6 +566,7 @@ function renderInteractive(
 	const render = (nextProps: Partial<Parameters<typeof ChatPane>[0]>) => {
 		root.render(
 			<ChatPane
+				worktreePath={TEST_WORKTREE_PATH}
 				transcript={[]}
 				tags={[]}
 				chats={[
@@ -902,6 +908,90 @@ test("exposes semantic message and streaming state", () => {
 	expect(streaming).not.toBeNull();
 	expect(streaming?.textContent).toContain("Live before");
 	expect(streaming?.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+});
+
+test("normalizes only in-worktree Markdown file-line hrefs", () => {
+	const root = "/worktrees/review";
+	const pageUrl = "http://127.0.0.1:49272/";
+	const file = "src/infrastructure/persistence/postgres/postgres-task-store.ts";
+	const cases: [string, string | null][] = [
+		[`http://127.0.0.1:49272${root}/${file}:51`, file],
+		[`/worktrees/review/${file}:51`, file],
+		[
+			`http://localhost:49272/worktrees/review/src%2Finfrastructure%2Fpersistence%2Fpostgres%2Fpostgres-task-store.ts:51`,
+			file,
+		],
+		[`${file}:51`, file],
+		[`./${file}:51`, file],
+		[`${file}:51-58`, file],
+		[`${file}:51–58`, file],
+		[`http://127.0.0.1:49272/worktrees/review-sibling/${file}:51`, null],
+		[`http://127.0.0.1:49272/other/${file}:51`, null],
+		[`http://127.0.0.1:49272/worktrees/review/../other/${file}:51`, null],
+		[`http://127.0.0.1:49272/worktrees/review/%2e%2e/other/${file}:51`, null],
+		[`http://127.0.0.1:49272/worktrees/review/%ZZ/${file}:51`, null],
+		[`https://example.com/${file}:51`, null],
+		[`mailto:agent@example.com`, null],
+		[`https://example.com/${file}`, null],
+		[`#section`, null],
+	];
+
+	for (const [href, expected] of cases) {
+		expect(resolveMarkdownFileHref(href, root, pageUrl)).toBe(expected);
+	}
+});
+
+test("opens issue-shaped Markdown file links without browser navigation", () => {
+	const file = "src/infrastructure/persistence/postgres/postgres-task-store.ts";
+	const openedPaths: string[] = [];
+	const rendered = renderInteractive({
+		transcript: [
+			{
+				role: "assistant",
+				text: `[postgres-task-store.ts:51](http://127.0.0.1:49272${TEST_WORKTREE_PATH}/${file}:51)`,
+				tags: [],
+				at: "2026-08-24T00:00:00Z",
+				sessionId: "session-1",
+			},
+		],
+		onOpenFileRef: (path) => openedPaths.push(path),
+	});
+	const link = rendered.container.querySelector<HTMLAnchorElement>("a");
+	expect(link).not.toBeNull();
+	const click = document.createEvent("Event");
+	click.initEvent("click", true, true);
+	act(() => {
+		link?.dispatchEvent(click);
+	});
+	expect(click.defaultPrevented).toBe(true);
+	expect(openedPaths).toEqual([file]);
+});
+
+test("leaves external and out-of-worktree Markdown links untouched", () => {
+	const openedPaths: string[] = [];
+	const rendered = renderInteractive({
+		transcript: [
+			{
+				role: "assistant",
+				text: `[external](https://example.com/src/index.ts:12) and [outside](http://127.0.0.1:49272/other/src/index.ts:12)`,
+				tags: [],
+				at: "2026-08-24T00:00:00Z",
+				sessionId: "session-1",
+			},
+		],
+		onOpenFileRef: (path) => openedPaths.push(path),
+	});
+	const links = rendered.container.querySelectorAll<HTMLAnchorElement>("a");
+	expect(links.length).toBe(2);
+	for (const link of links) {
+		const click = document.createEvent("Event");
+		click.initEvent("click", true, true);
+		act(() => {
+			link.dispatchEvent(click);
+		});
+		expect(click.defaultPrevented).toBe(false);
+	}
+	expect(openedPaths).toEqual([]);
 });
 
 test("opens file references from rendered assistant markdown", () => {
