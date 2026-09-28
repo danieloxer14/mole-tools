@@ -539,7 +539,14 @@ test("keeps toolbar buttons aligned to the find control height", () => {
 	expect(segmentedItems.every((item) => item.classList.contains("h-7"))).toBe(
 		true,
 	);
-	expect(tagButton?.className).toContain("size-8");
+	expect(tagButton).not.toBeNull();
+	expect(tagButton?.classList.contains("size-8")).toBe(true);
+	const actionToolbar = tagButton?.parentElement;
+	expect(actionToolbar).not.toBeNull();
+	expect(actionToolbar?.classList.contains("flex-nowrap")).toBe(true);
+	expect(actionToolbar?.classList.contains("flex-wrap")).toBe(false);
+	expect(actionToolbar?.classList.contains("overflow-x-auto")).toBe(true);
+	expect(actionToolbar?.classList.contains("justify-end-safe")).toBe(true);
 });
 
 test("shows the current match and total for multiple matches", () => {

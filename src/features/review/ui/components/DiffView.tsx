@@ -1755,7 +1755,7 @@ export function DiffView({
 					<span className="text-success">+{file.insertions}</span>
 					<span className="text-destructive">−{file.deletions}</span>
 				</div>
-				<div className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-2">
+				<div className="flex min-w-0 max-w-full flex-1 flex-nowrap items-center justify-end-safe gap-2 overflow-x-auto">
 					{!binary && !showingRendered ? (
 						<div
 							className="flex h-8 w-56 min-w-0 max-w-full shrink items-center overflow-hidden rounded-3xl border border-border bg-input/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30"
