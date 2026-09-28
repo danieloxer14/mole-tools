@@ -20,6 +20,8 @@ const defaultProps: ChangedFilesHeaderProps = {
 	total: 3,
 	mode: "list",
 	onModeChange: noop,
+	filterQuery: "",
+	onFilterQueryChange: noop,
 };
 
 afterEach(() => {
@@ -66,6 +68,27 @@ test("renders viewed files progress header", () => {
 	expect(html).toContain('role="progressbar"');
 	expect(html).toContain('aria-label="Viewed file coverage"');
 	expect(html).toContain("1/3 files");
+});
+test("renders full-width file filter beneath global status row", () => {
+	const container = document.createElement("div");
+	container.innerHTML = markup();
+	const region = container.querySelector('[data-region="changed-files"]');
+	const rows = region?.children;
+	expect(rows).toHaveLength(2);
+	expect(
+		rows?.[0]?.querySelector('[aria-label="Changed files layout"]'),
+	).not.toBeNull();
+	expect(rows?.[0]?.querySelector('[role="progressbar"]')).not.toBeNull();
+	expect(rows?.[0]?.textContent).toContain("1/3 files");
+	const input = region?.querySelector<HTMLInputElement>(
+		'input[aria-label="Filter files"]',
+	);
+	expect(input?.type).toBe("text");
+	expect(input?.placeholder).toBe("Filter files");
+	expect(input?.value).toBe("");
+	expect(input?.className).toContain("w-full");
+	expect(input?.parentElement?.parentElement?.className).toContain("min-w-0");
+	expect(region?.querySelector("svg.lucide-search")).not.toBeNull();
 });
 
 test("renders empty viewed files progress", () => {

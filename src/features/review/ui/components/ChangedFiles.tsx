@@ -594,6 +594,7 @@ export function ChangedFiles({
 	onViewedChange,
 }: ChangedFilesProps): ReactElement {
 	const [mode, setMode] = useState<ChangedFilesMode>("list");
+	const [filterQuery, setFilterQuery] = useState("");
 	const [collapsedFolderPaths, setCollapsedFolderPaths] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -604,9 +605,28 @@ export function ChangedFiles({
 				.filter((entry) => entry.path.length > 0),
 		[files],
 	);
-	const tree = useMemo(() => buildChangedFileTree(entries), [entries]);
+	const normalizedFilterQuery = useMemo(
+		() => filterQuery.toLowerCase(),
+		[filterQuery],
+	);
+	const matchingEntries = useMemo(
+		() =>
+			normalizedFilterQuery.length === 0
+				? entries
+				: entries.filter((entry) =>
+						entry.path.toLowerCase().includes(normalizedFilterQuery),
+					),
+		[entries, normalizedFilterQuery],
+	);
+	const tree = useMemo(
+		() => buildChangedFileTree(matchingEntries),
+		[matchingEntries],
+	);
 	const displayTree = useMemo(() => compactChangedFileTree(tree), [tree]);
-	const listItems = useMemo(() => buildChangedFileList(entries), [entries]);
+	const listItems = useMemo(
+		() => buildChangedFileList(matchingEntries),
+		[matchingEntries],
+	);
 
 	const rowRegistry = useRef<Map<string, HTMLElement>>(new Map());
 	const registerRow = useCallback(
@@ -786,6 +806,8 @@ export function ChangedFiles({
 				total={changedFileCount(paths)}
 				mode={mode}
 				onModeChange={setMode}
+				filterQuery={filterQuery}
+				onFilterQueryChange={setFilterQuery}
 			/>
 			<nav
 				className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
