@@ -278,11 +278,11 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `commit-system` | `commit` | Commit-message tone and repository conventions. |
 | `mr-code` | `merge-request` default `--mode code` | Code-change MR title, description format, and repository conventions. |
 | `mr-plan` | `merge-request --mode plan` | Implementation-plan purpose, scope, and decisions. |
-| `review-layers-code` | `review` default `--mode code` | Review-layer coverage, priorities, and code-review focus. |
-| `review-layers-plan` | `review` default `--mode plan` | Requirements, risks, assumptions, and acceptance-criteria review. |
+| `review-layers-code` | `review` default `--mode code` | Ordered end-to-end runtime boundaries and test coverage for code review. |
+| `review-layers-plan` | `review` default `--mode plan` | Architecture decisions, deliverable completeness, and acceptance-criteria testability for plan review. |
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
-| `review-explain-comment` | Review UI **Explain** on a GitLab discussion | Prompt for explaining a review comment in a new chat. |
-| `review-comment-from-chat` | "Comment from chat" | Review UI |
+| `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
+| `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
