@@ -1,3 +1,4 @@
+import { cn } from "cn";
 import { Check, ChevronDown, FileText, Loader2, RefreshCw } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ReviewState } from "../../state";
@@ -467,30 +468,37 @@ export function LayerPane({
 													</span>
 												</div>
 												<div className="flex min-w-0 flex-wrap gap-1.5">
-													{layerFiles.map((path) => (
-														<Badge
-															className="h-auto max-w-full min-w-0 shrink cursor-pointer justify-start gap-1 overflow-visible text-left font-mono text-xs whitespace-normal break-words hover:bg-muted hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground [overflow-wrap:anywhere]"
-															key={path}
-															variant="secondary"
-															render={
-																<button
-																	type="button"
-																	title={path}
-																	aria-label={path}
-																	aria-current={
-																		path === selectedPath ? "true" : undefined
-																	}
-																	data-active={
-																		path === selectedPath ? "true" : "false"
-																	}
-																	onClick={() => onSelectFile(path)}
-																/>
-															}
-														>
-															<FileText aria-hidden />
-															{shortFilePath(path, changedFilePaths)}
-														</Badge>
-													))}
+													{layerFiles.map((path) => {
+														const active = path === selectedPath;
+														const isViewed = viewed.has(path);
+														return (
+															<Badge
+																className={cn(
+																	"h-auto max-w-full min-w-0 shrink cursor-pointer justify-start gap-1 overflow-visible text-left font-mono text-xs whitespace-normal break-words [overflow-wrap:anywhere]",
+																	active
+																		? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
+																		: isViewed
+																			? "bg-success/15 text-success hover:bg-success/20 hover:text-success"
+																			: "hover:bg-muted hover:text-foreground",
+																)}
+																key={path}
+																variant="secondary"
+																render={
+																	<button
+																		type="button"
+																		title={path}
+																		aria-label={path}
+																		aria-current={active ? "true" : undefined}
+																		data-active={active ? "true" : "false"}
+																		onClick={() => onSelectFile(path)}
+																	/>
+																}
+															>
+																<FileText aria-hidden />
+																{shortFilePath(path, changedFilePaths)}
+															</Badge>
+														);
+													})}
 													{layerFiles.length === 0 ? (
 														<span className="text-xs text-muted-foreground">
 															No changed files

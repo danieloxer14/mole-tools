@@ -651,6 +651,65 @@ test("renders layer file chips with shortened labels and full-path accessible la
 	expect(markup).toContain('title="web/route.ts"');
 });
 
+test("styles layer file chips by Viewed state with selection taking precedence", () => {
+	const selected = "src/routes/selected.ts";
+	const viewed = "src/routes/viewed.ts";
+	const unviewed = "src/routes/unviewed.ts";
+	const paths = [selected, viewed, unviewed];
+	const markup = renderLayerPane({
+		state: reviewState({
+			layers: [
+				{
+					...reviewState().layers[0],
+					files: paths,
+				},
+			],
+			viewedFiles: [selected, viewed],
+		}),
+		files: paths,
+		selectedPath: selected,
+	});
+	const container = parseMarkup(markup);
+	const selectedChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${selected}"]`,
+	);
+	const viewedChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${viewed}"]`,
+	);
+	const unviewedChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${unviewed}"]`,
+	);
+	if (!selectedChip || !viewedChip || !unviewedChip) {
+		throw new Error("Missing layer file chip");
+	}
+
+	const selectedClasses = new Set(selectedChip.className.split(/\s+/));
+	expect(selectedClasses).toContain("bg-primary");
+	expect(selectedClasses).toContain("text-primary-foreground");
+	expect(selectedClasses).toContain("hover:bg-primary/90");
+	expect(selectedClasses).toContain("hover:text-primary-foreground");
+	expect(selectedClasses).not.toContain("bg-success/15");
+	expect(selectedClasses).not.toContain("text-success");
+	expect(selectedClasses).not.toContain("hover:bg-success/20");
+	expect(selectedClasses).not.toContain("hover:text-success");
+	expect(selectedChip.getAttribute("aria-current")).toBe("true");
+
+	const viewedClasses = new Set(viewedChip.className.split(/\s+/));
+	expect(viewedClasses).toContain("bg-success/15");
+	expect(viewedClasses).toContain("text-success");
+	expect(viewedClasses).toContain("hover:bg-success/20");
+	expect(viewedClasses).toContain("hover:text-success");
+	expect(viewedChip.hasAttribute("aria-current")).toBe(false);
+
+	const unviewedClasses = new Set(unviewedChip.className.split(/\s+/));
+	expect(unviewedClasses).toContain("hover:bg-muted");
+	expect(unviewedClasses).toContain("hover:text-foreground");
+	expect(unviewedClasses).not.toContain("bg-primary");
+	expect(unviewedClasses).not.toContain("bg-success/15");
+	expect(unviewedClasses).not.toContain("text-success");
+	expect(unviewedChip.hasAttribute("aria-current")).toBe(false);
+});
+
 test("keeps long layer file labels readable and accessible", () => {
 	const longPath =
 		"src/features/review/components/very-long-file-name-that-wraps-safely-and-stays-visible-in-chip.ts";
