@@ -366,9 +366,10 @@ invalid JSON gets one retry with the validation error; a second failure stores
 `review.layerTimeoutSeconds` (default `600`).
 
 Progress is explicit: a reviewer marks each layer Done, marks individual files
-Viewed, and can use each layer's file chips to navigate the centre column. A
-layer's file-coverage bar counts only its curated files; the global bar counts
-all changed files.
+Viewed, and can use each layer's file chips to navigate the centre column.
+Non-selected Viewed layer file chips use a soft success-green treatment; the
+selected chip remains primary/orange even when Viewed. A layer's file-coverage
+bar counts only its curated files; the global bar counts all changed files.
 
 ## 6. Chat, tagging, and agent safety
 
