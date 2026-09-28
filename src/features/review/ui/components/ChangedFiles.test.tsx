@@ -336,7 +336,6 @@ test("measures shared names on mount, resize, and font loading", async () => {
 		expect(
 			fileButton.closest<HTMLElement>("[data-file-path]")?.className,
 		).toContain("flex-wrap");
-		expect(viewedControl.parentElement?.className).toContain("flex-wrap");
 
 		const beforeFontLoad = fileName.textContent;
 		act(() => measurement.loadFont(20));
@@ -372,14 +371,9 @@ test("measures shared names on mount, resize, and font loading", async () => {
 		act(() => measurement.resize(60));
 		expect(visualName(treeFileButton).textContent).toContain("…");
 		expect(treeFileButton.title).toBe(filePath);
-		const narrowViewedControl = Array.from(
-			treeNav.querySelectorAll<HTMLElement>('[role="checkbox"]'),
-		).find(
-			(control) => control.getAttribute("aria-label") === `Viewed ${filePath}`,
-		);
-		if (!narrowViewedControl)
-			throw new Error("Narrow Viewed control is missing");
-		expect(narrowViewedControl.parentElement?.className).toContain("flex-wrap");
+		expect(
+			treeFileButton.closest<HTMLElement>("[data-file-path]")?.className,
+		).toContain("flex-wrap");
 		expect(
 			treeFileButton
 				.closest<HTMLElement>("[data-file-path]")
@@ -410,6 +404,45 @@ function modeButton(container: HTMLElement, label: string): HTMLButtonElement {
 	if (!button) throw new Error(`Missing ${label} mode button`);
 	return button;
 }
+
+test("renders checkbox-only Viewed controls with a custom tooltip in list and tree", async () => {
+	const path = "src/nested/a.ts";
+	const rendered = renderInteractive({ files: [parsedFile(path)] });
+	const nav = changedFilesNav(rendered.container);
+	const checkbox = nav.querySelector<HTMLElement>(
+		`[role="checkbox"][aria-label="Viewed ${path}"]`,
+	);
+	if (!checkbox) throw new Error("List Viewed checkbox is missing");
+	const listRow = checkbox.closest<HTMLElement>("[data-file-path]");
+	if (!listRow) throw new Error("List file row is missing");
+	expect(listRow.textContent).not.toContain("Viewed");
+	expect(checkbox.getAttribute("title")).toBeNull();
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		checkbox.focus();
+		await Bun.sleep(0);
+	});
+	expect(document.activeElement).toBe(checkbox);
+	const tooltips = document.body.querySelectorAll(
+		'[data-slot="tooltip-content"]',
+	);
+	expect(tooltips).toHaveLength(1);
+	expect(tooltips[0]?.textContent).toBe("Viewed");
+
+	act(() => modeButton(rendered.container, "Tree view").click());
+	const treeNav = changedFilesNav(rendered.container);
+	const treeCheckbox = treeNav.querySelector<HTMLElement>(
+		`[role="checkbox"][aria-label="Viewed ${path}"]`,
+	);
+	if (!treeCheckbox) throw new Error("Tree Viewed checkbox is missing");
+	const treeRow = treeCheckbox.closest<HTMLElement>("[data-file-path]");
+	if (!treeRow) throw new Error("Tree file row is missing");
+	expect(treeRow.textContent).not.toContain("Viewed");
+	expect(treeCheckbox.getAttribute("title")).toBeNull();
+});
 
 test("builds an ordered tree with roots, duplicate basenames, and collisions", () => {
 	const tree = buildChangedFileTree([

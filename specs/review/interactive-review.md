@@ -203,8 +203,10 @@ agent chat. The MR title sits in the header above the panes.
   switches to an expanded-by-default compact tree; each disclosure row joins
   eligible single-directory chains and stops at a branch or directory
   containing a direct file, with indentation based on displayed depth.
-  Directory rows disclose descendants only; insertion/deletion statistics and
-  persisted Viewed controls appear on file rows only. Names display in full
+  Directory rows disclose descendants only; insertion/deletion statistics
+  appear on file rows only. File rows expose checkbox-only Viewed controls
+  with custom tooltip text exactly `Viewed`; each checkbox's accessible label
+  includes the full file path. Names display in full
   when they fit and use middle ellipsis while retaining a visible suffix when
   constrained; controls keep complete paths in accessible labels and tooltips.
   Navigation scrolls vertically without horizontal overflow, shrinking names
