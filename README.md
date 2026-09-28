@@ -78,7 +78,7 @@ Every route is **required** and must reference an existing provider key. If a ro
 
 #### Review — Agent and Model Selection
 
-Review-agent selection is independent of `models`. `review.model` is passed to the selected review agent (`omp --model <name>`, `claude --model <name>`, or `codex exec -m <name>`); it does not configure Ollama. Omit `review` to use the default Claude agent, its default `claude` binary, and Claude's current defaults for model and effort.
+Review-agent selection is independent of `models`. `review.model` is passed to the selected review agent (`omp --model <name>`, `claude --model <name>`, or `codex exec -m <name>`); it does not configure Ollama. Omit `review` to use the default Claude agent and binary; Claude reviews then pass `--model opus`, which Claude CLI resolves to its latest Opus alias. Effort remains at the CLI default unless configured.
 
 ```jsonc
 // OMP: choose a model visible to the selected OMP executable.
@@ -109,22 +109,35 @@ Review-agent selection is independent of `models`. `review.model` is passed to t
 ```
 
 `review.binary` replaces only the executable name or path. When omitted, the
-selected agent's executable name is used. A model is sent as `--model <name>` for OMP and Claude, or `codex exec -m <name>` for Codex. OMP effort is sent as `--thinking <level>`, Claude effort as `--effort <level>`, and Codex effort as `-c model_reasoning_effort=<level>`. Unset effort sends no effort option; Codex's `-c` option is not an OMP effort flag.
+selected agent's executable name is used. A configured model is sent unchanged
+as `--model <name>` for OMP and Claude, or `codex exec -m <name>` for Codex.
+When Claude's model is omitted, reviews pass `--model opus`, the latest Opus
+CLI alias. OMP effort is sent as `--thinking <level>`, Claude effort as
+`--effort <level>`, and Codex effort as `-c model_reasoning_effort=<level>`.
+Unset effort sends no effort option; Codex's `-c` option is not an OMP effort
+flag.
 
 The **Settings** dialog opens on **Prompts** and has a **General** tab for global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); each version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to rebuild cached layers.
 
 The OMP model dropdown comes from `models --json` run by the selected OMP
 executable. Effort choices are limited to values advertised as supported for
 that model. Claude model discovery uses the Anthropic Models API when the
-server has `ANTHROPIC_API_KEY`; API visibility reflects that key's entitlement, not the models available to the separate Claude CLI account. Without that key, the dropdown offers the Claude CLI aliases `sonnet`, `opus`, and `haiku`; these aliases are not a complete CLI catalog. API availability and Claude CLI entitlement are distinct. Existing custom model selections remain selectable until changed. Catalog failures remain visible and retryable. Codex model discovery uses the selected Codex CLI's `codex debug models` catalog; any model name can also be entered, or left blank to use Codex's configured default.
+server has `ANTHROPIC_API_KEY`; API visibility reflects that key's entitlement,
+not entitlement for the separate Claude CLI account. Without that key, the
+dropdown offers the Claude CLI aliases `sonnet`, `opus`, and `haiku`; these
+aliases are not a complete CLI catalog. API visibility does not prove CLI
+account entitlement. Existing custom model selections remain selectable until
+changed. Catalog failures remain visible and retryable. Codex model discovery
+uses the selected Codex CLI's `codex debug models` catalog; any model name can
+also be entered, or left blank to use Codex's configured default.
 
 Effort is optional. OMP accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `auto`; model discovery narrows the dropdown to supported values. Claude accepts `low`, `medium`, `high`, `xhigh`, and `max`. Codex accepts model-specific reasoning levels. Unset effort sends no effort option.
 
-Each prompt field overrides its corresponding General default independently when Agent is **Default**. An explicit prompt agent uses only that version's model and effort; blank values send no corresponding option and use that agent's CLI defaults, without borrowing another agent's global defaults. New chats, including Explain chats, persist the effective agent/model/effort at creation; later settings or prompt edits do not rebind them. Older prompt versions and bound chats without effort remain unset and continue without an effort option. An unbound legacy chat with existing transcript binds current global defaults at its next turn. Commit and merge-request prompts continue to use `models.*` routes and ignore review prompt metadata.
+Each prompt field overrides its corresponding General default independently when Agent is **Default**. An explicit prompt agent uses only that version's model and effort; blank values send no corresponding option except Claude's model, which defaults to `--model opus` (the latest Opus CLI alias). Explicit model values are forwarded unchanged, without borrowing another agent's global defaults. New chats, including Explain chats, persist the effective agent/model/effort at creation; later settings or prompt edits do not rebind them. Older prompt versions and bound chats without effort remain unset and continue without an effort option. An unbound legacy chat with existing transcript binds current global defaults at its next turn. Commit and merge-request prompts continue to use `models.*` routes and ignore review prompt metadata.
 
 OMP and Claude chat turns use read-only inspection tools (`read`, `grep`, `glob`, `bash`); Bash is limited by prompt policy to read-only commands. Codex chat turns run in its `read-only` sandbox, with the review working directory marked `untrusted` to prevent project-local Codex configuration from granting reviewed code access to local MCP commands or broader workspace/network permissions. Codex layer and comment-from-chat turns run in `workspace-write` with the review output directory added via `--add-dir`; the review worktree is writable to Codex in those turns, so prompt policy is the guard, as for OMP's `bash` tool. This write access is an intentional exception to the read-only review boundary, limited to those turns.
 
-Prompt versions can select an agent and model independently. A version whose agent is **Default** inherits the global Review agent/model above; a version with an explicit agent uses that agent and its version model (or no model option when that model is blank). Chats keep the agent/model they were bound to when created, even after the global setting or prompt version changes. For a non-default agent kind, mole-tools uses the `omp`, `claude`, or `codex` binary from `PATH`; `review.binary` applies only when the selected agent is the configured default.
+Prompt versions can select an agent and model independently. A version whose agent is **Default** inherits the global Review agent/model above; a version with an explicit agent uses that agent and its version model, or Claude's latest Opus CLI alias (`--model opus`) when Claude's model is blank. Explicit Claude models are forwarded unchanged. Chats keep the agent/model they were bound to when created, even after the global setting or prompt version changes. For a non-default agent kind, mole-tools uses the `omp`, `claude`, or `codex` binary from `PATH`; `review.binary` applies only when the selected agent is the configured default.
 
 
 #### Optional Sections
@@ -269,8 +282,10 @@ Review the changed code for correctness and risk.
 ```
 
 With Agent **Default** or unset, each blank field inherits its matching global
-Review default. An explicitly selected agent with blank Model or Effort uses
-that agent's CLI default. Older versions without effort keep it unset. Review
+Review default. For an explicitly selected Claude agent, blank Model uses
+`--model opus` (the latest Opus CLI alias) and blank Effort uses the Claude
+CLI default. Other explicitly selected agents use their CLI defaults for blank
+Model or Effort. Older versions without effort keep it unset. Review
 effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_effort=<level>` (available Codex levels vary by model); unset means no effort flag. Frontmatter is ignored by commit and MR prompts, which continue to use their `models.*` LLM routes.
 
 | Slot | Used by | Customise for |
@@ -388,7 +403,9 @@ is omitted for that run, leaving the model's agent default in effect; prompt
 metadata remains unchanged. Changing Default Agent is rejected when an active
 default-agent prompt has a saved effort unsupported by the new agent; change or
 clear that effort, or assign that prompt an explicit agent first. An explicit
-prompt agent with blank Model or Effort uses that agent's CLI default. New chats,
+Claude prompt agent with blank Model uses `--model opus` (the latest Opus CLI
+alias), while blank Effort uses the Claude CLI default. Other explicit prompt
+agents use their CLI defaults for blank Model or Effort. New chats,
 including Explain chats, bind agent/model/effort once; existing bindings do not
 change when settings change. Legacy prompt versions and chats without effort
 keep it unset. Commit and MR prompts remain on their `models.*` routes.
@@ -466,8 +483,9 @@ Configure OMP provider credentials through OMP before running a review.
 Settings **General** discovers models from the selected OMP executable using
 `models --json`; each model's advertised compatible effort choices appear in
 the dropdown. The global and per-prompt selections apply to both layer
-generation and chat according to the precedence above. Omit Model or Effort to
-retain the selected agent's configured CLI default.
+generation and chat according to the precedence above. Unset Effort retains
+the selected agent's CLI default. An omitted Model retains OMP or Codex CLI
+defaults; Claude instead receives `--model opus`, its latest Opus CLI alias.
 
 **Claude Code**
 
@@ -477,13 +495,14 @@ claude auth login
 claude auth status
 ```
 
-Claude is the default review agent. Settings can show model IDs visible to
-`ANTHROPIC_API_KEY` through the Anthropic Models API, but that API entitlement is
-separate from Claude CLI access. Without the key, Settings shows only the
-`sonnet`, `opus`, and `haiku` CLI aliases, not a complete Claude CLI model list.
-Set `review.model` to any model name accepted by `claude --model`; omit it to
-use Claude Code's current default. Claude effort uses `--effort`; leave effort
-unset to use the CLI default.
+Claude is the default review agent. When no Claude model is configured, reviews
+pass `--model opus`; Claude CLI resolves `opus` to its latest Opus alias.
+Explicit `review.model` values are forwarded unchanged. Settings can show model
+IDs visible to `ANTHROPIC_API_KEY` through the Anthropic Models API, but API
+catalog visibility does not prove entitlement for the separate Claude CLI
+account. Without the key, Settings shows only the `sonnet`, `opus`, and `haiku`
+CLI aliases, not a complete Claude CLI model list. Claude effort uses
+`--effort`; leave effort unset to use the CLI default.
 
 **Codex CLI**
 

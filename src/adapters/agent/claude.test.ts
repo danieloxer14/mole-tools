@@ -62,7 +62,7 @@ describe("ClaudeAgentAdapter", () => {
 		expect(call).toBeDefined();
 		expect(call?.binary).toBe("claude");
 		expect(call?.cwd).toBe(turn.cwd);
-		expect(call?.args.slice(0, 9)).toEqual([
+		expect(call?.args).toEqual([
 			"-p",
 			"--output-format",
 			"stream-json",
@@ -70,17 +70,15 @@ describe("ClaudeAgentAdapter", () => {
 			"--verbose",
 			"--session-id",
 			session?.kind === "session" ? session.sessionId : "",
+			"--model",
+			"opus",
 			"--append-system-prompt",
 			await Bun.file(turn.systemPromptFile).text(),
-		]);
-		expect(call?.args.slice(9, 14)).toEqual([
 			"--allowedTools",
 			"Read",
 			"Grep",
 			"Glob",
 			"Bash",
-		]);
-		expect(call?.args.slice(14)).toEqual([
 			"--add-dir",
 			turn.cwd,
 			"--",
@@ -107,6 +105,10 @@ describe("ClaudeAgentAdapter", () => {
 			"claude-opus-4-6",
 			"--append-system-prompt",
 		]);
+		expect(calls[0]?.args.filter((arg) => arg === "--model")).toEqual([
+			"--model",
+		]);
+		expect(calls[0]?.args).not.toContain("opus");
 	});
 
 	test("ignores duplicate transcript events and reports unknown provider events", async () => {
@@ -178,6 +180,8 @@ describe("ClaudeAgentAdapter", () => {
 			"--verbose",
 			"--resume",
 			"resume-session",
+			"--model",
+			"opus",
 			"--append-system-prompt",
 			await Bun.file(turn.systemPromptFile).text(),
 			"--allowedTools",

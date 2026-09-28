@@ -28,6 +28,8 @@ export interface ClaudeAgentOptions {
 }
 
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"] as const;
+const DEFAULT_CLAUDE_MODEL = "opus";
+
 const IGNORED_STREAM_EVENTS: Record<string, true> = {
 	message_start: true,
 	content_block_start: true,
@@ -202,7 +204,7 @@ function mapClaudeEvent(
 
 export class ClaudeAgentAdapter implements ReviewAgent {
 	private readonly binary: string;
-	private readonly model?: string;
+	private readonly model: string;
 	private readonly effort?: ClaudeEffort;
 	private readonly execFn: AgentExec;
 
@@ -213,7 +215,7 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 		const config = resolveAgentConfig(execOrOptions, options, "claude");
 		this.execFn = config.execFn;
 		this.binary = config.binary;
-		this.model = config.model;
+		this.model = config.model ?? DEFAULT_CLAUDE_MODEL;
 		if (config.effort !== undefined) assertAgentEffort("claude", config.effort);
 		this.effort = config.effort;
 	}

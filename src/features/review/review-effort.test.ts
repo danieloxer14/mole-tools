@@ -545,6 +545,8 @@ describe("review effort selection", () => {
 						"--verbose",
 						"--resume",
 						"session-1",
+						"--model",
+						"opus",
 						"--append-system-prompt",
 						"Review instructions.",
 						"--allowedTools",
