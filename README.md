@@ -377,6 +377,7 @@ Stale as a warning badge.
 Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
+Rendered Markdown file previews retain horizontal gutters for block actions and wide content such as Mermaid diagrams.
 
 The **Settings** dialog has four tabs: **General**, **Prompts**, **Skills**, and
 **Appearance**; it opens on **Prompts**. **General** contains **Default Agent**,
