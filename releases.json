@@ -1,0 +1,179 @@
+[
+	{
+		"version": "0.10.1",
+		"description": "Adds viewed-file chip highlighting and improves constrained diff toolbar layout.",
+		"features": [
+			"Viewed layer files are highlighted without changing selected-chip styling."
+		],
+		"improvements": [],
+		"fixes": [
+			"Diff action toolbar stays on one line and scrolls horizontally when space is constrained."
+		]
+	},
+	{
+		"version": "0.10.0",
+		"description": "Adds Codex reviews, versioned review skills, overview view, and update checks.",
+		"features": [
+			"Codex can act as a review agent.",
+			"Create versioned skills in Settings and invoke them with slash commands in chat.",
+			"Review merge-request descriptions and general discussions, with actions to explain discussions in chat.",
+			"Show when a newer mole-tools release is available."
+		],
+		"improvements": [
+			"Configure review-agent model and reasoning effort.",
+			"Browse changed files in the review sidebar with improved navigation.",
+			"Persist collapsed comment state and move draft-mode controls into the header."
+		],
+		"fixes": [
+			"Clean up OMP catalog subprocesses.",
+			"Fix Markdown inset and end stale sidebar splitter drags."
+		]
+	},
+	{
+		"version": "0.9.0",
+		"description": "Expands review customization, chat-generated comments, and review workflow controls.",
+		"features": [
+			"Select light theme, changed-files tree mode, folder-level progress controls, and whitespace visibility.",
+			"Generate anchored comment drafts from review chat."
+		],
+		"improvements": [
+			"Combine refresh, sync, and layer regeneration; show total diff stats; stop comment generation from its draft.",
+			"Add review favicon and tab title."
+		],
+		"fixes": ["Hide noisy system-generated notes from general discussions."]
+	},
+	{
+		"version": "0.8.1",
+		"description": "Refines side-by-side diff sizing, inline diffs, and layer coverage layout.",
+		"features": [],
+		"improvements": [
+			"Keep side-by-side diff columns aligned with fixed line-number and equal-width content columns.",
+			"Use dedicated layout for full-width inline diff tables.",
+			"Keep file coverage on one row with a flexible progress bar and visible viewed and total count.",
+			"Add regression coverage for diff table columns and layer coverage layout."
+		],
+		"fixes": []
+	},
+	{
+		"version": "0.8.0",
+		"description": "Improves viewed-file progress updates, review chat streaming, and review UI consistency.",
+		"features": [],
+		"improvements": [
+			"Update viewed-file progress without reloading full review state, preserving diff, discussion, and approval data.",
+			"Keep review chat streaming stable across tool boundaries, busy and error states, and switched chats.",
+			"Polish segmented controls, layer progress, overflow handling, settings, headers, spacing, and review surfaces."
+		],
+		"fixes": []
+	},
+	{
+		"version": "0.7.0",
+		"description": "Streamlines review workspace, setup, review context, and file tagging.",
+		"features": [
+			"Rework review layout with a compact merge-request header, review-layer column, changed-file progress, viewed-file tracking, and agent controls.",
+			"Default interactive review to Claude and create the parent directory during first-run config setup.",
+			"Provide review discussion context to the first chat turn.",
+			"Add path-only chat tags for binary, collapsed, renamed, deleted, and stat-only files.",
+			"Render sanitized Markdown previews for review comments."
+		],
+		"improvements": [
+			"Highlight multiline diff syntax by tokenizing complete hunks.",
+			"Remove BDD scenario generation while retaining layer coverage and lifecycle behavior."
+		],
+		"fixes": []
+	},
+	{
+		"version": "0.6.1",
+		"description": "Fixes activation of the explanation prompt preset.",
+		"features": [],
+		"improvements": [],
+		"fixes": [
+			"The active review-explain-comment preset is now honored by the Explain discussion flow."
+		]
+	},
+	{
+		"version": "0.6.0",
+		"description": "Adds prompt presets, review settings, discussion explanations, and review workflow refinements.",
+		"features": [
+			"Manage named prompt presets and versions, and configure review agent and model in Prompts and Models.",
+			"Explain inline and general GitLab discussions in a new chat with discussion history and surrounding diff context."
+		],
+		"improvements": [
+			"Collapse positioned discussion bodies per file.",
+			"Scroll selected changed-file rows into view and synchronize Viewed state with persisted progress.",
+			"Use clearer chat composer key behavior and collapsible review layers.",
+			"Show concise layer file paths and reviewed commit SHA.",
+			"Bound review-layer prompt context with configurable byte limits.",
+			"Avoid duplicate Git repository-root discovery during merge-request environment handoff."
+		],
+		"fixes": [
+			"Honor the active review-explain-comment preset.",
+			"Replace cramped diff toolbar controls with compact icons and show find-result navigation only after search starts."
+		]
+	},
+	{
+		"version": "0.5.0",
+		"description": "Adds drag-to-select for tags and comments and a review babysitter.",
+		"features": [
+			"Select tags and comments by dragging.",
+			"Add a review babysitter."
+		],
+		"improvements": [],
+		"fixes": []
+	},
+	{
+		"version": "0.4.1",
+		"description": "Patch release with no separately listed user-facing changes.",
+		"features": [],
+		"improvements": [],
+		"fixes": []
+	},
+	{
+		"version": "0.4.0",
+		"description": "Adds diff-file search, whole-file viewing, and merge-request description modes.",
+		"features": [
+			"Find text in files from the diff view.",
+			"Reveal whole files in the diff viewer.",
+			"Choose merge-request description modes."
+		],
+		"improvements": [],
+		"fixes": []
+	},
+	{
+		"version": "0.3.1",
+		"description": "Improves rendered Markdown review, agent tools, clone authentication, and Claude session resumption.",
+		"features": [
+			"Syntax-highlight rendered file code and add tag and comment actions to rendered blocks.",
+			"Allow review agents to use a read-only Bash tool."
+		],
+		"improvements": [
+			"Preserve rendered Mermaid diagrams across background refreshes and allow wide tables to scroll.",
+			"Resolve review repositories with SSH URLs to avoid interactive GitLab credential prompts.",
+			"Resume Claude sessions with the CLI resume option."
+		],
+		"fixes": [
+			"Ignore rate_limit_event provider events instead of reporting unknown-event diagnostics."
+		]
+	},
+	{
+		"version": "0.3.0",
+		"description": "Adds GitLab merge-request review, AI generation context, and validated automatic commits.",
+		"features": [
+			"Review GitLab merge requests in a token-protected local UI with generated layers, diff view, persistent agent chat, positioned discussion drafts, approval controls, and stale-head refresh.",
+			"Add context guidance to AI commit and merge-request generation, including retry paths.",
+			"Create validated local commits non-interactively with commit auto."
+		],
+		"improvements": [
+			"Improve nested boolean option detection and CLI help rendering.",
+			"Improve GitLab reviewer resolution, Pi iteration handoffs, and cost aggregation and session parsing.",
+			"Simplify installer asset naming and expand configuration and architecture documentation."
+		],
+		"fixes": []
+	},
+	{
+		"version": "0.2.0",
+		"description": "Initial published release of mole-tools.",
+		"features": [],
+		"improvements": [],
+		"fixes": []
+	}
+]

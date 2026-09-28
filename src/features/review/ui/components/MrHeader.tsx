@@ -1,6 +1,7 @@
 import { Check, Copy, ExternalLink, RefreshCw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MrApprovalState } from "../../../../ports/git-host";
+import type { ReleaseNotes } from "../../release-notes";
 import { IconButton } from "./IconButton";
 import { UpdateAvailable } from "./UpdateAvailable";
 import { Badge } from "./ui/badge";
@@ -29,8 +30,12 @@ export interface MrHeaderProps {
 	refreshing: boolean;
 	layerGenerating: boolean;
 	onRefresh: () => void;
-	update?: { current: string; latest: string } | null;
-	onOpenSettings: () => void;
+	update?: {
+		latest: string;
+		releases: ReleaseNotes[];
+		autoOpen: boolean;
+	} | null;
+	onUpdateAutoOpened: (version: string) => void;
 }
 
 export function headerTitle(title: string, iid: number): string {
@@ -103,6 +108,7 @@ export function MrHeader({
 	layerGenerating,
 	onRefresh,
 	update,
+	onUpdateAutoOpened,
 	onOpenSettings,
 }: MrHeaderProps) {
 	const [copied, setCopied] = useState(false);
@@ -278,7 +284,12 @@ export function MrHeader({
 					{approvalButtonTooltip}
 				</span>
 				{update ? (
-					<UpdateAvailable current={update.current} latest={update.latest} />
+					<UpdateAvailable
+						latest={update.latest}
+						releases={update.releases}
+						autoOpen={update.autoOpen}
+						onAutoOpened={onUpdateAutoOpened}
+					/>
 				) : null}
 				<IconButton
 					label="Settings"

@@ -14,7 +14,7 @@ Use this skill to prepare a version-bump PR and, only after the user confirms it
 - Stop after opening the version-bump PR. Wait for the user to approve and merge it; do not approve or merge it on the user's behalf, and do not continue release preparation while approval is pending.
 - Publish the exact version already merged into `main`. Never increment or rewrite it during publishing.
 - Never invent commits, issue references, release details, or verification results. Include an issue or PR reference only when a commit or linked context names it and `gh` confirms it belongs to this release.
-- Review the latest release notes and retain useful style, such as concise bold lead-ins and a closing PR-context sentence when it is applicable and verified. Use the required release-note categories below.
+- Treat the merged catalog entry as the sole source of GitHub Release notes. Preserve its wording verbatim and use the required headings; do not independently curate notes or add styling, PR context, or other claims.
 
 ## 1. Inspect repository and choose version
 
@@ -32,7 +32,47 @@ gh release list --limit 1
 gh release view "$latest_tag"
 ```
 
-Require a clean worktree on `main` whose `HEAD` equals `origin/main`. If any check fails, stop and report the exact state; do not switch away from uncommitted work, reset, or guess which changes to discard. Inspect `package.json`'s current version. If the latest tag, latest GitHub Release, and package version disagree, stop and reconcile the history before proposing a bump.
+Require a clean worktree on `main` whose `HEAD` equals `origin/main`. If any check fails, stop and report the exact state; do not switch away from uncommitted work, reset, or guess which changes to discard. Inspect `package.json`'s current version and the root `releases.json` catalog. Validate that the catalog is a non-empty newest-first JSON array; each entry has exactly `version`, `description`, `features`, `improvements`, and `fixes`; versions are unique strict `MAJOR.MINOR.PATCH`; descriptions and every list item are non-empty plain text with no Markdown or HTML markup; category values are arrays of strings (which may be empty); and versions are strictly descending. Require the first catalog version to equal `package.json`'s version and the latest GitHub Release/tag version. If the latest release and tag disagree, stop before choosing a bump.
+Run the catalog and version checks with Bun from the repository root. Example validator:
+
+```bash
+LATEST_TAG="$latest_tag" bun -e '
+const fs = require("node:fs");
+const catalog = JSON.parse(fs.readFileSync("releases.json", "utf8"));
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+const keys = ["version", "description", "features", "improvements", "fixes"];
+const versionPattern = /^\d+\.\d+\.\d+$/;
+const parseVersion = (value) => {
+  if (typeof value !== "string" || !versionPattern.test(value)) throw Error(`invalid version: ${value}`);
+  return value.split(".").map(BigInt);
+};
+const compare = (a, b) => {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+  return 0;
+};
+const markupPattern = /<\s*\/?[A-Za-z][^>]*>|<!--|&(?:#\d+|#x[\da-f]+|[a-z][\da-z]+);|!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|!\[[^\]\n]*\]|(?:^|\n)\s{0,3}\[[^\]\n]+\]:|`{1,3}[^`\n]+`|(?:\*\*|__|~~)[^\n]+?(?:\*\*|__|~~)|(?:^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s)|(?:^|\s)(?:\*[^*\n]+\*|_[^_\n]+_)(?:\s|$)/i;
+const nonEmptyPlainText = (value) => typeof value === "string" && value.length > 0 && value === value.trim() && !markupPattern.test(value);
+if (!Array.isArray(catalog) || catalog.length === 0) throw Error("catalog must be a non-empty array");
+const seen = new Set();
+let previous;
+for (const entry of catalog) {
+  if (!entry || Array.isArray(entry) || Object.keys(entry).sort().join(",") !== [...keys].sort().join(",")) throw Error("invalid catalog entry keys");
+  const parsed = parseVersion(entry.version);
+  if (seen.has(entry.version)) throw Error(`duplicate version: ${entry.version}`);
+  seen.add(entry.version);
+  if (previous && compare(parsed, previous) >= 0) throw Error("catalog must be strictly newest-first");
+  previous = parsed;
+  if (!nonEmptyPlainText(entry.description)) throw Error("description must be non-empty plain text without Markdown or HTML");
+  for (const field of keys.slice(2)) {
+    if (!Array.isArray(entry[field]) || entry[field].some((item) => !nonEmptyPlainText(item))) throw Error(`${field} must contain only non-empty plain text without Markdown or HTML`);
+  }
+}
+if (catalog[0].version !== pkg.version) throw Error("catalog top version must equal package.json version");
+const latestTag = process.env.LATEST_TAG?.replace(/^v/, "");
+if (!latestTag || catalog[0].version !== latestTag) throw Error("catalog top version must equal latest published tag");
+'
+```
+Set `LATEST_TAG` to the tag verified above when running that validator. Also confirm `gh release view "$latest_tag" --json tagName --jq .tagName` identifies that same latest release; the catalog top version, package version, latest tag, and latest GitHub Release must all agree. Stop if any disagree.
 
 Inspect changes since the latest release tag, including commit subjects and the actual diff:
 
@@ -52,20 +92,20 @@ Use semver impact: breaking compatibility change means major; backward-compatibl
 
 ## 2. Prepare and open version PR
 
-Use a new branch based on the fetched `origin/main`, named `release/vX.Y.Z`. If that branch already exists, inspect it and its PR; do not overwrite or force-push it. Update only the `version` value in `package.json` on this branch. Do not change lockfiles, create a tag, or publish from the release branch.
+Use a new branch based on fetched `origin/main`, named `release/vX.Y.Z`. If that branch already exists, inspect it and its PR; do not overwrite or force-push it. Update `package.json`'s `version` and prepend one entry for the target version to `releases.json`. The catalog entry must have exactly `version`, `description`, `features`, `improvements`, and `fixes`; use a concise factual, non-empty plain-text description and non-empty plain-text strings in categorized arrays. Empty arrays are allowed. Base every note on verified commits, diffs, and linked issues/PRs. Preserve strict newest-first order, unique strict `MAJOR.MINOR.PATCH` versions, and the existing schema. Do not change lockfiles, create a tag, or publish from the release branch.
 
-Review `git diff -- package.json` and `git status --short`; confirm the only change is the requested version. Commit and push only `package.json`, then open a PR to `main` with `gh`:
+Review `git diff -- package.json releases.json` and `git status --short`; confirm the only changed files are exactly `package.json` and `releases.json`, and that only the package version and new catalog entry changed. Run the catalog/version validation above, plus the focused catalog test and standard quality gates required by the repository. Commit and push only those two files, then open a PR to `main` with `gh`:
 
 ```bash
 git switch -c release/vX.Y.Z origin/main
-git add package.json
+git add package.json releases.json
 git commit -m "chore(release): vX.Y.Z"
 git push -u origin release/vX.Y.Z
-gh pr create --base main --head release/vX.Y.Z --title "chore(release): vX.Y.Z" --body "Bump package version to vX.Y.Z."
+gh pr create --base main --head release/vX.Y.Z --title "chore(release): vX.Y.Z" --body "Bump package version and add release catalog entry for vX.Y.Z."
 gh pr view release/vX.Y.Z
 ```
 
-Report the PR URL, exact version, and why the bump fits. **Pause here.** Ask the user to review, approve, and merge the PR. Do not run any post-merge command or publish command until the user explicitly confirms the PR is merged.
+Report the PR URL, exact version, and why the bump fits. **Pause here.** Ask the user to review, approve, and merge the PR. Do not approve or merge it, run post-merge commands, or publish until the user explicitly confirms the PR is merged.
 
 ## 3. Verify merged version on fresh `main`
 
@@ -81,7 +121,7 @@ git rev-parse HEAD
 git rev-parse refs/remotes/origin/main
 ```
 
-Stop if the checkout is dirty, not on `main`, cannot fast-forward, or `HEAD` differs from `origin/main`. Verify `package.json` now contains the exact PR version; do not make another version edit. Find the prior release tag and compare it with merged `main`:
+Stop if the checkout is dirty, not on `main`, cannot fast-forward, or `HEAD` differs from `origin/main`. Verify `package.json` and the first `releases.json` entry both contain the exact approved PR version; rerun the catalog schema/order validation and confirm package/catalog version agreement. The latest published tag and GitHub Release should still match the preceding catalog entry until this version is published; do not require them to match the new catalog top before publishing. Do not make another version or catalog edit. Find the prior release tag and compare it with merged `main`:
 
 ```bash
 prior_tag="$(git describe --tags --abbrev=0 origin/main)"
@@ -89,31 +129,36 @@ git log --oneline --decorate "$prior_tag"..origin/main
 git diff --stat "$prior_tag"..origin/main
 ```
 
-Review the commits and relevant diffs. For every issue or PR reference considered for notes, verify the referenced item with `gh issue view <number>` or `gh pr view <number>` (qualify cross-repository references). Exclude unverified, unrelated, or inferred references. Re-read the latest GitHub Release notes with `gh release view "$prior_tag"` and preserve useful style without copying obsolete or unrelated claims.
+Review the commits and relevant diffs to understand and verify the merged catalog entry. The entry at `releases.json` index 0 is the sole source of the GitHub Release notes; do not independently recurate or add claims. For any issue or PR reference included in that entry, verify it with `gh issue view <number>` or `gh pr view <number>` (qualify cross-repository references). If an entry contains an unverified or unrelated reference or claim, stop and report it rather than silently publishing divergent notes.
 
-## 4. Curate notes and publish
-
-Write release notes to a temporary file outside the repository so the clean-worktree check remains satisfied. Use these exact headings, in this order:
+Create a temporary notes file outside the repository, using the merged entry's description followed by non-empty categories only, in this exact order and heading style:
 
 ```markdown
+<description from the merged catalog entry>
+
 ## Features
+
+- <each feature, verbatim from the merged catalog>
 
 ## Improvements
 
+- <each improvement, verbatim from the merged catalog>
+
 ## Bug fixes
+
+- <each fix, verbatim from the merged catalog>
 ```
 
-Add concise bullets only for changes verified from commits, diffs, or linked issues. Keep issue/PR links only when they were explicitly referenced and verified. Leave a category without bullets if no verified entry belongs there; never add filler or fabricate a release detail. Do not use generated notes in place of this reviewed content.
+Omit any category section whose array is empty. Preserve catalog wording exactly; do not add generated notes, separate curation, or unsupported references. Keep the notes file outside the repository so the clean-worktree check remains satisfied.
 
-Immediately before publishing, reconfirm the merged package version, clean `main`, and equality with `origin/main`. Then run this exact command with the notes file you curated:
-
+Immediately before publishing, reconfirm the merged package version, catalog top version, clean `main`, and equality with `origin/main`. Then run this exact command with the derived notes file:
 ```bash
 bun run release publish --notes-file <path>
 ```
 
 For a shell variable, quote its expansion: `bun run release publish --notes-file "$notes_file"`.
 
-The script is the only publishing path. It requires the exact `publish --notes-file <path>` invocation and non-empty notes; checks GitHub CLI authentication, clean `main`, and that `HEAD` matches freshly fetched `origin/main`; refuses an existing `v<package-version>` tag or GitHub Release; builds the binary; creates an annotated tag at the unchanged `HEAD`; pushes that tag ref only; and creates the GitHub Release with the supplied notes and macOS arm64 asset. It never increments `package.json`, commits, or pushes `HEAD`. Do not work around a failed safety check.
+The script is the only publishing path. It requires the exact `publish --notes-file <path>` invocation and non-empty notes; checks GitHub CLI authentication, clean `main`, and that `HEAD` matches freshly fetched `origin/main`; refuses an existing `v<package-version>` tag or GitHub Release; builds the binary; creates an annotated tag at the unchanged `HEAD`; pushes that tag ref only; and creates the GitHub Release with the supplied notes and macOS arm64 asset. It never increments `package.json`, changes `releases.json`, commits, or pushes `HEAD`. Do not work around a failed safety check.
 
 If tag creation or push succeeds but GitHub Release creation fails, stop and report the exact state. Do not delete/recreate the tag or blindly rerun the script; resolve the partial publish deliberately.
 

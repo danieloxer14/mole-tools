@@ -393,7 +393,7 @@ including Explain chats, bind agent/model/effort once; existing bindings do not
 change when settings change. Legacy prompt versions and chats without effort
 keep it unset. Commit and MR prompts remain on their `models.*` routes.
 
-The **General** tab shows the installed version as small grey text at the bottom-left. Each `mole-tools review` launch checks GitHub's latest release in the background; the browser reads the result from token-protected `GET /api/version`. When a newer version is available, the review header shows **Update X.Y.Z available**. Selecting it opens an **Update mole-tools** modal with the install command and a **Copy install command** button. Failed checks are silent and leave the Update button hidden.
+The **General** tab shows the installed version as small grey text at the bottom-left. Each `mole-tools review` launch silently checks GitHub's public `releases.json` catalog in the background; the browser reads the result from token-protected `GET /api/version`. When a newer version is available, the review header shows **Update X.Y.Z available**, and its release notes open automatically once per version. Close the dialog and select the header button to reopen it manually. A failed catalog fetch is silent: no update button or release notes appear.
 
 ### Skills
 
@@ -684,11 +684,13 @@ bun run lint                         # biome check (formatting + linting)
 
 ### Releasing
 
-Releases use a version-bump PR first. Do not tag or publish before that PR is merged.
+Releases use a version-bump PR first. Do not tag or publish before that PR is merged and the user confirms the merge.
 
 See `.claude/skills/release/SKILL.md` for the full release checklist.
 
-Start from a clean, up-to-date `main`. Review the latest GitHub release and tag, inspect changes since that release, and choose a patch, minor, or major bump from the current `package.json` version. Create a `release/vX.Y.Z` branch from `origin/main` and change only `package.json`'s `version` on that branch. Commit and push that branch, then open a PR to `main`:
+Start from a clean, up-to-date `main`. Review the latest GitHub release and tag, inspect changes since that release, and validate root `releases.json`: it must be a non-empty newest-first JSON array with unique, strictly descending `MAJOR.MINOR.PATCH` versions. Each entry has exactly `version`, `description`, `features`, `improvements`, and `fixes`; description and listed strings are non-empty plain text, while category arrays may be empty. Require the first catalog version, current `package.json` version, latest GitHub Release, and latest tag to agree before choosing a patch, minor, or major bump.
+
+Create a `release/vX.Y.Z` branch from `origin/main`. The dedicated version PR must change exactly `package.json` and `releases.json`: bump the package version and prepend a factual entry for that same version, preserving catalog schema and order. Commit and push both files, then open a PR to `main`:
 
 ```bash
 git fetch --tags origin refs/heads/main:refs/remotes/origin/main
@@ -700,24 +702,24 @@ gh auth status
 gh release list --limit 1
 git describe --tags --abbrev=0 origin/main
 git switch -c release/vX.Y.Z origin/main
-# Update only package.json's version on this branch.
-git add package.json
+# Update package.json version and prepend matching releases.json entry.
+git add package.json releases.json
 git commit -m "chore(release): vX.Y.Z"
 git push -u origin release/vX.Y.Z
-gh pr create --base main --head release/vX.Y.Z --title "chore(release): vX.Y.Z" --body "Bump package version to vX.Y.Z."
+gh pr create --base main --head release/vX.Y.Z --title "chore(release): vX.Y.Z" --body "Bump package version and add release catalog entry for vX.Y.Z."
 ```
 
-Stop after opening the PR. Wait for the user to approve and merge it; do not merge it or publish while approval is pending.
+Validate the catalog schema/order and package/latest-release version agreement, and review the diff/status to confirm exactly those two files changed. Stop after opening the PR. Wait for the user to review, approve, and merge it; do not approve or merge it or publish while approval is pending.
 
-After the user confirms the merge, switch to `main`, fetch again, and verify it is clean and matches `origin/main`. Compare the prior release tag with merged `main`, review commit messages and referenced issues, and curate verified release notes under **Features**, **Improvements**, and **Bug fixes**. Never invent issue references or release details. Save the notes to a temporary file, then publish the already-merged version:
+After the user confirms the merge, verify the PR is merged, switch to `main`, fetch again, and verify it is clean and matches `origin/main`. Confirm `package.json` and the first catalog entry match the approved version. The merged catalog entry is the sole source for GitHub Release notes: put its description first, then its non-empty **Features**, **Improvements**, and **Bug fixes** (`fixes`) in that order, preserving text verbatim and omitting empty categories. Do not separately curate or add notes. Save these derived notes outside the repository:
 
 ```bash
 notes_file="$(mktemp)"
-# Write the curated release notes to "$notes_file".
+# Write the merged catalog entry's description and non-empty categories to "$notes_file".
 bun run release publish --notes-file "$notes_file"
 ```
 
-The publish command does not bump `package.json`, commit, or push `HEAD`. It refuses dirty, non-`main`, or stale checkouts and an existing tag or GitHub Release; it builds the binary, creates and pushes an annotated version tag only, and creates the GitHub Release with the supplied notes and macOS arm64 asset. Verify the tag and release with `git ls-remote --tags origin "refs/tags/vX.Y.Z"` and `gh release view vX.Y.Z`. The GitHub Release is the release entry.
+Publishing does not mutate `releases.json` or `package.json`, commit, or push `HEAD`. The publish command requires clean `main` at freshly fetched `origin/main`, refuses an existing tag or GitHub Release, builds the binary, creates and pushes an annotated tag only, and creates the GitHub Release with supplied notes and macOS arm64 asset. Do not bypass failed checks. If tag creation or push succeeds but release creation fails, stop and report exact state; do not delete/recreate the tag or blindly rerun. Verify the remote tag and release with `git ls-remote --tags origin "refs/tags/vX.Y.Z"` and `gh release view vX.Y.Z`. The GitHub Release is the release entry.
 
 ### Project Structure (Quick Reference)
 

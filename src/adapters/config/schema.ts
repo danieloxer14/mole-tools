@@ -115,6 +115,14 @@ export const ConfigSchema = z.object({
 	prompts: z.partialRecord(PromptNameSchema, PresetNameSchema).default({}),
 	appearance: AppearanceConfigSchema.optional(),
 	reviewBabysitter: ReviewBabysitterConfigSchema.optional(),
+	updates: z
+		.object({
+			lastShownVersion: z
+				.string()
+				.regex(/^\d+\.\d+\.\d+$/)
+				.refine((version) => version === version.trim()),
+		})
+		.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

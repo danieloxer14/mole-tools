@@ -4,15 +4,17 @@ import {
 	isNewerVersion,
 	parseVersion,
 } from "../../shared/app-version";
+import { parseReleaseCatalog, type ReleaseNotes } from "./release-notes";
 
-export const LATEST_RELEASE_URL =
-	"https://api.github.com/repos/danieloxer14/mole-tools/releases/latest";
+export const RELEASE_CATALOG_URL =
+	"https://raw.githubusercontent.com/danieloxer14/mole-tools/main/releases.json";
 export const VERSION_CHECK_TIMEOUT_MS = 5000;
 
 export interface VersionStatus {
 	current: string;
 	latest: string | null;
 	updateAvailable: boolean;
+	releases: ReleaseNotes[];
 }
 
 export interface CheckForUpdateOptions {
@@ -28,9 +30,12 @@ export async function checkForUpdate(
 	const fetcher = options.fetcher ?? globalThis.fetch;
 
 	try {
-		const response = await fetcher(LATEST_RELEASE_URL, {
+		if (parseVersion(current) === null) {
+			throw new Error("Installed version is invalid");
+		}
+
+		const response = await fetcher(RELEASE_CATALOG_URL, {
 			headers: {
-				accept: "application/vnd.github+json",
 				"user-agent": `mole-tools/${current}`,
 			},
 			signal: AbortSignal.timeout(
@@ -39,28 +44,26 @@ export async function checkForUpdate(
 		});
 
 		if (!response.ok) {
-			throw new Error(`Release lookup failed (${response.status})`);
+			throw new Error(`Release catalog request failed (${response.status})`);
 		}
 
-		const body: unknown = await response.json();
-		if (
-			typeof body !== "object" ||
-			body === null ||
-			!("tag_name" in body) ||
-			typeof body.tag_name !== "string" ||
-			parseVersion(body.tag_name) === null
-		) {
-			throw new Error("Release lookup returned an invalid tag_name");
+		const catalog = parseReleaseCatalog(await response.json());
+		const latest = catalog[0];
+		if (!latest) {
+			throw new Error("Release catalog is empty");
 		}
+		const releases = catalog.filter((release) =>
+			isNewerVersion(release.version, current),
+		);
 
-		const latest = body.tag_name.replace(/^v/, "");
 		return {
 			current,
-			latest,
-			updateAvailable: isNewerVersion(latest, current),
+			latest: latest.version,
+			updateAvailable: releases.length > 0,
+			releases,
 		};
 	} catch (error) {
 		logger.debug("review.version-check-failed", { error });
-		return { current, latest: null, updateAvailable: false };
+		return { current, latest: null, updateAvailable: false, releases: [] };
 	}
 }

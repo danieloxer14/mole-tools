@@ -160,10 +160,13 @@ export interface ReviewRoutesOptions {
 	issues?: IssueTracker | null;
 	config?:
 		| (Pick<Config, "jira"> &
-				Partial<Pick<Config, "review" | "prompts" | "diff" | "appearance">>)
+				Partial<
+					Pick<Config, "review" | "prompts" | "diff" | "appearance" | "updates">
+				>)
 		| {
 				diff?: { ignore?: string[] };
 				jira?: { enabled?: boolean; branchPattern?: string };
+				updates?: Config["updates"];
 				review?: ReviewLayerConfig & {
 					largeFileLineThreshold?: number;
 					agent?: PromptAgentName;
@@ -699,6 +702,19 @@ export function createReviewRoutes(
 	let currentExpandedDiff = options.expandedDiff;
 	let currentMr = options.mr;
 	let initialLayerRunAllowed = true;
+	const versionStatus: Promise<VersionStatus> =
+		options.versionStatus ??
+		Promise.resolve({
+			current: APP_VERSION,
+			latest: null,
+			updateAvailable: false,
+			releases: [],
+		});
+	let shownVersion = options.config?.updates?.lastShownVersion;
+	let acknowledgementInFlight: {
+		version: string;
+		promise: Promise<void>;
+	} | null = null;
 	let codexModelChoicesPromise: Promise<CodexModelChoice[]> | null = null;
 	let fallbackDiscussions = [...(options.discussions ?? [])];
 	const threshold =
@@ -2792,14 +2808,64 @@ export function createReviewRoutes(
 				return jsonResponse(await apiState());
 			}
 			if (request.method === "GET" && url.pathname === "/api/version") {
-				return jsonResponse(
-					await (options.versionStatus ??
-						Promise.resolve({
-							current: APP_VERSION,
-							latest: null,
-							updateAvailable: false,
-						})),
-				);
+				const status = await versionStatus;
+				return jsonResponse({
+					...status,
+					autoOpen:
+						status.updateAvailable &&
+						status.latest !== null &&
+						status.latest !== shownVersion,
+				});
+			}
+			if (request.method === "POST" && url.pathname === "/api/version/shown") {
+				const parsed = z
+					.object({
+						version: z
+							.string()
+							.regex(/^\d+\.\d+\.\d+$/)
+							.refine((version) => version === version.trim()),
+					})
+					.strict()
+					.safeParse(await parseBody(request));
+				if (!parsed.success) {
+					return jsonResponse({ error: parsed.error.message }, 400);
+				}
+
+				const status = await versionStatus;
+				if (
+					!status.updateAvailable ||
+					status.latest === null ||
+					parsed.data.version !== status.latest
+				) {
+					return jsonResponse(
+						{ error: "Version is not the available latest release" },
+						400,
+					);
+				}
+				if (shownVersion === parsed.data.version) return emptyResponse(204);
+
+				if (!options.persistConfig) {
+					throw new Error("Config persistence is unavailable");
+				}
+				let pending = acknowledgementInFlight;
+				if (!pending || pending.version !== parsed.data.version) {
+					pending = {
+						version: parsed.data.version,
+						promise: options.persistConfig({
+							updates: { lastShownVersion: parsed.data.version },
+						}),
+					};
+					acknowledgementInFlight = pending;
+				}
+				try {
+					await pending.promise;
+					shownVersion = parsed.data.version;
+				} finally {
+					if (acknowledgementInFlight === pending) {
+						acknowledgementInFlight = null;
+					}
+				}
+				return emptyResponse(204);
 			}
 			if (
 				request.method === "POST" &&

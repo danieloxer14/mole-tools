@@ -10,6 +10,13 @@ import type { Config } from "../../adapters/config/schema";
 import { runWorktreePrune } from "./index";
 
 let dir: string;
+const updateConfigSpies: Array<{ mockRestore: () => void }> = [];
+
+function spyOnUpdateConfig() {
+	const spy = spyOn(loader, "updateConfig");
+	updateConfigSpies.push(spy);
+	return spy;
+}
 
 function makeConfig(overrides?: Partial<Config>): Config {
 	const base: Config = {
@@ -25,6 +32,7 @@ function makeConfig(overrides?: Partial<Config>): Config {
 }
 
 afterEach(async () => {
+	for (const spy of updateConfigSpies.splice(0)) spy.mockRestore();
 	if (dir) await rm(dir, { recursive: true, force: true });
 });
 
@@ -35,7 +43,7 @@ describe("runWorktreePrune — base-dir resolution", () => {
 
 		// Spy on updateConfig to verify persistence call
 		let persistArgs: string | undefined;
-		spyOn(loader, "updateConfig").mockImplementation(async (_partial) => {
+		spyOnUpdateConfig().mockImplementation(async (_partial) => {
 			persistArgs = (_partial as { worktreePrune?: { baseDir: string } })
 				?.worktreePrune?.baseDir;
 		});
@@ -57,7 +65,7 @@ describe("runWorktreePrune — base-dir resolution", () => {
 		const cliPath = "/cli/override";
 		const configPath = "/config/path";
 		let persistenceCalled = false;
-		spyOn(loader, "updateConfig").mockImplementation(async () => {
+		spyOnUpdateConfig().mockImplementation(async () => {
 			persistenceCalled = true;
 		});
 
@@ -77,7 +85,7 @@ describe("runWorktreePrune — base-dir resolution", () => {
 	test("saved config is used directly without prompting", async () => {
 		const configPath = "/saved/config/path";
 		let persistenceCalled = false;
-		spyOn(loader, "updateConfig").mockImplementation(async () => {
+		spyOnUpdateConfig().mockImplementation(async () => {
 			persistenceCalled = true;
 		});
 
