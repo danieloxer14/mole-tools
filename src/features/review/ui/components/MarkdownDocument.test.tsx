@@ -208,6 +208,9 @@ test("file policy escapes raw HTML and keeps code-file left padding", () => {
 	try {
 		expect(container.querySelector(".rendered-markdown img")).toBeNull();
 		expect(
+			container.querySelector(".rendered-markdown")?.classList.contains("pr-4"),
+		).toBe(true);
+		expect(
 			container.querySelector(".rendered-markdown")?.classList.contains("pl-4"),
 		).toBe(true);
 		expect(

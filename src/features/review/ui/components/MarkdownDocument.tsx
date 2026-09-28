@@ -602,7 +602,7 @@ export const MarkdownDocument = memo(function MarkdownDocument({
 			<div
 				className={
 					policy.kind === "file"
-						? "rendered-markdown min-w-0 max-w-full pl-4 [overflow-wrap:anywhere]"
+						? "rendered-markdown min-w-0 max-w-full pl-4 pr-4 [overflow-wrap:anywhere]"
 						: "rendered-markdown overview-markdown min-w-0 max-w-full [overflow-wrap:anywhere]"
 				}
 				ref={containerRef}
