@@ -33,7 +33,7 @@ binary on `PATH`. The optional top-level `review` config is independent of
   "review": {
     "agent": "claude", // "omp", "claude", or "codex"; default "claude"
     "binary": "claude", // optional binary override
-    "model": "review-model", // optional; no model flag when omitted
+    "model": "review-model", // optional; omitted Claude model uses --model opus
     "effort": "high", // optional; OMP --thinking or Claude --effort
     "layerTimeoutSeconds": 600,
     "largeFileLineThreshold": 800,
@@ -42,8 +42,9 @@ binary on `PATH`. The optional top-level `review` config is independent of
 ```
 
 Omitting `review` uses the default agent `claude` with its default `claude`
-binary and no forced model or effort, so Claude Code selects its own current
-defaults.
+binary. Claude runs pass `--model opus` when no model is configured; Claude
+CLI resolves that alias to its latest Opus model. Explicit model values are
+forwarded unchanged. Effort remains at the CLI default unless configured.
 
 Prompt overrides use the existing prompt-loader convention. The first read
 seeds these files under `~/.config/mole-tools/prompts/` without overwriting user
@@ -69,9 +70,14 @@ Review the changed code for correctness and risk.
 ```
 
 With Agent unset or `default`, the version inherits the General default agent,
-model, and effort independently for each blank field. An explicit `omp`, `claude`, or `codex` agent uses only that version's Model and Effort; blank values send no corresponding flag and use that agent's CLI defaults rather than inheriting settings for another agent. Commit and MR prompt slots ignore review
-frontmatter and continue to use their `models.*` LLM routes; existing prompt
-versions without effort keep that field unset.
+model, and effort independently for each blank field. An explicit `omp`,
+`claude`, or `codex` agent uses only that version's Model and Effort; blank
+values use the agent's CLI defaults, except an omitted Claude model uses
+`--model opus`, the latest Opus CLI alias. Explicit Claude models are forwarded
+unchanged. The Anthropic Models API catalog reflects its API key entitlement
+and does not prove entitlement for the separate Claude CLI account. Commit and
+MR prompt slots ignore review frontmatter and continue to use their `models.*`
+LLM routes; existing prompt versions without effort keep that field unset.
 
 ### Settings dialog and model catalogs
 
