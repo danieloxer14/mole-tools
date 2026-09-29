@@ -78,6 +78,16 @@ function state(): ReviewState {
 function request(path: string, init?: RequestInit): Request {
 	return new Request(`http://127.0.0.1${path}`, init);
 }
+function versionRequest(method: "GET" | "POST", body?: string): Request {
+	return request(method === "GET" ? "/api/version" : "/api/version/shown", {
+		method,
+		headers: {
+			"X-Mole-Token": token,
+			...(body === undefined ? {} : { "content-type": "application/json" }),
+		},
+		...(body === undefined ? {} : { body }),
+	});
+}
 
 const diff: ParsedFileDiff[] = [
 	{
@@ -402,52 +412,220 @@ class RecordingLayerAgent implements ReviewAgent {
 
 describe("review routes", () => {
 	test("rejects every API path without the per-run token", async () => {
-		const routes = createReviewRoutes({ token, state: state() });
-		for (const path of ["/api", "/api/state", "/api/version"]) {
-			const response = await routes(request(path));
+		let persistCount = 0;
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			persistConfig: async () => {
+				persistCount += 1;
+			},
+		});
+		for (const path of [
+			"/api",
+			"/api/state",
+			"/api/version",
+			"/api/version/shown",
+		]) {
+			const response = await routes(
+				request(path, path === "/api/version/shown" ? { method: "POST" } : {}),
+			);
 			expect(response.status).toBe(401);
 			expect(await response.text()).toBe("");
 		}
+		expect(persistCount).toBe(0);
 		const authorized = await routes(
 			request("/api/state", { headers: { "X-Mole-Token": token } }),
 		);
 		expect(authorized.status).toBe(200);
 	});
-	test("returns supplied version status for token-authenticated requests", async () => {
+	test("derives autoOpen from available status and route-local acknowledgement", async () => {
 		const versionStatus = {
 			current: "0.9.0",
 			latest: "0.10.0",
 			updateAvailable: true,
+			releases: [
+				{
+					version: "0.10.0",
+					description: "Update release",
+					features: ["New feature"],
+					improvements: [],
+					fixes: [],
+				},
+			],
 		};
+		let persistCount = 0;
 		const routes = createReviewRoutes({
 			token,
 			state: state(),
 			versionStatus: Promise.resolve(versionStatus),
+			persistConfig: async () => {
+				persistCount += 1;
+			},
 		});
 
-		const response = await routes(
-			request("/api/version", {
-				headers: { "X-Mole-Token": token },
-			}),
-		);
+		const response = await routes(versionRequest("GET"));
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual(versionStatus);
+		expect(await response.json()).toEqual({ ...versionStatus, autoOpen: true });
+		expect(persistCount).toBe(0);
+
+		const acknowledgedRoutes = createReviewRoutes({
+			token,
+			state: state(),
+			config: {
+				jira: { enabled: false },
+				updates: { lastShownVersion: "0.10.0" },
+			},
+			versionStatus: Promise.resolve(versionStatus),
+		});
+		const acknowledged = await acknowledgedRoutes(versionRequest("GET"));
+		expect(await acknowledged.json()).toEqual({
+			...versionStatus,
+			autoOpen: false,
+		});
+
+		const unavailableRoutes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve({
+				...versionStatus,
+				updateAvailable: false,
+			}),
+		});
+		const unavailable = await unavailableRoutes(versionRequest("GET"));
+		expect((await unavailable.json()).autoOpen).toBe(false);
+
+		const missingLatestRoutes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve({
+				...versionStatus,
+				latest: null,
+			}),
+		});
+		const missingLatest = await missingLatestRoutes(versionRequest("GET"));
+		expect((await missingLatest.json()).autoOpen).toBe(false);
 	});
 
-	test("defaults version status to the installed application version", async () => {
+	test("defaults version status to no releases and no auto-open", async () => {
 		const routes = createReviewRoutes({ token, state: state() });
-		const response = await routes(
-			request("/api/version", {
-				headers: { "X-Mole-Token": token },
-			}),
-		);
+		const response = await routes(versionRequest("GET"));
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
 			current: APP_VERSION,
 			latest: null,
 			updateAvailable: false,
+			releases: [],
+			autoOpen: false,
 		});
+	});
+
+	test("persists exact acknowledgement once and suppresses later auto-open", async () => {
+		const versionStatus = {
+			current: "0.9.0",
+			latest: "0.10.0",
+			updateAvailable: true,
+			releases: [],
+		};
+		const persisted: unknown[] = [];
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			config: {
+				jira: { enabled: false },
+				updates: { lastShownVersion: "0.9.0" },
+			},
+			versionStatus: Promise.resolve(versionStatus),
+			persistConfig: async (partial) => {
+				persisted.push(partial);
+			},
+		});
+		const acknowledge = () =>
+			routes(versionRequest("POST", JSON.stringify({ version: "0.10.0" })));
+
+		const responses = await Promise.all([acknowledge(), acknowledge()]);
+		expect(responses.map((response) => response.status)).toEqual([204, 204]);
+		expect(persisted).toEqual([{ updates: { lastShownVersion: "0.10.0" } }]);
+
+		const laterGet = await routes(versionRequest("GET"));
+		expect((await laterGet.json()).autoOpen).toBe(false);
+		expect((await acknowledge()).status).toBe(204);
+		expect(persisted).toHaveLength(1);
+	});
+
+	test("rejects malformed, mismatched, and unavailable acknowledgements", async () => {
+		const versionStatus = {
+			current: "0.9.0",
+			latest: "0.10.0",
+			updateAvailable: true,
+			releases: [],
+		};
+		const persisted: unknown[] = [];
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve(versionStatus),
+			persistConfig: async (partial) => {
+				persisted.push(partial);
+			},
+		});
+		for (const body of [
+			"{",
+			"[]",
+			JSON.stringify({}),
+			JSON.stringify({ version: "v0.10.0" }),
+			JSON.stringify({ version: "0.9.0" }),
+			JSON.stringify({ version: "0.10.1" }),
+			JSON.stringify({ version: "0.10.0", extra: true }),
+		]) {
+			const response = await routes(versionRequest("POST", body));
+			expect(response.status).toBe(400);
+		}
+
+		const unavailableRoutes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve({
+				...versionStatus,
+				updateAvailable: false,
+				releases: [],
+			}),
+			persistConfig: async (partial) => {
+				persisted.push(partial);
+			},
+		});
+		const unavailable = await unavailableRoutes(
+			versionRequest("POST", JSON.stringify({ version: "0.10.0" })),
+		);
+		expect(unavailable.status).toBe(400);
+		expect(persisted).toEqual([]);
+	});
+
+	test("keeps auto-open state unchanged when acknowledgement persistence fails", async () => {
+		let persistCount = 0;
+		const routes = createReviewRoutes({
+			token,
+			state: state(),
+			versionStatus: Promise.resolve({
+				current: "0.9.0",
+				latest: "0.10.0",
+				updateAvailable: true,
+				releases: [],
+			}),
+			persistConfig: async () => {
+				persistCount += 1;
+				throw new Error("persist failed");
+			},
+		});
+
+		const response = await routes(
+			versionRequest("POST", JSON.stringify({ version: "0.10.0" })),
+		);
+		expect(response.status).toBe(500);
+		expect(persistCount).toBe(1);
+
+		const laterGet = await routes(versionRequest("GET"));
+		expect((await laterGet.json()).autoOpen).toBe(true);
 	});
 
 	test("streams authenticated project-upload ranges as binary media", async () => {

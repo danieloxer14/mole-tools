@@ -203,6 +203,33 @@ describe("config schema", () => {
 		expect(config.models).toEqual(baseConfig.models);
 	});
 
+	test("accepts absent and strict shown update versions", () => {
+		expect(ConfigSchema.parse(baseConfig)).not.toHaveProperty("updates");
+
+		const config = ConfigSchema.parse({
+			...baseConfig,
+			updates: { lastShownVersion: "0.10.1" },
+		});
+		expect(config.updates).toEqual({ lastShownVersion: "0.10.1" });
+	});
+
+	test("rejects non-strict shown update versions", () => {
+		for (const lastShownVersion of ["v1.2.3", "1.2", "1.2.3-beta", "1.2.3\n"]) {
+			expect(
+				ConfigSchema.safeParse({
+					...baseConfig,
+					updates: { lastShownVersion },
+				}).success,
+			).toBe(false);
+		}
+		expect(
+			ConfigSchema.safeParse({
+				...baseConfig,
+				updates: { lastShownVersion: 123 },
+			}).success,
+		).toBe(false);
+	});
+
 	test("ignores unknown keys at every config level", () => {
 		const config = ConfigSchema.parse({
 			...baseConfig,

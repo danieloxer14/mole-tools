@@ -3,7 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PortError } from "../../core/errors";
-import { CONFIG_TEMPLATE, CONFIG_TEMPLATE_TEXT, loadConfig } from "./loader";
+import {
+	CONFIG_TEMPLATE,
+	CONFIG_TEMPLATE_TEXT,
+	loadConfig,
+	updateConfig,
+} from "./loader";
 import { resolveLlmProvider } from "./schema";
 
 let dir: string;
@@ -209,6 +214,27 @@ describe("loadConfig", () => {
 			scheduleTimes: ["09:00", "12:00", "15:00"],
 			intervalSeconds: 900,
 		});
+	});
+	test("preserves updates through legacy normalization and partial persistence", async () => {
+		const path = await configPath();
+		const legacy = {
+			ollama: {
+				commitModel: "custom-model",
+				baseUrl: "http://localhost:11434",
+			},
+			jira: { enabled: false, branchPattern: "[A-Z]+-[0-9]+" },
+			diff: { ignore: [] },
+			updates: { lastShownVersion: "0.9.0" },
+		};
+		await Bun.write(path, JSON.stringify(legacy));
+
+		const migrated = await loadConfig(path);
+		expect(migrated.updates).toEqual({ lastShownVersion: "0.9.0" });
+
+		await updateConfig({ updates: { lastShownVersion: "0.10.1" } }, path);
+		const persisted = await loadConfig(path);
+		expect(persisted.updates).toEqual({ lastShownVersion: "0.10.1" });
+		expect(persisted.models).toEqual(migrated.models);
 	});
 
 	test("throws a precise error for a bad config key", async () => {

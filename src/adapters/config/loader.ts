@@ -154,6 +154,7 @@ function normalizeConfig(raw: unknown): unknown {
 		prompts: input.prompts,
 		appearance: input.appearance,
 		reviewBabysitter: input.reviewBabysitter,
+		updates: input.updates,
 	};
 	if (input.ollama) {
 		const ollama = input.ollama as Record<string, unknown>;

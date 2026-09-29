@@ -164,13 +164,33 @@ async function fetchApproval(token: string): Promise<MrApprovalState | null> {
 	return value === null ? null : (value as MrApprovalState);
 }
 
-async function fetchVersionStatus(token: string): Promise<VersionStatus> {
+type ReviewVersionStatus = VersionStatus & { autoOpen: boolean };
+
+async function fetchVersionStatus(token: string): Promise<ReviewVersionStatus> {
 	const response = await fetch(apiUrl("/api/version", token), {
 		headers: { "X-Mole-Token": token },
 	});
 	if (!response.ok)
 		throw new Error(`Version status request failed (${response.status})`);
-	return (await response.json()) as VersionStatus;
+	return (await response.json()) as ReviewVersionStatus;
+}
+
+async function acknowledgeVersionShown(
+	token: string,
+	version: string,
+): Promise<void> {
+	const response = await fetch(apiUrl("/api/version/shown", token), {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"X-Mole-Token": token,
+		},
+		body: JSON.stringify({ version }),
+	});
+	if (!response.ok)
+		throw new Error(
+			`Version acknowledgement request failed (${response.status})`,
+		);
 }
 
 async function updateApproval(
@@ -422,8 +442,15 @@ function useToasts() {
 function ReviewApp() {
 	const token = useMemo(tokenFromLocation, []);
 	const [data, setData] = useState<ReviewStateResponse | null>(null);
-	const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(
-		null,
+	const [versionStatus, setVersionStatus] =
+		useState<ReviewVersionStatus | null>(null);
+
+	const acknowledgeUpdateShown = useCallback(
+		(version: string) => {
+			if (!token) return;
+			void acknowledgeVersionShown(token, version).catch(() => undefined);
+		},
+		[token],
 	);
 
 	const { dismissToast, pushToast, toasts } = useToasts();
@@ -1999,11 +2026,13 @@ function ReviewApp() {
 				update={
 					versionStatus?.updateAvailable && versionStatus.latest
 						? {
-								current: versionStatus.current,
 								latest: versionStatus.latest,
+								releases: versionStatus.releases,
+								autoOpen: versionStatus.autoOpen,
 							}
 						: null
 				}
+				onUpdateAutoOpened={acknowledgeUpdateShown}
 				onRefresh={refreshReview}
 				onOpenSettings={() => {
 					setSettingsInitialTab("prompts");

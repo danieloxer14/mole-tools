@@ -63,6 +63,7 @@ const base: MrHeaderProps = {
 	refreshing: false,
 	layerGenerating: false,
 	onRefresh: () => {},
+	onUpdateAutoOpened: () => {},
 	onOpenSettings: () => {},
 };
 
@@ -262,7 +263,11 @@ test("hides the update button when no update is available", () => {
 
 test("keeps review controls when an update is available", () => {
 	const container = render({
-		update: { current: "0.9.0", latest: "0.10.0" },
+		update: {
+			latest: "0.10.0",
+			releases: [],
+			autoOpen: false,
+		},
 	});
 	const header = container.querySelector("header");
 	const viewToggle = header?.querySelector('[aria-label="Review view"]');
@@ -290,6 +295,23 @@ test("keeps review controls when an update is available", () => {
 	);
 	expect(container.querySelector("[data-insertions]")?.textContent).toBe("+12");
 	expect(container.querySelector("[data-deletions]")?.textContent).toBe("−4");
+});
+test("forwards automatic update opening while keeping the header button visible", () => {
+	const shownVersions: string[] = [];
+	const { container } = renderInteractive({
+		update: {
+			latest: "0.10.0",
+			releases: [],
+			autoOpen: true,
+		},
+		onUpdateAutoOpened: (version) => shownVersions.push(version),
+	});
+
+	expect(container.querySelector("[data-update-available]")?.textContent).toBe(
+		"Update 0.10.0 available",
+	);
+	expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+	expect(shownVersions).toEqual(["0.10.0"]);
 });
 
 test("renders diff totals right of approval pill with diff colours", () => {
