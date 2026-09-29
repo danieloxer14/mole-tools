@@ -17,7 +17,11 @@ import type {
 } from "../../ports/git-host";
 import { validatePosition } from "../../shared/gitlab-position";
 import { encodeProjectPath, type MrRef, parseMrUrl } from "../../shared/mr-url";
-import type { GitLabLabel, GitLabMergeRequest } from "./glab-schemas";
+import type {
+	GitLabDiscussion,
+	GitLabLabel,
+	GitLabMergeRequest,
+} from "./glab-schemas";
 import {
 	GitLabApprovalStateSchema,
 	GitLabAutoApprovalMergeRequestSchema,
@@ -704,14 +708,25 @@ export class GlabAdapter implements GitHost {
 		const positionedNote = discussion.notes.find(
 			(note) => note.position !== null,
 		);
-		const position: DiscussionPosition | null = positionedNote?.position
-			? {
-					newPath: positionedNote.position.new_path,
-					oldPath: positionedNote.position.old_path,
-					newLine: positionedNote.position.new_line,
-					oldLine: positionedNote.position.old_line,
-				}
-			: null;
+		let position: DiscussionPosition | null = null;
+		if (positionedNote?.position) {
+			const source = positionedNote.position;
+			const rangeEnd = source.line_range?.end;
+			position = {
+				newPath: source.new_path,
+				oldPath: source.old_path,
+				newLine: rangeEnd
+					? rangeEnd.type === "new"
+						? rangeEnd.new_line
+						: null
+					: source.new_line,
+				oldLine: rangeEnd
+					? rangeEnd.type === "old"
+						? rangeEnd.old_line
+						: null
+					: source.old_line,
+			};
+		}
 		return {
 			id: String(discussion.id),
 			resolved:

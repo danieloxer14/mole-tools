@@ -101,16 +101,39 @@ export const GitLabApprovalStateSchema = z
 	})
 	.passthrough();
 
+const PositiveLine = z.number().int().positive().nullable();
+
+const GitLabDiscussionLineRangeEntrySchema = z
+	.object({
+		line_code: NonEmptyString,
+		type: z.enum(["new", "old"]),
+		old_line: PositiveLine,
+		new_line: PositiveLine,
+	})
+	.passthrough()
+	.refine(
+		(entry) =>
+			entry.type === "new" ? entry.new_line !== null : entry.old_line !== null,
+		{
+			message: "GitLab line range entry must include its selected side line",
+		},
+	);
+
 export const GitLabPositionSchema = z
 	.object({
 		old_path: z.string().nullable(),
 		new_path: z.string().nullable(),
 		old_line: z.number().int().nonnegative().nullable(),
 		new_line: z.number().int().nonnegative().nullable(),
+		line_range: z
+			.object({
+				start: GitLabDiscussionLineRangeEntrySchema,
+				end: GitLabDiscussionLineRangeEntrySchema,
+			})
+			.passthrough()
+			.optional(),
 	})
 	.passthrough();
-
-const PositiveLine = z.number().int().positive().nullable();
 
 const GitLabLineRangeEntrySchema = z
 	.object({

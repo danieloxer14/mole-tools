@@ -597,6 +597,16 @@ function discussionMatchesLine(
 ): boolean {
 	const position = discussion.position;
 	if (!position) return false;
+	if (position.newLine !== null && position.oldLine !== null) {
+		return (
+			file.newPath !== null &&
+			file.oldPath !== null &&
+			position.newPath === file.newPath &&
+			position.oldPath === file.oldPath &&
+			position.newLine === line.newLine &&
+			position.oldLine === line.oldLine
+		);
+	}
 	return (
 		(position.newPath === file.newPath &&
 			position.newLine !== null &&
