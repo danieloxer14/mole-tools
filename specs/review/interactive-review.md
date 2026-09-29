@@ -365,14 +365,18 @@ validated document is version `1` and has one or more layers, each with:
   "layers": [
     {
       "title": "Short review concern or change area",
-      "tldr": "One-paragraph explanation",
-      "files": ["src/example.ts"],
+      "tldr": "- Routes the request.\n- Returns the result.",
+      "files": ["src/example.ts"]
     }
   ]
 }
 ```
 
-`files` is curated over the full changed-file tree; unknown paths are dropped,
+`tldr` uses compact Markdown: separate two or more distinct points into short
+paragraphs with a blank line or focused bullets on separate lines; a genuinely
+single-point description may remain one short paragraph. Encode line breaks as
+JSON `\n` sequences inside the string. `files` is illustrative here; generated
+guides curate files over the full changed-file tree. Unknown paths are dropped,
 and an empty layer is dropped. Prompts guide the agent to cover what changed,
 architecture/implementation layers, implied decisions, and verification. The
 plan prompt additionally examines requirements completeness, assumptions, risks,

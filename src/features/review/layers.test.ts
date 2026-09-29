@@ -220,6 +220,8 @@ describe("review layer generation", () => {
 
 	test("validates, filters unknown files, and persists the cached guide", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-layers-"));
+		const tldr =
+			"Routes the review request.\n\n- Persists curated files.\n- Reports ready state.";
 		try {
 			const paths = getReviewPaths(ref, join(dir, "config.json"));
 			const store = new ReviewStore(paths);
@@ -227,7 +229,11 @@ describe("review layer generation", () => {
 				{
 					version: 1,
 					layers: [
-						{ ...layerDoc.layers[0], files: ["src/app.ts", "missing.ts"] },
+						{
+							...layerDoc.layers[0],
+							tldr,
+							files: ["src/app.ts", "missing.ts"],
+						},
 						{ ...layerDoc.layers[0], title: "Dropped", files: ["missing.ts"] },
 					],
 				},
@@ -239,7 +245,9 @@ describe("review layer generation", () => {
 			expect(result.state.layerStatus).toBe("ready");
 			expect(result.state.layers).toHaveLength(1);
 			expect(result.state.layers[0]?.title).toBe("Application layer");
-			expect(result.state.layers[0]?.tldr).toBe("Routes the review request.");
+			expect(result.doc?.layers[0]?.tldr).toBe(tldr);
+			expect(result.state.layers[0]?.tldr).toBe(tldr);
+			expect((await store.read())?.layers[0]?.tldr).toBe(tldr);
 			expect(result.state.layers[0]?.files).toEqual(["src/app.ts"]);
 			expect((await store.read())?.layers).toEqual(result.state.layers);
 			expect(agent.turns).toHaveLength(1);

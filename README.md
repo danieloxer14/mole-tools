@@ -246,10 +246,11 @@ append-only: mole-tools never deletes prompt versions. The `commit-system`,
 their text edits still live under `~/.config/mole-tools/prompts/`.
 
 Shipped layer-prompt guidance does not automatically replace existing prompt
-versions. To adopt updated guidance, open **Settings > Prompts**, select
-`review-layers-code` or `review-layers-plan`, and choose **Reset** to save the
-shipped guidance as a new version; existing versions remain in history. Use
-**Regenerate** in the review UI to apply it to already cached layers.
+versions. To adopt updated guidance, open **Settings > Prompts** and **Reset**
+both `review-layers-code` and `review-layers-plan` independently; each Reset
+saves the shipped guidance as a new version, while existing versions remain in
+history. Use **Regenerate** in the review UI to apply the updated prompts to
+already cached layers.
 
 Existing flat prompt files migrate lazily, once on first access of their slot:
 `prompts/<slot>.md` becomes `<slot>/default/001.md`. The former
