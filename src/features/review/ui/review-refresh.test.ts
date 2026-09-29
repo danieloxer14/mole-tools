@@ -15,9 +15,22 @@ const stale: ReviewFreshnessResponse = {
 	headSha: "remote-head",
 	newCommitCount: 2,
 };
-const syncedState = {} as ReviewApiState;
+const currentDiscussion = {
+	id: "current-discussion",
+	resolved: false,
+	notes: [],
+	position: null,
+};
+const syncedState = {
+	mr: { title: "Current title" },
+	discussions: [currentDiscussion],
+} as unknown as ReviewApiState;
 
-function operations(events: string[], freshness: ReviewFreshnessResponse) {
+function operations(
+	events: string[],
+	freshness: ReviewFreshnessResponse,
+	state: { current: ReviewApiState },
+) {
 	return {
 		checkFreshness: async () => {
 			events.push("check");
@@ -29,28 +42,27 @@ function operations(events: string[], freshness: ReviewFreshnessResponse) {
 		},
 		regenerate: async () => {
 			events.push("regenerate");
+			expect(state.current).toBe(syncedState);
+			expect(state.current.mr.title).toBe("Current title");
+			expect(state.current.discussions).toEqual([currentDiscussion]);
 		},
 		applyFreshness: () => {
 			events.push("freshness");
 		},
-		applySyncedState: () => {
+		applySyncedState: (next: ReviewApiState) => {
 			events.push("synced");
+			state.current = next;
 		},
 	};
 }
 
-test("refreshes a fresh review without syncing before regeneration", async () => {
+async function expectSuccessfulRefresh(
+	freshness: ReviewFreshnessResponse,
+): Promise<void> {
 	const events: string[] = [];
+	const state = { current: {} as ReviewApiState };
 
-	await runReviewRefresh(operations(events, fresh));
-
-	expect(events).toEqual(["check", "freshness", "regenerate"]);
-});
-
-test("syncs a stale review before regenerating layers", async () => {
-	const events: string[] = [];
-
-	await runReviewRefresh(operations(events, stale));
+	await runReviewRefresh(operations(events, freshness, state));
 
 	expect(events).toEqual([
 		"check",
@@ -59,14 +71,23 @@ test("syncs a stale review before regenerating layers", async () => {
 		"synced",
 		"regenerate",
 	]);
+}
+
+test("syncs and applies full state for an unchanged head before regeneration", async () => {
+	await expectSuccessfulRefresh(fresh);
+});
+
+test("syncs and applies full state for a changed head before regeneration", async () => {
+	await expectSuccessfulRefresh(stale);
 });
 
 test("stops before sync and regeneration when freshness fails", async () => {
 	const events: string[] = [];
+	const state = { current: {} as ReviewApiState };
 
 	await expect(
 		runReviewRefresh({
-			...operations(events, fresh),
+			...operations(events, fresh, state),
 			checkFreshness: async () => {
 				events.push("check");
 				throw new Error("freshness failed");
@@ -77,12 +98,13 @@ test("stops before sync and regeneration when freshness fails", async () => {
 	expect(events).toEqual(["check"]);
 });
 
-test("stops before regeneration when sync fails", async () => {
+test("stops before applying state or regenerating when sync fails on a fresh head", async () => {
 	const events: string[] = [];
+	const state = { current: {} as ReviewApiState };
 
 	await expect(
 		runReviewRefresh({
-			...operations(events, stale),
+			...operations(events, fresh, state),
 			sync: async () => {
 				events.push("sync");
 				throw new Error("sync failed");

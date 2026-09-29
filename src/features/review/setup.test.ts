@@ -12,9 +12,19 @@ import {
 	reviewRemoteUrl,
 	setupReview,
 	syncReview,
+	syncReviewMetadata,
 } from "./setup";
 import { LEGACY_CHAT_ID, type ReviewState, ReviewStateSchema } from "./state";
 import { ReviewStore } from "./store";
+
+class CountingReviewStore extends ReviewStore {
+	writeCount = 0;
+
+	override async write(state: ReviewState): Promise<void> {
+		this.writeCount += 1;
+		await super.write(state);
+	}
+}
 
 const ref = {
 	host: "gitlab.example.com",
@@ -197,10 +207,10 @@ describe("setupReview chat state", () => {
 			expect(persisted.chats).toHaveLength(1);
 			expect(persisted.chats[0]?.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
 			expect(persisted.chats[0]?.id).not.toBe(LEGACY_CHAT_ID);
-			expect(persisted.activeChatId).toBe(persisted.chats[0]?.id);
+			expect(persisted.activeChatId).toBe(persisted.chats[0]?.id ?? null);
 			expect(result.state.collapsedDiscussionIds).toEqual([]);
 			expect(persisted.collapsedDiscussionIds).toEqual([]);
-			expect(result.state.activeChatId).toBe(persisted.chats[0]?.id);
+			expect(result.state.activeChatId).toBe(result.state.chats[0]?.id ?? null);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -229,12 +239,18 @@ describe("setupReview chat state", () => {
 						title: "Existing chat",
 						sessionId: "provider-session",
 						createdAt: "2026-08-25T00:00:00.000Z",
+						agent: null,
+						model: null,
+						effort: null,
 					},
 					{
 						id: "chat-two",
 						title: "Another chat",
 						sessionId: null,
 						createdAt: "2026-08-25T00:01:00.000Z",
+						agent: null,
+						model: null,
+						effort: null,
 					},
 				],
 				activeChatId: "chat-two",
@@ -273,6 +289,149 @@ describe("setupReview chat state", () => {
 			expect(persisted.chats).toEqual(existing.chats);
 			expect(persisted.activeChatId).toBe(existing.activeChatId);
 			expect(persisted.collapsedDiscussionIds).toEqual(["discussion-1"]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("updates MR metadata in either launch mode without resetting review data", async () => {
+		for (const mode of ["code", "plan"] as const) {
+			const dir = await mkdtemp(
+				join(tmpdir(), `mole-review-metadata-${mode}-`),
+			);
+			try {
+				const paths = pathsFor(dir);
+				const existing = stateFor(paths, {
+					mr: { ...stateFor(paths).mr, description: "Old description" },
+					revision: {
+						headSha: "persisted-head",
+						mergeBaseSha: "persisted-base",
+						diffRefs: {
+							baseSha: "persisted-base",
+							startSha: "persisted-start",
+							headSha: "persisted-head",
+						},
+						syncedAt: "2026-08-25T00:00:00.000Z",
+					},
+					worktreePath: "/persisted/worktree",
+					repoRoot: "/persisted/repo",
+					layers: [
+						{
+							id: "layer-api",
+							title: "API",
+							tldr: "API layer",
+							files: ["src/api.ts"],
+							done: true,
+							stale: false,
+						},
+					],
+					viewedFiles: ["src/api.ts"],
+					chats: [
+						{
+							id: "chat-one",
+							title: "Existing chat",
+							sessionId: null,
+							createdAt: "2026-08-25T00:00:00.000Z",
+							agent: null,
+							model: null,
+							effort: null,
+						},
+					],
+					activeChatId: "chat-one",
+					drafts: [
+						{
+							id: "draft-1",
+							body: "Keep draft",
+							selection: {
+								path: "src/api.ts",
+								side: "new",
+								startLine: 1,
+								endLine: 1,
+							},
+							filePath: "src/api.ts",
+							status: "draft",
+							error: null,
+							postedDiscussionId: null,
+							staleSince: null,
+						},
+					],
+				});
+				const store = new CountingReviewStore(paths);
+				await store.write(existing);
+				store.writeCount = 0;
+				const validatedRef = {
+					...ref,
+					host: "gitlab-new.example.com",
+					projectPath: "group/new-api",
+				};
+				const mr = {
+					...mergeRequest(),
+					projectPath: "group/new-api",
+					webUrl:
+						"https://gitlab-new.example.com/group/new-api/-/merge_requests/42",
+					title: "Current title",
+					description: "",
+					sourceBranch: "current-source",
+					targetBranch: "current-target",
+				};
+				const result = await setupReview({
+					vcs: new FakeVcs({
+						repoRoot: paths.repoPath,
+						worktrees: [],
+						diffRange: [],
+					}),
+					ref: validatedRef,
+					mr,
+					paths,
+					store,
+					mode,
+				});
+				const persisted = await store.read();
+				expect(result.state.mr).toEqual({
+					host: validatedRef.host,
+					projectPath: validatedRef.projectPath,
+					iid: ref.iid,
+					webUrl: mr.webUrl,
+					title: mr.title,
+					description: "",
+					sourceBranch: mr.sourceBranch,
+					targetBranch: mr.targetBranch,
+				});
+				expect(persisted?.mr).toEqual(result.state.mr);
+				expect(result.state.revision).toEqual(existing.revision);
+				expect(result.state.worktreePath).toBe(existing.worktreePath);
+				expect(result.state.repoRoot).toBe(existing.repoRoot);
+				expect(result.state.chats).toEqual(existing.chats);
+				expect(result.state.activeChatId).toBe(existing.activeChatId);
+				expect(result.state.drafts).toEqual(existing.drafts);
+				expect(result.state.layers).toEqual(existing.layers);
+				expect(result.state.viewedFiles).toEqual(existing.viewedFiles);
+				expect(result.state.mode).toBe(mode);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("does not write unchanged same-mode metadata", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-metadata-noop-"));
+		try {
+			const paths = pathsFor(dir);
+			const store = new CountingReviewStore(paths);
+			await store.write(stateFor(paths));
+			store.writeCount = 0;
+			await setupReview({
+				vcs: new FakeVcs({
+					repoRoot: paths.repoPath,
+					worktrees: [],
+					diffRange: [],
+				}),
+				ref,
+				mr: mergeRequest(),
+				paths,
+				store,
+			});
+			expect(store.writeCount).toBe(0);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -505,6 +664,81 @@ describe("syncReview MR description", () => {
 			});
 			expect(retained.state.mr.description).toBe("Updated");
 			expect((await store.read())?.mr.description).toBe("Updated");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("syncReviewMetadata", () => {
+	test("updates latest persisted metadata without changing revision or local review data", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-metadata-sync-"));
+		try {
+			const paths = pathsFor(dir);
+			const latest = stateFor(paths, {
+				mr: { ...stateFor(paths).mr, description: "Old body" },
+				viewedFiles: ["src/kept.ts"],
+			});
+			const store = new ReviewStore(paths);
+			await store.write(latest);
+			const staleInput = stateFor(paths, { viewedFiles: [] });
+			const updated = await syncReviewMetadata({
+				ref: {
+					...ref,
+					host: "gitlab-new.example.com",
+					projectPath: "group/new-api",
+				},
+				mr: {
+					...mergeRequest(),
+					projectPath: "group/new-api",
+					webUrl:
+						"https://gitlab-new.example.com/group/new-api/-/merge_requests/42",
+					title: "New title",
+					description: "",
+					sourceBranch: "new-source",
+					targetBranch: "new-target",
+					author: "not persisted",
+					state: "closed",
+				},
+				state: staleInput,
+				store,
+			});
+			expect(updated.mr).toEqual({
+				host: "gitlab-new.example.com",
+				projectPath: "group/new-api",
+				iid: ref.iid,
+				webUrl:
+					"https://gitlab-new.example.com/group/new-api/-/merge_requests/42",
+				title: "New title",
+				description: "",
+				sourceBranch: "new-source",
+				targetBranch: "new-target",
+			});
+			expect(updated.revision).toEqual(latest.revision);
+			expect(updated.worktreePath).toBe(latest.worktreePath);
+			expect(updated.viewedFiles).toEqual(latest.viewedFiles);
+			const reread = await store.read();
+			expect(reread).toEqual(updated);
+			expect(reread?.mr).not.toHaveProperty("author");
+			expect(reread?.mr).not.toHaveProperty("state");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects an IID mismatch like syncReview", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-metadata-iid-"));
+		try {
+			const paths = pathsFor(dir);
+			await expect(
+				syncReviewMetadata({
+					ref,
+					mr: { ...mergeRequest(), iid: ref.iid + 1 },
+					state: stateFor(paths),
+				}),
+			).rejects.toThrow(
+				`Merge request IID mismatch: URL has ${ref.iid}, response has ${ref.iid + 1}`,
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

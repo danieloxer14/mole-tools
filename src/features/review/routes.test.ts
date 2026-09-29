@@ -2639,6 +2639,200 @@ describe("review routes", () => {
 		}
 	});
 
+	test("same-ref sync updates metadata and discussions without rebuilding review state", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-metadata-sync-"));
+		try {
+			const previous = ReviewStateSchema.parse({
+				...state(),
+				mr: { ...state().mr, description: "Old body" },
+				layerStatus: "ready",
+				layers: [
+					{
+						id: "layer-1",
+						title: "Keep layer",
+						tldr: "Keep layer state",
+						files: ["src/app.ts"],
+						done: true,
+						stale: false,
+					},
+				],
+				viewedFiles: ["src/app.ts"],
+				drafts: [
+					{
+						id: "draft-1",
+						body: "Keep draft",
+						selection: commentSelection,
+						filePath: commentSelection.path,
+						status: "draft",
+						error: null,
+						postedDiscussionId: null,
+						staleSince: null,
+					},
+				],
+			});
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(previous);
+			const vcs = new FakeVcs({
+				repoRoot: previous.repoRoot,
+				worktrees: [{ path: previous.worktreePath, ref: "head" }],
+			});
+			const latest = {
+				...discussion,
+				id: "discussion-updated",
+				resolved: true,
+				notes: [
+					{
+						id: "note-updated",
+						author: "reviewer",
+						body: "Updated note",
+						createdAt: "2026-01-01T00:00:00.000Z",
+						system: false,
+					},
+				],
+			};
+			let discussionFetches = 0;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				vcs,
+				diff: commentDiff,
+				layerDiff: [
+					{
+						path: "src/app.ts",
+						statOnly: false,
+						patch: "@@ -1 +1 @@\\n-old\\n+new\\n",
+						insertions: 1,
+						deletions: 1,
+					},
+				],
+				discussions: [discussion],
+				getDiscussions: async () => {
+					discussionFetches++;
+					return [latest];
+				},
+				fetchMr: async () => ({
+					iid: previous.mr.iid,
+					projectPath: previous.mr.projectPath,
+					title: "Updated title",
+					description: null,
+					webUrl: previous.mr.webUrl,
+					sourceBranch: "updated-feature",
+					targetBranch: previous.mr.targetBranch,
+					headSha: previous.revision.headSha,
+					diffRefs: previous.revision.diffRefs,
+				}),
+			});
+
+			const response = await routes(
+				request(`/api/sync?t=${token}`, { method: "POST" }),
+			);
+			const api = await response.json();
+			const persisted = await store.read();
+			expect(response.status).toBe(200);
+			expect(api.mr).toMatchObject({
+				title: "Updated title",
+				description: "",
+				sourceBranch: "updated-feature",
+			});
+			expect(api.discussions).toEqual([latest]);
+			expect(discussionFetches).toBe(1);
+			expect(persisted).toMatchObject({
+				...previous,
+				mr: {
+					...previous.mr,
+					title: "Updated title",
+					description: "",
+					sourceBranch: "updated-feature",
+				},
+			});
+			expect(persisted?.revision).toEqual(previous.revision);
+			expect(persisted?.layers).toEqual(previous.layers);
+			expect(persisted?.viewedFiles).toEqual(previous.viewedFiles);
+			expect(persisted?.chats).toEqual(previous.chats);
+			expect(persisted?.drafts).toEqual(previous.drafts);
+			expect(vcs.forceWorktreeCalls).toEqual([]);
+			expect(vcs.addWorktreeCalls).toEqual([]);
+			expect(vcs.fetchRefCalls).toEqual([]);
+			expect(vcs.diffRangeCalls).toEqual([]);
+
+			const stateResponse = await routes(request(`/api/state?t=${token}`));
+			expect((await stateResponse.json()).discussions).toEqual([latest]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("discussion failure leaves sync state and cached discussions intact and retry replaces them", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-sync-discussion-failure-"),
+		);
+		try {
+			const previous = state();
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(previous);
+			const vcs = new FakeVcs({
+				repoRoot: previous.repoRoot,
+				worktrees: [{ path: previous.worktreePath, ref: "head" }],
+			});
+			let fetchDiscussions = true;
+			let discussionFetches = 0;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				vcs,
+				discussions: [discussion],
+				getDiscussions: async () => {
+					discussionFetches++;
+					if (fetchDiscussions) throw new Error("discussion provider offline");
+					return [];
+				},
+				fetchMr: async () => ({
+					iid: previous.mr.iid,
+					projectPath: previous.mr.projectPath,
+					title: "Changed title",
+					description: "Changed body",
+					webUrl: previous.mr.webUrl,
+					sourceBranch: previous.mr.sourceBranch,
+					targetBranch: previous.mr.targetBranch,
+					headSha: previous.revision.headSha,
+					diffRefs: previous.revision.diffRefs,
+				}),
+			});
+			const failed = await routes(
+				request(`/api/sync?t=${token}`, { method: "POST" }),
+			);
+			expect(failed.status).toBe(502);
+			expect(discussionFetches).toBe(1);
+			expect(await store.read()).toEqual(previous);
+			const beforeRetry = await routes(request(`/api/state?t=${token}`));
+			expect((await beforeRetry.json()).discussions).toEqual([discussion]);
+			expect(vcs.forceWorktreeCalls).toEqual([]);
+			expect(vcs.addWorktreeCalls).toEqual([]);
+			discussionFetches = 0;
+
+			fetchDiscussions = false;
+			const retried = await routes(
+				request(`/api/sync?t=${token}`, { method: "POST" }),
+			);
+			expect(retried.status).toBe(200);
+			expect((await retried.json()).discussions).toEqual([]);
+			expect((await store.read())?.mr.title).toBe("Changed title");
+			expect(discussionFetches).toBe(1);
+			expect(vcs.forceWorktreeCalls).toEqual([]);
+			expect(vcs.addWorktreeCalls).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("sync repoints worktree and preserves chat while marking stale anchors", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-route-"));
 		try {

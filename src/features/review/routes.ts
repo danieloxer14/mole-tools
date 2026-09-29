@@ -94,6 +94,7 @@ import {
 	compareReviewHead,
 	type ReviewMergeRequest,
 	syncReview,
+	syncReviewMetadata,
 } from "./setup";
 import { type SseFrame, sseResponse } from "./sse";
 import {
@@ -1788,17 +1789,60 @@ export function createReviewRoutes(
 		});
 	}
 	async function syncInternal(): Promise<Response> {
-		const state = await currentState();
+		const state = (await options.store?.read()) ?? fallbackState;
+		if (!state) throw new Error("Review state is unavailable");
 		const fetcher = reviewMrFetcher();
 		if (!options.vcs || !fetcher)
 			return jsonResponse({ error: "MR sync is unavailable" }, 503);
 		const ref = reviewRef(state);
 		const mr = await fetcher(ref);
+		const host = options.gitHost;
+		const discussionFetcher =
+			options.getDiscussions ??
+			(host?.listDiscussions
+				? () => host.listDiscussions?.(ref) ?? Promise.resolve([])
+				: null);
+		let discussions: HostDiscussion[] | undefined;
+		if (discussionFetcher) {
+			try {
+				discussions = await discussionFetcher();
+			} catch (error) {
+				return jsonResponse(
+					{ error: `Unable to refresh discussions: ${errorMessage(error)}` },
+					502,
+				);
+			}
+		}
+		const fetchedRefs = mr.diffRefs;
+		const refsMatch =
+			fetchedRefs !== undefined &&
+			fetchedRefs.baseSha === state.revision.diffRefs.baseSha &&
+			fetchedRefs.startSha === state.revision.diffRefs.startSha &&
+			fetchedRefs.headSha === state.revision.diffRefs.headSha;
+		if (mr.headSha === state.revision.headSha && refsMatch) {
+			const result = await syncReviewMetadata({
+				ref,
+				mr: { ...mr, description: mr.description ?? "" },
+				state,
+				store: options.store,
+			});
+			fallbackState = result;
+			currentMr = mr;
+			if (discussions !== undefined) fallbackDiscussions = discussions;
+			return jsonResponse(
+				await apiState({
+					discussions,
+					diff: currentDiff,
+					skipDiscussionFetch: true,
+					skipLayerGeneration: true,
+				}),
+			);
+		}
 		const previousDiff = currentLayerDiff;
 		const result = await syncReview({
 			vcs: options.vcs,
 			ref,
-			mr,
+			mr: { ...mr, description: mr.description ?? "" },
 			state,
 			previousDiff,
 			store: options.store,
@@ -1813,8 +1857,13 @@ export function createReviewRoutes(
 		currentMr = mr;
 		fallbackState = result.state;
 		initialLayerRunAllowed = false;
-		await refreshDiscussions();
-		return jsonResponse(await apiState());
+		if (discussions !== undefined) fallbackDiscussions = discussions;
+		return jsonResponse(
+			await apiState({
+				discussions,
+				skipDiscussionFetch: true,
+			}),
+		);
 	}
 	async function sync(): Promise<Response> {
 		return serializeDisplayMutation(syncInternal);
@@ -2594,10 +2643,18 @@ export function createReviewRoutes(
 		return serializeDisplayMutation(() => whitespaceInternal(request));
 	}
 
-	async function apiState(): Promise<ReviewApiState> {
+	async function apiState(responseOptions?: {
+		discussions?: HostDiscussion[];
+		diff?: ParsedFileDiff[];
+		skipDiscussionFetch?: boolean;
+		skipLayerGeneration?: boolean;
+	}): Promise<ReviewApiState> {
 		const state = await currentState();
-		const variants = await diffVariants(state);
+		const variants = responseOptions?.diff
+			? { display: responseOptions.diff, full: responseOptions.diff }
+			: await diffVariants(state);
 		if (
+			!responseOptions?.skipLayerGeneration &&
 			initialLayerRunAllowed &&
 			state.layerStatus === "pending" &&
 			(options.createReviewAgent || layerAgent) &&
@@ -2606,7 +2663,7 @@ export function createReviewRoutes(
 			initialLayerRunAllowed = false;
 			void startLayerGeneration(false)?.catch(() => undefined);
 		}
-		if (options.getDiscussions) {
+		if (!responseOptions?.skipDiscussionFetch && options.getDiscussions) {
 			try {
 				fallbackDiscussions = await options.getDiscussions();
 			} catch {
@@ -2617,7 +2674,7 @@ export function createReviewRoutes(
 		return {
 			...state,
 			diff: variants.display,
-			discussions: fallbackDiscussions,
+			discussions: responseOptions?.discussions ?? fallbackDiscussions,
 			approval: approvalState,
 			largeFileLineThreshold: threshold,
 			busyChatIds: [...activeTurns.keys()],

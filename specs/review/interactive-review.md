@@ -166,8 +166,8 @@ Implemented HTTP surface:
 | `GET /api/version`                                   | Return `{ current, latest, updateAvailable }` from the launch-time GitHub release check. |
 | `GET /api/approval`                                  | Return live GitLab approval status for the current user and merge request.                                                                                                                                                                                                                                                              |
 | `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's GitLab approval. |
-| `GET`/`POST /api/refresh`                            | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this check does not mutate the worktree.                                                                                                                                                                                                                          |
-| `POST /api/sync`                                     | Explicitly fetch the new head, re-point the detached worktree, recompute merge base/diff/refs, mark layers stale, and flag drafts whose anchors no longer resolve.                                                                                                                                                                      |
+| `GET /api/refresh`                                   | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this read-only freshness check does not mutate review state or the worktree.                                                                                                                                                                                          |
+| `POST /api/sync`                                     | Fetch current MR metadata and preflight the complete discussion list. When head SHA and all available diff refs match persisted state, update metadata only; otherwise perform full code sync, recomputing merge base/worktree/diff refs and marking layers stale. Return synced state and discussions. |
 | `POST /api/progress`                                 | Persist a layer `done` toggle and/or a viewed-file change, returning only updated `layers` and `viewedFiles`; viewed-file changes support one path or a batch `{ viewedFiles: { paths: string[], viewed: boolean } }` applied in one mutation. |
 | `GET /api/file?path=&side=`                          | Return text from the worktree (`new`) or the merge-base revision (`old`); reject traversal outside the worktree.                                                                                                                                                                                                                        |
 | `GET /api/diff?path=`                                | Return the unfiltered parsed file diff for an explicit expansion.                                                                                                                                                                                                                                                                       |
@@ -651,21 +651,36 @@ v1 files. The legacy `chat.ndjson` file is adopted once into the per-chat
 directory. State and transcript are validated when read. A state version
 mismatch discards the old v1 file and starts fresh; there is no schema migration.
 
-Freshness is detected, never silently applied:
+The read-only freshness check is not itself a sync:
 
-1. Refresh asks GitLab for current MR metadata, fetches the head ref, compares it
-   with persisted `revision.headSha`, and reports whether it is stale plus the
-   number of new commits when locally comparable.
-2. The UI shows a banner presenting the review's commit (`Merge request at: <sha>`) and offers Sync. It does not mutate the worktree during
-   this check.
-3. Explicit Sync fetches the new head, computes a new merge base, removes and
-   recreates the detached worktree at that SHA, recomputes local filtered and
-   full diffs, and stores new `diff_refs`/`syncedAt`.
-4. Sync marks every existing layer `stale: true`. It keeps chat, viewed-file
-   progress, and drafts. A draft whose selected path/lines no longer build a
-   valid position receives `staleSince`; it is not auto-posted.
-5. The UI may regenerate layers after Sync, but never forces regeneration. The
-   reviewer must explicitly choose it.
+1. On explicit **Refresh**, the UI calls `GET /api/refresh` to fetch current MR
+   metadata/head and compare the head SHA with persisted `revision.headSha`. It
+   reports head drift and the number of new commits when locally comparable;
+   it does not mutate review state or the worktree.
+2. After every successful freshness check, whether the head is unchanged or
+   stale, the UI calls `POST /api/sync` and replaces its current API state with
+   the returned complete state before regenerating layers. The header exposes
+   one **Refresh** control and a freshness badge when stale; there is no
+   separate Sync control or polling/background sync.
+3. Sync fetches current MR metadata and the complete discussion list. If head
+   SHA and all fetched diff refs exist and match persisted refs, it updates MR
+   metadata only: title, description, URL, and branches refresh without
+   rebuilding the worktree/diffs or changing revision `syncedAt` or layer
+   state. If head SHA or refs differ, or refs are unavailable, full code sync
+   recomputes merge base, worktree, diffs, refs, and revision and marks
+   existing layers stale. Both paths return current MR metadata and discussions;
+   discussions replace the in-memory list wholesale and are not persisted.
+4. When a discussion provider exists, sync fetches discussions before changing
+   persisted state, worktree, or cached discussions. A discussion preflight
+   failure returns a non-2xx error and retains prior persisted/local review
+   data, worktree, and discussions. A failed freshness check or sync stops
+   refresh before layer regeneration and appears through the UI's existing
+   error toast; retry with a recovered provider can apply the updates.
+5. Sync retains local chats/transcripts, viewed-file progress, and drafts.
+   Full code sync flags drafts whose anchors no longer resolve with
+   `staleSince`; drafts are not auto-posted. Metadata-only sync leaves revision,
+   worktree, diffs, layers, and anchors unchanged. After successful sync,
+   Refresh regenerates layers for either metadata-only or full code sync.
 
 ## 10. Failure and non-goals
 
