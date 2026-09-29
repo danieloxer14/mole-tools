@@ -392,12 +392,12 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
-Review layers have one completion circle: Open is neutral, Done is green with a
-check, and hovering or focusing the circle previews the action (check to
-complete, cross to reopen). Stale layers retain a warning badge. Layer
-descriptions render as compact, sanitized GitHub-flavoured Markdown with
-preserved line breaks; unsafe HTML is removed and unsafe link targets are
-neutralized.
+Review layers have one completion circle on the right of the title, sized like
+the chevron: Open is neutral, Done is green with a check, and hovering or
+focusing the circle previews the action (check to complete, cross to reopen).
+Stale layers retain a warning badge. Layer descriptions render as compact,
+sanitized GitHub-flavoured Markdown with preserved line breaks; unsafe HTML is
+removed and unsafe link targets are neutralized.
 
 Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed

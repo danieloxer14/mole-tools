@@ -610,6 +610,35 @@ test("orders ready completion status, progress, fraction, and regenerate action"
 	const completedCard = layerCardMarkup(readyMarkup, "completed");
 	const staleCard = layerCardMarkup(readyMarkup, "stale");
 	const openCard = layerCardMarkup(readyMarkup, "open");
+	const staleHeader = parseMarkup(staleCard).querySelector(
+		"div.flex.items-center.gap-2.p-3",
+	);
+	const staleChevron = staleHeader?.querySelector(
+		'button[aria-controls^="layer-details-"]',
+	);
+	const staleTitle = staleHeader?.querySelector("button[data-active]");
+	const staleBadge = staleHeader?.querySelector('[data-layer-state="stale"]');
+	const staleCompletion = staleHeader?.querySelector("button[aria-pressed]");
+	if (
+		!staleHeader ||
+		!staleChevron ||
+		!staleTitle ||
+		!staleBadge ||
+		!staleCompletion
+	) {
+		throw new Error("Missing stale layer header controls");
+	}
+	const staleChildren = [...staleHeader.children];
+	expect(staleChildren.indexOf(staleChevron)).toBeLessThan(
+		staleChildren.indexOf(staleTitle),
+	);
+	expect(staleChildren.indexOf(staleTitle)).toBeLessThan(
+		staleChildren.indexOf(staleBadge),
+	);
+	expect(staleChildren.indexOf(staleBadge)).toBeLessThan(
+		staleChildren.indexOf(staleCompletion),
+	);
+	expect(staleCompletion.classList.contains("size-6")).toBe(true);
 	expect(completedCard).toContain('aria-label="Mark Completed not done"');
 	expect(completedCard).toContain('aria-pressed="true"');
 	expect(completedCard).toContain('data-layer-state="done"');
@@ -869,18 +898,43 @@ function renderCollapseLayers(): string {
 test("renders chevron and completion controls for each layer", () => {
 	const markup = renderCollapseLayers();
 	for (const layerId of ["done-layer", "open-layer"]) {
-		const collapseControl = markup.indexOf(
-			`aria-controls="layer-details-${layerId}"`,
+		const card = parseMarkup(layerCardMarkup(markup, layerId));
+		const header = card.querySelector("div.flex.items-center.gap-2.p-3");
+		const collapseControl = header?.querySelector<HTMLButtonElement>(
+			'button[aria-controls^="layer-details-"]',
 		);
-		const details = markup.indexOf(`id="layer-details-${layerId}"`);
+		const title = header?.querySelector<HTMLButtonElement>(
+			"button[data-active]",
+		);
+		const completion = header?.querySelector<HTMLButtonElement>(
+			"button[aria-pressed]",
+		);
+		if (!header || !collapseControl || !title || !completion) {
+			throw new Error(`Missing layer header controls for ${layerId}`);
+		}
+		const controls = [...header.children].filter(
+			(child): child is HTMLButtonElement => child.tagName === "BUTTON",
+		);
 
-		expect(collapseControl).toBeGreaterThanOrEqual(0);
-		expect(details).toBeGreaterThan(collapseControl);
+		expect(collapseControl.parentElement).toBe(header);
+		expect(title.parentElement).toBe(header);
+		expect(completion.parentElement).toBe(header);
+		expect(controls.indexOf(collapseControl)).toBeLessThan(
+			controls.indexOf(title),
+		);
+		expect(controls.indexOf(title)).toBeLessThan(controls.indexOf(completion));
+		expect(title.classList.contains("min-w-0")).toBe(true);
+		expect(title.classList.contains("flex-1")).toBe(true);
+		expect(title.classList.contains("truncate")).toBe(true);
+		expect(completion.classList.contains("shrink-0")).toBe(true);
+		expect(collapseControl.classList.contains("size-6")).toBe(true);
+		expect(completion.classList.contains("size-6")).toBe(true);
+		expect(completion.classList.contains("size-7")).toBe(false);
+		expect(collapseControl.getAttribute("aria-expanded")).toBe(
+			layerId === "done-layer" ? "false" : "true",
+		);
 	}
-	expect(markup).toContain('aria-label="Expand Done layer"');
-	expect(markup).toContain('aria-expanded="false"');
-	expect(markup).toContain('aria-label="Collapse Open layer"');
-	expect(markup).toContain('aria-expanded="true"');
+
 	expect(markup).toContain('data-collapsed="true"');
 	expect(markup).toContain('data-collapsed="false"');
 	expect(markup).not.toContain(">Expand</button>");
@@ -970,6 +1024,9 @@ test("completion button toggles callback once and collapses only after saved sta
 	expect(document.activeElement).toBe(completion);
 	act(() => completion?.click());
 	expect(events).toEqual([["layer-1", true]]);
+	act(() => render(initialState));
+	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
+
 	act(() => render(initialState, "Progress save failed"));
 	expect(container.querySelector('[role="alert"]')?.textContent).toContain(
 		"Progress save failed",
@@ -982,6 +1039,11 @@ test("completion button toggles callback once and collapses only after saved sta
 	});
 	act(() => render(savedState));
 	expect(container.querySelector('[data-collapsed="true"]')).not.toBeNull();
+	const expand = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Expand Diff"]',
+	);
+	act(() => expand?.click());
+	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
 
 	const uncheck = container.querySelector<HTMLButtonElement>(
 		'button[aria-label="Mark Diff not done"]',
@@ -991,6 +1053,6 @@ test("completion button toggles callback once and collapses only after saved sta
 		["layer-1", true],
 		["layer-1", false],
 	]);
-	expect(container.querySelector('[data-collapsed="true"]')).not.toBeNull();
+	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
 	expect(uncheck?.getAttribute("aria-pressed")).toBe("true");
 });
