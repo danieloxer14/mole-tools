@@ -91,6 +91,14 @@ test("sanitizes unsafe tags, attributes, and URLs from comment HTML", () => {
 	expect(html).not.toContain("javascript:");
 	expect(html).not.toContain("alert(");
 });
+
+test("keeps single-newline breaks disabled by default and enables them on request", () => {
+	expect(renderMarkdownHtml("first\nsecond")).toContain("<p>first\nsecond</p>");
+	expect(
+		renderMarkdownHtml("first\nsecond", undefined, { breaks: true }),
+	).toContain("<p>first<br>second</p>");
+});
+
 test("wraps Markdown tables for internal scrolling while preserving fenced code", () => {
 	const longUrl = `https://example.test/${"segment".repeat(20)}`;
 	const html = renderMarkdownHtml(

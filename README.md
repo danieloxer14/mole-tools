@@ -237,13 +237,19 @@ of the active preset. The shipped default seeds `default/001.md` on first
 access, and `config.prompts` records the active preset per slot (a missing
 entry means `default`).
 
-The five review prompt slots are managed from the **Prompts** tab in Settings.
+The five review prompt slots are managed from **Settings > Prompts**.
 General review defaults are in **General**. Saving a prompt creates a new
 version, **Roll back** copies an older version forward as a new latest version,
 and **Reset** writes the shipped default as a new version. This history is
 append-only: mole-tools never deletes prompt versions. The `commit-system`,
 `mr-code`, and `mr-plan` presets are selected in `config.json`'s `prompts` map;
 their text edits still live under `~/.config/mole-tools/prompts/`.
+
+Shipped layer-prompt guidance does not automatically replace existing prompt
+versions. To adopt updated guidance, open **Settings > Prompts**, select
+`review-layers-code` or `review-layers-plan`, and choose **Reset** to save the
+shipped guidance as a new version; existing versions remain in history. Use
+**Regenerate** in the review UI to apply it to already cached layers.
 
 Existing flat prompt files migrate lazily, once on first access of their slot:
 `prompts/<slot>.md` becomes `<slot>/default/001.md`. The former
@@ -386,8 +392,12 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
-Review layers show Open as a neutral circle, Done as a green check circle, and
-Stale as a warning badge.
+Review layers have one completion circle: Open is neutral, Done is green with a
+check, and hovering or focusing the circle previews the action (check to
+complete, cross to reopen). Stale layers retain a warning badge. Layer
+descriptions render as compact, sanitized GitHub-flavoured Markdown with
+preserved line breaks; unsafe HTML is removed and unsafe link targets are
+neutralized.
 
 Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed

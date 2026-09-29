@@ -14,11 +14,13 @@ export function escapeHtml(value: string): string {
 /**
  * Parses `source` as GitHub-flavoured markdown and returns sanitized HTML.
  * Pass `configureRenderer` to override individual renderer methods (e.g. to
- * intercept fenced code blocks for a diagram engine).
+ * intercept fenced code blocks for a diagram engine). Set `options.breaks` to
+ * convert single newlines to hard breaks; this is disabled by default.
  */
 export function renderMarkdownHtml(
 	source: string,
 	configureRenderer?: (renderer: Renderer) => void,
+	options: { breaks?: boolean } = {},
 ): string {
 	const renderer = new Renderer();
 	const defaultTable = renderer.table.bind(renderer);
@@ -27,6 +29,7 @@ export function renderMarkdownHtml(
 	configureRenderer?.(renderer);
 	const html = marked.parse(source, {
 		async: false,
+		breaks: options.breaks ?? false,
 		gfm: true,
 		renderer,
 	}) as string;

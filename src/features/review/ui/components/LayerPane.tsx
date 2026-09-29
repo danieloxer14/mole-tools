@@ -1,6 +1,14 @@
 import { cn } from "cn";
-import { Check, ChevronDown, FileText, Loader2, RefreshCw } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+	Check,
+	ChevronDown,
+	FileText,
+	Loader2,
+	RefreshCw,
+	X,
+} from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { renderMarkdownHtml } from "../../../../shared/markdown";
 import type { ReviewState } from "../../state";
 import { changedFileCount, viewedFileCount } from "./ChangedFilesHeader";
 import { IconButton } from "./IconButton";
@@ -8,7 +16,6 @@ import { ProgressBar } from "./ProgressBar";
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -110,16 +117,6 @@ export function collapseLayerOnDoneTransition(
 	return next;
 }
 
-export function collapseLayerWhenDone(
-	collapsedLayerIds: ReadonlySet<string>,
-	layerId: string,
-	done: boolean,
-): Set<string> {
-	const next = new Set(collapsedLayerIds);
-	if (done) next.add(layerId);
-	return next;
-}
-
 /** Shortens a changed-file path to the shortest suffix of whole path
  * segments that is still unique among the given paths, so layer file chips
  * display compact relative names. Falls back to the full path when no
@@ -142,6 +139,28 @@ export function shortFilePath(
 		if (!collides) return suffix.join("/");
 	}
 	return path;
+}
+
+function LayerDescription({ text }: { text: string }) {
+	const html = useMemo(() => {
+		try {
+			return renderMarkdownHtml(text, undefined, { breaks: true });
+		} catch {
+			return null;
+		}
+	}, [text]);
+
+	if (html === null) {
+		return <div className="layer-markdown layer-markdown-plain">{text}</div>;
+	}
+
+	return (
+		<div
+			className="layer-markdown"
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
+			dangerouslySetInnerHTML={{ __html: html }}
+		/>
+	);
 }
 
 export function LayerPane({
@@ -399,18 +418,38 @@ export function LayerPane({
 														</Button>
 													}
 												/>
-												<Checkbox
-													id={`layer-done-${layer.id}`}
-													checked={layer.done}
-													aria-label={`Mark ${layer.title} done`}
-													onCheckedChange={(checked) => {
-														const done = checked === true;
-														setCollapsedLayerIds((current) =>
-															collapseLayerWhenDone(current, layer.id, done),
-														);
-														onToggleDone(layer.id, done);
-													}}
-												/>
+												<button
+													type="button"
+													aria-label={`Mark ${layer.title} ${
+														layer.done ? "not done" : "done"
+													}`}
+													aria-pressed={layer.done}
+													data-layer-state={layerState}
+													className={`group inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-transparent transition-colors duration-150 ease-out focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 ${
+														layer.done
+															? "bg-success text-success-foreground hover:bg-success/80"
+															: "bg-secondary text-secondary-foreground hover:bg-secondary"
+													}`}
+													onClick={() => onToggleDone(layer.id, !layer.done)}
+												>
+													{layer.done ? (
+														<>
+															<Check
+																className="size-3 group-hover:hidden group-focus-visible:hidden"
+																aria-hidden
+															/>
+															<X
+																className="hidden size-3 group-hover:block group-focus-visible:block"
+																aria-hidden
+															/>
+														</>
+													) : (
+														<Check
+															className="invisible size-3 group-hover:visible group-focus-visible:visible"
+															aria-hidden
+														/>
+													)}
+												</button>
 												<button
 													type="button"
 													className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"
@@ -431,22 +470,7 @@ export function LayerPane({
 													>
 														Stale
 													</Badge>
-												) : (
-													<span
-														role="img"
-														aria-label={layerState === "done" ? "Done" : "Open"}
-														data-layer-state={layerState}
-														className={`inline-flex size-5 shrink-0 items-center justify-center rounded-full ${
-															layerState === "done"
-																? "bg-success text-success-foreground"
-																: "bg-secondary"
-														}`}
-													>
-														{layerState === "done" && (
-															<Check className="size-3" aria-hidden />
-														)}
-													</span>
-												)}
+												) : null}
 											</div>
 											<CollapsibleContent
 												keepMounted
@@ -454,7 +478,7 @@ export function LayerPane({
 												className="space-y-3 px-3 pb-3 text-sm text-foreground"
 												data-collapsed={collapsed ? "true" : "false"}
 											>
-												<p>{layer.tldr}</p>
+												<LayerDescription text={layer.tldr} />
 												<div className="flex items-center gap-3 text-xs">
 													<span className="shrink-0">File coverage</span>
 													<ProgressBar
