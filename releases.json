@@ -1,5 +1,21 @@
 [
 	{
+		"version": "0.11.0",
+		"description": "Adds release-note update notifications and full-path changed-file filtering, with review sync and navigation improvements.",
+		"features": [
+			"Show release notes in a once-per-version update notification.",
+			"Filter changed files by case-insensitive full path."
+		],
+		"improvements": [
+			"Refresh review metadata and discussions during sync when merge request head is unchanged.",
+			"Use the latest Opus model by default for Claude reviews."
+		],
+		"fixes": [
+			"Route agent-authored Markdown file links to changed-file review navigation.",
+			"Add a right gutter to file Markdown previews."
+		]
+	},
+	{
 		"version": "0.10.1",
 		"description": "Adds viewed-file chip highlighting and improves constrained diff toolbar layout.",
 		"features": [
