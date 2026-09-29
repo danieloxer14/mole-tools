@@ -700,3 +700,68 @@ test("omits From chat when no context is supplied", () => {
 	);
 	expect(markup).not.toContain("From chat");
 });
+test("from-chat draft targeting keeps same-anchor requests with clicked draft", async () => {
+	const container = document.createElement("div");
+	const root = createRoot(container);
+	document.body.append(container);
+	const requests: { draftId: string; chatId: string }[] = [];
+	const drafts = [
+		{ ...draftFor("Existing A"), id: "draft-a" },
+		{ ...draftFor("Existing B"), id: "draft-b" },
+	];
+	let activeChatId = "chat-a";
+	let resolveA: ((draft: Draft) => void) | undefined;
+	let resolveB: ((draft: Draft) => void) | undefined;
+	const render = () =>
+		root.render(
+			<div>
+				{drafts.map((draft) => (
+					<CommentDraft
+						key={draft.id}
+						draft={draft}
+						onCancel={() => {}}
+						onEdit={() => {}}
+						onSend={() => {}}
+						onRetry={() => {}}
+						fromChat={{
+							...fromChat(),
+							onGenerate: (id) => {
+								const chatId = activeChatId;
+								requests.push({ draftId: id, chatId });
+								const resolve = (generated: Draft) => {
+									const index = drafts.findIndex((item) => item.id === id);
+									if (index >= 0) drafts[index] = generated;
+								};
+								if (id === "draft-a") resolveA = resolve;
+								else resolveB = resolve;
+							},
+						}}
+					/>
+				))}
+			</div>,
+		);
+	try {
+		act(render);
+		const buttons = container.querySelectorAll<HTMLButtonElement>(
+			'button[aria-label="From chat"]',
+		);
+		act(() => buttons[0]?.click());
+		activeChatId = "chat-b";
+		act(() => buttons[1]?.click());
+		expect(requests).toEqual([
+			{ draftId: "draft-a", chatId: "chat-a" },
+			{ draftId: "draft-b", chatId: "chat-b" },
+		]);
+		act(() => {
+			resolveB?.({ ...drafts[1], body: "Existing B\n\nGenerated B" });
+			resolveA?.({ ...drafts[0], body: "Existing A\n\nGenerated A" });
+		});
+		expect(drafts.map(({ id, body }) => [id, body])).toEqual([
+			["draft-a", "Existing A\n\nGenerated A"],
+			["draft-b", "Existing B\n\nGenerated B"],
+		]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});

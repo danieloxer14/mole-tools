@@ -1915,6 +1915,166 @@ describe("review routes", () => {
 		expect(clear.status).toBe(unknown.status);
 	});
 
+	test("multi-draft lifecycle persists B while A send is deferred", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-multi-draft-"));
+		try {
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			const draftA = {
+				id: "draft-a",
+				body: "Body A",
+				selection: commentSelection,
+				filePath: commentSelection.path,
+				status: "draft" as const,
+				error: null,
+				postedDiscussionId: null,
+				staleSince: null,
+			};
+			await store.write(
+				ReviewStateSchema.parse({ ...state(), drafts: [draftA] }),
+			);
+			let releaseDiscussion!: () => void;
+			let announceStarted!: () => void;
+			const discussionGate = new Promise<void>((resolve) => {
+				releaseDiscussion = resolve;
+			});
+			const discussionStarted = new Promise<void>((resolve) => {
+				announceStarted = resolve;
+			});
+			let sentBody: string | null = null;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				diff: commentDiff,
+				gitHost: {
+					createDiscussion: async (input) => {
+						sentBody = input.body;
+						announceStarted();
+						await discussionGate;
+						return discussion;
+					},
+					listDiscussions: async () => [discussion],
+				},
+			});
+
+			const sendResponsePromise = routes(
+				request(`/api/comments/${draftA.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			await discussionStarted;
+			const createBResponse = await routes(
+				request(`/api/comments/draft?t=${token}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						selection: {
+							...commentSelection,
+							startLine: commentSelection.startLine + 1,
+							endLine: commentSelection.endLine + 1,
+						},
+						filePath: commentSelection.path,
+					}),
+				}),
+			);
+			const draftB = (await createBResponse.json()) as { id: string };
+			const duringSend = await store.read();
+			expect(duringSend?.drafts).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ id: draftA.id, body: "Body A" }),
+					expect.objectContaining({ id: draftB.id, body: "" }),
+				]),
+			);
+			releaseDiscussion();
+			const sendResponse = await sendResponsePromise;
+			await sendResponse.text();
+			const afterSend = await store.read();
+			expect(sentBody).toBe("Body A");
+			expect(afterSend?.drafts).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						id: draftA.id,
+						body: "Body A",
+						status: "posted",
+					}),
+					expect.objectContaining({
+						id: draftB.id,
+						body: "",
+						status: "draft",
+					}),
+				]),
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("draft edit queue sends the persisted latest body", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-draft-edit-queue-"));
+		try {
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(
+				ReviewStateSchema.parse({
+					...state(),
+					drafts: [
+						{
+							id: "draft-queue",
+							body: "Old body",
+							selection: commentSelection,
+							filePath: commentSelection.path,
+							status: "draft",
+							error: null,
+							postedDiscussionId: null,
+							staleSince: null,
+						},
+					],
+				}),
+			);
+			let postedBody: string | null = null;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				diff: commentDiff,
+				gitHost: {
+					createDiscussion: async (input) => {
+						postedBody = input.body;
+						return discussion;
+					},
+					listDiscussions: async () => [discussion],
+				},
+			});
+
+			const updated = await routes(
+				request(`/api/comments/draft-queue?t=${token}`, {
+					method: "PUT",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ body: "Last typed body" }),
+				}),
+			);
+			expect(updated.status).toBe(200);
+			const sent = await routes(
+				request(`/api/comments/draft-queue/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			await sent.text();
+			expect(sent.status).toBe(200);
+			expect(postedBody).toBe("Last typed body");
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: "Last typed body",
+				status: "posted",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("streams a successful comment send and replaces the draft", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-send-route-"));
 		try {
