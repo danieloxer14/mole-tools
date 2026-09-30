@@ -6,10 +6,12 @@ import type { ReviewState } from "../../state";
 import {
 	IMPORTANCE_BG_CLASS,
 	type ImportanceRating,
+	type ImportanceReviewProgress,
 	importanceTitle,
 } from "../importance";
 import { changedFileCount, viewedFileCount } from "./ChangedFilesHeader";
 import { IconButton } from "./IconButton";
+import { ImportanceProgressBar } from "./ImportanceProgressBar";
 import { ProgressBar } from "./ProgressBar";
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -38,6 +40,7 @@ interface LayerPaneProps {
 	onRegenerate: () => void;
 	onRetry: () => void;
 	importanceByPath?: ReadonlyMap<string, ImportanceRating>;
+	importanceProgress?: ImportanceReviewProgress;
 }
 
 export function layersStatusMessage(
@@ -176,6 +179,7 @@ export function LayerPane({
 	onRegenerate,
 	onRetry,
 	importanceByPath,
+	importanceProgress,
 }: LayerPaneProps) {
 	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
 		() =>
@@ -335,6 +339,12 @@ export function LayerPane({
 								{layerActionControl}
 							</div>
 						)}
+						{importanceProgress ? (
+							<ImportanceProgressBar
+								className="px-4 pb-3"
+								progress={importanceProgress}
+							/>
+						) : null}
 						{state.layerStatus === "failed" && state.layerError ? (
 							<Alert className="mx-4 mb-3" variant="destructive">
 								{state.layerError}

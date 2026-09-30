@@ -1,6 +1,8 @@
 import { List, ListTree, Search } from "lucide-react";
 import type { ImportanceStatus } from "../../importance";
+import type { ImportanceReviewProgress } from "../importance";
 
+import { ImportanceProgressBar } from "./ImportanceProgressBar";
 import { ProgressBar } from "./ProgressBar";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -26,6 +28,7 @@ export interface ChangedFilesHeaderProps {
 		canRetry: boolean;
 		onRetry: () => void;
 	};
+	importanceProgress?: ImportanceReviewProgress;
 }
 
 export function viewedFileCount(
@@ -59,6 +62,7 @@ export function ChangedFilesHeader({
 	filterQuery,
 	onFilterQueryChange,
 	importance,
+	importanceProgress,
 }: ChangedFilesHeaderProps) {
 	return (
 		<div
@@ -152,6 +156,9 @@ export function ChangedFilesHeader({
 					</div>
 				)}
 			</div>
+			{importanceProgress ? (
+				<ImportanceProgressBar progress={importanceProgress} />
+			) : null}
 			<div className="flex min-w-0 items-center rounded-3xl border border-border bg-input/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
 				<div className="relative min-w-0 flex-1">
 					<Search

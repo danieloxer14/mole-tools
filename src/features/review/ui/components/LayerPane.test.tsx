@@ -117,6 +117,21 @@ function renderLayerPane(
 		/>,
 	);
 }
+test("renders importance progress after completed layers progress", () => {
+	const html = renderLayerPane({
+		importanceProgress: { value: 3, total: 6, threshold: 1.5 },
+	});
+	const completedIndex = html.indexOf('aria-label="Completed"');
+	const importanceIndex = html.indexOf(
+		'aria-label="Importance review progress"',
+	);
+
+	expect(importanceIndex).toBeGreaterThan(completedIndex);
+});
+
+test("omits importance progress when no progress is provided", () => {
+	expect(renderLayerPane()).not.toContain("Importance review progress");
+});
 
 function parseMarkup(markup: string): HTMLDivElement {
 	const container = document.createElement("div");

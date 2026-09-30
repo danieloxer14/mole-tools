@@ -1,4 +1,8 @@
-import type { DiffHunk, DiffLine } from "../../../shared/diff-parse";
+import type {
+	DiffHunk,
+	DiffLine,
+	ParsedFileDiff,
+} from "../../../shared/diff-parse";
 import type {
 	ImportanceFile,
 	ImportanceScore,
@@ -72,6 +76,103 @@ export function indexedDiffLineImportance(
 	if (oldRating === null) return newRating;
 	if (newRating === null) return oldRating;
 	return oldRating.score > newRating.score ? oldRating : newRating;
+}
+
+const IMPORTANCE_WEIGHTS: Record<ImportanceScore, number> = {
+	1: 0.5,
+	2: 0.75,
+	3: 1,
+	4: 1.25,
+	5: 1.5,
+};
+
+export interface ImportanceReviewProgress {
+	value: number;
+	total: number;
+	threshold: number;
+}
+
+export interface ImportanceReviewFileTotals {
+	byPath: ReadonlyMap<string, { total: number; threshold: number }>;
+	total: number;
+	threshold: number;
+}
+
+export function importanceReviewFileTotals(
+	diff: readonly ParsedFileDiff[],
+	files: readonly ImportanceFile[],
+): ImportanceReviewFileTotals {
+	const spansByPath = new Map<string, ImportanceSpan[]>();
+	for (const file of files) {
+		const spans = spansByPath.get(file.path);
+		if (spans) spans.push(...file.spans);
+		else spansByPath.set(file.path, [...file.spans]);
+	}
+
+	const byPath = new Map<string, { total: number; threshold: number }>();
+	const seen = new Set<string>();
+	let total = 0;
+	let threshold = 0;
+
+	for (const file of diff) {
+		const key = file.newPath ?? file.oldPath;
+		if (!key || seen.has(key)) continue;
+		seen.add(key);
+
+		const spans = spansByPath.get(key);
+		if (!spans) continue;
+		const ratings = lineImportanceMap(spans, file.hunks);
+		let fileTotal = 0;
+		let fileThreshold = 0;
+		for (const hunk of file.hunks) {
+			for (const line of hunk.lines) {
+				if (line.kind !== "add" && line.kind !== "del") continue;
+				const rating = indexedDiffLineImportance(ratings, line);
+				if (rating === null) continue;
+				const weight = IMPORTANCE_WEIGHTS[rating.score];
+				fileTotal += weight;
+				if (rating.score >= 4) fileThreshold += weight;
+			}
+		}
+
+		byPath.set(key, { total: fileTotal, threshold: fileThreshold });
+		total += fileTotal;
+		threshold += fileThreshold;
+	}
+
+	return { byPath, total, threshold };
+}
+
+export function importanceReviewProgressForViewedFiles(
+	fileTotals: ImportanceReviewFileTotals,
+	viewedFiles: readonly string[],
+): ImportanceReviewProgress {
+	const viewed = new Set(viewedFiles);
+	let value = 0;
+	for (const [path, totals] of fileTotals.byPath) {
+		if (viewed.has(path)) value += totals.total;
+	}
+	return { value, total: fileTotals.total, threshold: fileTotals.threshold };
+}
+
+export function importanceReviewProgress(
+	diff: readonly ParsedFileDiff[],
+	files: readonly ImportanceFile[],
+	viewedFiles: readonly string[],
+): ImportanceReviewProgress {
+	return importanceReviewProgressForViewedFiles(
+		importanceReviewFileTotals(diff, files),
+		viewedFiles,
+	);
+}
+
+export function importanceProgressColor(ratio: number): string {
+	if (!Number.isFinite(ratio) || ratio < 0) ratio = 0;
+	if (ratio >= 1) return "var(--color-importance-5)";
+	const scaled = ratio * 4;
+	const index = Math.floor(scaled);
+	const progress = scaled - index;
+	return `color-mix(in oklch, var(--color-importance-${index + 1}) ${Math.round((1 - progress) * 100)}%, var(--color-importance-${index + 2}))`;
 }
 
 export function importanceTitle(score: ImportanceScore): string {

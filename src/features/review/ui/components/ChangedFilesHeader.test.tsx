@@ -53,6 +53,21 @@ test("does not render importance markup when absent or null", () => {
 	).toBe(markup());
 });
 
+test("renders importance progress between file count and filter", () => {
+	const html = markup({
+		importanceProgress: { value: 3, total: 6, threshold: 1.5 },
+	});
+
+	expect(html).toContain('aria-label="Importance review progress"');
+	expect(html.indexOf("Importance review progress")).toBeGreaterThan(
+		html.indexOf("files</span>"),
+	);
+	expect(html.indexOf("Importance review progress")).toBeLessThan(
+		html.indexOf('placeholder="Filter files"'),
+	);
+	expect(markup()).not.toContain("Importance review progress");
+});
+
 test("shows pending and running importance status", () => {
 	for (const status of ["pending", "running"] as const) {
 		const html = markup({

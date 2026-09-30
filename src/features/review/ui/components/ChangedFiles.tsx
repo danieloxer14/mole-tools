@@ -229,6 +229,7 @@ export interface ChangedFilesProps {
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	importanceByPath?: ReadonlyMap<string, ImportanceRating>;
 	importance?: ChangedFilesHeaderProps["importance"];
+	importanceProgress?: ChangedFilesHeaderProps["importanceProgress"];
 }
 
 export interface ChangedFileEntry {
@@ -613,6 +614,7 @@ export function ChangedFiles({
 	onViewedChange,
 	importance,
 	importanceByPath,
+	importanceProgress,
 }: ChangedFilesProps): ReactElement {
 	const [mode, setMode] = useState<ChangedFilesMode>("list");
 	const [filterQuery, setFilterQuery] = useState("");
@@ -832,6 +834,7 @@ export function ChangedFiles({
 				filterQuery={filterQuery}
 				onFilterQueryChange={setFilterQuery}
 				importance={importance}
+				importanceProgress={importanceProgress}
 			/>
 			<nav
 				className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto"

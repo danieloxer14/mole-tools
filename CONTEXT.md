@@ -144,5 +144,13 @@ with head and merge-base SHA stamps at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 Running status exists in memory only.
 
+**Importance review progress** appears on Layers and Files tabs when the feature
+flag is on and scoring is ready, showing the same percentage: weighted added and
+deleted lines in viewed files against all scored changed lines (levels 1–5 weigh
+0.5, 0.75, 1, 1.25, and 1.5; context and unscored lines don't count). A marker
+shows the target for all High (4) and Critical (5) lines; fill blends through
+importance colours toward level 5 and stays level 5 at the target. A subtle
+flame animates once reached, static with reduced motion.
+
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.
