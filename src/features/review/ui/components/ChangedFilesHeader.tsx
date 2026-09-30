@@ -124,7 +124,7 @@ export function ChangedFilesHeader({
 						importance.status === "running" ? (
 							<span className="flex items-center gap-1.5 text-muted-foreground">
 								<Spinner className="size-3" />
-								Scoring importance…
+								Scoring…
 							</span>
 						) : (
 							<>

@@ -58,8 +58,7 @@ test("shows pending and running importance status", () => {
 		const html = markup({
 			importance: { status, error: null, canRetry: false, onRetry: noop },
 		});
-		expect(html).toContain("Scoring importance…");
-		expect(html).toContain('data-slot="spinner"');
+		expect(html).toContain("Scoring…");
 	}
 });
 

@@ -489,7 +489,7 @@ reason sentence of at most 144 characters for every span. Pastel blue-to-red
 colours mark diff gutters, changed-file rows (using each file's highest span
 score), and layer file pills. Diff gutters and layer pills show each span's
 score label and reason in custom tooltips. The Changed files header shows
-**Scoring importance…** while running or **Importance failed** with an error
+**Scoring…** while running or **Importance failed** with an error
 tooltip and **Retry** on failure. Results persist at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
