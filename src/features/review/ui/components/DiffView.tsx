@@ -44,8 +44,17 @@ import type {
 	DiffLine,
 	ParsedFileDiff,
 } from "../../../../shared/diff-parse";
+import type { ImportanceSpan } from "../../importance";
 import { type Draft, isMarkdownSelection } from "../../state";
 import type { FromChatContext } from "../from-chat";
+import {
+	IMPORTANCE_BG_CLASS,
+	type ImportanceLineMap,
+	type ImportanceRating,
+	importanceTitle,
+	indexedDiffLineImportance,
+	lineImportanceMap,
+} from "../importance";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 import { CommentMarkdown } from "./CommentMarkdown";
 import {
@@ -83,7 +92,12 @@ import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
 } from "./ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "./ui/tooltip";
 import { useDiffDrag } from "./use-diff-drag";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
@@ -127,6 +141,7 @@ interface DiffViewProps {
 	fileContentsError: string | null;
 	discussions?: readonly HostDiscussion[];
 	drafts?: readonly Draft[];
+	importance?: readonly ImportanceSpan[];
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	onModeChange: (mode: DiffMode) => void;
@@ -803,6 +818,29 @@ function LineActions({
 	);
 }
 
+function ImportanceStrip({ rating }: { rating: ImportanceRating }) {
+	return (
+		<TooltipProvider delay={0}>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<span
+							role="img"
+							aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
+							tabIndex={-1}
+							className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]}`}
+						/>
+					}
+				/>
+				<TooltipContent className="flex-col items-start gap-0.5">
+					<span className="font-medium">{importanceTitle(rating.score)}</span>
+					<span>{rating.reason}</span>
+				</TooltipContent>
+			</Tooltip>
+		</TooltipProvider>
+	);
+}
+
 function DiffLineRow({
 	line,
 	mode,
@@ -817,6 +855,7 @@ function DiffLineRow({
 	selected = false,
 	drag,
 	onDragStart,
+	importance,
 }: {
 	line: DiffLine;
 	mode: DiffMode;
@@ -831,6 +870,7 @@ function DiffLineRow({
 	selected?: boolean;
 	drag?: { hunkIndex: number; side: "new" | "old"; line: number };
 	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
+	importance?: ImportanceLineMap;
 }) {
 	const isMatch = lineTextMatches(line.text, find.query);
 	const isCurrent = find.currentId === findId;
@@ -882,6 +922,11 @@ function DiffLineRow({
 	);
 	const oldHighlight = lineHighlight(highlightedCode, "old", line.oldLine);
 	const newHighlight = lineHighlight(highlightedCode, "new", line.newLine);
+	const lineRating = importance
+		? indexedDiffLineImportance(importance, line)
+		: null;
+	const oldRating = line.kind !== "add" ? lineRating : null;
+	const newRating = line.kind !== "del" ? lineRating : null;
 	return mode === "inline" ? (
 		<tr
 			ref={setRef}
@@ -889,7 +934,14 @@ function DiffLineRow({
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
 			{...trProps}
 		>
-			<td className="line-number">{line.oldLine ?? ""}</td>
+			<td
+				className={
+					lineRating === null ? "line-number" : "line-number importance-cell"
+				}
+			>
+				{lineRating === null ? null : <ImportanceStrip rating={lineRating} />}
+				{line.oldLine ?? ""}
+			</td>
 			<td className="line-number">{line.newLine ?? ""}</td>
 			<td className="line-text">
 				<span className="line-prefix">
@@ -914,7 +966,14 @@ function DiffLineRow({
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
 			{...trProps}
 		>
-			<td className="line-number">{line.oldLine ?? ""}</td>
+			<td
+				className={
+					oldRating === null ? "line-number" : "line-number importance-cell"
+				}
+			>
+				{oldRating === null ? null : <ImportanceStrip rating={oldRating} />}
+				{line.oldLine ?? ""}
+			</td>
 			<td className={`side-line ${line.kind === "del" ? "removed" : ""}`}>
 				{line.kind === "add" ? (
 					""
@@ -935,7 +994,14 @@ function DiffLineRow({
 					</>
 				)}
 			</td>
-			<td className="line-number">{line.newLine ?? ""}</td>
+			<td
+				className={
+					newRating === null ? "line-number" : "line-number importance-cell"
+				}
+			>
+				{newRating === null ? null : <ImportanceStrip rating={newRating} />}
+				{line.newLine ?? ""}
+			</td>
 			<td className={`side-line ${line.kind === "add" ? "added" : ""}`}>
 				{line.kind === "del" ? (
 					""
@@ -1116,6 +1182,7 @@ function HunkRows({
 	dragSelected,
 	collapsedDiscussionIds,
 	onToggleDiscussionCollapse,
+	importance,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
@@ -1150,6 +1217,7 @@ function HunkRows({
 	dragSelected?: (row: DiffDragRow) => boolean;
 	collapsedDiscussionIds: ReadonlySet<string>;
 	onToggleDiscussionCollapse: (discussionId: string) => void;
+	importance?: ImportanceLineMap;
 }) {
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
@@ -1215,6 +1283,7 @@ function HunkRows({
 									? (event) => onLineClick(line, hunk.header, event)
 									: undefined
 							}
+							importance={importance}
 						/>
 						<InlineCommentRows
 							file={file}
@@ -1274,6 +1343,7 @@ function DiffTable({
 	onCommentSelection,
 	collapsedDiscussionIds,
 	onToggleDiscussionCollapse,
+	importance,
 }: {
 	file: ParsedFileDiff;
 	mode: DiffMode;
@@ -1290,8 +1360,13 @@ function DiffTable({
 	onCommentSelection?: (selection: DiffLineSelection) => void;
 	collapsedDiscussionIds: ReadonlySet<string>;
 	onToggleDiscussionCollapse: (discussionId: string) => void;
+	importance?: readonly ImportanceSpan[];
 }) {
 	const path = file.newPath ?? file.oldPath ?? "";
+	const importanceIndex = useMemo(
+		() => (importance ? lineImportanceMap(importance, file.hunks) : undefined),
+		[file.hunks, importance],
+	);
 	const language = path.split(".").pop() ?? "text";
 	const defaultSide = file.status === "deleted" ? "old" : "new";
 	const highlightedCode = useCodeHighlights(file, fileContents, language);
@@ -1489,6 +1564,7 @@ function DiffTable({
 								}
 								collapsedDiscussionIds={collapsedDiscussionIds}
 								onToggleDiscussionCollapse={onToggleDiscussionCollapse}
+								importance={importanceIndex}
 							/>
 						</Fragment>
 					);
@@ -1532,6 +1608,7 @@ export function DiffView({
 	onSendDraft,
 	onRetryDraft,
 	fromChat,
+	importance,
 	collapsedDiscussionIds: savedCollapsedDiscussionIds = [],
 	onCollapsedDiscussionIdsChange,
 	findQuery: findQueryProp,
@@ -2053,6 +2130,7 @@ export function DiffView({
 							find={find}
 							collapsedDiscussionIds={collapsedDiscussionIds}
 							onToggleDiscussionCollapse={toggleDiscussionCollapse}
+							importance={importance}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (

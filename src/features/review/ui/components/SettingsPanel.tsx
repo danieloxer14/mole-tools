@@ -2,6 +2,7 @@ import {
 	type ReactNode,
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -13,8 +14,11 @@ import {
 	type PromptAgentName,
 } from "../../../../adapters/prompts/frontmatter";
 import { APP_VERSION } from "../../../../shared/app-version";
+import type { FeatureFlagId } from "../../../../shared/feature-flags";
 import { controlValue, errorMessage, postJson, requestJson } from "../api-json";
+import { useConfirmedFeatureFlags } from "../feature-flags";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { FeaturesSettings } from "./FeaturesSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { Alert } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -23,6 +27,10 @@ import { Input } from "./ui/input";
 import { NativeSelect } from "./ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
+export const FEATURE_SLOTS: readonly {
+	slot: PromptName;
+	flag: FeatureFlagId;
+}[] = [{ slot: "review-importance", flag: "layer-importance" }];
 export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-layers-code",
 	"review-layers-plan",
@@ -40,6 +48,7 @@ export const SLOT_LABELS: Record<PromptName, string> = {
 	"review-chat": "Review chat",
 	"review-explain-comment": "Explain review comment",
 	"review-comment-from-chat": "Comment from chat",
+	"review-importance": "Review importance",
 };
 export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 	"commit-system":
@@ -58,11 +67,18 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Prompt used by the review UI to explain a GitLab discussion in a new chat.",
 	"review-comment-from-chat":
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
+	"review-importance":
+		"System prompt the importance agent uses to score changed line spans 1–5 and provide a concise reason for each (Features → File important must be on).",
 };
 
 type ReviewAgent = PromptAgentName;
 type PromptAgent = "default" | ReviewAgent;
-type SettingsTab = "general" | "prompts" | "skills" | "appearance";
+export type SettingsTab =
+	| "general"
+	| "prompts"
+	| "skills"
+	| "appearance"
+	| "features";
 
 interface ModelCatalogModel {
 	id: string;
@@ -207,8 +223,20 @@ export function SettingsPanel({
 	initialTab,
 	whitespace,
 }: SettingsPanelProps) {
+	const flags = useConfirmedFeatureFlags();
+	const visibleSlots = useMemo(() => {
+		const enabledFlags = new Set(
+			flags?.filter((flag) => flag.enabled).map((flag) => flag.id),
+		);
+		return [
+			...VISIBLE_SLOTS,
+			...FEATURE_SLOTS.filter((entry) => enabledFlags.has(entry.flag)).map(
+				(entry) => entry.slot,
+			),
+		];
+	}, [flags]);
 	const firstSlot: PromptName =
-		initialSettings?.slots.find((slot) => VISIBLE_SLOTS.includes(slot.slot))
+		initialSettings?.slots.find((slot) => visibleSlots.includes(slot.slot))
 			?.slot ??
 		VISIBLE_SLOTS[0] ??
 		"review-layers-code";
@@ -447,26 +475,33 @@ export function SettingsPanel({
 	);
 	const latestVersion = prompt ? (prompt.versions.at(-1) ?? prompt.version) : 0;
 
-	const handleSlotSelect = (slot: PromptName) => {
-		if (!settings) return;
-		const slotSettings = settings.slots.find((item) => item.slot === slot);
-		const preset = slotSettings?.activePreset ?? "default";
-		setSelectedSlot(slot);
-		setSelectedPreset(preset);
-		clearPromptState(
-			setPrompt,
-			setText,
-			setLoadedText,
-			setSelectedVersion,
-			setPromptAgent,
-			setLoadedAgent,
-			setPromptModel,
-			setLoadedModel,
-			setPromptEffort,
-			setLoadedEffort,
-		);
-		void loadPromptWithPending(slot, preset);
-	};
+	const handleSlotSelect = useCallback(
+		(slot: PromptName) => {
+			if (!settings) return;
+			const slotSettings = settings.slots.find((item) => item.slot === slot);
+			const preset = slotSettings?.activePreset ?? "default";
+			setSelectedSlot(slot);
+			setSelectedPreset(preset);
+			clearPromptState(
+				setPrompt,
+				setText,
+				setLoadedText,
+				setSelectedVersion,
+				setPromptAgent,
+				setLoadedAgent,
+				setPromptModel,
+				setLoadedModel,
+				setPromptEffort,
+				setLoadedEffort,
+			);
+			void loadPromptWithPending(slot, preset);
+		},
+		[loadPromptWithPending, settings],
+	);
+	useEffect(() => {
+		if (!settings || visibleSlots.includes(selectedSlot)) return;
+		handleSlotSelect(firstSlot);
+	}, [firstSlot, handleSlotSelect, selectedSlot, settings, visibleSlots]);
 
 	const handlePresetChange = (value: string) => {
 		setSelectedPreset(value);
@@ -731,7 +766,8 @@ export function SettingsPanel({
 						value === "general" ||
 						value === "prompts" ||
 						value === "skills" ||
-						value === "appearance"
+						value === "appearance" ||
+						value === "features"
 					) {
 						setSelectedTab(value);
 					}
@@ -746,6 +782,7 @@ export function SettingsPanel({
 					<TabsTrigger value="prompts">Prompts</TabsTrigger>
 					<TabsTrigger value="skills">Skills</TabsTrigger>
 					<TabsTrigger value="appearance">Appearance</TabsTrigger>
+					<TabsTrigger value="features">Features</TabsTrigger>
 				</TabsList>
 				<TabsContent
 					value="general"
@@ -951,7 +988,7 @@ export function SettingsPanel({
 						<div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-auto p-6 md:grid-cols-[14rem_minmax(0,1fr)] md:gap-6">
 							<nav className="space-y-1" aria-label="Prompt slots">
 								{settings.slots
-									.filter((slot) => VISIBLE_SLOTS.includes(slot.slot))
+									.filter((slot) => visibleSlots.includes(slot.slot))
 									.map((slot) => (
 										<button
 											key={slot.slot}
@@ -1277,6 +1314,9 @@ export function SettingsPanel({
 				</TabsContent>
 				<TabsContent value="appearance" className="overflow-auto p-6">
 					<AppearanceSettings token={token} />
+				</TabsContent>
+				<TabsContent value="features" className="overflow-auto p-6">
+					<FeaturesSettings token={token} />
 				</TabsContent>
 			</Tabs>
 		</section>

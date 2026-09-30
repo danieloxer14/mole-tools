@@ -1,4 +1,5 @@
 import type { ReviewApiState } from "../routes";
+import { apiUrl } from "./api-json";
 
 export type LayerAction = "regenerate" | "retry";
 type LayerStreamAction = LayerAction | "observe";
@@ -19,7 +20,7 @@ function parseLayerStatus(
 		: null;
 }
 
-function parseLayerSseBlock(block: string): LayerStreamFrame | null {
+function parseSseBlock(block: string): LayerStreamFrame | null {
 	let event = "message";
 	const dataLines: string[] = [];
 	for (const line of block.split(/\r?\n/)) {
@@ -36,26 +37,14 @@ function parseLayerSseBlock(block: string): LayerStreamFrame | null {
 	}
 }
 
-export async function consumeLayerStream(
-	token: string,
-	action: LayerStreamAction,
+export async function readSseFrames(
+	response: Response,
 	onFrame: (frame: LayerStreamFrame) => void,
+	missingBodyMessage: string,
 ): Promise<void> {
-	const response = await fetch(
-		`/api/layers/${action}?t=${encodeURIComponent(token)}`,
-		{
-			method: "POST",
-			headers: {
-				accept: "text/event-stream",
-				"X-Mole-Token": token,
-			},
-		},
-	);
-	if (!response.ok)
-		throw new Error(`Layer ${action} request failed (${response.status})`);
-	if (!response.body) throw new Error("Layer stream did not return a body");
-
-	const reader = response.body.getReader();
+	const body = response.body;
+	if (!body) throw new Error(missingBodyMessage);
+	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
 	try {
@@ -66,18 +55,59 @@ export async function consumeLayerStream(
 			const blocks = buffer.split(/\r?\n\r?\n/);
 			buffer = blocks.pop() ?? "";
 			for (const block of blocks) {
-				const frame = parseLayerSseBlock(block);
+				const frame = parseSseBlock(block);
 				if (frame) onFrame(frame);
 			}
 		}
 		buffer += decoder.decode();
 		if (buffer.trim()) {
-			const frame = parseLayerSseBlock(buffer);
+			const frame = parseSseBlock(buffer);
 			if (frame) onFrame(frame);
 		}
 	} finally {
 		reader.releaseLock();
 	}
+}
+
+export async function postSseStream(
+	token: string,
+	path: string,
+	streamName: "Layer" | "Importance",
+	action: LayerStreamAction,
+	onFrame: (frame: LayerStreamFrame) => void,
+	signal?: AbortSignal,
+): Promise<void> {
+	const response = await fetch(apiUrl(path, token), {
+		method: "POST",
+		headers: {
+			accept: "text/event-stream",
+			"X-Mole-Token": token,
+		},
+		signal,
+	});
+	if (!response.ok)
+		throw new Error(
+			`${streamName} ${action} request failed (${response.status})`,
+		);
+	await readSseFrames(
+		response,
+		onFrame,
+		`${streamName} stream did not return a body`,
+	);
+}
+
+export function consumeLayerStream(
+	token: string,
+	action: LayerStreamAction,
+	onFrame: (frame: LayerStreamFrame) => void,
+): Promise<void> {
+	return postSseStream(
+		token,
+		`/api/layers/${action}`,
+		"Layer",
+		action,
+		onFrame,
+	);
 }
 
 export function mergeLayerStreamFrame(

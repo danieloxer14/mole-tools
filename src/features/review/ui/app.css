@@ -59,6 +59,11 @@
 	--color-diff-hunk-bg: var(--diff-hunk-bg);
 	--color-find-match: var(--find-match);
 	--color-find-match-current: var(--find-match-current);
+	--color-importance-1: var(--importance-1);
+	--color-importance-2: var(--importance-2);
+	--color-importance-3: var(--importance-3);
+	--color-importance-4: var(--importance-4);
+	--color-importance-5: var(--importance-5);
 	--color-overlay: var(--overlay);
 }
 
@@ -107,6 +112,11 @@
 	--diff-hunk-bg: oklch(0.55 0.15 250 / 12%);
 	--find-match: oklch(0.85 0.16 90 / 50%);
 	--find-match-current: oklch(0.8 0.18 60 / 70%);
+	--importance-1: oklch(0.86 0.1 245);
+	--importance-2: oklch(0.88 0.1 200);
+	--importance-3: oklch(0.91 0.12 105);
+	--importance-4: oklch(0.86 0.12 65);
+	--importance-5: oklch(0.8 0.14 25);
 	--overlay: oklch(0 0 0 / 30%);
 }
 .dark {
@@ -152,6 +162,11 @@
 	--diff-del-fg: oklch(0.85 0.1 25);
 	--diff-hunk-bg: oklch(0.55 0.15 250 / 12%);
 	--find-match: oklch(0.85 0.16 90 / 35%);
+	--importance-1: oklch(0.72 0.1 245);
+	--importance-2: oklch(0.74 0.1 200);
+	--importance-3: oklch(0.8 0.12 105);
+	--importance-4: oklch(0.75 0.12 65);
+	--importance-5: oklch(0.7 0.14 25);
 	--find-match-current: oklch(0.8 0.18 60 / 60%);
 }
 
@@ -198,6 +213,8 @@
 .diff-table.side-by-side .diff-line > td { padding: 0; }
 .diff-table.side-by-side .diff-side-column { width: calc(50% - 3rem); }
 .diff-table.side-by-side .diff-line > td.line-number { padding-right: 0.25rem; width: auto; }
+	.diff-table .line-number.importance-cell { position: relative; }
+	.diff-table .line-number .importance-strip { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; }
 .diff-table.side-by-side .side-line { width: auto; }
 	.diff-table .line-prefix { color: var(--color-muted-foreground); display: inline-block; width: --spacing(4); }
 	.diff-table .diff-line-add, .diff-table .side-line.added { background: var(--color-diff-add-bg); color: var(--color-diff-add-fg); }

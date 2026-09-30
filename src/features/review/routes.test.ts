@@ -3,6 +3,7 @@ import {
 	mkdir,
 	mkdtemp,
 	readdir,
+	readFile,
 	rm,
 	symlink,
 	writeFile,
@@ -18,6 +19,7 @@ import type { AgentExec } from "../../adapters/agent/exec";
 import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
 import { OmpAgentAdapter } from "../../adapters/agent/omp";
 import type { Config } from "../../adapters/config/schema";
+import { FeatureFlagStore } from "../../adapters/feature-flags/store";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import { SkillStore } from "../../adapters/skills/store";
 import type { HostDiscussion } from "../../ports/git-host";
@@ -712,9 +714,9 @@ describe("review routes", () => {
 
 		for (const path of [
 			`/api/description-media/not-a-secret/clip.webm?t=${token}`,
-			`/api/description-media/${secret}/%2E%2E%2Fescape.webm?t=${token}`,
 			`/api/description-media/${secret}/clip.webm/extra?t=${token}`,
 			`/api/description-media/${secret}/https%3A%2F%2Fevil.example%2Fclip.webm?t=${token}`,
+			`/api/description-media/${secret}/%2E%2E%2Fescape.webm?t=${token}`,
 		]) {
 			expect((await routes(request(path))).status).toBe(404);
 		}
@@ -4704,7 +4706,7 @@ describe("prompt settings read API", () => {
 			const response = await routes(request(`/api/settings?t=${token}`));
 			expect(response.status).toBe(200);
 			const body = await response.json();
-			expect(body.slots).toHaveLength(8);
+			expect(body.slots).toHaveLength(9);
 			expect(body.slots.map((slot: { slot: string }) => slot.slot)).toEqual([
 				"commit-system",
 				"mr-code",
@@ -4714,6 +4716,7 @@ describe("prompt settings read API", () => {
 				"review-chat",
 				"review-explain-comment",
 				"review-comment-from-chat",
+				"review-importance",
 			]);
 			expect(body.slots).toContainEqual({
 				slot: "review-chat",
@@ -7008,5 +7011,798 @@ describe("skills API", () => {
 		const response = await routes(skillRequest("/api/skills"));
 		expect(response.status).toBe(500);
 		expect(await response.json()).toEqual({ error: "boom" });
+	});
+});
+describe("feature flags API", () => {
+	function featureRequest(path: string, body?: string): Request {
+		return request(path, {
+			method: body === undefined ? "GET" : "POST",
+			headers: {
+				"X-Mole-Token": token,
+				...(body === undefined ? {} : { "content-type": "application/json" }),
+			},
+			...(body === undefined ? {} : { body }),
+		});
+	}
+
+	test("returns registry flags with defaults when storage is absent", async () => {
+		const routes = createReviewRoutes({ token, state: state() });
+		const response = await routes(featureRequest("/api/features"));
+		expect(response.status).toBe(200);
+		const payload = (await response.json()) as {
+			flags: Array<{
+				id: string;
+				label: string;
+				description: string;
+				enabled: boolean;
+			}>;
+		};
+		expect(payload.flags).toHaveLength(1);
+		expect(payload.flags[0]).toMatchObject({
+			id: "layer-importance",
+			label: "File important",
+			enabled: false,
+		});
+	});
+
+	test("updates a flag and preserves unknown keys", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
+		try {
+			const path = join(dir, "features.json");
+			await writeFile(path, JSON.stringify({ future: true }));
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				featureFlagStore: new FeatureFlagStore(path),
+			});
+			const response = await routes(
+				featureRequest(
+					"/api/features",
+					JSON.stringify({ id: "layer-importance", enabled: true }),
+				),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.json()).toMatchObject({
+				flags: [{ id: "layer-importance", enabled: true }],
+			});
+			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+				future: true,
+				"layer-importance": true,
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("creates features.json on the first POST", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
+		try {
+			const path = join(dir, "features.json");
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				featureFlagStore: new FeatureFlagStore(path),
+			});
+
+			expect(await Bun.file(path).exists()).toBe(false);
+			const response = await routes(
+				featureRequest(
+					"/api/features",
+					JSON.stringify({ id: "layer-importance", enabled: true }),
+				),
+			);
+
+			expect(response.status).toBe(200);
+			expect(await response.json()).toMatchObject({
+				flags: [{ id: "layer-importance", enabled: true }],
+			});
+			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+				"layer-importance": true,
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects unknown ids and malformed request bodies", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
+		try {
+			const path = join(dir, "features.json");
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				featureFlagStore: new FeatureFlagStore(path),
+			});
+			for (const body of [
+				JSON.stringify({ id: "unknown", enabled: true }),
+				JSON.stringify({ id: "layer-importance" }),
+				JSON.stringify({ id: "layer-importance", enabled: true, extra: true }),
+				"not json",
+			]) {
+				const response = await routes(featureRequest("/api/features", body));
+				expect(response.status).toBe(400);
+				expect(await response.json()).toHaveProperty("error");
+			}
+			await expect(readFile(path, "utf8")).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reports unavailable storage and write failures", async () => {
+		const unavailableRoutes = createReviewRoutes({ token, state: state() });
+		const unavailable = await unavailableRoutes(
+			featureRequest(
+				"/api/features",
+				JSON.stringify({
+					id: "layer-importance",
+					enabled: true,
+				}),
+			),
+		);
+		expect(unavailable.status).toBe(503);
+		expect(await unavailable.json()).toEqual({
+			error: "Feature flags are unavailable",
+		});
+
+		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
+		try {
+			const blocker = join(dir, "not-a-directory");
+			const original = "keep unchanged";
+			await writeFile(blocker, original);
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				featureFlagStore: new FeatureFlagStore(join(blocker, "features.json")),
+			});
+			const failed = await routes(
+				featureRequest(
+					"/api/features",
+					JSON.stringify({ id: "layer-importance", enabled: true }),
+				),
+			);
+			expect(failed.status).toBe(500);
+			expect(await failed.json()).toHaveProperty("error");
+			expect(await readFile(blocker, "utf8")).toBe(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("importance API", () => {
+	class ImportanceRouteAgent implements ReviewAgent {
+		runs = 0;
+		readonly signals: AbortSignal[] = [];
+		readonly releaseFirst = Promise.withResolvers<void>();
+		private readonly startWaiters = new Map<number, () => void>();
+
+		constructor(
+			private readonly options: {
+				failRuns?: Set<number>;
+				blockFirst?: boolean;
+			} = {},
+		) {}
+
+		waitForRun(run: number): Promise<void> {
+			if (this.runs >= run) return Promise.resolve();
+			const { promise, resolve } = Promise.withResolvers<void>();
+			this.startWaiters.set(run, resolve);
+			return promise;
+		}
+
+		async preflight(): Promise<void> {}
+
+		async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+			const run = ++this.runs;
+			this.startWaiters.get(run)?.();
+			if (turn.signal) this.signals.push(turn.signal);
+			if (this.options.blockFirst && run === 1) {
+				await this.releaseFirst.promise;
+				if (turn.signal?.aborted) return;
+			}
+			if (this.options.failRuns?.has(run)) {
+				yield { kind: "error", message: "Importance agent failed" };
+				return;
+			}
+
+			const outputPath = turn.message.match(/Output file: ([^\n]+)/)?.[1];
+			if (!outputPath) throw new Error("missing importance output path");
+			await Bun.write(
+				outputPath,
+				JSON.stringify({
+					version: 1,
+					files: [
+						{
+							path: "src/app.ts",
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 4,
+									reason: "This changes request validation behavior.",
+								},
+							],
+						},
+					],
+				}),
+			);
+			yield { kind: "turn_end" };
+		}
+	}
+
+	async function fixture(
+		dir: string,
+		options: { agent?: ReviewAgent; enabled?: boolean } = {},
+	) {
+		const paths = {
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		};
+		const store = new ReviewStore(paths);
+		await store.write(state());
+		const featureFlagStore = new FeatureFlagStore(join(dir, "features.json"));
+		await featureFlagStore.set("layer-importance", options.enabled ?? true);
+		const importanceDir = join(dir, "importance");
+		const routes = createReviewRoutes({
+			token,
+			store,
+			paths: chatPaths(dir),
+			diff: commentDiff,
+			featureFlagStore,
+			importanceDir,
+			...(options.agent ? { layerAgent: options.agent } : {}),
+		});
+		return { featureFlagStore, importanceDir, routes, store };
+	}
+
+	function importanceRequest(
+		path: string,
+		method: "GET" | "POST" = "GET",
+	): Request {
+		const separator = path.includes("?") ? "&" : "?";
+		return request(`${path}${separator}t=${token}`, {
+			method,
+			headers: { "X-Mole-Token": token },
+		});
+	}
+
+	test("gates all importance endpoints when flag is off or unavailable", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-off-"));
+		try {
+			const agent = new ImportanceRouteAgent();
+			const enabledStore = await fixture(dir, { agent, enabled: false });
+			const endpoints = [
+				["/api/importance", "GET"],
+				["/api/importance/observe", "POST"],
+				["/api/importance/retry", "POST"],
+			] as const;
+
+			for (const [path, method] of endpoints) {
+				const response = await enabledStore.routes(
+					importanceRequest(path, method),
+				);
+				expect(response.status).toBe(404);
+				expect(await response.json()).toEqual({
+					error: "Feature disabled",
+				});
+			}
+			expect(agent.runs).toBe(0);
+
+			const noStoreAgent = new ImportanceRouteAgent();
+			const noStoreRoutes = createReviewRoutes({
+				token,
+				state: state(),
+				layerAgent: noStoreAgent,
+			});
+			for (const [path, method] of endpoints) {
+				const response = await noStoreRoutes(importanceRequest(path, method));
+				expect(response.status).toBe(404);
+				expect(await response.json()).toEqual({
+					error: "Feature disabled",
+				});
+			}
+			expect(noStoreAgent.runs).toBe(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reads absent, invalid, schema-invalid, and stale results as pending", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-read-"));
+		try {
+			const { importanceDir, routes } = await fixture(dir);
+			const resultPath = join(importanceDir, "importance.json");
+			const readSnapshot = async () => {
+				const response = await routes(importanceRequest("/api/importance"));
+				expect(response.status).toBe(200);
+				return response.json();
+			};
+			expect(await readSnapshot()).toEqual({
+				revisionKey: "head:base",
+				status: "pending",
+				error: null,
+				files: [],
+			});
+
+			await mkdir(importanceDir, { recursive: true });
+			for (const contents of [
+				"{ invalid json",
+				JSON.stringify({ version: 1, status: "pending" }),
+				JSON.stringify({
+					version: 1,
+					revision: { headSha: "old-head", mergeBaseSha: "base" },
+					status: "ready",
+					error: null,
+					files: [],
+					generatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+				JSON.stringify({
+					version: 1,
+					revision: { headSha: "head", mergeBaseSha: "base" },
+					status: "ready",
+					error: null,
+					files: [
+						{
+							path: "src/app.ts",
+							spans: [{ side: "new", startLine: 1, endLine: 1, score: 5 }],
+						},
+					],
+					generatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+				JSON.stringify({
+					version: 1,
+					revision: { headSha: "new-head", mergeBaseSha: "base" },
+					status: "ready",
+					error: null,
+					files: [
+						{
+							path: "src/app.ts",
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 5,
+									reason: "This changes request validation behavior.",
+								},
+							],
+						},
+					],
+					generatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			]) {
+				await writeFile(resultPath, contents, "utf8");
+				expect(await readSnapshot()).toEqual({
+					revisionKey: "head:base",
+					status: "pending",
+					error: null,
+					files: [],
+				});
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("joins concurrent observes and returns the stored result without rerunning", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-join-"));
+		try {
+			const agent = new ImportanceRouteAgent({ blockFirst: true });
+			const { importanceDir, routes } = await fixture(dir, { agent });
+			const before = await routes(importanceRequest("/api/importance"));
+			expect(await before.json()).toEqual({
+				revisionKey: "head:base",
+				status: "pending",
+				error: null,
+				files: [],
+			});
+
+			const firstResponse = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const firstBody = firstResponse.text();
+			await agent.waitForRun(1);
+			const active = await routes(importanceRequest("/api/importance"));
+			expect(await active.json()).toEqual({
+				revisionKey: "head:base",
+				status: "running",
+				error: null,
+				files: [],
+			});
+			const secondResponse = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const secondBody = secondResponse.text();
+			agent.releaseFirst.resolve();
+			const [first, second] = await Promise.all([firstBody, secondBody]);
+
+			for (const body of [first, second]) {
+				const running = body.indexOf(
+					'event: status\ndata: {"status":"running","revisionKey":"head:base"}',
+				);
+				const ready = body.indexOf(
+					'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
+				);
+				const done = body.indexOf(
+					'event: done\ndata: {"status":"ready","revisionKey":"head:base"}',
+				);
+				expect(running).toBeGreaterThanOrEqual(0);
+				expect(ready).toBeGreaterThan(running);
+				expect(done).toBeGreaterThan(ready);
+			}
+			expect(agent.runs).toBe(1);
+
+			const result = JSON.parse(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			) as {
+				status: string;
+				revision: { headSha: string; mergeBaseSha: string };
+				files: Array<{ path: string }>;
+			};
+			expect(result).toMatchObject({
+				status: "ready",
+				revision: { headSha: "head", mergeBaseSha: "base" },
+				files: [{ path: "src/app.ts" }],
+			});
+			expect(await readdir(importanceDir)).toEqual(["importance.json"]);
+
+			const cachedResponse = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await cachedResponse.text()).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
+			);
+			expect(agent.runs).toBe(1);
+			const readySnapshot = await routes(importanceRequest("/api/importance"));
+			expect(await readySnapshot.json()).toMatchObject({
+				status: "ready",
+				files: [{ path: "src/app.ts" }],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists agent failures and forced retry reruns the agent", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-retry-"));
+		try {
+			const agent = new ImportanceRouteAgent({ failRuns: new Set([1]) });
+			const { importanceDir, routes } = await fixture(dir, { agent });
+			const failedResponse = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const failedStream = await failedResponse.text();
+			expect(failedStream).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"failed","error":"Importance agent failed","files":[]}',
+			);
+			expect(failedStream).toContain(
+				'event: error\ndata: {"message":"Importance agent failed","revisionKey":"head:base"}',
+			);
+			expect(failedStream).toContain(
+				'event: done\ndata: {"status":"failed","revisionKey":"head:base"}',
+			);
+
+			const storedFailure = JSON.parse(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			) as { status: string; error: string };
+			expect(storedFailure).toMatchObject({
+				status: "failed",
+				error: "Importance agent failed",
+			});
+			const observedFailure = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await observedFailure.text()).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"failed","error":"Importance agent failed","files":[]}',
+			);
+			expect(agent.runs).toBe(1);
+
+			const retry = await routes(
+				importanceRequest(
+					"/api/importance/retry?revisionKey=head%3Abase",
+					"POST",
+				),
+			);
+			expect(await retry.text()).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
+			);
+			expect(agent.runs).toBe(2);
+			const ready = await routes(importanceRequest("/api/importance"));
+			expect(await ready.json()).toMatchObject({
+				status: "ready",
+				files: [{ path: "src/app.ts" }],
+			});
+
+			const duplicateRetry = await routes(
+				importanceRequest(
+					"/api/importance/retry?revisionKey=head%3Abase",
+					"POST",
+				),
+			);
+			expect(await duplicateRetry.text()).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"ready"',
+			);
+			expect(agent.runs).toBe(2);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("stale revision retry does not rerun or overwrite current ready results", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-stale-retry-"));
+		try {
+			const agent = new ImportanceRouteAgent();
+			const { importanceDir, routes, store } = await fixture(dir, { agent });
+			await (
+				await routes(importanceRequest("/api/importance/observe", "POST"))
+			).text();
+			expect(agent.runs).toBe(1);
+
+			const previous = await store.read();
+			if (!previous) throw new Error("Review state was not written");
+			await store.write(
+				ReviewStateSchema.parse({
+					...previous,
+					revision: {
+						...previous.revision,
+						headSha: "head-2",
+						diffRefs: {
+							...previous.revision.diffRefs,
+							headSha: "head-2",
+						},
+					},
+				}),
+			);
+			await (
+				await routes(importanceRequest("/api/importance/observe", "POST"))
+			).text();
+			expect(agent.runs).toBe(2);
+			const persisted = await readFile(
+				join(importanceDir, "importance.json"),
+				"utf8",
+			);
+
+			const staleRetry = await routes(
+				importanceRequest(
+					"/api/importance/retry?revisionKey=head%3Abase",
+					"POST",
+				),
+			);
+			const stream = await staleRetry.text();
+			expect(stream).toContain(
+				'event: status\ndata: {"revisionKey":"head-2:base","status":"ready"',
+			);
+			expect(agent.runs).toBe(2);
+			expect(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			).toBe(persisted);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("discards output when revision changes before another observer starts", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-stale-completion-"),
+		);
+		try {
+			const agent = new ImportanceRouteAgent({ blockFirst: true });
+			const { importanceDir, routes, store } = await fixture(dir, { agent });
+			const response = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const body = response.text();
+			await agent.waitForRun(1);
+
+			const previous = await store.read();
+			if (!previous) throw new Error("Review state was not written");
+			await store.write(
+				ReviewStateSchema.parse({
+					...previous,
+					revision: {
+						...previous.revision,
+						headSha: "head-2",
+						diffRefs: {
+							...previous.revision.diffRefs,
+							headSha: "head-2",
+						},
+					},
+				}),
+			);
+			agent.releaseFirst.resolve();
+
+			const stream = await body;
+			expect(stream).toContain(
+				'event: status\ndata: {"revisionKey":"head-2:base","status":"pending","error":null,"files":[]}',
+			);
+			expect(stream).toContain(
+				'event: done\ndata: {"status":"pending","revisionKey":"head-2:base"}',
+			);
+			expect(stream).not.toContain("outdated revision");
+			expect(agent.runs).toBe(1);
+			expect(
+				await Bun.file(join(importanceDir, "importance.json")).exists(),
+			).toBe(false);
+
+			const current = await routes(importanceRequest("/api/importance"));
+			expect(await current.json()).toEqual({
+				revisionKey: "head-2:base",
+				status: "pending",
+				error: null,
+				files: [],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("aborts a run from an old revision and starts one for the new revision", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-revision-"),
+		);
+		try {
+			const agent = new ImportanceRouteAgent({ blockFirst: true });
+			const { importanceDir, routes, store } = await fixture(dir, { agent });
+			const oldResponse = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const oldBody = oldResponse.text();
+			await agent.waitForRun(1);
+
+			const previous = await store.read();
+			if (!previous) throw new Error("Review state was not written");
+			await store.write(
+				ReviewStateSchema.parse({
+					...previous,
+					revision: {
+						...previous.revision,
+						headSha: "head-2",
+						diffRefs: {
+							...previous.revision.diffRefs,
+							headSha: "head-2",
+						},
+					},
+				}),
+			);
+			const pending = await routes(importanceRequest("/api/importance"));
+			expect(await pending.json()).toEqual({
+				revisionKey: "head-2:base",
+				status: "pending",
+				error: null,
+				files: [],
+			});
+
+			const secondStarted = agent.waitForRun(2);
+			const newResponse = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const newBody = newResponse.text();
+			await secondStarted;
+			expect(agent.signals[0]?.aborted).toBe(true);
+			agent.releaseFirst.resolve();
+
+			const [oldStream, newStream] = await Promise.all([oldBody, newBody]);
+			expect(oldStream).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"pending","error":null,"files":[]}',
+			);
+			expect(newStream).toContain(
+				'event: status\ndata: {"revisionKey":"head-2:base","status":"ready","error":null,"files":',
+			);
+			expect(agent.runs).toBe(2);
+			const result = JSON.parse(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			) as { revision: { headSha: string; mergeBaseSha: string } };
+			expect(result.revision).toEqual({
+				headSha: "head-2",
+				mergeBaseSha: "base",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("lets an active run persist after the flag turns off", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-toggle-"));
+		try {
+			const agent = new ImportanceRouteAgent({ blockFirst: true });
+			const { featureFlagStore, routes } = await fixture(dir, { agent });
+			const response = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const body = response.text();
+			await agent.waitForRun(1);
+
+			await featureFlagStore.set("layer-importance", false);
+			const disabled = await routes(importanceRequest("/api/importance"));
+			expect(disabled.status).toBe(404);
+			agent.releaseFirst.resolve();
+			expect(await body).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
+			);
+			expect(agent.signals[0]?.aborted).toBe(false);
+
+			await featureFlagStore.set("layer-importance", true);
+			const ready = await routes(importanceRequest("/api/importance"));
+			expect(await ready.json()).toMatchObject({
+				status: "ready",
+				files: [{ path: "src/app.ts" }],
+			});
+			expect(agent.runs).toBe(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reports unavailable agents and write failures through the stream", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-errors-"));
+		try {
+			const noAgent = await fixture(dir);
+			const unavailable = await noAgent.routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await unavailable.text()).toBe(
+				'event: status\ndata: {"status":"unavailable","revisionKey":"head:base"}\n\n' +
+					'event: error\ndata: {"message":"Importance agent is unavailable","revisionKey":"head:base"}\n\n' +
+					'event: done\ndata: {"status":"failed","revisionKey":"head:base"}\n\n',
+			);
+
+			const writeDir = join(dir, "write-failure");
+			const agent = new ImportanceRouteAgent();
+			const writable = await fixture(writeDir, { agent });
+			const resultPath = join(writable.importanceDir, "importance.json");
+			await mkdir(resultPath, { recursive: true });
+			await writeFile(join(resultPath, "blocker"), "keep");
+
+			const failed = await writable.routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const body = await failed.text();
+			expect(body).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"failed","error":"Unable to save importance:',
+			);
+			const message = body.match(
+				/"error":"(Unable to save importance:[^"]*)"/,
+			)?.[1];
+			expect(message).toMatch(/^Unable to save importance: /);
+			expect(body).toContain(
+				`event: error\ndata: {"message":"${message}","revisionKey":"head:base"}`,
+			);
+			expect(body).toContain(
+				'event: done\ndata: {"status":"failed","revisionKey":"head:base"}',
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("layer regeneration and retry do not start importance runs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-layer-"));
+		try {
+			const agent = new RecordingLayerAgent();
+			const { importanceDir, routes } = await fixture(dir, { agent });
+			for (const path of ["/api/layers/regenerate", "/api/layers/retry"]) {
+				const response = await routes(importanceRequest(path, "POST"));
+				expect(response.status).toBe(200);
+				await response.text();
+			}
+
+			expect(agent.prompts).toHaveLength(2);
+			expect(
+				await Bun.file(join(importanceDir, "importance.json")).exists(),
+			).toBe(false);
+			const snapshot = await routes(importanceRequest("/api/importance"));
+			expect(await snapshot.json()).toEqual({
+				revisionKey: "head:base",
+				status: "pending",
+				error: null,
+				files: [],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 });

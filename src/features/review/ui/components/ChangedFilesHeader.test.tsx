@@ -36,6 +36,124 @@ function markup(overrides: Partial<ChangedFilesHeaderProps> = {}): string {
 		<ChangedFilesHeader {...defaultProps} {...overrides} />,
 	);
 }
+
+test("does not render importance markup when absent or null", () => {
+	expect(markup()).not.toContain("Scoring importance");
+	expect(markup()).not.toContain("Importance failed");
+	expect(markup()).not.toContain("Importance legend");
+	expect(
+		markup({
+			importance: {
+				status: null,
+				error: null,
+				canRetry: false,
+				onRetry: noop,
+			},
+		}),
+	).toBe(markup());
+});
+
+test("shows pending and running importance status", () => {
+	for (const status of ["pending", "running"] as const) {
+		const html = markup({
+			importance: { status, error: null, canRetry: false, onRetry: noop },
+		});
+		expect(html).toContain("Scoring…");
+	}
+});
+
+test("omits the importance legend when scoring is ready", () => {
+	const html = markup({
+		importance: {
+			status: "ready",
+			error: null,
+			canRetry: false,
+			onRetry: noop,
+		},
+	});
+	const container = document.createElement("div");
+	container.innerHTML = html;
+	expect(
+		container.querySelector('[aria-label="Importance legend"]'),
+	).toBeNull();
+	expect(container.textContent).toContain("1/3 files");
+});
+
+test("shows failed importance status and Retry calls onRetry", () => {
+	let retries = 0;
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() =>
+		root.render(
+			<ChangedFilesHeader
+				{...defaultProps}
+				importance={{
+					status: "failed",
+					error: "Scoring unavailable",
+					canRetry: true,
+					onRetry: () => retries++,
+				}}
+			/>,
+		),
+	);
+	expect(container.textContent).toContain("Importance failed");
+	const retry = Array.from(container.querySelectorAll("button")).find(
+		(button) => button.textContent === "Retry",
+	);
+	expect(retry).not.toBeUndefined();
+	act(() => retry?.click());
+	expect(retries).toBe(1);
+});
+
+test("hides Retry when importance failure requires sync or reload", () => {
+	const html = markup({
+		importance: {
+			status: "failed",
+			error: "Importance results are for a different revision.",
+			canRetry: false,
+			onRetry: noop,
+		},
+	});
+
+	expect(html).toContain("Importance failed");
+	expect(html).not.toContain(">Retry</button>");
+});
+
+test("shows failed importance error in tooltip on focus", async () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() =>
+		root.render(
+			<ChangedFilesHeader
+				{...defaultProps}
+				importance={{
+					status: "failed",
+					error: "Scoring unavailable",
+					canRetry: true,
+					onRetry: noop,
+				}}
+			/>,
+		),
+	);
+	const failed = Array.from(container.querySelectorAll("button")).find(
+		(button) => button.textContent === "Importance failed",
+	);
+	expect(failed).not.toBeUndefined();
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		failed?.focus();
+		await Bun.sleep(0);
+	});
+	expect(
+		document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
+	).toBe("Scoring unavailable");
+});
 test("does not render a whitespace control", () => {
 	const html = markup();
 

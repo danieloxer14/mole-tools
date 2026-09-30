@@ -225,7 +225,7 @@ describe("concurrent draft route and mounted UI smoke", () => {
 							position: {
 								oldPath: "src/app.ts",
 								newPath: "src/app.ts",
-								oldLine: 1,
+								oldLine: null,
 								newLine: 2,
 							},
 							notes: [

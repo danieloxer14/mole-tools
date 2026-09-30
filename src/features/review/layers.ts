@@ -9,6 +9,10 @@ import type { ReviewAgent } from "../../ports/review-agent";
 import type { CommitMeta, FileDiff, Vcs } from "../../ports/vcs";
 import type { ParsedFileDiff } from "../../shared/diff-parse";
 import type { MrRef } from "../../shared/mr-url";
+import {
+	agentAttemptTimeoutSeconds,
+	runAgentFileAttempt,
+} from "./agent-attempt";
 import type { ReviewPaths } from "./paths";
 import type { ReviewMergeRequest } from "./setup";
 import {
@@ -141,19 +145,6 @@ export interface LayerGenerationResult {
 	runId: string;
 	attempts: number;
 }
-
-interface LayerAttemptSuccess {
-	ok: true;
-	doc: LayerDoc;
-}
-
-interface LayerAttemptFailure {
-	ok: false;
-	kind: "output" | "agent";
-	error: string;
-}
-
-type LayerAttempt = LayerAttemptSuccess | LayerAttemptFailure;
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -542,107 +533,8 @@ function layerDocWithIds(
 		.filter((layer): layer is NonNullable<typeof layer> => layer !== null);
 }
 
-function layerTimeoutSeconds(config: LayerGenerationOptions["config"]): number {
-	const configured = config?.review?.layerTimeoutSeconds;
-	return typeof configured === "number" &&
-		Number.isFinite(configured) &&
-		configured > 0
-		? configured
-		: 600;
-}
 export function reviewLayerPromptName(mode: ReviewState["mode"]): PromptName {
 	return mode === "plan" ? "review-layers-plan" : "review-layers-code";
-}
-
-async function runAttempt(
-	options: LayerGenerationOptions,
-	message: string,
-	outputPath: string,
-	promptPath: string,
-	writeDir: string,
-): Promise<LayerAttempt> {
-	await rm(outputPath, { force: true });
-	const controller = new AbortController();
-	const timeoutSeconds = layerTimeoutSeconds(options.config);
-	let timeoutId: ReturnType<typeof setTimeout> | undefined;
-	let agentError: string | null = null;
-	try {
-		const iterable = options.agent.run({
-			cwd: options.state.worktreePath,
-			systemPromptFile: promptPath,
-			message,
-			writeDir,
-			signal: controller.signal,
-		});
-		const iterator = iterable[Symbol.asyncIterator]();
-		const consume = (async (): Promise<LayerAttemptFailure | null> => {
-			try {
-				while (true) {
-					const result = await iterator.next();
-					if (result.done) return null;
-					if (result.value.kind === "error") agentError = result.value.message;
-				}
-			} catch (error) {
-				return { ok: false, kind: "agent", error: errorMessage(error) };
-			}
-		})();
-		const timedOut = new Promise<"timeout">((resolve) => {
-			timeoutId = setTimeout(() => {
-				controller.abort();
-				resolve("timeout");
-			}, timeoutSeconds * 1000);
-		});
-		const outcome = await Promise.race<LayerAttemptFailure | null | "timeout">([
-			consume,
-			timedOut,
-		]);
-		if (outcome === "timeout") {
-			try {
-				void Promise.resolve(iterator.return?.()).catch(() => undefined);
-			} catch {
-				// Iterator cleanup must not delay retryable failure persistence.
-			}
-			return {
-				ok: false,
-				kind: "agent",
-				error: `Layer agent timed out after ${timeoutSeconds} seconds`,
-			};
-		}
-		if (outcome) return outcome;
-	} catch (error) {
-		return { ok: false, kind: "agent", error: errorMessage(error) };
-	} finally {
-		if (timeoutId !== undefined) clearTimeout(timeoutId);
-	}
-	if (agentError) return { ok: false, kind: "agent", error: agentError };
-
-	const file = Bun.file(outputPath);
-	if (!(await file.exists())) {
-		return {
-			ok: false,
-			kind: "output",
-			error: `Layer agent did not write output file: ${outputPath}`,
-		};
-	}
-	let raw: unknown;
-	try {
-		raw = JSON.parse(await file.text());
-	} catch (error) {
-		return {
-			ok: false,
-			kind: "output",
-			error: `Layer output is not valid JSON: ${errorMessage(error)}`,
-		};
-	}
-	const parsed = LayerDocSchema.safeParse(raw);
-	if (!parsed.success) {
-		return {
-			ok: false,
-			kind: "output",
-			error: `Layer output failed schema validation: ${parsed.error.message}`,
-		};
-	}
-	return { ok: true, doc: parsed.data };
 }
 
 async function failedResult(
@@ -726,13 +618,20 @@ export async function generateLayers(
 			maxPromptBytes,
 		);
 		if (promptSizeError) throw new Error(promptSizeError);
-		let attempt = await runAttempt(
-			{ ...options, state, runId },
-			firstMessage,
-			paths.layerPath,
-			paths.promptPath,
-			paths.layersDir,
-		);
+		const attemptOptions = {
+			agent: options.agent,
+			cwd: state.worktreePath,
+			systemPromptFile: paths.promptPath,
+			writeDir: paths.layersDir,
+			outputPath: paths.layerPath,
+			timeoutSeconds: agentAttemptTimeoutSeconds(options.config),
+			label: "Layer",
+			schema: LayerDocSchema,
+		};
+		let attempt = await runAgentFileAttempt({
+			...attemptOptions,
+			message: firstMessage,
+		});
 		attempts = 1;
 		if (!attempt.ok && attempt.kind === "output") {
 			const retryMessage = `${firstMessage}\n\nPrevious output validation failed. Correct it and write a complete replacement file.\n${attempt.error}`;
@@ -750,13 +649,10 @@ export async function generateLayers(
 					retryPromptSizeError,
 				);
 			}
-			attempt = await runAttempt(
-				{ ...options, state, runId },
-				retryMessage,
-				paths.layerPath,
-				paths.promptPath,
-				paths.layersDir,
-			);
+			attempt = await runAgentFileAttempt({
+				...attemptOptions,
+				message: retryMessage,
+			});
 			attempts = 2;
 		}
 		if (!attempt.ok) {

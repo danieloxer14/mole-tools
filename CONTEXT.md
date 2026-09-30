@@ -130,5 +130,19 @@ slash. **No matches** includes a plus button to open Settings on Skills. The
 server expands tokens to active version text; transcript renders tags and use
 updates most-recently-used order.
 
+### Review feature flag
+A registered review flag, distinct from CLI feature terminology. Registry lives
+in `src/shared/feature-flags.ts`; values live in
+`~/.config/mole-tools/features.json` and are managed in Settings > Features
+through `GET/POST /api/features`.
+
+### Layer importance
+The `layer-importance` review flag enables whole-change-set scoring of changed
+line spans from 1 (skip) to 5 (critical). It runs after initial load and
+revision-changing sync, not layer Regenerate; results are persisted per MR
+with head and merge-base SHA stamps at
+`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
+Running status exists in memory only.
+
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

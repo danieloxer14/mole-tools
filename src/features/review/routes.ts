@@ -24,6 +24,7 @@ import {
 	type Config,
 	ReviewConfigSchema,
 } from "../../adapters/config/schema";
+import type { FeatureFlagStore } from "../../adapters/feature-flags/store";
 import {
 	DEFAULT_PROMPTS,
 	PROMPT_NAMES,
@@ -61,7 +62,14 @@ import type { FileDiff, Vcs } from "../../ports/vcs";
 import { APP_VERSION } from "../../shared/app-version";
 import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
+import {
+	defaultFeatureFlagValues,
+	FeatureFlagIdSchema,
+	type FeatureFlagValues,
+	featureFlagViews,
+} from "../../shared/feature-flags";
 import { buildPosition } from "../../shared/gitlab-position";
+import { importanceRevisionKey } from "../../shared/importance-revision-key";
 import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
 import {
 	expandSkillTokens,
@@ -82,6 +90,13 @@ import {
 	runCommentFromChat,
 } from "./comment-from-chat";
 import { buildExplainMessage, explainChatTitle } from "./explain";
+import {
+	generateImportance,
+	type ImportanceResult,
+	type ImportanceSnapshot,
+	readImportanceResult,
+	writeImportanceResult,
+} from "./importance";
 import {
 	generateLayers,
 	type LayerGenerationResult,
@@ -128,6 +143,8 @@ export interface ReviewRoutesOptions {
 	state?: ReviewState;
 	store?: ReviewStore;
 	skillStore?: SkillStore;
+	featureFlagStore?: FeatureFlagStore;
+	importanceDir?: string;
 	paths?: Pick<
 		ReviewPaths,
 		"layersDir" | "promptDir" | "layerPath" | "promptPath"
@@ -750,6 +767,11 @@ export function createReviewRoutes(
 		options.config?.review ?? {},
 	);
 	const layerAgent = options.layerAgent ?? options.reviewAgent;
+	async function featureFlags(): Promise<FeatureFlagValues> {
+		return options.featureFlagStore
+			? options.featureFlagStore.read()
+			: defaultFeatureFlagValues();
+	}
 	const chatAgent = options.reviewAgent;
 	function defaultSelection(): AgentSelection {
 		return {
@@ -1500,6 +1522,226 @@ export function createReviewRoutes(
 		if (!fallbackState) throw new Error("Review state is unavailable");
 		fallbackState = recoverOrphanedLayerRun(fallbackState);
 		return fallbackState;
+	}
+
+	function importanceDirFor(state: ReviewState): string {
+		return (
+			options.importanceDir ??
+			join(dirname(state.worktreePath), "review-importance")
+		);
+	}
+
+	function importanceResultPathFor(state: ReviewState): string {
+		return join(importanceDirFor(state), "importance.json");
+	}
+
+	let importanceRun: {
+		key: string;
+		controller: AbortController;
+		promise: Promise<ImportanceSnapshot>;
+	} | null = null;
+	let importanceStartGate: Promise<unknown> = Promise.resolve();
+
+	async function importanceSnapshot(
+		state?: ReviewState,
+	): Promise<ImportanceSnapshot> {
+		const snapshotState = state ?? (await currentState());
+		const revisionKey = importanceRevisionKey(snapshotState.revision);
+		if (importanceRun?.key === revisionKey) {
+			return { revisionKey, status: "running", error: null, files: [] };
+		}
+
+		const result = await readImportanceResult(
+			importanceResultPathFor(snapshotState),
+		);
+		if (result && importanceRevisionKey(result.revision) === revisionKey) {
+			return {
+				revisionKey,
+				status: result.status,
+				error: result.error,
+				files: result.files,
+			};
+		}
+		return { revisionKey, status: "pending", error: null, files: [] };
+	}
+
+	async function runImportance(
+		state: ReviewState,
+		key: string,
+		parsedDiff: ParsedFileDiff[],
+		controller: AbortController,
+	): Promise<ImportanceSnapshot> {
+		let result: Omit<ImportanceSnapshot, "revisionKey">;
+		try {
+			const agent = await agentForSlot("review-importance", layerAgent);
+			if (!agent) {
+				result = {
+					status: "failed",
+					error: "Importance agent is unavailable",
+					files: [],
+				};
+			} else {
+				const generated = await generateImportance({
+					agent,
+					state,
+					parsedDiff,
+					dir: importanceDirFor(state),
+					promptSourceDir: options.promptSourceDir,
+					promptPreset: presetFor("review-importance"),
+					config: options.config,
+					signal: controller.signal,
+				});
+				result = {
+					status: generated.status,
+					error: generated.error,
+					files: generated.files,
+				};
+			}
+		} catch (error) {
+			result = {
+				status: "failed",
+				error: errorMessage(error),
+				files: [],
+			};
+		}
+
+		if (controller.signal.aborted) {
+			return { revisionKey: key, status: "pending", error: null, files: [] };
+		}
+		let latest: ReviewState;
+		try {
+			latest = await currentState();
+		} catch (error) {
+			return {
+				revisionKey: key,
+				status: "failed",
+				error: errorMessage(error),
+				files: [],
+			};
+		}
+		const latestKey = importanceRevisionKey(latest.revision);
+		if (latestKey !== key) {
+			return {
+				revisionKey: latestKey,
+				status: "pending",
+				error: null,
+				files: [],
+			};
+		}
+
+		try {
+			const persisted: ImportanceResult = {
+				version: 1,
+				revision: {
+					headSha: state.revision.headSha,
+					mergeBaseSha: state.revision.mergeBaseSha,
+				},
+				status: result.status === "ready" ? "ready" : "failed",
+				error: result.error,
+				files: result.files,
+				generatedAt: new Date().toISOString(),
+			};
+			await writeImportanceResult(importanceResultPathFor(state), persisted);
+		} catch (error) {
+			return {
+				revisionKey: key,
+				status: "failed",
+				error: `Unable to save importance: ${errorMessage(error)}`,
+				files: [],
+			};
+		}
+		return { revisionKey: key, ...result };
+	}
+
+	function startImportance(
+		force: boolean,
+		expectedRevisionKey?: string,
+	): Promise<ImportanceSnapshot> {
+		const decision = importanceStartGate.then(async () => {
+			const { state, parsedDiff } = await serializeDisplayMutation(
+				async () => ({ state: await currentState(), parsedDiff: currentDiff }),
+			);
+			const key = importanceRevisionKey(state.revision);
+			if (force && expectedRevisionKey !== key) {
+				return { promise: Promise.resolve(await importanceSnapshot()) };
+			}
+			if (importanceRun?.key === key) {
+				return { promise: importanceRun.promise };
+			}
+			importanceRun?.controller.abort();
+			const snapshot = await importanceSnapshot(state);
+			if (
+				snapshot.status === "ready" ||
+				(!force && snapshot.status === "failed")
+			) {
+				return { promise: Promise.resolve(snapshot) };
+			}
+
+			const controller = new AbortController();
+			const promise = runImportance(state, key, parsedDiff, controller);
+			const tracked = { key, controller, promise };
+			importanceRun = tracked;
+			void promise.finally(() => {
+				if (importanceRun === tracked) importanceRun = null;
+			});
+			return { promise };
+		});
+		importanceStartGate = decision.then(
+			() => undefined,
+			() => undefined,
+		);
+		return decision.then(({ promise }) => promise);
+	}
+
+	async function importanceStream(
+		force: boolean,
+		expectedRevisionKey?: string,
+	): Promise<Response> {
+		async function* frames(): AsyncIterable<SseFrame> {
+			const state = await currentState();
+			const revisionKey = importanceRevisionKey(state.revision);
+			if (!options.createReviewAgent && !layerAgent) {
+				yield {
+					event: "status",
+					data: { status: "unavailable", revisionKey },
+				};
+				yield {
+					event: "error",
+					data: {
+						message: "Importance agent is unavailable",
+						revisionKey,
+					},
+				};
+				yield { event: "done", data: { status: "failed", revisionKey } };
+				return;
+			}
+
+			yield { event: "status", data: { status: "running", revisionKey } };
+			try {
+				const result = await startImportance(force, expectedRevisionKey);
+				yield { event: "status", data: result };
+				if (result.status === "failed") {
+					yield {
+						event: "error",
+						data: {
+							message: result.error ?? "Importance generation failed",
+							revisionKey: result.revisionKey,
+						},
+					};
+				}
+				yield {
+					event: "done",
+					data: { status: result.status, revisionKey: result.revisionKey },
+				};
+			} catch (error) {
+				yield {
+					event: "error",
+					data: { message: errorMessage(error), revisionKey },
+				};
+				yield { event: "done", data: { status: "failed", revisionKey } };
+			}
+		}
+		return sseResponse(frames());
 	}
 
 	async function descriptionMedia(request: Request): Promise<Response> {
@@ -3064,6 +3306,57 @@ export function createReviewRoutes(
 					source: catalog.source,
 					...(catalog.warning ? { warning: catalog.warning } : {}),
 				});
+			}
+			if (request.method === "GET" && url.pathname === "/api/features") {
+				return jsonResponse({
+					flags: featureFlagViews(await featureFlags()),
+				});
+			}
+			if (request.method === "POST" && url.pathname === "/api/features") {
+				const store = options.featureFlagStore;
+				if (!store) {
+					return jsonResponse({ error: "Feature flags are unavailable" }, 503);
+				}
+				const parsed = z
+					.object({ id: FeatureFlagIdSchema, enabled: z.boolean() })
+					.strict()
+					.safeParse(await parseBody(request));
+				if (!parsed.success) {
+					return jsonResponse({ error: parsed.error.message }, 400);
+				}
+				try {
+					const values = await store.set(parsed.data.id, parsed.data.enabled);
+					return jsonResponse({ flags: featureFlagViews(values) });
+				} catch (error) {
+					return jsonResponse({ error: errorMessage(error) }, 500);
+				}
+			}
+			if (request.method === "GET" && url.pathname === "/api/importance") {
+				if (!(await featureFlags())["layer-importance"]) {
+					return jsonResponse({ error: "Feature disabled" }, 404);
+				}
+				return jsonResponse(await importanceSnapshot());
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/importance/observe"
+			) {
+				if (!(await featureFlags())["layer-importance"]) {
+					return jsonResponse({ error: "Feature disabled" }, 404);
+				}
+				return importanceStream(false);
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/importance/retry"
+			) {
+				if (!(await featureFlags())["layer-importance"]) {
+					return jsonResponse({ error: "Feature disabled" }, 404);
+				}
+				const expectedRevisionKey = url.searchParams.get("revisionKey");
+				if (!expectedRevisionKey)
+					return jsonResponse({ error: "Missing revisionKey" }, 400);
+				return importanceStream(true, expectedRevisionKey);
 			}
 			if (request.method === "GET" && url.pathname === "/api/settings") {
 				return settingsSnapshot();

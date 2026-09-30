@@ -1,15 +1,13 @@
 import { cn } from "cn";
-import {
-	Check,
-	ChevronDown,
-	FileText,
-	Loader2,
-	RefreshCw,
-	X,
-} from "lucide-react";
+import { Check, ChevronDown, Loader2, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import type { ReviewState } from "../../state";
+import {
+	IMPORTANCE_BG_CLASS,
+	type ImportanceRating,
+	importanceTitle,
+} from "../importance";
 import { changedFileCount, viewedFileCount } from "./ChangedFilesHeader";
 import { IconButton } from "./IconButton";
 import { ProgressBar } from "./ProgressBar";
@@ -39,6 +37,7 @@ interface LayerPaneProps {
 	externallyDisabled: boolean;
 	onRegenerate: () => void;
 	onRetry: () => void;
+	importanceByPath?: ReadonlyMap<string, ImportanceRating>;
 }
 
 export function layersStatusMessage(
@@ -176,6 +175,7 @@ export function LayerPane({
 	externallyDisabled,
 	onRegenerate,
 	onRetry,
+	importanceByPath,
 }: LayerPaneProps) {
 	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
 		() =>
@@ -495,7 +495,8 @@ export function LayerPane({
 													{layerFiles.map((path) => {
 														const active = path === selectedPath;
 														const isViewed = viewed.has(path);
-														return (
+														const rating = importanceByPath?.get(path);
+														const pill = (
 															<Badge
 																className={cn(
 																	"h-auto max-w-full min-w-0 shrink cursor-pointer justify-start gap-1 overflow-visible text-left font-mono text-xs whitespace-normal break-words [overflow-wrap:anywhere]",
@@ -504,13 +505,14 @@ export function LayerPane({
 																		: isViewed
 																			? "bg-success/15 text-success hover:bg-success/20 hover:text-success"
 																			: "hover:bg-muted hover:text-foreground",
+																	rating !== undefined &&
+																		"overflow-hidden pl-0",
 																)}
 																key={path}
 																variant="secondary"
 																render={
 																	<button
 																		type="button"
-																		title={path}
 																		aria-label={path}
 																		aria-current={active ? "true" : undefined}
 																		data-active={active ? "true" : "false"}
@@ -518,9 +520,47 @@ export function LayerPane({
 																	/>
 																}
 															>
-																<FileText aria-hidden />
+																{rating !== undefined ? (
+																	<span
+																		aria-hidden="true"
+																		className={cn(
+																			"-my-0.5 mr-0.5 w-4 self-stretch",
+																			IMPORTANCE_BG_CLASS[rating.score],
+																		)}
+																	/>
+																) : null}
+
 																{shortFilePath(path, changedFilePaths)}
 															</Badge>
+														);
+														return (
+															<Tooltip key={path}>
+																<TooltipTrigger
+																	render={
+																		<span className="inline-flex min-w-0 max-w-full" />
+																	}
+																>
+																	{pill}
+																</TooltipTrigger>
+																<TooltipContent
+																	className={
+																		rating === undefined
+																			? undefined
+																			: "flex-col items-start gap-0.5"
+																	}
+																>
+																	{rating === undefined ? (
+																		path
+																	) : (
+																		<>
+																			<span className="font-medium">
+																				{importanceTitle(rating.score)}
+																			</span>
+																			<span>{rating.reason}</span>
+																		</>
+																	)}
+																</TooltipContent>
+															</Tooltip>
 														);
 													})}
 													{layerFiles.length === 0 ? (
