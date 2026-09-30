@@ -97,5 +97,5 @@ It holds the comment's anchor (file, line range, and the code or quoted Markdown
 - 2 — low: straightforward tests, documentation, renames, and simple wiring.
 - 1 — skip: imports, constants, type-only changes, formatting, and generated or lock files.
 
-Understand what the merge request does across all changed files before scoring; judge each part in the context of the whole change set. Do not force a distribution: several files may contain important parts. Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.`,
+Understand what the merge request does across all changed files before scoring; judge each part in the context of the whole change set. Do not force a distribution: several files may contain important parts. Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic. For every scored span, provide exactly one concise sentence explaining its score, no more than 144 characters and with no line breaks.`,
 };

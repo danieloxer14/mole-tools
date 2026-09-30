@@ -73,7 +73,15 @@ const validDoc: ImportanceDoc = {
 	files: [
 		{
 			path: "src/app.ts",
-			spans: [{ side: "new", startLine: 5, endLine: 5, score: 3 }],
+			spans: [
+				{
+					side: "new",
+					startLine: 5,
+					endLine: 5,
+					score: 3,
+					reason: "This changes request validation behavior.",
+				},
+			],
 		},
 	],
 };
@@ -228,13 +236,61 @@ describe("review importance", () => {
 		).toHaveLength(2);
 	});
 
-	test("importance schemas enforce score bounds and ordered spans", () => {
+	test("importance schemas enforce score bounds, required reason rules, and ordered spans", () => {
+		const span = {
+			side: "new",
+			startLine: 4,
+			endLine: 4,
+			score: 3,
+			reason: "This changes request validation behavior.",
+		};
+		expect(ImportanceSpanSchema.safeParse(span).success).toBe(true);
 		expect(
 			ImportanceSpanSchema.safeParse({
 				side: "new",
 				startLine: 4,
 				endLine: 3,
 				score: 3,
+				reason: span.reason,
+			}).success,
+		).toBe(false);
+		expect(
+			ImportanceSpanSchema.safeParse({
+				...span,
+				score: 9,
+			}).success,
+		).toBe(false);
+		expect(
+			ImportanceSpanSchema.safeParse({
+				side: "new",
+				startLine: 4,
+				endLine: 4,
+				score: 3,
+			}).success,
+		).toBe(false);
+		expect(
+			ImportanceSpanSchema.safeParse({ ...span, reason: "  \t " }).success,
+		).toBe(false);
+		expect(
+			ImportanceSpanSchema.safeParse({ ...span, reason: "x".repeat(145) })
+				.success,
+		).toBe(false);
+		expect(
+			ImportanceSpanSchema.safeParse({
+				...span,
+				reason: "x".repeat(144),
+			}).success,
+		).toBe(true);
+		expect(
+			ImportanceSpanSchema.safeParse({
+				...span,
+				reason: "First line.\nSecond.",
+			}).success,
+		).toBe(false);
+		expect(
+			ImportanceSpanSchema.safeParse({
+				...span,
+				reason: "First line.\rSecond.",
 			}).success,
 		).toBe(false);
 		expect(ImportanceDocSchema.safeParse(validDoc).success).toBe(true);
@@ -265,15 +321,39 @@ describe("review importance", () => {
 						...validDoc.files,
 						{
 							path: "docs/stats.json",
-							spans: [{ side: "new", startLine: 1, endLine: 1, score: 2 }],
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 2,
+									reason: "The change affects request validation.",
+								},
+							],
 						},
 						{
 							path: "assets/logo.png",
-							spans: [{ side: "new", startLine: 1, endLine: 1, score: 5 }],
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 5,
+									reason: "Binary assets do not have scorable text.",
+								},
+							],
 						},
 						{
 							path: "outside.ts",
-							spans: [{ side: "new", startLine: 1, endLine: 1, score: 4 }],
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 4,
+									reason: "This path is outside the changed files.",
+								},
+							],
 						},
 					],
 				},
@@ -296,8 +376,30 @@ describe("review importance", () => {
 			}
 		});
 	});
-	test("clips extreme model coordinates to actual parsed diff lines", async () => {
+	test("clips extreme coordinates into diff runs and preserves each reason", async () => {
 		await withTempDir(async (dir) => {
+			const separatedDiff: ParsedFileDiff = {
+				...appDiff,
+				hunks: [
+					...appDiff.hunks,
+					{
+						header: "@@ -8 +9 @@",
+						oldStart: 8,
+						oldLines: 1,
+						newStart: 9,
+						newLines: 1,
+						lines: [
+							{
+								kind: "context",
+								oldLine: 8,
+								newLine: 9,
+								text: "after",
+							},
+						],
+					},
+				],
+			};
+			const reason = "This changes request validation behavior.";
 			const agent = new WritingAgent([
 				{
 					version: 1,
@@ -310,20 +412,44 @@ describe("review importance", () => {
 									startLine: 5,
 									endLine: Number.MAX_SAFE_INTEGER,
 									score: 4,
+									reason,
 								},
-								{ side: "new", startLine: 100, endLine: 200, score: 5 },
+								{
+									side: "new",
+									startLine: 100,
+									endLine: 200,
+									score: 5,
+									reason: "This range is outside the diff.",
+								},
 							],
 						},
 					],
 				},
 			]);
-			const result = await generateImportance(generationOptions(dir, agent));
+			const result = await generateImportance(
+				generationOptions(dir, agent, { parsedDiff: [separatedDiff] }),
+			);
 
 			expect(result.status).toBe("ready");
 			expect(result.files).toEqual([
 				{
 					path: "src/app.ts",
-					spans: [{ side: "new", startLine: 5, endLine: 5, score: 4 }],
+					spans: [
+						{
+							side: "new",
+							startLine: 5,
+							endLine: 5,
+							score: 4,
+							reason,
+						},
+						{
+							side: "new",
+							startLine: 9,
+							endLine: 9,
+							score: 4,
+							reason,
+						},
+					],
 				},
 			]);
 		});
@@ -385,7 +511,15 @@ describe("review importance", () => {
 				files: [
 					{
 						path: "src/app.ts",
-						spans: [{ side: "new", startLine: 6, endLine: 5, score: 9 }],
+						spans: [
+							{
+								side: "new",
+								startLine: 6,
+								endLine: 5,
+								score: 9,
+								reason: "Invalid range and score.",
+							},
+						],
 					},
 				],
 			};

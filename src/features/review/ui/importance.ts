@@ -7,66 +7,71 @@ import type {
 
 export type { ImportanceScore } from "../importance";
 
+export interface ImportanceRating {
+	score: ImportanceScore;
+	reason: string;
+}
+
 export function lineImportanceMap(
 	spans: readonly ImportanceSpan[],
 	hunks: readonly DiffHunk[],
 ): ImportanceLineMap {
-	const scores: ImportanceLineMap = new Map();
+	const ratings: ImportanceLineMap = new Map();
 	for (const hunk of hunks) {
 		for (const line of hunk.lines) {
-			const oldScore =
-				line.oldLine === null ? null : scoreAt(spans, "old", line.oldLine);
-			const newScore =
-				line.newLine === null ? null : scoreAt(spans, "new", line.newLine);
-			if (oldScore !== null) scores.set(`old:${line.oldLine}`, oldScore);
-			if (newScore !== null) scores.set(`new:${line.newLine}`, newScore);
+			const oldRating =
+				line.oldLine === null ? null : ratingAt(spans, "old", line.oldLine);
+			const newRating =
+				line.newLine === null ? null : ratingAt(spans, "new", line.newLine);
+			if (oldRating !== null) ratings.set(`old:${line.oldLine}`, oldRating);
+			if (newRating !== null) ratings.set(`new:${line.newLine}`, newRating);
 		}
 	}
-	return scores;
+	return ratings;
 }
 
-function scoreAt(
+function ratingAt(
 	spans: readonly ImportanceSpan[],
 	side: ImportanceSpan["side"],
 	line: number,
-): ImportanceScore | null {
-	let score: ImportanceScore | null = null;
+): ImportanceRating | null {
+	let rating: ImportanceRating | null = null;
 	for (const span of spans) {
 		if (
 			span.side === side &&
 			span.startLine <= line &&
 			line <= span.endLine &&
-			(score === null || span.score > score)
+			(rating === null || span.score > rating.score)
 		) {
-			score = span.score;
+			rating = span;
 		}
 	}
-	return score;
+	return rating;
 }
 
-export type ImportanceLineMap = Map<string, ImportanceScore>;
+export type ImportanceLineMap = Map<string, ImportanceRating>;
 
 export function indexedLineImportance(
-	scores: ImportanceLineMap,
+	ratings: ImportanceLineMap,
 	side: ImportanceSpan["side"],
 	line: number | null,
-): ImportanceScore | null {
-	return line === null ? null : (scores.get(`${side}:${line}`) ?? null);
+): ImportanceRating | null {
+	return line === null ? null : (ratings.get(`${side}:${line}`) ?? null);
 }
 
 export function indexedDiffLineImportance(
-	scores: ImportanceLineMap,
+	ratings: ImportanceLineMap,
 	line: DiffLine,
-): ImportanceScore | null {
+): ImportanceRating | null {
 	if (line.kind === "del")
-		return indexedLineImportance(scores, "old", line.oldLine);
+		return indexedLineImportance(ratings, "old", line.oldLine);
 	if (line.kind === "add")
-		return indexedLineImportance(scores, "new", line.newLine);
-	const oldScore = indexedLineImportance(scores, "old", line.oldLine);
-	const newScore = indexedLineImportance(scores, "new", line.newLine);
-	if (oldScore === null) return newScore;
-	if (newScore === null) return oldScore;
-	return oldScore > newScore ? oldScore : newScore;
+		return indexedLineImportance(ratings, "new", line.newLine);
+	const oldRating = indexedLineImportance(ratings, "old", line.oldLine);
+	const newRating = indexedLineImportance(ratings, "new", line.newLine);
+	if (oldRating === null) return newRating;
+	if (newRating === null) return oldRating;
+	return oldRating.score > newRating.score ? oldRating : newRating;
 }
 
 export function importanceTitle(score: ImportanceScore): string {
@@ -91,16 +96,15 @@ export const IMPORTANCE_BG_CLASS: Record<ImportanceScore, string> = {
 
 export function fileImportanceMap(
 	files: readonly ImportanceFile[],
-): Map<string, ImportanceScore> {
-	const scores = new Map<string, ImportanceScore>();
+): Map<string, ImportanceRating> {
+	const ratings = new Map<string, ImportanceRating>();
 	for (const file of files) {
 		for (const span of file.spans) {
-			const current = scores.get(file.path);
-			scores.set(
-				file.path,
-				current === undefined || span.score > current ? span.score : current,
-			);
+			const current = ratings.get(file.path);
+			if (current === undefined || span.score > current.score) {
+				ratings.set(file.path, span);
+			}
 		}
 	}
-	return scores;
+	return ratings;
 }

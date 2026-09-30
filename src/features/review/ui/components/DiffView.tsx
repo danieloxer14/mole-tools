@@ -50,7 +50,7 @@ import type { FromChatContext } from "../from-chat";
 import {
 	IMPORTANCE_BG_CLASS,
 	type ImportanceLineMap,
-	type ImportanceScore,
+	type ImportanceRating,
 	importanceTitle,
 	indexedDiffLineImportance,
 	lineImportanceMap,
@@ -803,18 +803,25 @@ function LineActions({
 	);
 }
 
-function ImportanceStrip({ score }: { score: ImportanceScore }) {
+function ImportanceStrip({ rating }: { rating: ImportanceRating }) {
 	return (
-		<span
-			aria-hidden="true"
-			className={`importance-strip ${IMPORTANCE_BG_CLASS[score]}`}
-			title={importanceTitle(score)}
-		/>
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<span
+						role="img"
+						aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
+						tabIndex={-1}
+						className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]}`}
+					/>
+				}
+			/>
+			<TooltipContent className="flex-col items-start gap-0.5">
+				<span className="font-medium">{importanceTitle(rating.score)}</span>
+				<span>{rating.reason}</span>
+			</TooltipContent>
+		</Tooltip>
 	);
-}
-
-function lineNumberClass(score: ImportanceScore | null): string {
-	return score === null ? "line-number" : "line-number importance-cell";
 }
 
 function DiffLineRow({
@@ -898,11 +905,11 @@ function DiffLineRow({
 	);
 	const oldHighlight = lineHighlight(highlightedCode, "old", line.oldLine);
 	const newHighlight = lineHighlight(highlightedCode, "new", line.newLine);
-	const lineScore = importance
+	const lineRating = importance
 		? indexedDiffLineImportance(importance, line)
 		: null;
-	const oldScore = line.kind !== "add" ? lineScore : null;
-	const newScore = line.kind !== "del" ? lineScore : null;
+	const oldRating = line.kind !== "add" ? lineRating : null;
+	const newRating = line.kind !== "del" ? lineRating : null;
 	return mode === "inline" ? (
 		<tr
 			ref={setRef}
@@ -910,8 +917,12 @@ function DiffLineRow({
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
 			{...trProps}
 		>
-			<td className={lineNumberClass(lineScore)}>
-				{lineScore === null ? null : <ImportanceStrip score={lineScore} />}
+			<td
+				className={
+					lineRating === null ? "line-number" : "line-number importance-cell"
+				}
+			>
+				{lineRating === null ? null : <ImportanceStrip rating={lineRating} />}
 				{line.oldLine ?? ""}
 			</td>
 			<td className="line-number">{line.newLine ?? ""}</td>
@@ -938,8 +949,12 @@ function DiffLineRow({
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
 			{...trProps}
 		>
-			<td className={lineNumberClass(oldScore)}>
-				{oldScore === null ? null : <ImportanceStrip score={oldScore} />}
+			<td
+				className={
+					oldRating === null ? "line-number" : "line-number importance-cell"
+				}
+			>
+				{oldRating === null ? null : <ImportanceStrip rating={oldRating} />}
 				{line.oldLine ?? ""}
 			</td>
 			<td className={`side-line ${line.kind === "del" ? "removed" : ""}`}>
@@ -962,8 +977,12 @@ function DiffLineRow({
 					</>
 				)}
 			</td>
-			<td className={lineNumberClass(newScore)}>
-				{newScore === null ? null : <ImportanceStrip score={newScore} />}
+			<td
+				className={
+					newRating === null ? "line-number" : "line-number importance-cell"
+				}
+			>
+				{newRating === null ? null : <ImportanceStrip rating={newRating} />}
 				{line.newLine ?? ""}
 			</td>
 			<td className={`side-line ${line.kind === "add" ? "added" : ""}`}>

@@ -7056,7 +7056,15 @@ describe("importance API", () => {
 					files: [
 						{
 							path: "src/app.ts",
-							spans: [{ side: "new", startLine: 1, endLine: 1, score: 4 }],
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 4,
+									reason: "This changes request validation behavior.",
+								},
+							],
 						},
 					],
 				}),
@@ -7174,13 +7182,34 @@ describe("importance API", () => {
 				}),
 				JSON.stringify({
 					version: 1,
-					revision: { headSha: "new-head", mergeBaseSha: "base" },
+					revision: { headSha: "head", mergeBaseSha: "base" },
 					status: "ready",
 					error: null,
 					files: [
 						{
 							path: "src/app.ts",
 							spans: [{ side: "new", startLine: 1, endLine: 1, score: 5 }],
+						},
+					],
+					generatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+				JSON.stringify({
+					version: 1,
+					revision: { headSha: "new-head", mergeBaseSha: "base" },
+					status: "ready",
+					error: null,
+					files: [
+						{
+							path: "src/app.ts",
+							spans: [
+								{
+									side: "new",
+									startLine: 1,
+									endLine: 1,
+									score: 5,
+									reason: "This changes request validation behavior.",
+								},
+							],
 						},
 					],
 					generatedAt: "2026-01-01T00:00:00.000Z",

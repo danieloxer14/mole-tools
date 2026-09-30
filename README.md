@@ -307,7 +307,7 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
 | `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
 | `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
-| `review-importance` | Layer importance scoring (Features > Layer importance) | Scores each changed line span 1–5 for reviewer attention. |
+| `review-importance` | Layer importance scoring (Features > Layer importance) | Scores each changed line span 1–5 for reviewer attention and adds a concise reason. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -484,11 +484,13 @@ When **Layer importance** is on, an agent scores changed line spans after the
 initial diff loads and after a sync changes the head or merge-base revision.
 Layer **Regenerate** and **Retry** do not rerun importance. The
 `review-importance` prompt evaluates the whole change set on a 1–5 scale:
-1 (skip), 2 (low), 3 (moderate), 4 (high), 5 (critical). Pastel blue-to-red
+1 (skip), 2 (low), 3 (moderate), 4 (high), 5 (critical), and writes one concise
+reason sentence of at most 144 characters for every span. Pastel blue-to-red
 colours mark diff gutters, changed-file rows (using each file's highest span
-score), and layer file pills. The Changed files header shows **Scoring
-importance…** while running, a legend when ready, or **Importance failed** with
-an error tooltip and **Retry** on failure. Results persist at
+score), and layer file pills. Diff gutters and layer pills show each span's
+score label and reason in custom tooltips. The Changed files header shows
+**Scoring importance…** while running or **Importance failed** with an error
+tooltip and **Retry** on failure. Results persist at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
 importance immediately without a reload, but does not cancel an in-flight run;

@@ -29,6 +29,15 @@ export const ImportanceSpanSchema = z
 		startLine: z.number().int().positive(),
 		endLine: z.number().int().positive(),
 		score: ImportanceScoreSchema,
+		reason: z
+			.string()
+			.max(144)
+			.refine((reason) => reason.trim().length > 0, {
+				message: "reason must not be blank",
+			})
+			.refine((reason) => !/[\r\n]/.test(reason), {
+				message: "reason must be a single line",
+			}),
 	})
 	.refine((span) => span.endLine >= span.startLine, {
 		message: "endLine must be greater than or equal to startLine",
@@ -88,9 +97,11 @@ export interface ImportanceGenerationResult {
 
 const IMPORTANCE_OUTPUT_RULES = [
 	"- Read the input file named in the message. Each changed line is shown as `<old line> <new line> <+|-| > <text>`.",
-	'- Write JSON to the output file named in the message: `{"version":1,"files":[{"path":"<path exactly as listed>","spans":[{"side":"new","startLine":1,"endLine":3,"score":4}]}]}`.',
-	'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines. `score` is an integer 1–5.',
-	"- Cover every added and deleted line of every scorable file. Split a hunk into several spans when its parts differ in importance. Spans must not cross hunk boundaries.",
+	-'- Write JSON to the output file named in the message: `{"version":1,"files":[{"path":"<path exactly as listed>","spans":[{"side":"new","startLine":1,"endLine":3,"score":4}]}]}`.',
+	-'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines. `score` is an integer 1–5.',
+	+'- Write JSON to the output file named in the message: `{"version":1,"files":[{"path":"<path exactly as listed>","spans":[{"side":"new","startLine":1,"endLine":3,"score":4,"reason":"This changes request authorization behavior."}]}]}`.',
+	+'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines. `score` is an integer 1–5.',
+	+"- Every span must include `reason`: exactly one concise sentence explaining the score, with no line breaks and at most 144 characters.",
 	"- Skip files marked `(no textual diff — do not score)`.",
 	"- The worktree is read-only; inspect it only with read-only tools. Write only the output file.",
 	"- Reply with only the output file path.",
@@ -209,6 +220,7 @@ function clipImportanceSpans(
 					startLine: runStart,
 					endLine: runEnd,
 					score: span.score,
+					reason: span.reason,
 				});
 			}
 			runStart = line;
@@ -220,6 +232,7 @@ function clipImportanceSpans(
 				startLine: runStart,
 				endLine: runEnd,
 				score: span.score,
+				reason: span.reason,
 			});
 		}
 	}

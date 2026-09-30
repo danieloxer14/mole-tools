@@ -11,11 +11,27 @@ const roots: Root[] = [];
 const revisionKey = "head-one:base-one";
 const fileOne: ImportanceFile = {
 	path: "src/one.ts",
-	spans: [{ side: "new", startLine: 1, endLine: 2, score: 4 }],
+	spans: [
+		{
+			side: "new",
+			startLine: 1,
+			endLine: 2,
+			score: 4,
+			reason: "The new validation path affects request handling.",
+		},
+	],
 };
 const fileTwo: ImportanceFile = {
 	path: "src/two.ts",
-	spans: [{ side: "new", startLine: 3, endLine: 3, score: 5 }],
+	spans: [
+		{
+			side: "new",
+			startLine: 3,
+			endLine: 3,
+			score: 5,
+			reason: "This changes how requests are authorized.",
+		},
+	],
 };
 const pending: ImportanceSnapshot = {
 	revisionKey,

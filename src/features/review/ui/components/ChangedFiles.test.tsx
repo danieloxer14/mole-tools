@@ -1443,7 +1443,12 @@ test("filters complete effective paths in list and tree without changing global 
 test("renders importance dots on scored list files before counts", () => {
 	const rendered = renderInteractive({
 		files: [parsedFile("src/scored.ts"), parsedFile("src/unscored.ts")],
-		importanceByPath: new Map([["src/scored.ts", 5]]),
+		importanceByPath: new Map([
+			[
+				"src/scored.ts",
+				{ score: 5 as const, reason: "This path changes behavior." },
+			],
+		]),
 	});
 	const nav = changedFilesNav(rendered.container);
 	const scoredRow = nav.querySelector<HTMLElement>(
@@ -1473,7 +1478,15 @@ test("renders importance dots on scored list files before counts", () => {
 test("renders importance dots on tree leaves but never on folders", () => {
 	const rendered = renderInteractive({
 		files: [parsedFile("src/nested/scored.ts")],
-		importanceByPath: new Map([["src/nested/scored.ts", 3]]),
+		importanceByPath: new Map([
+			[
+				"src/nested/scored.ts",
+				{
+					score: 3 as const,
+					reason: "This path supports changed behavior.",
+				},
+			],
+		]),
 	});
 	act(() => modeButton(rendered.container, "Tree view").click());
 	const nav = changedFilesNav(rendered.container);

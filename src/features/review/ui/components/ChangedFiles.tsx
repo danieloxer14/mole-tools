@@ -11,7 +11,7 @@ import {
 	useState,
 } from "react";
 import type { ParsedFileDiff } from "../../../../shared/diff-parse";
-import type { ImportanceScore } from "../importance";
+import type { ImportanceRating } from "../importance";
 import { IMPORTANCE_BG_CLASS, importanceTitle } from "../importance";
 import type { ChangedFilesHeaderProps } from "./ChangedFilesHeader";
 import {
@@ -227,7 +227,7 @@ export interface ChangedFilesProps {
 	selectedPath: string | null;
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
-	importanceByPath?: ReadonlyMap<string, ImportanceScore>;
+	importanceByPath?: ReadonlyMap<string, ImportanceRating>;
 	importance?: ChangedFilesHeaderProps["importance"];
 }
 
@@ -428,7 +428,7 @@ interface ChangedFileRowProps {
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	registerRow: (path: string, element: HTMLElement | null) => void;
-	score?: ImportanceScore;
+	rating?: ImportanceRating;
 }
 
 function ChangedFileRow({
@@ -440,7 +440,7 @@ function ChangedFileRow({
 	onSelectFile,
 	onViewedChange,
 	registerRow,
-	score,
+	rating,
 }: ChangedFileRowProps): ReactElement {
 	const selected = entry.path === selectedPath;
 	return (
@@ -463,12 +463,12 @@ function ChangedFileRow({
 					className="block min-w-0 truncate font-mono text-xs"
 				/>
 			</button>
-			{score !== undefined && (
+			{rating !== undefined && (
 				<span
 					role="img"
-					aria-label={`Importance ${score} of 5`}
-					title={importanceTitle(score)}
-					className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[score]}`}
+					aria-label={`Importance ${rating.score} of 5`}
+					title={importanceTitle(rating.score)}
+					className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[rating.score]}`}
 				/>
 			)}
 			<span className="flex min-w-0 shrink-0 flex-wrap gap-1 text-xs tabular-nums">
@@ -507,7 +507,7 @@ interface ChangedFilesFolderProps {
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	registerRow: (path: string, element: HTMLElement | null) => void;
-	importanceByPath?: ReadonlyMap<string, ImportanceScore>;
+	importanceByPath?: ReadonlyMap<string, ImportanceRating>;
 }
 
 function ChangedFilesFolder({
@@ -596,7 +596,7 @@ function ChangedFilesFolder({
 							onSelectFile={onSelectFile}
 							onViewedChange={onViewedChange}
 							registerRow={registerRow}
-							score={importanceByPath?.get(child.entry.path)}
+							rating={importanceByPath?.get(child.entry.path)}
 						/>
 					),
 				)}
@@ -816,7 +816,7 @@ export function ChangedFiles({
 				onSelectFile={onSelectFile}
 				onViewedChange={onViewedChange}
 				registerRow={registerRow}
-				score={importanceByPath?.get(node.entry.path)}
+				rating={importanceByPath?.get(node.entry.path)}
 			/>
 		);
 	}
@@ -864,7 +864,7 @@ export function ChangedFiles({
 											onSelectFile={onSelectFile}
 											onViewedChange={onViewedChange}
 											registerRow={registerRow}
-											score={importanceByPath?.get(entry.path)}
+											rating={importanceByPath?.get(entry.path)}
 										/>
 									))}
 								</Fragment>
@@ -879,7 +879,7 @@ export function ChangedFiles({
 									onSelectFile={onSelectFile}
 									onViewedChange={onViewedChange}
 									registerRow={registerRow}
-									score={importanceByPath?.get(item.entry.path)}
+									rating={importanceByPath?.get(item.entry.path)}
 								/>
 							),
 						)

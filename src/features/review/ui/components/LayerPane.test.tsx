@@ -728,10 +728,83 @@ test("renders layer file chips with shortened labels and full-path accessible la
 	const markup = renderLayerPane();
 
 	expect(markup).toContain(">routes/route.ts</button>");
-	expect(markup).toContain('title="src/routes/route.ts"');
+	expect(markup).not.toContain('title="src/routes/route.ts"');
 	expect(markup).toContain('aria-label="src/routes/route.ts"');
 	expect(markup).toContain(">web/route.ts</button>");
-	expect(markup).toContain('title="web/route.ts"');
+	expect(markup).not.toContain('title="web/route.ts"');
+});
+test("shows score reasons and full unscored paths in layer pill component tooltips", async () => {
+	const scoredPath = "src/routes/route.ts";
+	const unscoredPath = "web/route.ts";
+	const paths = [scoredPath, unscoredPath];
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() =>
+		root.render(
+			<LayerPane
+				state={reviewState({
+					layers: [{ ...firstLayer(), files: paths }],
+				})}
+				files={paths}
+				filesContent={null}
+				selectedPath={null}
+				onSelectFile={() => {}}
+				onSelectLayer={() => {}}
+				onToggleDone={() => {}}
+				layerAction={null}
+				actionError={null}
+				externallyDisabled={false}
+				onRegenerate={() => {}}
+				onRetry={() => {}}
+				importanceByPath={
+					new Map([
+						[
+							scoredPath,
+							{
+								score: 4 as const,
+								reason: "This changes how requests are authorized.",
+							},
+						],
+					])
+				}
+			/>,
+		),
+	);
+	const scoredChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${scoredPath}"]`,
+	);
+	const unscoredChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${unscoredPath}"]`,
+	);
+	if (!scoredChip || !unscoredChip) throw new Error("Missing layer file chip");
+	expect(scoredChip.title).toBe("");
+	expect(unscoredChip.title).toBe("");
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		scoredChip.focus();
+		await Bun.sleep(0);
+	});
+	expect(
+		document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
+	).toBe("Importance 4/5 (High)This changes how requests are authorized.");
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		unscoredChip.focus();
+		await Bun.sleep(0);
+	});
+	expect(
+		Array.from(
+			document.body.querySelectorAll('[data-slot="tooltip-content"]'),
+		).at(-1)?.textContent,
+	).toBe(unscoredPath);
 });
 
 test("styles layer file chips by Viewed state with selection taking precedence", () => {
@@ -751,7 +824,18 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 		}),
 		files: paths,
 		selectedPath: selected,
-		importanceByPath: new Map(paths.map((path) => [path, 4])),
+		importanceByPath: new Map(
+			paths.map(
+				(path) =>
+					[
+						path,
+						{
+							score: 4,
+							reason: "This file supports changed request behavior.",
+						},
+					] as const,
+			),
+		),
 	});
 	const container = parseMarkup(markup);
 	const selectedChip = container.querySelector<HTMLButtonElement>(
@@ -772,7 +856,8 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 		expect(endCap?.tagName).toBe("SPAN");
 		expect(endCap?.classList).toContain("bg-importance-4");
 		expect(endCap?.classList).toContain("w-4");
-		expect(endCap?.getAttribute("title")).toBe("Importance 4/5 (High)");
+		expect(endCap?.getAttribute("title")).toBeNull();
+		expect(chip.getAttribute("title")).toBeNull();
 		expect(chip.querySelector("svg")).toBeNull();
 	}
 
@@ -833,7 +918,7 @@ test("keeps long layer file labels readable and accessible", () => {
 	});
 
 	expect(markup).toContain(`>${visibleLabel}</button>`);
-	expect(markup).toContain(`title="${longPath}"`);
+	expect(markup).not.toContain(`title="${longPath}"`);
 	expect(markup).toContain(`aria-label="${longPath}"`);
 });
 

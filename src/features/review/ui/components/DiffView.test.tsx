@@ -455,8 +455,20 @@ const importanceDiff: ParsedFileDiff = {
 };
 
 const importanceSpans = [
-	{ side: "old", startLine: 10, endLine: 10, score: 2 },
-	{ side: "new", startLine: 11, endLine: 12, score: 4 },
+	{
+		side: "old",
+		startLine: 10,
+		endLine: 10,
+		score: 2,
+		reason: "This removed check allowed unauthorized requests.",
+	},
+	{
+		side: "new",
+		startLine: 11,
+		endLine: 12,
+		score: 4,
+		reason: "This adds request validation before persistence.",
+	},
 ] as const;
 
 test("colours inline diff gutter by changed line importance", () => {
@@ -471,7 +483,11 @@ test("colours inline diff gutter by changed line importance", () => {
 	const oldStrip = oldLine?.querySelector(".importance-strip");
 	expect(oldLine?.classList.contains("importance-cell")).toBe(true);
 	expect(oldStrip?.classList.contains(IMPORTANCE_BG_CLASS[2])).toBe(true);
-	expect(oldStrip?.getAttribute("title")).toBe("Importance 2/5 (Low)");
+	expect(oldStrip?.getAttribute("title")).toBeNull();
+	expect(oldStrip?.getAttribute("role")).toBe("img");
+	expect(oldStrip?.getAttribute("aria-label")).toBe(
+		"Importance 2/5 (Low): This removed check allowed unauthorized requests.",
+	);
 
 	const addedCell = cells.find((cell) =>
 		cell
@@ -481,8 +497,45 @@ test("colours inline diff gutter by changed line importance", () => {
 	const addedStrip = addedCell?.querySelector(".importance-strip");
 	expect(addedCell?.classList.contains("importance-cell")).toBe(true);
 	expect(addedCell?.textContent?.trim()).toBe("");
-	expect(addedStrip?.getAttribute("title")).toBe("Importance 4/5 (High)");
+	expect(addedStrip?.getAttribute("title")).toBeNull();
+	expect(addedStrip?.getAttribute("aria-label")).toBe(
+		"Importance 4/5 (High): This adds request validation before persistence.",
+	);
 	expect(root.querySelector(`.${IMPORTANCE_BG_CLASS[5]}`)).toBeNull();
+});
+test("diff gutter tooltips show matching score and reason in both layouts", async () => {
+	for (const mode of ["inline", "side-by-side"] as const) {
+		const { container, root } = mountDiff({
+			file: importanceDiff,
+			mode,
+			importance: importanceSpans,
+		});
+		try {
+			const oldStrip = container.querySelector<HTMLElement>(
+				`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
+			);
+			if (!oldStrip)
+				throw new Error("Old-line importance indicator is missing");
+			expect(oldStrip.title).toBe("");
+			await act(async () => {
+				document.dispatchEvent(
+					new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+				);
+				oldStrip.focus();
+				await Bun.sleep(0);
+			});
+			const tooltip = document.body.querySelector(
+				'[data-slot="tooltip-content"]',
+			);
+			expect(tooltip?.textContent).toBe(
+				"Importance 2/5 (Low)This removed check allowed " +
+					"unauthorized requests.",
+			);
+		} finally {
+			act(() => root.unmount());
+			container.remove();
+		}
+	}
 });
 
 test("colours side-by-side line number cells on their covered sides", () => {
@@ -512,12 +565,12 @@ test("colours side-by-side line number cells on their covered sides", () => {
 		cellsWithScore(2)[0]
 			?.querySelector(".importance-strip")
 			?.getAttribute("title"),
-	).toBe("Importance 2/5 (Low)");
+	).toBeNull();
 	expect(
 		cellsWithScore(4)[0]
 			?.querySelector(".importance-strip")
 			?.getAttribute("title"),
-	).toBe("Importance 4/5 (High)");
+	).toBeNull();
 });
 
 test("importance absent or uncovered adds no importance strips", () => {
@@ -530,7 +583,15 @@ test("importance absent or uncovered adds no importance strips", () => {
 	const markupWithUncoveredScores = parseMarkup(
 		renderDiff({
 			file: importanceDiff,
-			importance: [{ side: "new", startLine: 20, endLine: 20, score: 3 }],
+			importance: [
+				{
+					side: "new",
+					startLine: 20,
+					endLine: 20,
+					score: 3,
+					reason: "This spans a line outside the rendered diff.",
+				},
+			],
 		}),
 	);
 

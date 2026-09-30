@@ -5,7 +5,7 @@ export const FEATURE_FLAGS = [
 		id: "layer-importance",
 		label: "Layer importance",
 		description:
-			"Score each changed line span 1–5 with a review agent and colour diff gutters, layer file pills, and changed files from cool blue (skip) to red (critical).",
+			"Score each changed line span 1–5 with a concise reason and colour diff gutters, layer file pills, and changed files from cool blue (skip) to red (critical).",
 		defaultEnabled: false,
 	},
 ] as const;
