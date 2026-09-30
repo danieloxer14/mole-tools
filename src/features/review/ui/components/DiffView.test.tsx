@@ -984,6 +984,190 @@ test("renders a per-discussion collapse chevron in the expanded state", () => {
 	expect(markup).not.toContain("inline-discussion-preview");
 });
 
+const placementFile: ParsedFileDiff = {
+	oldPath: "src/old-name.ts",
+	newPath: "src/new-name.ts",
+	status: "renamed",
+	binary: false,
+	insertions: 2,
+	deletions: 2,
+	hunks: [
+		{
+			header: "@@ -126,4 +126,4 @@",
+			oldStart: 126,
+			oldLines: 4,
+			newStart: 126,
+			newLines: 4,
+			lines: [
+				{ kind: "context", oldLine: 126, newLine: 126, text: "before" },
+				{ kind: "context", oldLine: 127, newLine: 127, text: "endpoint" },
+				{ kind: "del", oldLine: 149, newLine: null, text: "old endpoint" },
+				{ kind: "add", oldLine: null, newLine: 150, text: "new endpoint" },
+			],
+		},
+	],
+};
+
+function lineRow(
+	container: HTMLElement,
+	oldLine: string,
+	newLine: string,
+): HTMLTableRowElement | null {
+	return (
+		Array.from(
+			container.querySelectorAll<HTMLTableRowElement>("tr[data-find-line]"),
+		).find((row) => {
+			const numbers = row.querySelectorAll(".line-number");
+			return (
+				numbers[0]?.textContent === oldLine &&
+				numbers[1]?.textContent === newLine
+			);
+		}) ?? null
+	);
+}
+
+test("attaches normalized ranged discussion exactly below its endpoint in both layouts", () => {
+	const ranged = discussion("range-endpoint", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 127,
+		oldLine: null,
+	});
+	for (const mode of ["inline", "side-by-side"] as const) {
+		const { container, root } = mountDiff({
+			file: placementFile,
+			mode,
+			discussions: [ranged],
+		});
+		try {
+			const endpoint = lineRow(container, "127", "127");
+			const divergentScalar = lineRow(container, "", "150");
+			expect(
+				endpoint?.nextElementSibling?.classList.contains("inline-comment-row"),
+			).toBe(true);
+			expect(
+				endpoint?.nextElementSibling?.querySelectorAll(
+					'article[data-discussion-id="range-endpoint"]',
+				),
+			).toHaveLength(1);
+			expect(
+				divergentScalar?.nextElementSibling?.classList.contains(
+					"inline-comment-row",
+				),
+			).not.toBe(true);
+			expect(container.textContent).toContain("new:127");
+			expect(
+				container.querySelectorAll(
+					'article[data-discussion-id="range-endpoint"]',
+				),
+			).toHaveLength(1);
+		} finally {
+			act(() => root.unmount());
+			container.remove();
+		}
+	}
+});
+
+test("matches old-side and renamed scalar positions only on their corresponding rows", () => {
+	for (const [id, position, expected] of [
+		[
+			"old-only",
+			{
+				newPath: placementFile.newPath,
+				oldPath: placementFile.oldPath,
+				newLine: null,
+				oldLine: 149,
+			},
+			["149", ""],
+		],
+		[
+			"renamed-new",
+			{
+				newPath: placementFile.newPath,
+				oldPath: placementFile.oldPath,
+				newLine: 150,
+				oldLine: null,
+			},
+			["", "150"],
+		],
+	] as const) {
+		const { container, root } = mountDiff({
+			file: placementFile,
+			discussions: [discussion(id, position)],
+		});
+		try {
+			const row = lineRow(container, expected[0], expected[1]);
+			expect(
+				row?.nextElementSibling?.querySelector(
+					`article[data-discussion-id="${id}"]`,
+				),
+			).not.toBeNull();
+			expect(
+				container.querySelectorAll(`article[data-discussion-id="${id}"]`),
+			).toHaveLength(1);
+		} finally {
+			act(() => root.unmount());
+			container.remove();
+		}
+	}
+});
+
+test("matches two-coordinate scalar context only on one row with both paths and coordinates", () => {
+	const sameRow = discussion("same-row", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 127,
+		oldLine: 127,
+	});
+	const splitCoordinates = discussion("split-coordinates", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 150,
+		oldLine: 127,
+	});
+	const absentEndpoint = discussion("absent-endpoint", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 151,
+		oldLine: null,
+	});
+	const wrongPath = discussion("wrong-path", {
+		newPath: "src/other.ts",
+		oldPath: placementFile.oldPath,
+		newLine: 127,
+		oldLine: 127,
+	});
+	const { container, root } = mountDiff({
+		file: placementFile,
+		discussions: [sameRow, splitCoordinates, absentEndpoint, wrongPath],
+	});
+	try {
+		const endpoint = lineRow(container, "127", "127");
+		expect(
+			endpoint?.nextElementSibling?.querySelectorAll("article"),
+		).toHaveLength(1);
+		expect(
+			endpoint?.nextElementSibling?.querySelector(
+				'article[data-discussion-id="same-row"]',
+			),
+		).not.toBeNull();
+		expect(
+			container.querySelector(
+				'article[data-discussion-id="split-coordinates"]',
+			),
+		).toBeNull();
+		expect(
+			container.querySelector('article[data-discussion-id="absent-endpoint"]'),
+		).toBeNull();
+		expect(
+			container.querySelector('article[data-discussion-id="wrong-path"]'),
+		).toBeNull();
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
 test("omits discussion paths and repeated note metadata", () => {
 	const markup = renderDiff({
 		discussions: [
@@ -1860,6 +2044,7 @@ test("bounds long inline discussion content and keeps code and table regions int
 test("groups inline Explain in compact actions and preserves its callback", () => {
 	let explained = "";
 	const { container } = mountDiff({
+		file,
 		discussions: [positionedDiscussion],
 		onExplainDiscussion: (discussionId) => {
 			explained = discussionId;
@@ -1872,9 +2057,9 @@ test("groups inline Explain in compact actions and preserves its callback", () =
 		'button[data-action="explain"]',
 	);
 
-	expect(group?.className).toContain("flex");
-	expect(group?.className).toContain("shrink-0");
-	expect(button?.className).toContain("bg-primary");
+	expect(group?.classList.contains("flex")).toBe(true);
+	expect(group?.classList.contains("shrink-0")).toBe(true);
+	expect(button?.classList.contains("bg-primary")).toBe(true);
 	expect(button?.getAttribute("aria-busy")).toBeNull();
 	act(() => button?.click());
 	expect(explained).toBe("disc-1");

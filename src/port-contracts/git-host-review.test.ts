@@ -120,6 +120,57 @@ describe("GitHost review contract", () => {
 			],
 		]);
 	});
+	test("projects incoming range end into discussion position", async () => {
+		const exec: GlabExec = async () =>
+			ok(
+				JSON.stringify([
+					{
+						id: "range-discussion",
+						notes: [
+							{
+								id: 1,
+								author: { username: "reviewer" },
+								body: "note",
+								created_at: "2026-08-15T10:00:00Z",
+								system: false,
+								position: {
+									old_path: "src/old.ts",
+									new_path: "src/new.ts",
+									old_line: null,
+									new_line: 150,
+									line_range: {
+										start: {
+											line_code: "start",
+											type: "new",
+											old_line: null,
+											new_line: 122,
+										},
+										end: {
+											line_code: "end",
+											type: "new",
+											old_line: null,
+											new_line: 127,
+										},
+									},
+								},
+							},
+						],
+					},
+				]),
+			);
+		const glab = new GlabAdapter(exec);
+
+		await expect(glab.listDiscussions(ref)).resolves.toMatchObject([
+			{
+				position: {
+					newPath: "src/new.ts",
+					oldPath: "src/old.ts",
+					newLine: 127,
+					oldLine: null,
+				},
+			},
+		]);
+	});
 
 	test("rejects malformed MR payloads before any write", async () => {
 		const calls: { args: string[]; input?: string }[] = [];

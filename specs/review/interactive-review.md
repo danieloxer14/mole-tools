@@ -309,10 +309,11 @@ The header also offers a `Viewed` checkbox for the selected file, mirroring the
 
 Existing GitLab discussions are read-only except for **Explain**, which opens a
 new chat titled after the discussion and asks the agent to explain it (§6).
-Positioned discussions appear below their matching diff lines with
-resolved/unresolved styling, all notes, and an Explain button; unpositioned
-discussions appear in Overview's `General discussion` section, each with its
-own Explain button. Local drafts have no Explain.
+Positioned discussions appear once below the exact matching diff row.
+For a ranged GitLab discussion, that row is the selected-side range end even
+when GitLab's top-level scalar coordinate differs; unpositioned discussions
+appear in Overview's `General discussion` section, each with its own Explain
+button. Local drafts have no Explain.
 
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;

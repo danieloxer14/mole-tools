@@ -853,6 +853,185 @@ describe("GlabAdapter", () => {
 			]);
 		});
 	});
+	describe("incoming discussion positions", () => {
+		const ref: MrRef = {
+			host: "gitlab.example.com",
+			projectPath: "group/sub/project",
+			iid: 42,
+		};
+
+		function discussion(position: unknown) {
+			return JSON.stringify([
+				{
+					id: "positioned",
+					notes: [
+						{
+							id: 1,
+							author: { username: "reviewer" },
+							body: "note",
+							created_at: "2026-08-30T00:00:00Z",
+							system: false,
+							position,
+						},
+					],
+				},
+			]);
+		}
+
+		test("uses range endpoint side and retains scalar-only position mapping", async () => {
+			const range = {
+				start: {
+					line_code: "start",
+					type: "old",
+					old_line: 4,
+					new_line: null,
+				},
+				end: {
+					line_code: "end",
+					type: "new",
+					old_line: null,
+					new_line: 7,
+				},
+			};
+			const positions = [
+				{
+					old_path: "src/old.ts",
+					new_path: "src/renamed.ts",
+					old_line: 150,
+					new_line: 150,
+					line_range: range,
+					expected: {
+						newPath: "src/renamed.ts",
+						oldPath: "src/old.ts",
+						newLine: 7,
+						oldLine: null,
+					},
+				},
+				{
+					old_path: "src/old.ts",
+					new_path: "src/new.ts",
+					old_line: 6,
+					new_line: 8,
+					line_range: {
+						...range,
+						end: {
+							line_code: "end",
+							type: "old",
+							old_line: 6,
+							new_line: 8,
+						},
+					},
+					expected: {
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
+						newLine: null,
+						oldLine: 6,
+					},
+				},
+				{
+					old_path: "src/old.ts",
+					new_path: "src/new.ts",
+					old_line: null,
+					new_line: 8,
+					expected: {
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
+						newLine: 8,
+						oldLine: null,
+					},
+				},
+				{
+					old_path: "src/old.ts",
+					new_path: "src/new.ts",
+					old_line: 6,
+					new_line: null,
+					expected: {
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
+						newLine: null,
+						oldLine: 6,
+					},
+				},
+				{
+					old_path: "src/context.ts",
+					new_path: "src/context.ts",
+					old_line: 6,
+					new_line: 8,
+					expected: {
+						newPath: "src/context.ts",
+						oldPath: "src/context.ts",
+						newLine: 8,
+						oldLine: 6,
+					},
+				},
+			];
+
+			for (const position of positions) {
+				const glab = makeGlab({
+					"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+						ok(discussion(position)),
+				});
+
+				await expect(glab.listDiscussions(ref)).resolves.toMatchObject([
+					{ position: position.expected },
+				]);
+			}
+
+			const nullPosition = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(discussion(null)),
+			});
+			await expect(nullPosition.listDiscussions(ref)).resolves.toMatchObject([
+				{ position: null },
+			]);
+		});
+
+		test("rejects malformed present ranges rather than using scalar lines", async () => {
+			const malformed = [
+				{ start: {}, end: {} },
+				{
+					start: {
+						line_code: "start",
+						type: "new",
+						old_line: null,
+						new_line: 2,
+					},
+					end: {
+						line_code: "end",
+						type: "new",
+						old_line: null,
+						new_line: null,
+					},
+				},
+				{
+					start: {
+						line_code: "start",
+						type: "new",
+						old_line: null,
+						new_line: 2,
+					},
+				},
+			];
+
+			for (const line_range of malformed) {
+				const glab = makeGlab({
+					"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+						ok(
+							discussion({
+								old_path: "src/old.ts",
+								new_path: "src/new.ts",
+								old_line: null,
+								new_line: 150,
+								line_range,
+							}),
+						),
+				});
+				await expect(glab.listDiscussions(ref)).rejects.toThrow(
+					"Invalid GitLab discussion response",
+				);
+			}
+		});
+	});
 
 	describe("createDiscussion", () => {
 		const ref: MrRef = {
@@ -888,7 +1067,24 @@ describe("GlabAdapter", () => {
 				parsedDiff,
 				refs,
 			);
-			const calls: { args: string[]; input?: string }[] = [];
+			const responsePosition = {
+				...position,
+				new_line: 150,
+				line_range: {
+					start: {
+						line_code: "start",
+						type: "new" as const,
+						old_line: null,
+						new_line: 122,
+					},
+					end: {
+						line_code: "end",
+						type: "new" as const,
+						old_line: null,
+						new_line: 127,
+					},
+				},
+			};
 			const response = JSON.stringify({
 				id: "discussion-1",
 				resolved: false,
@@ -899,10 +1095,11 @@ describe("GlabAdapter", () => {
 						body: "Review this",
 						created_at: "2026-08-16T00:00:00Z",
 						system: false,
-						position,
+						position: responsePosition,
 					},
 				],
 			});
+			const calls: { args: string[]; input?: string }[] = [];
 			const exec: GlabExec = async (args, input) => {
 				calls.push({ args, input });
 				return ok(response);
@@ -917,6 +1114,12 @@ describe("GlabAdapter", () => {
 			});
 
 			expect(discussion.id).toBe("discussion-1");
+			expect(discussion.position).toEqual({
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 127,
+				oldLine: null,
+			});
 			expect(calls).toHaveLength(1);
 			expect(calls[0]?.args).toEqual([
 				"api",
