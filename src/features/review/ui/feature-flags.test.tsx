@@ -16,7 +16,7 @@ const originalFetch = globalThis.fetch;
 const roots: Root[] = [];
 const disabledFlag: FeatureFlagView = {
 	id: "layer-importance",
-	label: "Layer importance",
+	label: "File important",
 	description: "Score changed lines.",
 	enabled: false,
 };

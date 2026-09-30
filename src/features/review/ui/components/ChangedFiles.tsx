@@ -463,14 +463,6 @@ function ChangedFileRow({
 					className="block min-w-0 truncate font-mono text-xs"
 				/>
 			</button>
-			{rating !== undefined && (
-				<span
-					role="img"
-					aria-label={`Importance ${rating.score} of 5`}
-					title={importanceTitle(rating.score)}
-					className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[rating.score]}`}
-				/>
-			)}
 			<span className="flex min-w-0 shrink-0 flex-wrap gap-1 text-xs tabular-nums">
 				<span className="max-w-full break-all text-success">
 					+{entry.file.insertions}
@@ -479,6 +471,14 @@ function ChangedFileRow({
 					−{entry.file.deletions}
 				</span>
 			</span>
+			{rating !== undefined && (
+				<span
+					role="img"
+					aria-label={`Importance ${rating.score} of 5`}
+					title={importanceTitle(rating.score)}
+					className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[rating.score]}`}
+				/>
+			)}
 			<Tooltip>
 				<TooltipTrigger
 					render={

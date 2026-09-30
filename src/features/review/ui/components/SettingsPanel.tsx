@@ -68,7 +68,7 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 	"review-comment-from-chat":
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 	"review-importance":
-		"System prompt the importance agent uses to score changed line spans 1–5 and provide a concise reason for each (Features → Layer importance must be on).",
+		"System prompt the importance agent uses to score changed line spans 1–5 and provide a concise reason for each (Features → File important must be on).",
 };
 
 type ReviewAgent = PromptAgentName;

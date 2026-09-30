@@ -110,7 +110,7 @@ test("importance slot appears after existing slots when Layer importance is on",
 			flags: [
 				{
 					id: "layer-importance",
-					label: "Layer importance",
+					label: "File important",
 					description: "test",
 					enabled: true,
 				},
@@ -154,7 +154,7 @@ test("importance slot selection falls back when Layer importance turns off", asy
 				flags: [
 					{
 						id: "layer-importance",
-						label: "Layer importance",
+						label: "File important",
 						description: "test",
 						enabled,
 					},
@@ -215,7 +215,7 @@ test("importance slot selection falls back when Layer importance turns off", asy
 					flags: [
 						{
 							id: "layer-importance",
-							label: "Layer importance",
+							label: "File important",
 							description: "test",
 							enabled,
 						},

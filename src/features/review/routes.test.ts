@@ -6880,7 +6880,7 @@ describe("feature flags API", () => {
 		expect(payload.flags).toHaveLength(1);
 		expect(payload.flags[0]).toMatchObject({
 			id: "layer-importance",
-			label: "Layer importance",
+			label: "File important",
 			enabled: false,
 		});
 	});

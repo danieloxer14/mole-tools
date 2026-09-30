@@ -117,7 +117,7 @@ CLI alias. OMP effort is sent as `--thinking <level>`, Claude effort as
 Unset effort sends no effort option; Codex's `-c` option is not an OMP effort
 flag.
 
-The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > Layer importance** is on, it also shows `review-importance`. Each prompt version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to rebuild cached layers.
+The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > File important** is on, it also shows `review-importance`. Each prompt version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to rebuild cached layers.
 
 The OMP model dropdown comes from `models --json` run by the selected OMP
 executable. Effort choices are limited to values advertised as supported for
@@ -233,14 +233,14 @@ The prompt slots are `commit-system`, `mr-code`, `mr-plan`,
 `review-layers-code`, `review-layers-plan`, `review-chat`,
 `review-explain-comment`, `review-comment-from-chat`, and
 `review-importance` (visible in **Settings > Prompts** only when **Settings >
-Features > Layer importance** is on). Each slot can have multiple named
+Features > File important** is on). Each slot can have multiple named
 presets. The active text is the highest-numbered version of the active preset.
 The shipped default seeds `default/001.md` on first access, and
 `config.prompts` records the active preset per slot (a missing entry means
 `default`).
 
 The five standard review prompt slots are managed from **Settings > Prompts**;
-`review-importance` appears there only when **Layer importance** is on.
+`review-importance` appears there only when **File important** is on.
 General review defaults are in **General**. Saving a prompt creates a new
 version, **Roll back** copies an older version forward as a new latest version,
 and **Reset** writes the shipped default as a new version. This history is
@@ -307,7 +307,7 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
 | `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
 | `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
-| `review-importance` | Layer importance scoring (Features > Layer importance) | Scores each changed line span 1–5 for reviewer attention and adds a concise reason. |
+| `review-importance` | Importance scoring (Features > File important) | Scores each changed line span 1–5 for reviewer attention and adds a concise reason. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -355,7 +355,7 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 `commit-system` prompt preset supplies the system prompt; set it in the
 `prompts` map. Settings **Prompts** manages the five standard review prompt
 slots and additionally `review-importance` only when **Settings > Features >
-Layer importance** is on; it does not change commit prompt configuration.
+File important** is on; it does not change commit prompt configuration.
 
 
 ---
@@ -416,7 +416,7 @@ changes**. That toggle applies immediately to the current review, not review
 defaults. The **Prompts** tab manages the five standard review prompt slots
 (`review-layers-code`, `review-layers-plan`, `review-chat`,
 `review-explain-comment`, `review-comment-from-chat`), plus `review-importance`
-only while **Layer importance** is on, and their preset versions, each with
+only while **File important** is on, and their preset versions, each with
 Agent, Model, and Effort dropdowns. OMP models come from the selected
 executable's `models --json` catalog; Claude uses the Anthropic Models API with
 a server `ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key
@@ -480,7 +480,7 @@ Unknown keys are preserved when a flag is changed.
 
 #### Layer importance
 
-When **Layer importance** is on, an agent scores changed line spans after the
+When **File important** is on, an agent scores changed line spans after the
 initial diff loads and after a sync changes the head or merge-base revision.
 Layer **Regenerate** and **Retry** do not rerun importance. The
 `review-importance` prompt evaluates the whole change set on a 1–5 scale:

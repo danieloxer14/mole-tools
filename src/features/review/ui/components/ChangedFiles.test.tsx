@@ -1440,7 +1440,7 @@ test("filters complete effective paths in list and tree without changing global 
 	).not.toBeNull();
 	expect(nav.querySelector('[data-file-path="elsewhere.ts"]')).not.toBeNull();
 });
-test("renders importance dots on scored list files before counts", () => {
+test("renders importance dots on scored list files after counts", () => {
 	const rendered = renderInteractive({
 		files: [parsedFile("src/scored.ts"), parsedFile("src/unscored.ts")],
 		importanceByPath: new Map([
@@ -1468,7 +1468,7 @@ test("renders importance dots on scored list files before counts", () => {
 	const counts = scoredRow.querySelector("span.text-success");
 	if (!counts) throw new Error("File counts are missing");
 	expect(
-		dot.compareDocumentPosition(counts) & Node.DOCUMENT_POSITION_FOLLOWING,
+		counts.compareDocumentPosition(dot) & Node.DOCUMENT_POSITION_FOLLOWING,
 	).toBeTruthy();
 	expect(
 		unscoredRow.querySelector('[role="img"][aria-label^="Importance "]'),
@@ -1508,6 +1508,11 @@ test("renders importance dots on tree leaves but never on folders", () => {
 	if (!dot) throw new Error("Tree leaf importance dot is missing");
 	expect(dot.className.split(/\s+/)).toContain("bg-importance-3");
 	expect(dot.title).toBe("Importance 3/5 (Moderate)");
+	const counts = leafRow.querySelector("span.text-success");
+	if (!counts) throw new Error("File counts are missing");
+	expect(
+		counts.compareDocumentPosition(dot) & Node.DOCUMENT_POSITION_FOLLOWING,
+	).toBeTruthy();
 });
 
 test("omits importance dots when importanceByPath is undefined", () => {
