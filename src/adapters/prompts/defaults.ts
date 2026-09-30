@@ -66,7 +66,22 @@ Infer scope from the user request, current changes, relevant call sites, and tes
 
 Each layer should include the production files and localized tests covering that boundary. Finish with a layer for full end-to-end tests. Use only existing files; do not invent coverage. Keep layers focused, ordered, and concise. Make important uncovered boundaries clear in tldr.
 
-Write each tldr as useful, compact Markdown when it helps explain the layer: use at most one short heading, up to 2–3 focused bullets, inline code for names, and short paragraphs. Avoid large fenced examples and tables. Keep tldr specific to the layer rather than repeating its title or file list.
+When a layer has two or more distinct points, separate them into short Markdown paragraphs with a blank line or focused bullets on separate lines. A genuinely single-point tldr may stay one short paragraph. Keep tldr concise: at most one short heading, up to 2–3 focused bullets, inline code for names, and no large fenced examples or tables. Keep code-mode tldrs focused on execution boundaries. Encode line breaks as \`\\n\` inside JSON strings; never put a physical newline inside a JSON string.
+
+Schematic example (paths are illustrative, not repository coverage):
+
+\`\`\`json
+{
+  "version": 1,
+  "layers": [
+    {
+      "title": "Request boundary",
+      "tldr": "- Routes the request.\\n- Returns the result.",
+      "files": ["src/example.ts"]
+    }
+  ]
+}
+\`\`\`
 
 If a file or files have been deleted, in favour of a different implementation. Be sure to include the original and it's replacement in the same layer for easier understanding of old to new.
 
@@ -75,7 +90,22 @@ Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty
 
 Assess completeness of requirements, unstated assumptions, risks, and testability of the acceptance criteria. Also cover what is proposed, the architecture and implementation layers, decisions implied by the change, and how each layer is verified by tests. Treat these themes as guidance for what to look for, not as a fixed section template.
 
-Write each tldr as useful, compact Markdown when it helps explain the plan layer: use at most one short heading, up to 2–3 focused bullets, inline code for names, and short paragraphs. Avoid large fenced examples and tables. Focus on the layer's proposed decisions, requirements, assumptions, risks, or verification, as relevant.
+When a plan layer has two or more distinct points, separate them into short Markdown paragraphs with a blank line or focused bullets on separate lines. A genuinely single-point tldr may stay one short paragraph. Keep tldr concise: at most one short heading, up to 2–3 focused bullets, inline code for names, and no large fenced examples or tables. Focus on the layer's proposed decisions, requirements, assumptions, risks, or verification, as relevant. Encode line breaks as \`\\n\` inside JSON strings; never put a physical newline inside a JSON string.
+
+Schematic example (paths are illustrative, not repository coverage):
+
+\`\`\`json
+{
+  "version": 1,
+  "layers": [
+    {
+      "title": "Plan decisions",
+      "tldr": "- Verifies acceptance criteria.\\n- Calls out unresolved risks.",
+      "files": ["src/example.ts"]
+    }
+  ]
+}
+\`\`\`
 
 Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty array. Each layer entry must have non-empty title, tldr, and files array fields; keep files in implementation-flow order within each layer. Write the JSON to the absolute output path supplied in the user message, then reply with only that path.`,
 	"review-chat": `You are the interactive merge request review agent.
