@@ -548,11 +548,26 @@ always build a valid GitLab position. Creating a comment immediately opens an
 empty local draft editor below the selection's last line. The user writes its
 body; no agent turn or comment-generation prompt runs. The draft is local until
 its own Send: there is no batch submit. Draft statuses are `draft`, `sending`,
-`posted`, and `failed`; Cancel removes it, Edit persists body changes, and
-failed drafts keep their error with Retry. While sending, the draft is persisted
-before `GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and
-Send, and keeps Cancel available. A post failure transitions the draft to
-`failed` with its error.
+`posted`, and `failed`; Cancel removes that draft, Edit persists its body
+changes, and failed drafts keep their error with Retry. While sending, the
+draft is persisted before `GitHost.createDiscussion`; the UI shows `Sending…`,
+disables Edit and Send for that draft, and keeps Cancel available. A post
+failure transitions that draft to `failed` with its error.
+
+Multiple drafts can remain open at once, including drafts on the same anchor.
+Each card is identified by its draft ID: Edit, Send, Retry, Cancel, and
+From chat act only on that ID. Sending or canceling one draft does not remove,
+close, or change another draft's body, anchor, or controls.
+
+Edits are persisted optimistically and serialized per draft ID. Send and Retry
+wait for that draft's latest edit to persist before posting; a failed edit
+prevents posting an older body and leaves that draft editable with its error.
+Edits and sends for other draft IDs remain independent.
+
+Generation targets only the clicked draft ID. It snapshots the selected chat
+at click time, and its success, failure, or Stop affects only that draft.
+Delayed generation or persistence results cannot replace newer state for a
+draft or restore a canceled draft.
 
 ### From chat
 
@@ -606,11 +621,15 @@ current `diff_refs`:
 - Cross-side ranges, reversed ranges, missing hunk lines, stale refs, and paths
   that do not match the selected side are rejected before the API call.
 
-A successful Send posts one `GitLabPositionPayload` through `GitHost` using
-`glab api --method POST --input -`, refetches discussions, and retains the
-local draft as `status: "posted"` with `postedDiscussionId` while the refreshed
-discussion renders in the read-only posted thread. Posted comments are not
-editable in this UI. A post failure keeps the draft and inline error.
+A successful Send posts exactly one discussion for that draft, refetches
+discussions and review state, and retains that draft as `status: "posted"` with
+`postedDiscussionId` while the refreshed discussion renders in the read-only
+posted thread. Refresh does not close peer drafts: reconciliation keeps each
+peer's newer local or pending per-ID state until its persistence completes.
+Older GET, PUT, create, send, or generation results cannot replace newer
+per-ID state or resurrect a canceled draft. Posted comments are not editable
+in this UI. A post failure keeps the draft editable with its inline error;
+Retry applies only to that failed draft.
 
 ## 8. Plan mode and markdown rendering
 

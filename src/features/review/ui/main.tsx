@@ -69,6 +69,7 @@ import {
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
 import { projectWebUrl } from "./description-media";
+import { createDraftEditQueue } from "./draft-edit-queue";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
@@ -86,7 +87,6 @@ import {
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import { useSkills } from "./use-skills";
 import { useSplitterResize } from "./use-splitter-resize";
-
 import "./app.css";
 
 type ReviewStateResponse = ReviewApiState;
@@ -515,7 +515,9 @@ function ReviewApp() {
 		Record<string, DraftGeneration>
 	>({});
 	const chatControllers = useRef(new Map<string, AbortController>());
+	const autoRunRequested = useRef(false);
 	const fromChatControllers = useRef(new Map<string, AbortController>());
+	const fromChatGenerationSequence = useRef(new Map<string, number>());
 	const chatToolSequence = useRef(0);
 	const chatHistoryRequests = useRef(createRequestSequence());
 	const reviewStateRequests = useRef(createReviewStateRequestSequence());
@@ -523,8 +525,65 @@ function ReviewApp() {
 	const chatSelectionQueue = useRef(Promise.resolve());
 	const collapsedProgressWrites = useRef(createProgressWriteQueue());
 	const collapsedWriteSequence = useRef(0);
-	const autoRunRequested = useRef(false);
 	const draftEditSequence = useRef(new Map<string, number>());
+	const draftEditQueues = useRef(createDraftEditQueue());
+	const draftRevisions = useRef(new Map<string, number>());
+	const failedDraftEdits = useRef(new Set<string>());
+	const draftPendingOperations = useRef(new Map<string, number>());
+	const deletedDraftIds = useRef(new Set<string>());
+	const markDraftChanged = (id: string) => {
+		draftRevisions.current.set(id, (draftRevisions.current.get(id) ?? 0) + 1);
+	};
+	const beginDraftOperation = (id: string) => {
+		draftPendingOperations.current.set(
+			id,
+			(draftPendingOperations.current.get(id) ?? 0) + 1,
+		);
+	};
+	const finishDraftOperation = (id: string) => {
+		const pending = draftPendingOperations.current.get(id) ?? 0;
+		if (pending <= 1) draftPendingOperations.current.delete(id);
+		else draftPendingOperations.current.set(id, pending - 1);
+	};
+	const mergeFetchedDrafts = useCallback(
+		(
+			fetched: ReviewStateResponse,
+			revisionsAtRequest: ReadonlyMap<string, number>,
+		) => {
+			setData((current) => {
+				const drafts = new Map(
+					fetched.drafts.map((draft) => [draft.id, draft]),
+				);
+				for (const id of deletedDraftIds.current) drafts.delete(id);
+				if (current) {
+					for (const draft of current.drafts) {
+						if (deletedDraftIds.current.has(draft.id)) {
+							drafts.delete(draft.id);
+							continue;
+						}
+						const changedSinceFetch =
+							(draftRevisions.current.get(draft.id) ?? 0) >
+							(revisionsAtRequest.get(draft.id) ?? 0);
+						if (
+							changedSinceFetch ||
+							(draftPendingOperations.current.get(draft.id) ?? 0) > 0
+						)
+							drafts.set(draft.id, draft);
+					}
+				}
+				return { ...fetched, drafts: [...drafts.values()] };
+			});
+		},
+		[],
+	);
+	const fetchReviewState = useCallback(async () => {
+		const request = reviewStateRequests.current.beginFetch();
+		const revisionsAtRequest = new Map(draftRevisions.current);
+		const next = await fetchState(token);
+		if (reviewStateRequests.current.canApplyFetch(request))
+			mergeFetchedDrafts(next, revisionsAtRequest);
+		return next;
+	}, [token, mergeFetchedDrafts]);
 	const patchChat = useCallback((chatId: string, patch: ChatRuntimePatch) => {
 		setChatRuntimes((current) => {
 			const runtime = current[chatId] ?? EMPTY_CHAT_RUNTIME;
@@ -535,12 +594,7 @@ function ReviewApp() {
 			};
 		});
 	}, []);
-	const fetchReviewState = useCallback(async () => {
-		const request = reviewStateRequests.current.beginFetch();
-		const next = await fetchState(token);
-		if (reviewStateRequests.current.canApplyFetch(request)) setData(next);
-		return next;
-	}, [token]);
+
 	const resizeColumn = (column: ReviewColumn, requestedWidth: number) => {
 		const shell = reviewShell.current;
 		if (!shell) return;
@@ -1176,9 +1230,13 @@ function ReviewApp() {
 				return (await response.json()) as Draft;
 			})
 			.then((draft) => {
+				markDraftChanged(draft.id);
+				deletedDraftIds.current.delete(draft.id);
 				setData((current) =>
 					current
-						? { ...current, drafts: [...current.drafts, draft] }
+						? current.drafts.some((item) => item.id === draft.id)
+							? current
+							: { ...current, drafts: [...current.drafts, draft] }
 						: current,
 				);
 			})
@@ -1214,9 +1272,13 @@ function ReviewApp() {
 				return (await response.json()) as Draft;
 			})
 			.then((draft) => {
+				markDraftChanged(draft.id);
+				deletedDraftIds.current.delete(draft.id);
 				setData((current) =>
 					current
-						? { ...current, drafts: [...current.drafts, draft] }
+						? current.drafts.some((item) => item.id === draft.id)
+							? current
+							: { ...current, drafts: [...current.drafts, draft] }
 						: current,
 				);
 			})
@@ -1228,6 +1290,9 @@ function ReviewApp() {
 	};
 
 	const updateCommentDraft = (id: string, body: string) => {
+		if (deletedDraftIds.current.has(id)) return;
+		markDraftChanged(id);
+		beginDraftOperation(id);
 		const revision = (draftEditSequence.current.get(id) ?? 0) + 1;
 		draftEditSequence.current.set(id, revision);
 		setData((current) =>
@@ -1242,21 +1307,25 @@ function ReviewApp() {
 					}
 				: current,
 		);
-		void fetch(apiUrl(`/api/comments/${encodeURIComponent(id)}`, token), {
-			method: "PUT",
-			headers: {
-				"content-type": "application/json",
-				"X-Mole-Token": token,
-			},
-			body: JSON.stringify({ body }),
-		})
-			.then(async (response) => {
+		const queued = draftEditQueues.current.enqueue(id, async () => {
+			try {
+				const response = await fetch(
+					apiUrl(`/api/comments/${encodeURIComponent(id)}`, token),
+					{
+						method: "PUT",
+						headers: {
+							"content-type": "application/json",
+							"X-Mole-Token": token,
+						},
+						body: JSON.stringify({ body }),
+					},
+				);
 				if (!response.ok)
 					throw new Error(`Comment update failed (${response.status})`);
-				return (await response.json()) as Draft;
-			})
-			.then((updated) => {
+				const updated = (await response.json()) as Draft;
+				if (deletedDraftIds.current.has(id)) return;
 				if (draftEditSequence.current.get(id) !== revision) return;
+				failedDraftEdits.current.delete(id);
 				setData((current) =>
 					current
 						? {
@@ -1267,24 +1336,48 @@ function ReviewApp() {
 							}
 						: current,
 				);
-			})
-			.catch((reason: unknown) => {
-				if (draftEditSequence.current.get(id) !== revision) return;
-				setCommentError(
-					reason instanceof Error ? reason.message : String(reason),
+			} catch (reason: unknown) {
+				if (deletedDraftIds.current.has(id)) return;
+				if (draftEditSequence.current.get(id) !== revision) throw reason;
+				failedDraftEdits.current.add(id);
+				const message =
+					reason instanceof Error ? reason.message : String(reason);
+				setData((current) =>
+					current
+						? {
+								...current,
+								drafts: current.drafts.map((draft) =>
+									draft.id === id
+										? { ...draft, status: "draft", error: message }
+										: draft,
+								),
+							}
+						: current,
 				);
-			});
+				throw reason;
+			} finally {
+				finishDraftOperation(id);
+			}
+		});
+		void queued.catch(() => undefined);
 	};
 
 	const generateFromChat = (id: string) => {
 		const chatId = activeChatId;
-		if (!chatId) return;
+		if (
+			!chatId ||
+			deletedDraftIds.current.has(id) ||
+			!data?.drafts.some((draft) => draft.id === id)
+		)
+			return;
 		const existing = fromChatControllers.current.get(id);
 		if (existing) {
 			if (draftGenerations[id]?.status !== "failed") return;
 			existing.abort();
 			fromChatControllers.current.delete(id);
 		}
+		const generation = (fromChatGenerationSequence.current.get(id) ?? 0) + 1;
+		fromChatGenerationSequence.current.set(id, generation);
 		const controller = new AbortController();
 		fromChatControllers.current.set(id, controller);
 		setDraftGenerations((current) => ({
@@ -1292,7 +1385,9 @@ function ReviewApp() {
 			[id]: { status: "running" },
 		}));
 
-		const isCurrent = () => fromChatControllers.current.get(id) === controller;
+		const isCurrent = () =>
+			fromChatControllers.current.get(id) === controller &&
+			fromChatGenerationSequence.current.get(id) === generation;
 		const clearGeneration = () => {
 			if (!isCurrent()) return;
 			setDraftGenerations((current) => {
@@ -1347,26 +1442,35 @@ function ReviewApp() {
 						if (
 							typeof nextDraft !== "object" ||
 							nextDraft === null ||
-							!isCurrent()
+							(nextDraft as Draft).id !== id ||
+							!isCurrent() ||
+							deletedDraftIds.current.has(id)
 						) {
 							if (isCurrent())
 								failGeneration("Comment generation returned no draft");
 							return;
 						}
+						markDraftChanged(id);
 						draftEditSequence.current.set(
 							id,
 							(draftEditSequence.current.get(id) ?? 0) + 1,
 						);
-						setData((current) =>
-							current
-								? {
-										...current,
-										drafts: current.drafts.map((draft) =>
-											draft.id === id ? (nextDraft as Draft) : draft,
-										),
-									}
-								: current,
-						);
+						setData((current) => {
+							if (
+								!current ||
+								fromChatGenerationSequence.current.get(id) !== generation ||
+								deletedDraftIds.current.has(id) ||
+								!current.drafts.some((draft) => draft.id === id)
+							) {
+								return current;
+							}
+							return {
+								...current,
+								drafts: current.drafts.map((draft) =>
+									draft.id === id ? (nextDraft as Draft) : draft,
+								),
+							};
+						});
 						clearGeneration();
 					} else if (status === "failed") {
 						const message =
@@ -1406,6 +1510,10 @@ function ReviewApp() {
 	const stopFromChat = (id: string) => {
 		const controller = fromChatControllers.current.get(id);
 		if (!controller) return;
+		fromChatGenerationSequence.current.set(
+			id,
+			(fromChatGenerationSequence.current.get(id) ?? 0) + 1,
+		);
 		void fetch(
 			apiUrl(`/api/comments/${encodeURIComponent(id)}/from-chat/cancel`, token),
 			{
@@ -1424,6 +1532,14 @@ function ReviewApp() {
 	};
 
 	const cancelCommentDraft = (id: string) => {
+		if (deletedDraftIds.current.has(id)) return;
+		markDraftChanged(id);
+		fromChatGenerationSequence.current.set(
+			id,
+			(fromChatGenerationSequence.current.get(id) ?? 0) + 1,
+		);
+		deletedDraftIds.current.add(id);
+		beginDraftOperation(id);
 		const controller = fromChatControllers.current.get(id);
 		if (controller) {
 			controller.abort();
@@ -1443,6 +1559,12 @@ function ReviewApp() {
 					}
 				: current,
 		);
+		let operationPending = true;
+		const finishCancel = () => {
+			if (!operationPending) return;
+			operationPending = false;
+			finishDraftOperation(id);
+		};
 		void fetch(apiUrl(`/api/comments/${encodeURIComponent(id)}`, token), {
 			method: "DELETE",
 			headers: { "X-Mole-Token": token },
@@ -1456,10 +1578,18 @@ function ReviewApp() {
 					reason instanceof Error ? reason.message : String(reason),
 				);
 				void fetchReviewState().catch(() => undefined);
-			});
+			})
+			.finally(finishCancel);
 	};
 
 	const sendCommentDraft = (id: string) => {
+		if (
+			deletedDraftIds.current.has(id) ||
+			(failedDraftEdits.current.has(id) && !draftEditQueues.current.pending(id))
+		)
+			return;
+		markDraftChanged(id);
+		beginDraftOperation(id);
 		setCommentError(null);
 		setData((current) =>
 			current
@@ -1473,10 +1603,23 @@ function ReviewApp() {
 					}
 				: current,
 		);
+		let operationPending = true;
+		const finishSend = () => {
+			if (!operationPending) return;
+			operationPending = false;
+			finishDraftOperation(id);
+		};
 		void (async () => {
 			let postedDiscussion: HostDiscussion | null = null;
 			let streamError: string | null = null;
+			let editQueueFailed = false;
 			try {
+				try {
+					await draftEditQueues.current.pending(id);
+				} catch {
+					editQueueFailed = true;
+					throw new Error("Comment update failed; edit was not sent");
+				}
 				const response = await fetch(
 					apiUrl(`/api/comments/${encodeURIComponent(id)}/send`, token),
 					{
@@ -1508,6 +1651,7 @@ function ReviewApp() {
 							postedDiscussion = discussion as HostDiscussion;
 					}
 				});
+				finishSend();
 				await fetchReviewState();
 				if (postedDiscussion) {
 					setData((current) =>
@@ -1527,9 +1671,25 @@ function ReviewApp() {
 						streamError ?? `Comment send failed (${response.status})`,
 					);
 			} catch (reason: unknown) {
-				setCommentError(
-					reason instanceof Error ? reason.message : String(reason),
-				);
+				finishSend();
+				const message =
+					reason instanceof Error ? reason.message : String(reason);
+				setCommentError(message);
+				if (editQueueFailed) {
+					setData((current) =>
+						current
+							? {
+									...current,
+									drafts: current.drafts.map((draft) =>
+										draft.id === id
+											? { ...draft, status: "draft", error: message }
+											: draft,
+									),
+								}
+							: current,
+					);
+					return;
+				}
 				try {
 					await fetchReviewState();
 				} catch {

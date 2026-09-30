@@ -6,7 +6,9 @@ import { JSDOM } from "jsdom";
  * this before any module that transitively imports `dompurify`: the library
  * captures the global `window` at module load time.
  */
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+	url: "http://localhost/",
+});
 
 // jsdom does not implement scrolling; UI components call this on focused rows.
 Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", {
