@@ -63,7 +63,7 @@ test("shows pending and running importance status", () => {
 	}
 });
 
-test("shows ready importance legend with five titled swatches", () => {
+test("omits the importance legend when scoring is ready", () => {
 	const html = markup({
 		importance: {
 			status: "ready",
@@ -74,19 +74,10 @@ test("shows ready importance legend with five titled swatches", () => {
 	});
 	const container = document.createElement("div");
 	container.innerHTML = html;
-	const legend = container.querySelector('[aria-label="Importance legend"]');
-	expect(legend?.children).toHaveLength(5);
 	expect(
-		Array.from(legend?.children ?? []).map((swatch) =>
-			swatch.getAttribute("title"),
-		),
-	).toEqual([
-		"Importance 1/5 (Skip)",
-		"Importance 2/5 (Low)",
-		"Importance 3/5 (Moderate)",
-		"Importance 4/5 (High)",
-		"Importance 5/5 (Critical)",
-	]);
+		container.querySelector('[aria-label="Importance legend"]'),
+	).toBeNull();
+	expect(container.textContent).toContain("1/3 files");
 });
 
 test("shows failed importance status and Retry calls onRetry", () => {

@@ -1,12 +1,5 @@
 import { cn } from "cn";
-import {
-	Check,
-	ChevronDown,
-	FileText,
-	Loader2,
-	RefreshCw,
-	X,
-} from "lucide-react";
+import { Check, ChevronDown, Loader2, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import type { ReviewState } from "../../state";
@@ -532,12 +525,12 @@ export function LayerPane({
 																		aria-hidden="true"
 																		title={importanceTitle(score)}
 																		className={cn(
-																			"-my-0.5 mr-0.5 w-2 self-stretch",
+																			"-my-0.5 mr-0.5 w-4 self-stretch",
 																			IMPORTANCE_BG_CLASS[score],
 																		)}
 																	/>
 																) : null}
-																<FileText aria-hidden />
+
 																{shortFilePath(path, changedFilePaths)}
 															</Badge>
 														);

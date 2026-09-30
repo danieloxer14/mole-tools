@@ -1,6 +1,6 @@
 import { List, ListTree, Search } from "lucide-react";
 import type { ImportanceStatus } from "../../importance";
-import { IMPORTANCE_BG_CLASS, importanceTitle } from "../importance";
+
 import { ProgressBar } from "./ProgressBar";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -118,7 +118,7 @@ export function ChangedFilesHeader({
 				<span className="shrink-0 whitespace-nowrap tabular-nums">
 					{viewedCount}/{total} files
 				</span>
-				{importance?.status && (
+				{importance?.status && importance.status !== "ready" && (
 					<div className="flex min-w-0 items-center gap-2">
 						{importance.status === "pending" ||
 						importance.status === "running" ? (
@@ -126,7 +126,7 @@ export function ChangedFilesHeader({
 								<Spinner className="size-3" />
 								Scoring importance…
 							</span>
-						) : importance.status === "failed" ? (
+						) : (
 							<>
 								<Tooltip>
 									<TooltipTrigger
@@ -148,19 +148,6 @@ export function ChangedFilesHeader({
 									</Button>
 								)}
 							</>
-						) : (
-							<fieldset
-								aria-label="Importance legend"
-								className="m-0 flex min-w-0 items-center gap-1.5 border-0 p-0"
-							>
-								{([1, 2, 3, 4, 5] as const).map((score) => (
-									<span
-										key={score}
-										className={`size-2.5 rounded-sm ${IMPORTANCE_BG_CLASS[score]}`}
-										title={importanceTitle(score)}
-									/>
-								))}
-							</fieldset>
 						)}
 					</div>
 				)}
