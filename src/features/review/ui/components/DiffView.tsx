@@ -92,7 +92,12 @@ import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
 } from "./ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "./ui/tooltip";
 import { useDiffDrag } from "./use-diff-drag";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
@@ -607,6 +612,16 @@ function discussionMatchesLine(
 ): boolean {
 	const position = discussion.position;
 	if (!position) return false;
+	if (position.newLine !== null && position.oldLine !== null) {
+		return (
+			file.newPath !== null &&
+			file.oldPath !== null &&
+			position.newPath === file.newPath &&
+			position.oldPath === file.oldPath &&
+			position.newLine === line.newLine &&
+			position.oldLine === line.oldLine
+		);
+	}
 	return (
 		(position.newPath === file.newPath &&
 			position.newLine !== null &&
@@ -805,22 +820,24 @@ function LineActions({
 
 function ImportanceStrip({ rating }: { rating: ImportanceRating }) {
 	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<span
-						role="img"
-						aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
-						tabIndex={-1}
-						className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]}`}
-					/>
-				}
-			/>
-			<TooltipContent className="flex-col items-start gap-0.5">
-				<span className="font-medium">{importanceTitle(rating.score)}</span>
-				<span>{rating.reason}</span>
-			</TooltipContent>
-		</Tooltip>
+		<TooltipProvider delay={0}>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<span
+							role="img"
+							aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
+							tabIndex={-1}
+							className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]}`}
+						/>
+					}
+				/>
+				<TooltipContent className="flex-col items-start gap-0.5">
+					<span className="font-medium">{importanceTitle(rating.score)}</span>
+					<span>{rating.reason}</span>
+				</TooltipContent>
+			</Tooltip>
+		</TooltipProvider>
 	);
 }
 

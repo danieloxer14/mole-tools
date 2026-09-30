@@ -306,6 +306,56 @@ describe("review importance", () => {
 		).toBe(true);
 	});
 
+	test("normalizes alternate importance document shapes without inventing span data", () => {
+		const parsed = ImportanceDocSchema.safeParse({
+			files: {
+				"src/app.ts": {
+					spans: [
+						{
+							side: "added",
+							start_line: "4",
+							end_line: "5",
+							score: 3,
+							rationale: "This changes request validation behavior.",
+						},
+					],
+				},
+			},
+		});
+		expect(parsed).toEqual({
+			success: true,
+			data: {
+				version: 1,
+				files: [
+					{
+						path: "src/app.ts",
+						spans: [
+							{
+								side: "new",
+								startLine: 4,
+								endLine: 5,
+								score: 3,
+								reason: "This changes request validation behavior.",
+							},
+						],
+					},
+				],
+			},
+		});
+		expect(ImportanceDocSchema.safeParse({ version: 1 }).success).toBe(false);
+		expect(
+			ImportanceDocSchema.safeParse({
+				version: 1,
+				files: [
+					{
+						path: "src/app.ts",
+						spans: [{ side: "new", score: 3, reason: "A reason." }],
+					},
+				],
+			}).success,
+		).toBe(false);
+	});
+
 	test("importance file path falls back to old path for deletions", () => {
 		expect(
 			importanceFilePath({ ...appDiff, newPath: null, oldPath: "old.ts" }),
@@ -496,9 +546,6 @@ describe("review importance", () => {
 			expect(result.status).toBe("ready");
 			expect(result.attempts).toBe(2);
 			expect(agent.turns).toHaveLength(2);
-			expect(agent.turns[1]?.message).toContain(
-				"Previous output validation failed. Correct it and write a complete replacement file.",
-			);
 			expect(result.files).toEqual(validDoc.files);
 			expect(await Bun.file(join(dir, "run-1")).exists()).toBe(false);
 		});

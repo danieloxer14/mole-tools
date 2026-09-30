@@ -47,10 +47,76 @@ export const ImportanceFileSchema = z.object({
 	path: z.string().min(1),
 	spans: z.array(ImportanceSpanSchema),
 });
-export const ImportanceDocSchema = z.object({
+
+function isImportanceRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeImportanceSpanInput(value: unknown): unknown {
+	if (!isImportanceRecord(value)) return value;
+	const lineNumber = (line: unknown) =>
+		typeof line === "string" && /^[1-9]\d*$/.test(line) ? Number(line) : line;
+	return {
+		...value,
+		side:
+			value.side === "added"
+				? "new"
+				: value.side === "deleted"
+					? "old"
+					: value.side,
+		startLine: lineNumber(value.startLine ?? value.start_line ?? value.line),
+		endLine: lineNumber(value.endLine ?? value.end_line ?? value.line),
+		reason: value.reason ?? value.rationale ?? value.explanation,
+	};
+}
+
+function normalizeImportanceFileInput(
+	value: unknown,
+	fallbackPath?: string,
+): unknown {
+	if (!isImportanceRecord(value)) return value;
+	return {
+		...value,
+		...(value.path === undefined && fallbackPath !== undefined
+			? { path: fallbackPath }
+			: {}),
+		spans: Array.isArray(value.spans)
+			? value.spans.map(normalizeImportanceSpanInput)
+			: value.spans,
+	};
+}
+
+function normalizeImportanceDocInput(value: unknown): unknown {
+	if (!isImportanceRecord(value)) return value;
+	const files = Array.isArray(value.files)
+		? value.files.map((file) => normalizeImportanceFileInput(file))
+		: isImportanceRecord(value.files)
+			? Object.entries(value.files).map(([path, file]) =>
+					Array.isArray(file)
+						? {
+								path,
+								spans: file.map(normalizeImportanceSpanInput),
+							}
+						: normalizeImportanceFileInput(file, path),
+				)
+			: value.files;
+	return {
+		...value,
+		version: value.version === undefined ? 1 : value.version,
+		files,
+	};
+}
+
+const ImportanceDocObjectSchema = z.object({
 	version: z.literal(1),
 	files: z.array(ImportanceFileSchema),
 });
+
+/** Accept common JSON aliases while keeping line, score, and reason data required. */
+export const ImportanceDocSchema = z.preprocess(
+	normalizeImportanceDocInput,
+	ImportanceDocObjectSchema,
+);
 export const ImportanceResultSchema = z.object({
 	version: z.literal(1),
 	revision: z.object({ headSha: z.string(), mergeBaseSha: z.string() }),
@@ -97,11 +163,12 @@ export interface ImportanceGenerationResult {
 
 const IMPORTANCE_OUTPUT_RULES = [
 	"- Read the input file named in the message. Each changed line is shown as `<old line> <new line> <+|-| > <text>`.",
-	-'- Write JSON to the output file named in the message: `{"version":1,"files":[{"path":"<path exactly as listed>","spans":[{"side":"new","startLine":1,"endLine":3,"score":4}]}]}`.',
-	-'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines. `score` is an integer 1–5.',
-	+'- Write JSON to the output file named in the message: `{"version":1,"files":[{"path":"<path exactly as listed>","spans":[{"side":"new","startLine":1,"endLine":3,"score":4,"reason":"This changes request authorization behavior."}]}]}`.',
-	+'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines. `score` is an integer 1–5.',
-	+"- Every span must include `reason`: exactly one concise sentence explaining the score, with no line breaks and at most 144 characters.",
+	"- Write exactly one JSON object to the output file named in the message; do not return Markdown, prose, a bare array, or an alternate wrapper.",
+	'- The object must have `version: 1` and a `files` array: `{"version":1,"files":[{"path":"<path exactly as listed>","spans":[{"side":"new","startLine":1,"endLine":3,"score":4,"reason":"This changes request authorization behavior."}]}]}`.',
+	"- Every file must include its exact `path` and a `spans` array. Every span must include `side` (`new` or `old`), positive integer `startLine` and `endLine`, integer `score` (1–5), and `reason`.",
+	'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines.',
+	"- Every span's `reason` must be exactly one concise sentence explaining its score and hunk, with no line breaks and at most 144 characters. Never omit or invent this field.",
+	"- Do not omit `version`, `files`, `path`, `spans`, `side`, `startLine`, `endLine`, `score`, or `reason`, and do not rename these fields.",
 	"- Skip files marked `(no textual diff — do not score)`.",
 	"- The worktree is read-only; inspect it only with read-only tools. Write only the output file.",
 	"- Reply with only the output file path.",
@@ -307,7 +374,7 @@ export async function generateImportance(
 			return cancelledImportanceResult(runId, attempts);
 
 		if (!attempt.ok && attempt.kind === "output") {
-			const retryMessage = `${firstMessage}\n\nPrevious output validation failed. Correct it and write a complete replacement file.\n${attempt.error}`;
+			const retryMessage = `${firstMessage}\n\nPrevious output validation failed. Write a complete replacement JSON file following the required schema exactly: include version 1, a files array, and side, startLine, endLine, score, and reason on every span. Do not return prose or rename fields. Fix every listed validation error:\n${attempt.error}`;
 			attempts++;
 			attempt = await runAgentFileAttempt({
 				...attemptOptions,

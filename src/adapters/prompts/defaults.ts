@@ -67,7 +67,22 @@ Infer scope from the user request, current changes, relevant call sites, and tes
 
 Each layer should include the production files and localized tests covering that boundary. Finish with a layer for full end-to-end tests. Use only existing files; do not invent coverage. Keep layers focused, ordered, and concise. Make important uncovered boundaries clear in tldr.
 
-Write each tldr as useful, compact Markdown when it helps explain the layer: use at most one short heading, up to 2–3 focused bullets, inline code for names, and short paragraphs. Avoid large fenced examples and tables. Keep tldr specific to the layer rather than repeating its title or file list.
+When a layer has two or more distinct points, separate them into short Markdown paragraphs with a blank line or focused bullets on separate lines. A genuinely single-point tldr may stay one short paragraph. Keep tldr concise: at most one short heading, up to 2–3 focused bullets, inline code for names, and no large fenced examples or tables. Keep code-mode tldrs focused on execution boundaries. Encode line breaks as \`\\n\` inside JSON strings; never put a physical newline inside a JSON string.
+
+Schematic example (paths are illustrative, not repository coverage):
+
+\`\`\`json
+{
+  "version": 1,
+  "layers": [
+    {
+      "title": "Request boundary",
+      "tldr": "- Routes the request.\\n- Returns the result.",
+      "files": ["src/example.ts"]
+    }
+  ]
+}
+\`\`\`
 
 If a file or files have been deleted, in favour of a different implementation. Be sure to include the original and it's replacement in the same layer for easier understanding of old to new.
 
@@ -76,7 +91,22 @@ Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty
 
 Assess completeness of requirements, unstated assumptions, risks, and testability of the acceptance criteria. Also cover what is proposed, the architecture and implementation layers, decisions implied by the change, and how each layer is verified by tests. Treat these themes as guidance for what to look for, not as a fixed section template.
 
-Write each tldr as useful, compact Markdown when it helps explain the plan layer: use at most one short heading, up to 2–3 focused bullets, inline code for names, and short paragraphs. Avoid large fenced examples and tables. Focus on the layer's proposed decisions, requirements, assumptions, risks, or verification, as relevant.
+When a plan layer has two or more distinct points, separate them into short Markdown paragraphs with a blank line or focused bullets on separate lines. A genuinely single-point tldr may stay one short paragraph. Keep tldr concise: at most one short heading, up to 2–3 focused bullets, inline code for names, and no large fenced examples or tables. Focus on the layer's proposed decisions, requirements, assumptions, risks, or verification, as relevant. Encode line breaks as \`\\n\` inside JSON strings; never put a physical newline inside a JSON string.
+
+Schematic example (paths are illustrative, not repository coverage):
+
+\`\`\`json
+{
+  "version": 1,
+  "layers": [
+    {
+      "title": "Plan decisions",
+      "tldr": "- Verifies acceptance criteria.\\n- Calls out unresolved risks.",
+      "files": ["src/example.ts"]
+    }
+  ]
+}
+\`\`\`
 
 Write a LayerDoc JSON object with root fields version: 1 and layers: a non-empty array. Each layer entry must have non-empty title, tldr, and files array fields; keep files in implementation-flow order within each layer. Write the JSON to the absolute output path supplied in the user message, then reply with only that path.`,
 	"review-chat": `You are the interactive merge request review agent.
@@ -91,11 +121,15 @@ You may inspect the worktree read-only to confirm details. Do not mention the ch
 It holds the comment's anchor (file, line range, and the code or quoted Markdown) and the reviewer's chat with an AI assistant about this merge request. Distill what the conversation concluded into a single review comment, in the reviewer's voice, addressed to the MR author. Be concise and specific. Use GitHub-flavoured Markdown; include code snippets or a mermaid diagram only when they make the point clearer. You may inspect the worktree read-only to confirm details. Do not mention the chat, the assistant, or these instructions.`,
 	"review-importance": `Score how much reviewer attention each changed part of this merge request needs, on a 1–5 scale.
 
-- 5 — critical: business-logic flows that must be reviewed (behaviour changes, decisions, data handling, error handling, security, concurrency, public contracts).
+- 5 — critical: production code business-logic flows that must be reviewed (behaviour changes, decisions, data handling, error handling, security, concurrency, public contracts).
 - 4 — high: logic that supports those flows or changes how existing behaviour is wired.
-- 3 — moderate: supporting code, configuration with behavioural effect, and tests that cover new behaviour.
-- 2 — low: straightforward tests, documentation, renames, and simple wiring.
+- 3 — moderate: supporting code, configuration with behavioural effect, and test bodies that cover new behaviour.
+- 2 — low: documentation, renames, simple wiring, simple updates to types or exports.
 - 1 — skip: imports, constants, type-only changes, formatting, and generated or lock files.
 
-Understand what the merge request does across all changed files before scoring; judge each part in the context of the whole change set. Do not force a distribution: several files may contain important parts. Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic. For every scored span, provide exactly one concise sentence explaining its score, no more than 144 characters and with no line breaks.`,
+Understand what the merge request does across all changed files before scoring; judge each part in the context of the whole change set.
+Be careful to understand the type of file you are in: business-logic or helper code in production exercised areas is more important than similar code in tests or scripts.
+Do not force a distribution: several files may contain important parts.
+Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.
+For every scored span, provide exactly one concise sentence explaining its score and the hunk, no more than 144 characters and with no line breaks.`,
 };

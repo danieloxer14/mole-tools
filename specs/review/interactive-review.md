@@ -309,10 +309,11 @@ The header also offers a `Viewed` checkbox for the selected file, mirroring the
 
 Existing GitLab discussions are read-only except for **Explain**, which opens a
 new chat titled after the discussion and asks the agent to explain it (§6).
-Positioned discussions appear below their matching diff lines with
-resolved/unresolved styling, all notes, and an Explain button; unpositioned
-discussions appear in Overview's `General discussion` section, each with its
-own Explain button. Local drafts have no Explain.
+Positioned discussions appear once below the exact matching diff row.
+For a ranged GitLab discussion, that row is the selected-side range end even
+when GitLab's top-level scalar coordinate differs; unpositioned discussions
+appear in Overview's `General discussion` section, each with its own Explain
+button. Local drafts have no Explain.
 
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
@@ -365,14 +366,18 @@ validated document is version `1` and has one or more layers, each with:
   "layers": [
     {
       "title": "Short review concern or change area",
-      "tldr": "One-paragraph explanation",
-      "files": ["src/example.ts"],
+      "tldr": "- Routes the request.\n- Returns the result.",
+      "files": ["src/example.ts"]
     }
   ]
 }
 ```
 
-`files` is curated over the full changed-file tree; unknown paths are dropped,
+`tldr` uses compact Markdown: separate two or more distinct points into short
+paragraphs with a blank line or focused bullets on separate lines; a genuinely
+single-point description may remain one short paragraph. Encode line breaks as
+JSON `\n` sequences inside the string. `files` is illustrative here; generated
+guides curate files over the full changed-file tree. Unknown paths are dropped,
 and an empty layer is dropped. Prompts guide the agent to cover what changed,
 architecture/implementation layers, implied decisions, and verification. The
 plan prompt additionally examines requirements completeness, assumptions, risks,
@@ -548,11 +553,26 @@ always build a valid GitLab position. Creating a comment immediately opens an
 empty local draft editor below the selection's last line. The user writes its
 body; no agent turn or comment-generation prompt runs. The draft is local until
 its own Send: there is no batch submit. Draft statuses are `draft`, `sending`,
-`posted`, and `failed`; Cancel removes it, Edit persists body changes, and
-failed drafts keep their error with Retry. While sending, the draft is persisted
-before `GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and
-Send, and keeps Cancel available. A post failure transitions the draft to
-`failed` with its error.
+`posted`, and `failed`; Cancel removes that draft, Edit persists its body
+changes, and failed drafts keep their error with Retry. While sending, the
+draft is persisted before `GitHost.createDiscussion`; the UI shows `Sending…`,
+disables Edit and Send for that draft, and keeps Cancel available. A post
+failure transitions that draft to `failed` with its error.
+
+Multiple drafts can remain open at once, including drafts on the same anchor.
+Each card is identified by its draft ID: Edit, Send, Retry, Cancel, and
+From chat act only on that ID. Sending or canceling one draft does not remove,
+close, or change another draft's body, anchor, or controls.
+
+Edits are persisted optimistically and serialized per draft ID. Send and Retry
+wait for that draft's latest edit to persist before posting; a failed edit
+prevents posting an older body and leaves that draft editable with its error.
+Edits and sends for other draft IDs remain independent.
+
+Generation targets only the clicked draft ID. It snapshots the selected chat
+at click time, and its success, failure, or Stop affects only that draft.
+Delayed generation or persistence results cannot replace newer state for a
+draft or restore a canceled draft.
 
 ### From chat
 
@@ -606,11 +626,15 @@ current `diff_refs`:
 - Cross-side ranges, reversed ranges, missing hunk lines, stale refs, and paths
   that do not match the selected side are rejected before the API call.
 
-A successful Send posts one `GitLabPositionPayload` through `GitHost` using
-`glab api --method POST --input -`, refetches discussions, and retains the
-local draft as `status: "posted"` with `postedDiscussionId` while the refreshed
-discussion renders in the read-only posted thread. Posted comments are not
-editable in this UI. A post failure keeps the draft and inline error.
+A successful Send posts exactly one discussion for that draft, refetches
+discussions and review state, and retains that draft as `status: "posted"` with
+`postedDiscussionId` while the refreshed discussion renders in the read-only
+posted thread. Refresh does not close peer drafts: reconciliation keeps each
+peer's newer local or pending per-ID state until its persistence completes.
+Older GET, PUT, create, send, or generation results cannot replace newer
+per-ID state or resurrect a canceled draft. Posted comments are not editable
+in this UI. A post failure keeps the draft editable with its inline error;
+Retry applies only to that failed draft.
 
 ## 8. Plan mode and markdown rendering
 

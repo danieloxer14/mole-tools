@@ -7,6 +7,7 @@ import type { HostDiscussion } from "../../../../ports/git-host";
 import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { Draft } from "../../state";
 import { applyColorTheme } from "../color-theme";
+import { createDraftEditQueue } from "../draft-edit-queue";
 import { IMPORTANCE_BG_CLASS } from "../importance";
 import { DiffView } from "./DiffView";
 
@@ -1164,6 +1165,190 @@ test("renders a per-discussion collapse chevron in the expanded state", () => {
 	expect(markup).not.toContain("inline-discussion-preview");
 });
 
+const placementFile: ParsedFileDiff = {
+	oldPath: "src/old-name.ts",
+	newPath: "src/new-name.ts",
+	status: "renamed",
+	binary: false,
+	insertions: 2,
+	deletions: 2,
+	hunks: [
+		{
+			header: "@@ -126,4 +126,4 @@",
+			oldStart: 126,
+			oldLines: 4,
+			newStart: 126,
+			newLines: 4,
+			lines: [
+				{ kind: "context", oldLine: 126, newLine: 126, text: "before" },
+				{ kind: "context", oldLine: 127, newLine: 127, text: "endpoint" },
+				{ kind: "del", oldLine: 149, newLine: null, text: "old endpoint" },
+				{ kind: "add", oldLine: null, newLine: 150, text: "new endpoint" },
+			],
+		},
+	],
+};
+
+function lineRow(
+	container: HTMLElement,
+	oldLine: string,
+	newLine: string,
+): HTMLTableRowElement | null {
+	return (
+		Array.from(
+			container.querySelectorAll<HTMLTableRowElement>("tr[data-find-line]"),
+		).find((row) => {
+			const numbers = row.querySelectorAll(".line-number");
+			return (
+				numbers[0]?.textContent === oldLine &&
+				numbers[1]?.textContent === newLine
+			);
+		}) ?? null
+	);
+}
+
+test("attaches normalized ranged discussion exactly below its endpoint in both layouts", () => {
+	const ranged = discussion("range-endpoint", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 127,
+		oldLine: null,
+	});
+	for (const mode of ["inline", "side-by-side"] as const) {
+		const { container, root } = mountDiff({
+			file: placementFile,
+			mode,
+			discussions: [ranged],
+		});
+		try {
+			const endpoint = lineRow(container, "127", "127");
+			const divergentScalar = lineRow(container, "", "150");
+			expect(
+				endpoint?.nextElementSibling?.classList.contains("inline-comment-row"),
+			).toBe(true);
+			expect(
+				endpoint?.nextElementSibling?.querySelectorAll(
+					'article[data-discussion-id="range-endpoint"]',
+				),
+			).toHaveLength(1);
+			expect(
+				divergentScalar?.nextElementSibling?.classList.contains(
+					"inline-comment-row",
+				),
+			).not.toBe(true);
+			expect(container.textContent).toContain("new:127");
+			expect(
+				container.querySelectorAll(
+					'article[data-discussion-id="range-endpoint"]',
+				),
+			).toHaveLength(1);
+		} finally {
+			act(() => root.unmount());
+			container.remove();
+		}
+	}
+});
+
+test("matches old-side and renamed scalar positions only on their corresponding rows", () => {
+	for (const [id, position, expected] of [
+		[
+			"old-only",
+			{
+				newPath: placementFile.newPath,
+				oldPath: placementFile.oldPath,
+				newLine: null,
+				oldLine: 149,
+			},
+			["149", ""],
+		],
+		[
+			"renamed-new",
+			{
+				newPath: placementFile.newPath,
+				oldPath: placementFile.oldPath,
+				newLine: 150,
+				oldLine: null,
+			},
+			["", "150"],
+		],
+	] as const) {
+		const { container, root } = mountDiff({
+			file: placementFile,
+			discussions: [discussion(id, position)],
+		});
+		try {
+			const row = lineRow(container, expected[0], expected[1]);
+			expect(
+				row?.nextElementSibling?.querySelector(
+					`article[data-discussion-id="${id}"]`,
+				),
+			).not.toBeNull();
+			expect(
+				container.querySelectorAll(`article[data-discussion-id="${id}"]`),
+			).toHaveLength(1);
+		} finally {
+			act(() => root.unmount());
+			container.remove();
+		}
+	}
+});
+
+test("matches two-coordinate scalar context only on one row with both paths and coordinates", () => {
+	const sameRow = discussion("same-row", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 127,
+		oldLine: 127,
+	});
+	const splitCoordinates = discussion("split-coordinates", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 150,
+		oldLine: 127,
+	});
+	const absentEndpoint = discussion("absent-endpoint", {
+		newPath: placementFile.newPath,
+		oldPath: placementFile.oldPath,
+		newLine: 151,
+		oldLine: null,
+	});
+	const wrongPath = discussion("wrong-path", {
+		newPath: "src/other.ts",
+		oldPath: placementFile.oldPath,
+		newLine: 127,
+		oldLine: 127,
+	});
+	const { container, root } = mountDiff({
+		file: placementFile,
+		discussions: [sameRow, splitCoordinates, absentEndpoint, wrongPath],
+	});
+	try {
+		const endpoint = lineRow(container, "127", "127");
+		expect(
+			endpoint?.nextElementSibling?.querySelectorAll("article"),
+		).toHaveLength(1);
+		expect(
+			endpoint?.nextElementSibling?.querySelector(
+				'article[data-discussion-id="same-row"]',
+			),
+		).not.toBeNull();
+		expect(
+			container.querySelector(
+				'article[data-discussion-id="split-coordinates"]',
+			),
+		).toBeNull();
+		expect(
+			container.querySelector('article[data-discussion-id="absent-endpoint"]'),
+		).toBeNull();
+		expect(
+			container.querySelector('article[data-discussion-id="wrong-path"]'),
+		).toBeNull();
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
 test("omits discussion paths and repeated note metadata", () => {
 	const markup = renderDiff({
 		discussions: [
@@ -1875,6 +2060,81 @@ test("updates rendered Markdown From chat controls when generation state changes
 		container.remove();
 	}
 });
+test("from-chat draft targeting uses each rendered Markdown draft ID", () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	const markdownSelection = {
+		kind: "markdown" as const,
+		path: "README.md",
+		startLine: 1,
+		endLine: 1,
+		quote: "# Review guide",
+	};
+	const drafts: Draft[] = [
+		{
+			id: "markdown-a",
+			body: "Existing A",
+			selection: markdownSelection,
+			filePath: "README.md",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+		{
+			id: "markdown-b",
+			body: "",
+			selection: markdownSelection,
+			filePath: "README.md",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+	];
+	const generated: string[] = [];
+	try {
+		act(() => {
+			root.render(
+				<DiffView
+					file={markdownFile}
+					mode="inline"
+					viewMode="rendered"
+					largeFileLineThreshold={800}
+					fileContents="# Review guide"
+					fileContentsError={null}
+					drafts={drafts}
+					onModeChange={() => {}}
+					onLineSelection={() => {}}
+					onCommentSelection={() => {}}
+					fromChat={{
+						availability: { kind: "ready", chatLabel: "Review chat" },
+						generations: {},
+						onGenerate: (id) => generated.push(id),
+						onStop: (id) => generated.push(`stop:${id}`),
+					}}
+				/>,
+			);
+		});
+		const buttons = container.querySelectorAll<HTMLButtonElement>(
+			'button[aria-label="From chat"]',
+		);
+		expect(buttons).toHaveLength(2);
+		act(() => {
+			buttons[0]?.click();
+			buttons[1]?.click();
+		});
+		expect(generated).toEqual(["markdown-a", "markdown-b"]);
+		expect(drafts.map(({ id, body }) => [id, body])).toEqual([
+			["markdown-a", "Existing A"],
+			["markdown-b", ""],
+		]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
 
 test("marks selected diff rows with data-selected", () => {
 	const container = document.createElement("div");
@@ -1965,6 +2225,7 @@ test("bounds long inline discussion content and keeps code and table regions int
 test("groups inline Explain in compact actions and preserves its callback", () => {
 	let explained = "";
 	const { container } = mountDiff({
+		file,
 		discussions: [positionedDiscussion],
 		onExplainDiscussion: (discussionId) => {
 			explained = discussionId;
@@ -1977,9 +2238,9 @@ test("groups inline Explain in compact actions and preserves its callback", () =
 		'button[data-action="explain"]',
 	);
 
-	expect(group?.className).toContain("flex");
-	expect(group?.className).toContain("shrink-0");
-	expect(button?.className).toContain("bg-primary");
+	expect(group?.classList.contains("flex")).toBe(true);
+	expect(group?.classList.contains("shrink-0")).toBe(true);
+	expect(button?.classList.contains("bg-primary")).toBe(true);
 	expect(button?.getAttribute("aria-busy")).toBeNull();
 	act(() => button?.click());
 	expect(explained).toBe("disc-1");
@@ -2324,3 +2585,563 @@ test(
 	},
 	{ timeout: 30_000 },
 );
+
+test("multi-draft lifecycle keeps draft cards and controls keyed by ID", () => {
+	const drafts: Draft[] = [
+		{
+			id: "draft-a",
+			body: "Body A",
+			selection: {
+				path: "src/app.ts",
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+			},
+			filePath: "src/app.ts",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+		{
+			id: "draft-b",
+			body: "Body B",
+			selection: {
+				path: "src/app.ts",
+				side: "new",
+				startLine: 4,
+				endLine: 4,
+			},
+			filePath: "src/app.ts",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+	];
+	const sent: string[] = [];
+	const edits: Array<{ id: string; body: string }> = [];
+	const { container, root } = mountDiff({
+		drafts,
+		onEditDraft: (id, body) => edits.push({ id, body }),
+		onSendDraft: (id) => sent.push(id),
+	});
+	try {
+		const cardA = container.querySelector('[data-draft-id="draft-a"]');
+		const cardB = container.querySelector('[data-draft-id="draft-b"]');
+		expect(cardA?.textContent).toContain("src/app.ts:new:1-1");
+		expect(cardA?.textContent).toContain("Body A");
+		expect(cardB?.textContent).toContain("src/app.ts:new:4-4");
+		expect(cardB?.textContent).toContain("Body B");
+		const writeButtons = [
+			...container.querySelectorAll('[aria-label="Write"]'),
+		];
+		act(() =>
+			writeButtons[1]?.dispatchEvent(
+				new window.MouseEvent("click", { bubbles: true }),
+			),
+		);
+		act(() =>
+			writeButtons[0]?.dispatchEvent(
+				new window.MouseEvent("click", { bubbles: true }),
+			),
+		);
+		const editors = [...container.querySelectorAll("textarea")];
+		expect(editors).toHaveLength(2);
+		act(() => {
+			for (const [index, body] of ["Edited A", "Edited B"].entries()) {
+				const editor = editors[index];
+				if (!editor) continue;
+				Object.getOwnPropertyDescriptor(
+					window.HTMLTextAreaElement.prototype,
+					"value",
+				)?.set?.call(editor, body);
+				editor.dispatchEvent(new window.Event("input", { bubbles: true }));
+			}
+		});
+		expect(edits).toEqual([
+			{ id: "draft-a", body: "Edited A" },
+			{ id: "draft-b", body: "Edited B" },
+		]);
+		const sendButtons = [...container.querySelectorAll("button")].filter(
+			(button) => button.textContent?.includes("Send"),
+		);
+		expect(sendButtons).toHaveLength(2);
+		act(() => sendButtons[1]?.click());
+		act(() => sendButtons[0]?.click());
+		expect(sent).toEqual(["draft-b", "draft-a"]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+test("draft edit queue serializes each ID without blocking other IDs", async () => {
+	const queue = createDraftEditQueue();
+	const operations: string[] = [];
+	let releaseA!: () => void;
+	const aGate = new Promise<void>((resolve) => {
+		releaseA = resolve;
+	});
+	const firstA = queue.enqueue("A", async () => {
+		operations.push("A1:start");
+		await aGate;
+		operations.push("A1:done");
+	});
+	const secondA = queue.enqueue("A", async () => {
+		operations.push("A2");
+	});
+	const firstB = queue.enqueue("B", async () => {
+		operations.push("B1");
+	});
+
+	await firstB;
+	expect(operations).toEqual(["A1:start", "B1"]);
+	releaseA();
+	await Promise.all([firstA, secondA]);
+	expect(operations).toEqual(["A1:start", "B1", "A1:done", "A2"]);
+	expect(queue.pending("A")).toBeUndefined();
+});
+test("from-chat draft targeting preserves mounted drafts through failure, Stop, and Cancel alongside queued edits", async () => {
+	const token = "mounted-draft-queue-test";
+	const originalFetch = globalThis.fetch;
+	const originalHistory = window.location.href;
+	const rootElement = document.createElement("div");
+	rootElement.id = "root";
+	document.body.replaceChildren(rootElement);
+	window.history.replaceState(null, "", `/?t=${token}`);
+
+	const drafts: Draft[] = [
+		{
+			id: "draft-a",
+			body: "A initial",
+			selection: {
+				path: "src/app.ts",
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+			},
+			filePath: "src/app.ts",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+		{
+			id: "draft-b",
+			body: "B initial",
+			selection: {
+				path: "src/app.ts",
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+			},
+			filePath: "src/app.ts",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+		{
+			id: "draft-c",
+			body: "C initial",
+			selection: {
+				path: "src/app.ts",
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+			},
+			filePath: "src/app.ts",
+			status: "draft",
+			error: null,
+			postedDiscussionId: null,
+			staleSince: null,
+		},
+	];
+	const initialState = {
+		version: 1,
+		mode: "code",
+		mr: {
+			host: "gitlab.example.com",
+			projectPath: "group/project",
+			iid: 42,
+			webUrl: "https://gitlab.example.com/group/project/-/merge_requests/42",
+			title: "Draft queue",
+			description: "",
+			sourceBranch: "feature",
+			targetBranch: "main",
+		},
+		revision: {
+			headSha: "head",
+			mergeBaseSha: "base",
+			diffRefs: { baseSha: "base", startSha: "base", headSha: "head" },
+			syncedAt: "2026-01-01T00:00:00.000Z",
+		},
+		worktreePath: "/tmp/review",
+		repoRoot: "/tmp/review",
+		layerStatus: "ready",
+		layerError: null,
+		layers: [],
+		viewedFiles: [],
+		collapsedDiscussionIds: [],
+		chats: ["chat-a", "chat-b"].map((id) => ({
+			id,
+			title: id === "chat-a" ? "Chat A" : "Chat B",
+			createdAt: "2026-01-01T00:00:00.000Z",
+			busy: false,
+			agent: null,
+			model: null,
+		})),
+		activeChatId: "chat-a",
+		drafts,
+		diff: [file],
+		discussions: [],
+		approval: null,
+		largeFileLineThreshold: 800,
+		busyChatIds: [],
+	};
+	type Deferred = {
+		body: string;
+		resolve: (response: Response) => void;
+	};
+	const puts: Record<string, Deferred[]> = { "draft-a": [], "draft-b": [] };
+	const posted: Array<{ id: string; body: string }> = [];
+	type PendingGeneration = {
+		draftId: string;
+		chatId: string;
+		signal: AbortSignal | undefined;
+		resolve: (response: Response) => void;
+	};
+	const generations: PendingGeneration[] = [];
+	let persisted = drafts.map((draft) => ({ ...draft }));
+	globalThis.fetch = async (input, init) => {
+		const url = new URL(
+			input instanceof Request ? input.url : String(input),
+			"http://localhost",
+		);
+		const method =
+			init?.method ?? (input instanceof Request ? input.method : "GET");
+		if (url.pathname === "/api/settings/appearance")
+			return Response.json({ colorTheme: "light" });
+		if (url.pathname === "/api/state")
+			return Response.json({ ...initialState, drafts: persisted });
+		if (url.pathname === "/api/refresh")
+			return Response.json({
+				stale: false,
+				headSha: "head",
+				newCommitCount: 0,
+			});
+		if (url.pathname === "/api/version")
+			return Response.json({ current: null, latest: null, autoOpen: false });
+		if (url.pathname === "/api/approval") return Response.json(null);
+		if (url.pathname === "/api/chat") {
+			return Response.json([
+				{
+					role: "assistant",
+					text: "Review chat reply",
+					tags: [],
+					at: "2026-01-01T00:00:00.000Z",
+					sessionId: null,
+				},
+			]);
+		}
+		const generationMatch = url.pathname.match(
+			/^\/api\/comments\/([^/]+)\/from-chat$/,
+		);
+		if (generationMatch && method === "POST") {
+			const { promise, resolve } = Promise.withResolvers<Response>();
+			generations.push({
+				draftId: decodeURIComponent(generationMatch[1] ?? ""),
+				chatId: (JSON.parse(String(init?.body)) as { chatId: string }).chatId,
+				signal: init?.signal ?? undefined,
+				resolve,
+			});
+			return promise;
+		}
+		if (url.pathname.endsWith("/from-chat/cancel") && method === "POST")
+			return Response.json({});
+		const draftMatch = url.pathname.match(
+			/^\/api\/comments\/([^/]+)(?:\/send)?$/,
+		);
+		if (draftMatch && method === "PUT") {
+			const id = decodeURIComponent(draftMatch[1] ?? "");
+			const body = JSON.parse(String(init?.body)).body as string;
+			const { promise, resolve } = Promise.withResolvers<Response>();
+			if (!puts[id]) puts[id] = [];
+			puts[id].push({ body, resolve });
+			return promise.then(async (response) => {
+				if (response.ok) {
+					const updated = (await response.clone().json()) as Draft;
+					persisted = persisted.map((draft) =>
+						draft.id === id ? updated : draft,
+					);
+				}
+				return response;
+			});
+		}
+		if (draftMatch && method === "POST") {
+			const id = decodeURIComponent(draftMatch[1] ?? "");
+			const found = persisted.find((draft) => draft.id === id);
+			posted.push({ id, body: found?.body ?? "" });
+			return new Response(
+				`event: done\ndata: ${JSON.stringify({ discussion: discussion(`posted-${id}`, null) })}\n\n`,
+				{ headers: { "content-type": "text/event-stream" } },
+			);
+		}
+		return Response.json({});
+	};
+
+	const flush = async () => {
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setTimeout(resolve, 0);
+		await act(async () => {
+			await promise;
+		});
+	};
+	const setTextarea = (id: string, value: string) => {
+		const card = rootElement.querySelector(`[data-draft-id="${id}"]`);
+		const textarea = card?.querySelector("textarea");
+		if (!(textarea instanceof window.HTMLTextAreaElement))
+			throw new Error(
+				`Missing editor for ${id}: ${rootElement.textContent ?? ""}`,
+			);
+		Object.getOwnPropertyDescriptor(
+			window.HTMLTextAreaElement.prototype,
+			"value",
+		)?.set?.call(textarea, value);
+		textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+	};
+	const writeButtons = () => [
+		...rootElement.querySelectorAll<HTMLButtonElement>(
+			'button[aria-label="Write"]',
+		),
+	];
+	const sendButton = (id: string) => {
+		const card = rootElement.querySelector(`[data-draft-id="${id}"]`);
+		return [...(card?.querySelectorAll("button") ?? [])].find((button) =>
+			button.textContent?.includes("Send"),
+		);
+	};
+	const cardButton = (id: string, label: string) => {
+		const card = rootElement.querySelector(`[data-draft-id="${id}"]`);
+		return [...(card?.querySelectorAll("button") ?? [])].find(
+			(button) => button.getAttribute("aria-label") === label,
+		);
+	};
+	const selectChat = async (chatLabel: string) => {
+		act(() =>
+			document.body
+				.querySelector<HTMLButtonElement>('button[aria-label="Switch chat"]')
+				?.click(),
+		);
+		await flush();
+		const option = [
+			...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+		].find((item) => item.textContent?.includes(chatLabel));
+		if (!option) throw new Error(`Missing chat option ${chatLabel}`);
+		act(() => option.click());
+		await flush();
+	};
+	const draftBodySnapshot = () =>
+		["draft-a", "draft-b"].map((id) => [
+			id,
+			rootElement.querySelector<HTMLTextAreaElement>(
+				`[data-draft-id="${id}"] textarea`,
+			)?.value ?? null,
+		]);
+
+	try {
+		// Import boots ReviewApp against #root using the mocked API fetches.
+		await import("../main");
+		await flush();
+		act(() => {
+			for (const button of writeButtons()) button.click();
+		});
+		const initialBodies = draftBodySnapshot();
+		act(() => cardButton("draft-a", "From chat")?.click());
+		await flush();
+		expect(generations).toHaveLength(1);
+		expect(generations[0]?.draftId).toBe("draft-a");
+		await act(async () => {
+			generations[0]?.resolve(
+				new Response(
+					`event: done\ndata: ${JSON.stringify({ status: "failed", error: "Generation failed" })}\n\n`,
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+			);
+			await Promise.resolve();
+		});
+		expect(rootElement.textContent).toContain("Generation failed");
+		expect(draftBodySnapshot()).toEqual(initialBodies);
+
+		act(() => cardButton("draft-a", "From chat")?.click());
+		await flush();
+		expect(generations).toHaveLength(2);
+		act(() => cardButton("draft-a", "Stop generating comment")?.click());
+		expect(generations[1]?.signal?.aborted).toBe(true);
+		expect(draftBodySnapshot()).toEqual(initialBodies);
+		await act(async () => {
+			generations[1]?.resolve(
+				new Response(
+					`event: done\ndata: ${JSON.stringify({ status: "ok", draft: { ...drafts[0], body: "Late stopped result" } })}\n\n`,
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+			);
+			await Promise.resolve();
+		});
+		expect(draftBodySnapshot()).toEqual(initialBodies);
+		act(() => cardButton("draft-c", "From chat")?.click());
+		await flush();
+		expect(generations).toHaveLength(3);
+		expect(generations[2]?.draftId).toBe("draft-c");
+		const bodiesBeforeCancel = draftBodySnapshot();
+		act(() => {
+			const card = rootElement.querySelector('[data-draft-id="draft-c"]');
+			[...(card?.querySelectorAll("button") ?? [])]
+				.find((button) => button.textContent?.trim() === "Cancel")
+				?.click();
+		});
+		await flush();
+		expect(rootElement.querySelector('[data-draft-id="draft-c"]')).toBeNull();
+		expect(draftBodySnapshot()).toEqual(bodiesBeforeCancel);
+		await act(async () => {
+			generations[2]?.resolve(
+				new Response(
+					`event: done\ndata: ${JSON.stringify({ status: "ok", draft: { ...drafts[2], body: "Late canceled result" } })}\n\n`,
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+			);
+			await Promise.resolve();
+		});
+		expect(rootElement.querySelector('[data-draft-id="draft-c"]')).toBeNull();
+		expect(draftBodySnapshot()).toEqual(bodiesBeforeCancel);
+		act(() => cardButton("draft-a", "From chat")?.click());
+		await flush();
+		await selectChat("Chat B");
+		act(() => cardButton("draft-b", "From chat")?.click());
+		await flush();
+		expect(
+			generations.slice(3).map(({ draftId, chatId }) => [draftId, chatId]),
+		).toEqual([
+			["draft-a", "chat-a"],
+			["draft-b", "chat-b"],
+		]);
+		await act(async () => {
+			generations[4]?.resolve(
+				new Response(
+					`event: done\ndata: ${JSON.stringify({ status: "ok", draft: { ...drafts[1], body: "B initial\nB generated" } })}\n\n`,
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+			);
+			await Promise.resolve();
+		});
+		await flush();
+		act(() => cardButton("draft-b", "Preview")?.click());
+		await flush();
+		expect(
+			rootElement.querySelector('[data-draft-id="draft-b"]')?.textContent,
+		).toContain("B generated");
+		act(() => cardButton("draft-b", "Write")?.click());
+		await flush();
+		expect(draftBodySnapshot()).toEqual([
+			["draft-a", "A initial"],
+			["draft-b", "B initial\nB generated"],
+		]);
+		await act(async () => {
+			generations[3]?.resolve(
+				new Response(
+					`event: done\ndata: ${JSON.stringify({ status: "ok", draft: { ...drafts[0], body: "A initial\nA generated" } })}\n\n`,
+					{ headers: { "content-type": "text/event-stream" } },
+				),
+			);
+			await Promise.resolve();
+		});
+		await flush();
+		act(() => cardButton("draft-a", "Preview")?.click());
+		await flush();
+		act(() => cardButton("draft-a", "Write")?.click());
+		await flush();
+		expect(draftBodySnapshot()).toEqual([
+			["draft-a", "A initial\nA generated"],
+			["draft-b", "B initial\nB generated"],
+		]);
+		act(() => {
+			setTextarea("draft-a", "A first edit");
+			setTextarea("draft-a", "A exact latest body");
+			setTextarea("draft-b", "B independent body");
+		});
+		await flush();
+
+		act(() => sendButton("draft-a")?.click());
+		await flush();
+		expect(posted).toEqual([]);
+		expect(puts["draft-a"]?.map((put) => put.body)).toEqual(["A first edit"]);
+		expect(puts["draft-b"]?.map((put) => put.body)).toEqual([
+			"B independent body",
+		]);
+
+		await act(async () => {
+			puts["draft-b"]?.[0]?.resolve(
+				Response.json({ ...drafts[1], body: "B independent body" }),
+			);
+			await Promise.resolve();
+		});
+		expect(posted).toEqual([]);
+		expect(sendButton("draft-b")).toBeDefined();
+		await act(async () => {
+			puts["draft-a"]?.[0]?.resolve(
+				Response.json({ ...drafts[0], body: "A first edit" }),
+			);
+			await Promise.resolve();
+		});
+		await flush();
+		expect(
+			rootElement.querySelector('[data-draft-id="draft-a"]')?.textContent,
+		).toContain("A exact latest body");
+		expect(posted).toEqual([]);
+
+		await act(async () => {
+			puts["draft-a"]?.[1]?.resolve(
+				Response.json(
+					{ ...drafts[0], body: "A exact latest body" },
+					{ status: 500 },
+				),
+			);
+			await Promise.resolve();
+		});
+		await flush();
+		expect(posted).toEqual([]);
+		expect(rootElement.textContent).toContain(
+			"Comment update failed; edit was not sent",
+		);
+		expect(
+			rootElement.querySelector('[data-draft-id="draft-b"]')?.textContent,
+		).toContain("B independent body");
+		expect(sendButton("draft-b")).toBeDefined();
+
+		act(() => setTextarea("draft-a", "A retry body"));
+		await flush();
+		expect(puts["draft-a"]?.map((put) => put.body)).toEqual([
+			"A first edit",
+			"A exact latest body",
+			"A retry body",
+		]);
+		act(() => sendButton("draft-a")?.click());
+		await flush();
+		expect(posted).toEqual([]);
+		await act(async () => {
+			puts["draft-a"]?.[2]?.resolve(
+				Response.json({ ...drafts[0], body: "A retry body" }),
+			);
+			await Promise.resolve();
+		});
+		await flush();
+		expect(posted).toEqual([{ id: "draft-a", body: "A retry body" }]);
+		expect(persisted.find((draft) => draft.id === "draft-a")?.body).toBe(
+			"A retry body",
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+		window.history.replaceState(null, "", originalHistory);
+		document.body.replaceChildren();
+	}
+});

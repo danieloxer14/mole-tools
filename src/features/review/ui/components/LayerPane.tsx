@@ -420,12 +420,33 @@ export function LayerPane({
 												/>
 												<button
 													type="button"
+													className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"
+													data-active={
+														layerFiles.includes(selectedPath ?? "")
+															? "true"
+															: "false"
+													}
+													onClick={() => onSelectLayer(layer.id)}
+												>
+													{layer.title}
+												</button>
+												{layerState === "stale" ? (
+													<Badge
+														variant="secondary"
+														className="bg-warning/15 text-warning"
+														data-layer-state="stale"
+													>
+														Stale
+													</Badge>
+												) : null}
+												<button
+													type="button"
 													aria-label={`Mark ${layer.title} ${
 														layer.done ? "not done" : "done"
 													}`}
 													aria-pressed={layer.done}
 													data-layer-state={layerState}
-													className={`group inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-transparent transition-colors duration-150 ease-out focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 ${
+													className={`group inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-transparent transition-colors duration-150 ease-out focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 ${
 														layer.done
 															? "bg-success text-success-foreground hover:bg-success/80"
 															: "bg-secondary text-secondary-foreground hover:bg-secondary"
@@ -450,27 +471,6 @@ export function LayerPane({
 														/>
 													)}
 												</button>
-												<button
-													type="button"
-													className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground transition-colors duration-150 ease-out"
-													data-active={
-														layerFiles.includes(selectedPath ?? "")
-															? "true"
-															: "false"
-													}
-													onClick={() => onSelectLayer(layer.id)}
-												>
-													{layer.title}
-												</button>
-												{layerState === "stale" ? (
-													<Badge
-														variant="secondary"
-														className="bg-warning/15 text-warning"
-														data-layer-state="stale"
-													>
-														Stale
-													</Badge>
-												) : null}
 											</div>
 											<CollapsibleContent
 												keepMounted

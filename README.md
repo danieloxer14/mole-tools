@@ -248,11 +248,13 @@ append-only: mole-tools never deletes prompt versions. The `commit-system`,
 `mr-code`, and `mr-plan` presets are selected in `config.json`'s `prompts` map;
 their text edits still live under `~/.config/mole-tools/prompts/`.
 
-Shipped layer-prompt guidance does not automatically replace existing prompt
-versions. To adopt updated guidance, open **Settings > Prompts**, select
-`review-layers-code` or `review-layers-plan`, and choose **Reset** to save the
-shipped guidance as a new version; existing versions remain in history. Use
-**Regenerate** in the review UI to apply it to already cached layers.
+Shipped review-prompt guidance does not automatically replace existing prompt
+versions. To adopt updated guidance, open **Settings > Prompts** and **Reset**
+`review-layers-code`, `review-layers-plan`, and `review-importance`
+independently; each Reset saves the shipped guidance as a new version while
+preserving existing history. Use **Regenerate** to apply updated layer prompts
+to cached layers. After resetting `review-importance`, use **Retry** on a failed
+importance run.
 
 Existing flat prompt files migrate lazily, once on first access of their slot:
 `prompts/<slot>.md` becomes `<slot>/default/001.md`. The former
@@ -397,12 +399,12 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
-Review layers have one completion circle: Open is neutral, Done is green with a
-check, and hovering or focusing the circle previews the action (check to
-complete, cross to reopen). Stale layers retain a warning badge. Layer
-descriptions render as compact, sanitized GitHub-flavoured Markdown with
-preserved line breaks; unsafe HTML is removed and unsafe link targets are
-neutralized.
+Review layers have one completion circle on the right of the title, sized like
+the chevron: Open is neutral, Done is green with a check, and hovering or
+focusing the circle previews the action (check to complete, cross to reopen).
+Stale layers retain a warning badge. Layer descriptions render as compact,
+sanitized GitHub-flavoured Markdown with preserved line breaks; unsafe HTML is
+removed and unsafe link targets are neutralized.
 
 Drafts support local Write/Preview Markdown modes. Published positioned and
 general discussions render sanitized GitHub-flavoured Markdown; collapsed
