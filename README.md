@@ -498,6 +498,16 @@ The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
 importance immediately without a reload, but does not cancel an in-flight run;
 that run can still finish and persist its result.
 
+With the feature flag on and scoring ready, a shared importance review progress
+bar appears directly beneath the Layers/Files tabs. It shows the weighted share
+of added and deleted lines in viewed files against all scored changed lines.
+Importance levels 1–5 weigh 0.5, 0.75, 1, 1.25, and 1.5; context and unscored
+lines don't count. The target is the greater of the weighted total of level 3–5
+lines or 50% of all scored changed lines. A marker shows the target. Fill colour
+blends through importance colours toward level 5 as progress approaches the
+target and stays level 5 once reached; a subtle flame animates at that point,
+but stays static with reduced motion.
+
 
 
 ```bash

@@ -51,6 +51,7 @@ test("does not render importance markup when absent or null", () => {
 			},
 		}),
 	).toBe(markup());
+	expect(markup()).not.toContain('aria-label="Importance review progress"');
 });
 
 test("shows pending and running importance status", () => {
