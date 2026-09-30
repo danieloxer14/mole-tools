@@ -10,6 +10,11 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import type { ReviewState } from "../../state";
+import {
+	IMPORTANCE_BG_CLASS,
+	type ImportanceScore,
+	importanceTitle,
+} from "../importance";
 import { changedFileCount, viewedFileCount } from "./ChangedFilesHeader";
 import { IconButton } from "./IconButton";
 import { ProgressBar } from "./ProgressBar";
@@ -39,6 +44,7 @@ interface LayerPaneProps {
 	externallyDisabled: boolean;
 	onRegenerate: () => void;
 	onRetry: () => void;
+	importanceByPath?: ReadonlyMap<string, ImportanceScore>;
 }
 
 export function layersStatusMessage(
@@ -176,6 +182,7 @@ export function LayerPane({
 	externallyDisabled,
 	onRegenerate,
 	onRetry,
+	importanceByPath,
 }: LayerPaneProps) {
 	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
 		() =>
@@ -495,6 +502,7 @@ export function LayerPane({
 													{layerFiles.map((path) => {
 														const active = path === selectedPath;
 														const isViewed = viewed.has(path);
+														const score = importanceByPath?.get(path);
 														return (
 															<Badge
 																className={cn(
@@ -504,6 +512,7 @@ export function LayerPane({
 																		: isViewed
 																			? "bg-success/15 text-success hover:bg-success/20 hover:text-success"
 																			: "hover:bg-muted hover:text-foreground",
+																	score !== undefined && "overflow-hidden pl-0",
 																)}
 																key={path}
 																variant="secondary"
@@ -518,6 +527,16 @@ export function LayerPane({
 																	/>
 																}
 															>
+																{score !== undefined ? (
+																	<span
+																		aria-hidden="true"
+																		title={importanceTitle(score)}
+																		className={cn(
+																			"-my-0.5 mr-0.5 w-2 self-stretch",
+																			IMPORTANCE_BG_CLASS[score],
+																		)}
+																	/>
+																) : null}
 																<FileText aria-hidden />
 																{shortFilePath(path, changedFilePaths)}
 															</Badge>

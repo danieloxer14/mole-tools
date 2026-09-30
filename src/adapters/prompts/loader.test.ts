@@ -350,12 +350,18 @@ describe("prompt store", () => {
 		).rejects.toThrow(PortError);
 	});
 
-	test("seeds the explain-comment prompt when missing", async () => {
+	test("seeds prompts when missing", async () => {
 		const dir = await promptsDir();
 		await loadPrompt("review-explain-comment", { dir });
+		await loadPrompt("review-importance", { dir });
 		expect(
 			await Bun.file(
 				join(dir, "review-explain-comment", "default", "001.md"),
+			).exists(),
+		).toBe(true);
+		expect(
+			await Bun.file(
+				join(dir, "review-importance", "default", "001.md"),
 			).exists(),
 		).toBe(true);
 	});
@@ -368,6 +374,7 @@ describe("prompt store", () => {
 			"review-chat",
 			"review-comment-from-chat",
 			"review-explain-comment",
+			"review-importance",
 			"review-layers-code",
 			"review-layers-plan",
 		]);

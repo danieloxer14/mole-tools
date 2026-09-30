@@ -117,7 +117,7 @@ CLI alias. OMP effort is sent as `--thinking <level>`, Claude effort as
 Unset effort sends no effort option; Codex's `-c` option is not an OMP effort
 flag.
 
-The **Settings** dialog opens on **Prompts** and has a **General** tab for global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); each version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to rebuild cached layers.
+The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > Layer importance** is on, it also shows `review-importance`. Each prompt version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to rebuild cached layers.
 
 The OMP model dropdown comes from `models --json` run by the selected OMP
 executable. Effort choices are limited to values advertised as supported for
@@ -229,15 +229,18 @@ Prompt presets and their version history live beside `config.json`:
             └── NNN.md
 ```
 
-The eight prompt slots are `commit-system`, `mr-code`, `mr-plan`,
+The prompt slots are `commit-system`, `mr-code`, `mr-plan`,
 `review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, and `review-comment-from-chat`. Each slot can
-have multiple named presets. The active text is the highest-numbered version
-of the active preset. The shipped default seeds `default/001.md` on first
-access, and `config.prompts` records the active preset per slot (a missing
-entry means `default`).
+`review-explain-comment`, `review-comment-from-chat`, and
+`review-importance` (visible in **Settings > Prompts** only when **Settings >
+Features > Layer importance** is on). Each slot can have multiple named
+presets. The active text is the highest-numbered version of the active preset.
+The shipped default seeds `default/001.md` on first access, and
+`config.prompts` records the active preset per slot (a missing entry means
+`default`).
 
-The five review prompt slots are managed from **Settings > Prompts**.
+The five standard review prompt slots are managed from **Settings > Prompts**;
+`review-importance` appears there only when **Layer importance** is on.
 General review defaults are in **General**. Saving a prompt creates a new
 version, **Roll back** copies an older version forward as a new latest version,
 and **Reset** writes the shipped default as a new version. This history is
@@ -304,6 +307,7 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
 | `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
 | `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
+| `review-importance` | Layer importance scoring (Features > Layer importance) | Scores each changed line span 1–5 for reviewer attention. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -349,8 +353,9 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 
 **Configuration.** Uses the `commit` model route from `config.json`. The active
 `commit-system` prompt preset supplies the system prompt; set it in the
-`prompts` map. Settings **Prompts** manages only the five review prompt slots
-and does not change commit prompt configuration.
+`prompts` map. Settings **Prompts** manages the five standard review prompt
+slots and additionally `review-importance` only when **Settings > Features >
+Layer importance** is on; it does not change commit prompt configuration.
 
 
 ---
@@ -404,9 +409,21 @@ general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
 Rendered Markdown file previews retain horizontal gutters for block actions and wide content such as Mermaid diagrams.
 
-The **Settings** dialog has four tabs: **General**, **Prompts**, **Skills**, and
-**Appearance**; it opens on **Prompts**. **General** contains **Default Agent**,
-**Default model**, **Default effort**, and **Show whitespace changes**. That toggle applies immediately to the current review, not review defaults. The **Prompts** tab manages the five review prompt slots (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, `review-comment-from-chat`) and their preset versions, each with Agent, Model, and Effort dropdowns. OMP models come from the selected executable's `models --json` catalog; Claude uses the Anthropic Models API with a server `ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key entitlement does not establish Claude CLI access, and aliases are not a full CLI catalog. Optional effort choices are model-compatible; OMP sends `--thinking`, Claude sends `--effort`, and Codex sends `-c model_reasoning_effort=<level>`.
+The **Settings** dialog has five tabs: **General**, **Prompts**, **Skills**,
+**Appearance**, and **Features**; it opens on **Prompts**. **General** contains
+**Default Agent**, **Default model**, **Default effort**, and **Show whitespace
+changes**. That toggle applies immediately to the current review, not review
+defaults. The **Prompts** tab manages the five standard review prompt slots
+(`review-layers-code`, `review-layers-plan`, `review-chat`,
+`review-explain-comment`, `review-comment-from-chat`), plus `review-importance`
+only while **Layer importance** is on, and their preset versions, each with
+Agent, Model, and Effort dropdowns. OMP models come from the selected
+executable's `models --json` catalog; Claude uses the Anthropic Models API with
+a server `ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key
+entitlement does not establish Claude CLI access, and aliases are not a full
+CLI catalog. Optional effort choices are model-compatible; OMP sends
+`--thinking`, Claude sends `--effort`, and Codex sends its model reasoning
+effort setting.
 
 With Agent **Default**, each unset prompt field inherits its matching General
 value. An inherited effort unsupported by an explicitly selected prompt model
@@ -452,6 +469,31 @@ The **Appearance** tab has a **Color theme** dropdown: **Default** (dark) or
 lighter than in Default). The
 choice applies immediately and is saved as `appearance.colorTheme`
 (`"default"` or `"light"`) in `config.json`.
+
+#### Features
+
+The **Features** tab has one checkbox per review feature flag. Values are
+stored in `~/.config/mole-tools/features.json`, a JSON object keyed by flag ID,
+for example `{ "layer-importance": true }`. Missing files or keys default to
+off; invalid files also use defaults and are not rewritten until a toggle.
+Unknown keys are preserved when a flag is changed.
+
+#### Layer importance
+
+When **Layer importance** is on, an agent scores changed line spans after the
+initial diff loads and after a sync changes the head or merge-base revision.
+Layer **Regenerate** and **Retry** do not rerun importance. The
+`review-importance` prompt evaluates the whole change set on a 1–5 scale:
+1 (skip), 2 (low), 3 (moderate), 4 (high), 5 (critical). Pastel blue-to-red
+colours mark diff gutters, changed-file rows (using each file's highest span
+score), and layer file pills. The Changed files header shows **Scoring
+importance…** while running, a legend when ready, or **Importance failed** with
+an error tooltip and **Retry** on failure. Results persist at
+`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
+The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
+importance immediately without a reload, but does not cancel an in-flight run;
+that run can still finish and persist its result.
+
 
 
 ```bash
@@ -759,5 +801,5 @@ Publishing does not mutate `releases.json` or `package.json`, commit, or push `H
 | `src/core/` | Context, error handling, feature interface |
 | `src/features/` | One directory per surviving feature (commit, merge-request, worktree-prune, init, review) |
 | `src/adapters/` | Config loader, prompt loader, provider adapters, VCS/host implementations |
-| `src/features/review/ui/components/SettingsPanel.tsx` | Review Settings dialog (General, Prompts, Skills, and Appearance) for global defaults, review prompt presets and versions, catalog-backed agent/model/effort choices, and color theme |
+| `src/features/review/ui/components/SettingsPanel.tsx` | Review Settings dialog (General, Prompts, Skills, Appearance, and Features) for global defaults, review prompt presets and versions, catalog-backed agent/model/effort choices, feature flags, and color theme |
 | `specs/` | Design docs and architecture notes |

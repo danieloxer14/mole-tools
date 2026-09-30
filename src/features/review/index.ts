@@ -1,5 +1,10 @@
+import { join } from "node:path";
 import { z } from "zod";
 import { updateConfig } from "../../adapters/config/loader";
+import {
+	FeatureFlagStore,
+	featureFlagsPath,
+} from "../../adapters/feature-flags/store";
 import { promptsDir } from "../../adapters/prompts/loader";
 import { SkillStore, skillsDir } from "../../adapters/skills/store";
 import type { Context } from "../../core/context";
@@ -150,6 +155,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			reviewAgent: ctx.createReviewAgent(),
 			promptSourceDir: promptsDir(),
 			skillStore: new SkillStore(skillsDir()),
+			featureFlagStore: new FeatureFlagStore(featureFlagsPath()),
 			createReviewAgent: ctx.createReviewAgent,
 			persistConfig: (partial) => updateConfig(partial),
 			vcs: ctx.vcs,
@@ -158,6 +164,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			mr: result.mr,
 			paths: result.paths,
 			versionStatus,
+			importanceDir: join(result.paths.reviewDir, "importance"),
 		});
 		const address = server.start();
 		try {

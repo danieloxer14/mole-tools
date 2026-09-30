@@ -1,11 +1,16 @@
 import { List, ListTree, Search } from "lucide-react";
+import type { ImportanceStatus } from "../../importance";
+import { IMPORTANCE_BG_CLASS, importanceTitle } from "../importance";
 import { ProgressBar } from "./ProgressBar";
+import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Spinner } from "./ui/spinner";
 import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
 } from "./ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+
 export type ChangedFilesMode = "list" | "tree";
 
 export interface ChangedFilesHeaderProps {
@@ -15,6 +20,12 @@ export interface ChangedFilesHeaderProps {
 	onModeChange: (mode: ChangedFilesMode) => void;
 	filterQuery: string;
 	onFilterQueryChange: (query: string) => void;
+	importance?: {
+		status: ImportanceStatus | null;
+		error: string | null;
+		canRetry: boolean;
+		onRetry: () => void;
+	};
 }
 
 export function viewedFileCount(
@@ -47,6 +58,7 @@ export function ChangedFilesHeader({
 	onModeChange,
 	filterQuery,
 	onFilterQueryChange,
+	importance,
 }: ChangedFilesHeaderProps) {
 	return (
 		<div
@@ -106,6 +118,52 @@ export function ChangedFilesHeader({
 				<span className="shrink-0 whitespace-nowrap tabular-nums">
 					{viewedCount}/{total} files
 				</span>
+				{importance?.status && (
+					<div className="flex min-w-0 items-center gap-2">
+						{importance.status === "pending" ||
+						importance.status === "running" ? (
+							<span className="flex items-center gap-1.5 text-muted-foreground">
+								<Spinner className="size-3" />
+								Scoring importance…
+							</span>
+						) : importance.status === "failed" ? (
+							<>
+								<Tooltip>
+									<TooltipTrigger
+										render={
+											<button type="button" className="text-destructive">
+												Importance failed
+											</button>
+										}
+									/>
+									<TooltipContent>{importance.error}</TooltipContent>
+								</Tooltip>
+								{importance.canRetry && (
+									<Button
+										size="xs"
+										variant="outline"
+										onClick={importance.onRetry}
+									>
+										Retry
+									</Button>
+								)}
+							</>
+						) : (
+							<fieldset
+								aria-label="Importance legend"
+								className="m-0 flex min-w-0 items-center gap-1.5 border-0 p-0"
+							>
+								{([1, 2, 3, 4, 5] as const).map((score) => (
+									<span
+										key={score}
+										className={`size-2.5 rounded-sm ${IMPORTANCE_BG_CLASS[score]}`}
+										title={importanceTitle(score)}
+									/>
+								))}
+							</fieldset>
+						)}
+					</div>
+				)}
 			</div>
 			<div className="flex min-w-0 items-center rounded-3xl border border-border bg-input/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
 				<div className="relative min-w-0 flex-1">

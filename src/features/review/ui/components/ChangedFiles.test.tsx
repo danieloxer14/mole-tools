@@ -1440,3 +1440,70 @@ test("filters complete effective paths in list and tree without changing global 
 	).not.toBeNull();
 	expect(nav.querySelector('[data-file-path="elsewhere.ts"]')).not.toBeNull();
 });
+test("renders importance dots on scored list files before counts", () => {
+	const rendered = renderInteractive({
+		files: [parsedFile("src/scored.ts"), parsedFile("src/unscored.ts")],
+		importanceByPath: new Map([["src/scored.ts", 5]]),
+	});
+	const nav = changedFilesNav(rendered.container);
+	const scoredRow = nav.querySelector<HTMLElement>(
+		'[data-file-path="src/scored.ts"]',
+	);
+	const unscoredRow = nav.querySelector<HTMLElement>(
+		'[data-file-path="src/unscored.ts"]',
+	);
+	const dot = scoredRow?.querySelector<HTMLElement>(
+		'[role="img"][aria-label="Importance 5 of 5"]',
+	);
+	if (!dot || !scoredRow || !unscoredRow) {
+		throw new Error("Scored list row or importance dot is missing");
+	}
+	expect(dot.className.split(/\s+/)).toContain("bg-importance-5");
+	expect(dot.title).toBe("Importance 5/5 (Critical)");
+	const counts = scoredRow.querySelector("span.text-success");
+	if (!counts) throw new Error("File counts are missing");
+	expect(
+		dot.compareDocumentPosition(counts) & Node.DOCUMENT_POSITION_FOLLOWING,
+	).toBeTruthy();
+	expect(
+		unscoredRow.querySelector('[role="img"][aria-label^="Importance "]'),
+	).toBeNull();
+});
+
+test("renders importance dots on tree leaves but never on folders", () => {
+	const rendered = renderInteractive({
+		files: [parsedFile("src/nested/scored.ts")],
+		importanceByPath: new Map([["src/nested/scored.ts", 3]]),
+	});
+	act(() => modeButton(rendered.container, "Tree view").click());
+	const nav = changedFilesNav(rendered.container);
+	const folderRow = nav.querySelector<HTMLElement>(
+		'[data-folder-row="src/nested"]',
+	);
+	const leafRow = nav.querySelector<HTMLElement>(
+		'[data-file-path="src/nested/scored.ts"]',
+	);
+	if (!folderRow || !leafRow) {
+		throw new Error("Tree folder or file row is missing");
+	}
+	expect(
+		folderRow.querySelector('[role="img"][aria-label^="Importance "]'),
+	).toBeNull();
+	const dot = leafRow.querySelector<HTMLElement>(
+		'[role="img"][aria-label="Importance 3 of 5"]',
+	);
+	if (!dot) throw new Error("Tree leaf importance dot is missing");
+	expect(dot.className.split(/\s+/)).toContain("bg-importance-3");
+	expect(dot.title).toBe("Importance 3/5 (Moderate)");
+});
+
+test("omits importance dots when importanceByPath is undefined", () => {
+	const rendered = renderInteractive({
+		files: [parsedFile("src/scored.ts")],
+	});
+	expect(
+		changedFilesNav(rendered.container).querySelector(
+			'[role="img"][aria-label^="Importance "]',
+		),
+	).toBeNull();
+});

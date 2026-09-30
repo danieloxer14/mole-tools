@@ -11,6 +11,9 @@ import {
 	useState,
 } from "react";
 import type { ParsedFileDiff } from "../../../../shared/diff-parse";
+import type { ImportanceScore } from "../importance";
+import { IMPORTANCE_BG_CLASS, importanceTitle } from "../importance";
+import type { ChangedFilesHeaderProps } from "./ChangedFilesHeader";
 import {
 	ChangedFilesHeader,
 	type ChangedFilesMode,
@@ -224,6 +227,8 @@ export interface ChangedFilesProps {
 	selectedPath: string | null;
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
+	importanceByPath?: ReadonlyMap<string, ImportanceScore>;
+	importance?: ChangedFilesHeaderProps["importance"];
 }
 
 export interface ChangedFileEntry {
@@ -423,6 +428,7 @@ interface ChangedFileRowProps {
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	registerRow: (path: string, element: HTMLElement | null) => void;
+	score?: ImportanceScore;
 }
 
 function ChangedFileRow({
@@ -434,6 +440,7 @@ function ChangedFileRow({
 	onSelectFile,
 	onViewedChange,
 	registerRow,
+	score,
 }: ChangedFileRowProps): ReactElement {
 	const selected = entry.path === selectedPath;
 	return (
@@ -456,6 +463,14 @@ function ChangedFileRow({
 					className="block min-w-0 truncate font-mono text-xs"
 				/>
 			</button>
+			{score !== undefined && (
+				<span
+					role="img"
+					aria-label={`Importance ${score} of 5`}
+					title={importanceTitle(score)}
+					className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[score]}`}
+				/>
+			)}
 			<span className="flex min-w-0 shrink-0 flex-wrap gap-1 text-xs tabular-nums">
 				<span className="max-w-full break-all text-success">
 					+{entry.file.insertions}
@@ -492,6 +507,7 @@ interface ChangedFilesFolderProps {
 	onSelectFile: (path: string) => void;
 	onViewedChange: (paths: readonly string[], viewed: boolean) => void;
 	registerRow: (path: string, element: HTMLElement | null) => void;
+	importanceByPath?: ReadonlyMap<string, ImportanceScore>;
 }
 
 function ChangedFilesFolder({
@@ -504,6 +520,7 @@ function ChangedFilesFolder({
 	onSelectFile,
 	onViewedChange,
 	registerRow,
+	importanceByPath,
 }: ChangedFilesFolderProps): ReactElement {
 	const collapsed = collapsedFolderPaths.has(node.path);
 	const open = !collapsed;
@@ -566,6 +583,7 @@ function ChangedFilesFolder({
 							onSelectFile={onSelectFile}
 							onViewedChange={onViewedChange}
 							registerRow={registerRow}
+							importanceByPath={importanceByPath}
 						/>
 					) : (
 						<ChangedFileRow
@@ -578,6 +596,7 @@ function ChangedFilesFolder({
 							onSelectFile={onSelectFile}
 							onViewedChange={onViewedChange}
 							registerRow={registerRow}
+							score={importanceByPath?.get(child.entry.path)}
 						/>
 					),
 				)}
@@ -592,6 +611,8 @@ export function ChangedFiles({
 	selectedPath,
 	onSelectFile,
 	onViewedChange,
+	importance,
+	importanceByPath,
 }: ChangedFilesProps): ReactElement {
 	const [mode, setMode] = useState<ChangedFilesMode>("list");
 	const [filterQuery, setFilterQuery] = useState("");
@@ -779,6 +800,7 @@ export function ChangedFiles({
 					onSelectFile={onSelectFile}
 					onViewedChange={onViewedChange}
 					registerRow={registerRow}
+					importanceByPath={importanceByPath}
 				/>
 			);
 		}
@@ -794,6 +816,7 @@ export function ChangedFiles({
 				onSelectFile={onSelectFile}
 				onViewedChange={onViewedChange}
 				registerRow={registerRow}
+				score={importanceByPath?.get(node.entry.path)}
 			/>
 		);
 	}
@@ -808,6 +831,7 @@ export function ChangedFiles({
 				onModeChange={setMode}
 				filterQuery={filterQuery}
 				onFilterQueryChange={setFilterQuery}
+				importance={importance}
 			/>
 			<nav
 				className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
@@ -840,6 +864,7 @@ export function ChangedFiles({
 											onSelectFile={onSelectFile}
 											onViewedChange={onViewedChange}
 											registerRow={registerRow}
+											score={importanceByPath?.get(entry.path)}
 										/>
 									))}
 								</Fragment>
@@ -854,6 +879,7 @@ export function ChangedFiles({
 									onSelectFile={onSelectFile}
 									onViewedChange={onViewedChange}
 									registerRow={registerRow}
+									score={importanceByPath?.get(item.entry.path)}
 								/>
 							),
 						)

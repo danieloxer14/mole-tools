@@ -12,6 +12,7 @@ import { createRoot } from "react-dom/client";
 import type { HostDiscussion, MrApprovalState } from "../../../ports/git-host";
 import { splitSourceLines } from "../../../shared/diff-context";
 import type { ParsedFileDiff } from "../../../shared/diff-parse";
+import { importanceRevisionKey } from "../../../shared/importance-revision-key";
 import {
 	type ChatTag,
 	chatTagsEqual,
@@ -56,6 +57,7 @@ import {
 } from "./components/MrHeader";
 import { OverviewPane } from "./components/OverviewPane";
 import { ReviewSplitter } from "./components/ReviewSplitter";
+import type { SettingsTab } from "./components/SettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { errorToastMessage, type Toast, Toasts } from "./components/Toasts";
 import { Alert } from "./components/ui/alert";
@@ -69,8 +71,10 @@ import {
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
 import { projectWebUrl } from "./description-media";
+import { loadFeatureFlags, useConfirmedFeatureFlag } from "./feature-flags";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
+import { fileImportanceMap } from "./importance";
 import {
 	consumeLayerStream,
 	type LayerAction,
@@ -84,6 +88,7 @@ import {
 	runReviewRefresh,
 } from "./review-refresh";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
+import { useImportance } from "./use-importance";
 import { useSkills } from "./use-skills";
 import { useSplitterResize } from "./use-splitter-resize";
 
@@ -463,6 +468,28 @@ function ReviewApp() {
 	const reviewShell = useRef<HTMLElement | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
+	const importanceEnabled = useConfirmedFeatureFlag("layer-importance");
+	const importance = useImportance(
+		token,
+		importanceEnabled,
+		data ? importanceRevisionKey(data.revision) : "",
+	);
+	const importanceByPath = useMemo(
+		() =>
+			importanceEnabled && importance.status === "ready"
+				? fileImportanceMap(importance.files)
+				: undefined,
+		[importanceEnabled, importance.status, importance.files],
+	);
+	const selectedImportance = useMemo(
+		() =>
+			importanceEnabled && importance.status === "ready"
+				? importance.files
+						.filter((file) => file.path === selectedPath)
+						.flatMap((file) => file.spans)
+				: undefined,
+		[importanceEnabled, importance.status, importance.files, selectedPath],
+	);
 	const [reviewView, setReviewView] = useState<ReviewView>("code");
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
 	const [fileViewModes, setFileViewModes] = useState<
@@ -485,9 +512,8 @@ function ReviewApp() {
 		null,
 	);
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [settingsInitialTab, setSettingsInitialTab] = useState<
-		"general" | "prompts" | "skills" | "appearance"
-	>("prompts");
+	const [settingsInitialTab, setSettingsInitialTab] =
+		useState<SettingsTab>("prompts");
 	const [skillsRefreshKey, setSkillsRefreshKey] = useState(0);
 	const skills = useSkills(token, skillsRefreshKey);
 	const [error, setError] = useState<string | null>(null);
@@ -498,6 +524,10 @@ function ReviewApp() {
 	const [freshness, setFreshness] = useState<ReviewFreshnessResponse | null>(
 		null,
 	);
+
+	useEffect(() => {
+		if (token) void loadFeatureFlags(token);
+	}, [token]);
 	const [refreshing, setRefreshing] = useState(false);
 	const [syncing, setSyncing] = useState(false);
 	const [whitespaceChanging, setWhitespaceChanging] = useState(false);
@@ -2052,6 +2082,7 @@ function ReviewApp() {
 					<LayerPane
 						state={data}
 						files={files}
+						importanceByPath={importanceByPath}
 						filesContent={
 							<ChangedFiles
 								files={data.diff}
@@ -2063,6 +2094,17 @@ function ReviewApp() {
 										viewedFiles: { paths, viewed },
 									});
 								}}
+								importanceByPath={importanceByPath}
+								importance={
+									importanceEnabled
+										? {
+												status: importance.status,
+												error: importance.error,
+												canRetry: importance.canRetry,
+												onRetry: importance.retry,
+											}
+										: undefined
+								}
 							/>
 						}
 						selectedPath={selectedPath}
@@ -2112,6 +2154,7 @@ function ReviewApp() {
 						explainDisabled={creatingChat}
 						drafts={data.drafts}
 						onModeChange={setDiffMode}
+						importance={selectedImportance}
 						wholeFile={selectedWholeFile}
 						onWholeFileChange={changeWholeFile}
 						onViewModeChange={changeViewMode}

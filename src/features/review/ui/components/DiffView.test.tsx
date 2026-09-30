@@ -7,6 +7,7 @@ import type { HostDiscussion } from "../../../../ports/git-host";
 import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { Draft } from "../../state";
 import { applyColorTheme } from "../color-theme";
+import { IMPORTANCE_BG_CLASS } from "../importance";
 import { DiffView } from "./DiffView";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -147,6 +148,12 @@ function renderDiff(
 			{...props}
 		/>,
 	);
+}
+
+function parseMarkup(markup: string): HTMLElement {
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	return container;
 }
 
 function mountDiff(props: Partial<Parameters<typeof DiffView>[0]> = {}): {
@@ -422,6 +429,119 @@ test("keeps revealed inter-hunk context rows out of drag identity", () => {
 
 	expect(contextRow).toBeDefined();
 	expect(contextRow).not.toContain("data-drag-hunk");
+});
+
+const importanceDiff: ParsedFileDiff = {
+	oldPath: "src/app.ts",
+	newPath: "src/app.ts",
+	status: "modified",
+	binary: false,
+	insertions: 1,
+	deletions: 1,
+	hunks: [
+		{
+			header: "@@ -10,2 +10,2 @@",
+			oldStart: 10,
+			oldLines: 2,
+			newStart: 10,
+			newLines: 2,
+			lines: [
+				{ kind: "del", oldLine: 10, newLine: null, text: "removed" },
+				{ kind: "add", oldLine: null, newLine: 11, text: "added" },
+				{ kind: "context", oldLine: 12, newLine: 12, text: "context" },
+			],
+		},
+	],
+};
+
+const importanceSpans = [
+	{ side: "old", startLine: 10, endLine: 10, score: 2 },
+	{ side: "new", startLine: 11, endLine: 12, score: 4 },
+] as const;
+
+test("colours inline diff gutter by changed line importance", () => {
+	const root = parseMarkup(
+		renderDiff({
+			file: importanceDiff,
+			importance: importanceSpans,
+		}),
+	);
+	const cells = [...root.querySelectorAll("td.line-number")];
+	const oldLine = cells.find((cell) => cell.textContent?.trim() === "10");
+	const oldStrip = oldLine?.querySelector(".importance-strip");
+	expect(oldLine?.classList.contains("importance-cell")).toBe(true);
+	expect(oldStrip?.classList.contains(IMPORTANCE_BG_CLASS[2])).toBe(true);
+	expect(oldStrip?.getAttribute("title")).toBe("Importance 2/5 (Low)");
+
+	const addedCell = cells.find((cell) =>
+		cell
+			.querySelector(".importance-strip")
+			?.classList.contains(IMPORTANCE_BG_CLASS[4]),
+	);
+	const addedStrip = addedCell?.querySelector(".importance-strip");
+	expect(addedCell?.classList.contains("importance-cell")).toBe(true);
+	expect(addedCell?.textContent?.trim()).toBe("");
+	expect(addedStrip?.getAttribute("title")).toBe("Importance 4/5 (High)");
+	expect(root.querySelector(`.${IMPORTANCE_BG_CLASS[5]}`)).toBeNull();
+});
+
+test("colours side-by-side line number cells on their covered sides", () => {
+	const root = parseMarkup(
+		renderDiff({
+			file: importanceDiff,
+			mode: "side-by-side",
+			importance: importanceSpans,
+		}),
+	);
+	const cells = [...root.querySelectorAll("td.line-number")];
+	const cellsWithScore = (score: 2 | 4) =>
+		cells.filter((cell) =>
+			cell
+				.querySelector(".importance-strip")
+				?.classList.contains(IMPORTANCE_BG_CLASS[score]),
+		);
+	expect(cellsWithScore(2).map((cell) => cell.textContent?.trim())).toContain(
+		"10",
+	);
+	expect(cellsWithScore(4).map((cell) => cell.textContent?.trim())).toEqual([
+		"11",
+		"12",
+		"12",
+	]);
+	expect(
+		cellsWithScore(2)[0]
+			?.querySelector(".importance-strip")
+			?.getAttribute("title"),
+	).toBe("Importance 2/5 (Low)");
+	expect(
+		cellsWithScore(4)[0]
+			?.querySelector(".importance-strip")
+			?.getAttribute("title"),
+	).toBe("Importance 4/5 (High)");
+});
+
+test("importance absent or uncovered adds no importance strips", () => {
+	const markupWithoutImportance = parseMarkup(
+		renderDiff({ file: importanceDiff }),
+	);
+	const markupWithoutScores = parseMarkup(
+		renderDiff({ file: importanceDiff, importance: [] }),
+	);
+	const markupWithUncoveredScores = parseMarkup(
+		renderDiff({
+			file: importanceDiff,
+			importance: [{ side: "new", startLine: 20, endLine: 20, score: 3 }],
+		}),
+	);
+
+	for (const root of [
+		markupWithoutImportance,
+		markupWithoutScores,
+		markupWithUncoveredScores,
+	]) {
+		expect(root.querySelector(".importance-cell")).toBeNull();
+		expect(root.querySelector(".importance-strip")).toBeNull();
+	}
 });
 
 test("renders the find box without results or navigation until a search is made", () => {

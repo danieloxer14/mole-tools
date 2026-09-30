@@ -9,6 +9,7 @@ export const PROMPT_NAMES = [
 	"review-chat",
 	"review-explain-comment",
 	"review-comment-from-chat",
+	"review-importance",
 ] as const;
 export type PromptName = (typeof PROMPT_NAMES)[number];
 export const PromptNameSchema = z.enum(PROMPT_NAMES);
@@ -88,4 +89,13 @@ The pinned review worktree is strictly read-only. Use only read, grep, glob, and
 You may inspect the worktree read-only to confirm details. Do not mention the chat, the assistant, or these instructions.`,
 	"review-comment-from-chat": `You write one code review comment for a GitLab merge request. Read the conversation file named in the message.
 It holds the comment's anchor (file, line range, and the code or quoted Markdown) and the reviewer's chat with an AI assistant about this merge request. Distill what the conversation concluded into a single review comment, in the reviewer's voice, addressed to the MR author. Be concise and specific. Use GitHub-flavoured Markdown; include code snippets or a mermaid diagram only when they make the point clearer. You may inspect the worktree read-only to confirm details. Do not mention the chat, the assistant, or these instructions.`,
+	"review-importance": `Score how much reviewer attention each changed part of this merge request needs, on a 1–5 scale.
+
+- 5 — critical: business-logic flows that must be reviewed (behaviour changes, decisions, data handling, error handling, security, concurrency, public contracts).
+- 4 — high: logic that supports those flows or changes how existing behaviour is wired.
+- 3 — moderate: supporting code, configuration with behavioural effect, and tests that cover new behaviour.
+- 2 — low: straightforward tests, documentation, renames, and simple wiring.
+- 1 — skip: imports, constants, type-only changes, formatting, and generated or lock files.
+
+Understand what the merge request does across all changed files before scoring; judge each part in the context of the whole change set. Do not force a distribution: several files may contain important parts. Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.`,
 };

@@ -751,6 +751,7 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 		}),
 		files: paths,
 		selectedPath: selected,
+		importanceByPath: new Map(paths.map((path) => [path, 4])),
 	});
 	const container = parseMarkup(markup);
 	const selectedChip = container.querySelector<HTMLButtonElement>(
@@ -764,6 +765,13 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 	);
 	if (!selectedChip || !viewedChip || !unviewedChip) {
 		throw new Error("Missing layer file chip");
+	}
+
+	for (const chip of [selectedChip, viewedChip, unviewedChip]) {
+		const endCap = chip.firstElementChild;
+		expect(endCap?.tagName).toBe("SPAN");
+		expect(endCap?.classList).toContain("bg-importance-4");
+		expect(endCap?.getAttribute("title")).toBe("Importance 4/5 (High)");
 	}
 
 	const selectedClasses = new Set(selectedChip.className.split(/\s+/));
@@ -791,6 +799,18 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 	expect(unviewedClasses).not.toContain("bg-success/15");
 	expect(unviewedClasses).not.toContain("text-success");
 	expect(unviewedChip.hasAttribute("aria-current")).toBe(false);
+});
+
+test("leaves layer file chip markup unchanged without importance scores", () => {
+	const markup = renderLayerPane();
+	const container = parseMarkup(markup);
+	const chip = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="src/routes/route.ts"]',
+	);
+	if (!chip) throw new Error("Missing layer file chip");
+
+	expect(chip.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+	expect(chip.querySelector('[class*="bg-importance-"]')).toBeNull();
 });
 
 test("keeps long layer file labels readable and accessible", () => {

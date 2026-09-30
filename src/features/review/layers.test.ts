@@ -84,8 +84,10 @@ class WritingAgent implements ReviewAgent {
 	readonly prompts: string[] = [];
 	private index = 0;
 
-	constructor(private readonly outputs: (string | object | typeof MISSING)[]) {}
-
+	constructor(
+		private readonly outputs: (string | object | typeof MISSING)[],
+		private readonly errorEvent?: string,
+	) {}
 	async preflight(): Promise<void> {}
 
 	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
@@ -103,6 +105,9 @@ class WritingAgent implements ReviewAgent {
 			);
 		}
 		yield { kind: "session", sessionId: `layer-${this.index}` };
+		if (this.errorEvent !== undefined) {
+			yield { kind: "error", message: this.errorEvent };
+		}
 		yield { kind: "turn_end" };
 	}
 }
@@ -244,6 +249,22 @@ describe("review layer generation", () => {
 			expect((await store.read())?.layers).toEqual(result.state.layers);
 			expect(agent.turns).toHaveLength(1);
 			expect(agent.turns[0]?.message).toContain("bash");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("empty agent error event preserves layer success behavior", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-layers-empty-error-"),
+		);
+		try {
+			const paths = getReviewPaths(ref, join(dir, "config.json"));
+			const store = new ReviewStore(paths);
+			const result = await generateLayers(
+				await generationOptions(dir, new WritingAgent([layerDoc], ""), store),
+			);
+			expect(result.state.layerStatus).toBe("ready");
+			expect(result.state.layers).toHaveLength(1);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
