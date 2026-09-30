@@ -303,6 +303,12 @@ export function LayerPane({
 							</span>
 						</TabsTrigger>
 					</TabsList>
+					{importanceProgress ? (
+						<ImportanceProgressBar
+							className="mt-3"
+							progress={importanceProgress}
+						/>
+					) : null}
 				</div>
 				<TabsContent
 					value="layers"
@@ -339,12 +345,6 @@ export function LayerPane({
 								{layerActionControl}
 							</div>
 						)}
-						{importanceProgress ? (
-							<ImportanceProgressBar
-								className="px-4 pb-3"
-								progress={importanceProgress}
-							/>
-						) : null}
 						{state.layerStatus === "failed" && state.layerError ? (
 							<Alert className="mx-4 mb-3" variant="destructive">
 								{state.layerError}

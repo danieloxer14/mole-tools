@@ -131,7 +131,7 @@ export function importanceReviewFileTotals(
 				if (rating === null) continue;
 				const weight = IMPORTANCE_WEIGHTS[rating.score];
 				fileTotal += weight;
-				if (rating.score >= 4) fileThreshold += weight;
+				if (rating.score >= 3) fileThreshold += weight;
 			}
 		}
 
@@ -140,7 +140,7 @@ export function importanceReviewFileTotals(
 		threshold += fileThreshold;
 	}
 
-	return { byPath, total, threshold };
+	return { byPath, total, threshold: Math.max(threshold, total / 2) };
 }
 
 export function importanceReviewProgressForViewedFiles(

@@ -2277,7 +2277,6 @@ function ReviewApp() {
 									});
 								}}
 								importanceByPath={importanceByPath}
-								importanceProgress={importanceProgress}
 								importance={
 									importanceEnabled
 										? {

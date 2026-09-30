@@ -163,31 +163,31 @@ test("importance progress weights counted lines and only viewed files", () => {
 
 	const fileTotals = importanceReviewFileTotals(diff, files);
 	expect(fileTotals).toEqual({
-		byPath: new Map([["src/a.ts", { total: 5, threshold: 2.75 }]]),
+		byPath: new Map([["src/a.ts", { total: 5, threshold: 3.75 }]]),
 		total: 5,
-		threshold: 2.75,
+		threshold: 3.75,
 	});
 	expect(
 		importanceReviewProgressForViewedFiles(fileTotals, ["src/a.ts"]),
 	).toEqual({
 		value: 5,
 		total: 5,
-		threshold: 2.75,
+		threshold: 3.75,
 	});
 	expect(importanceReviewProgressForViewedFiles(fileTotals, [])).toEqual({
 		value: 0,
 		total: 5,
-		threshold: 2.75,
+		threshold: 3.75,
 	});
 	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
 		value: 5,
 		total: 5,
-		threshold: 2.75,
+		threshold: 3.75,
 	});
 	expect(importanceReviewProgress(diff, files, [])).toEqual({
 		value: 0,
 		total: 5,
-		threshold: 2.75,
+		threshold: 3.75,
 	});
 });
 
@@ -216,7 +216,39 @@ test("importance progress uses highest span score and excludes uncounted lines",
 	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
 		value: 2.5,
 		total: 2.5,
-		threshold: 1.5,
+		threshold: 2.5,
+	});
+});
+
+test("importance progress target includes moderate lines and has a 50% minimum", () => {
+	const diff = [
+		diffFile("src/moderate.ts", "src/moderate.ts", [diffLine("add", null, 1)]),
+		diffFile("src-low.ts", "src-low.ts", [
+			diffLine("add", null, 1),
+			diffLine("add", null, 2),
+		]),
+	];
+	const files: ImportanceFile[] = [
+		{ path: "src/moderate.ts", spans: [span("new", 1, 1, 3)] },
+		{
+			path: "src-low.ts",
+			spans: [span("new", 1, 1, 1), span("new", 2, 2, 2)],
+		},
+	];
+
+	const fileTotals = importanceReviewFileTotals(diff, files);
+	expect(fileTotals).toEqual({
+		byPath: new Map([
+			["src/moderate.ts", { total: 1, threshold: 1 }],
+			["src-low.ts", { total: 1.25, threshold: 0 }],
+		]),
+		total: 2.25,
+		threshold: 1.125,
+	});
+	expect(importanceReviewProgress(diff, files, ["src-low.ts"])).toEqual({
+		value: 1.25,
+		total: 2.25,
+		threshold: 1.125,
 	});
 });
 

@@ -3,6 +3,7 @@ import {
 	type ImportanceReviewProgress,
 	importanceProgressColor,
 } from "../importance";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function ImportanceProgressBar({
 	progress,
@@ -37,53 +38,61 @@ export function ImportanceProgressBar({
 	const width = `${(value / total) * 100}%`;
 
 	return (
-		<div
-			className={cn(
-				"flex min-w-0 items-center gap-2 text-xs text-muted-foreground",
-				className,
-			)}
-		>
-			<span>Importance</span>
-			<div
-				className="relative h-1.5 min-w-0 flex-1 rounded-full bg-muted"
-				role="progressbar"
-				aria-label="Importance review progress"
-				title="Target: all High and Critical changes"
-				aria-valuemin={0}
-				aria-valuemax={total}
-				aria-valuenow={value}
-				aria-valuetext={
-					threshold > 0
-						? `${pct}% reviewed, target ${targetPct}%`
-						: `${pct}% reviewed`
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<div
+						className={cn(
+							"flex min-w-0 items-center gap-2 text-xs text-muted-foreground",
+							className,
+						)}
+						role="progressbar"
+						aria-label="Importance review progress"
+						aria-valuemin={0}
+						aria-valuemax={total}
+						aria-valuenow={value}
+						aria-valuetext={
+							threshold > 0
+								? `${pct}% reviewed, target ${targetPct}%`
+								: `${pct}% reviewed`
+						}
+						data-reached={reached ? "true" : "false"}
+						// biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus opens the progress explanation tooltip.
+						tabIndex={0}
+					/>
 				}
-				data-reached={reached ? "true" : "false"}
 			>
-				<span className="absolute inset-0 overflow-hidden rounded-full">
-					<span
-						className="block h-full rounded-full transition-[width,background-color] duration-300 ease-out"
-						style={{
-							width,
-							backgroundColor: importanceProgressColor(ratio),
-						}}
-					/>
-				</span>
-				{reached && (
-					<span
-						aria-hidden
-						className="importance-progress-flame"
-						style={{ width }}
-					/>
-				)}
-				{threshold > 0 && (
-					<span
-						aria-hidden
-						className="importance-progress-marker"
-						style={{ left: `${(threshold / total) * 100}%` }}
-					/>
-				)}
-			</div>
-			<span className="tabular-nums">{pct}%</span>
-		</div>
+				<div className="relative h-1.5 min-w-0 flex-1 rounded-full bg-muted">
+					<span className="absolute inset-0 overflow-hidden rounded-full">
+						<span
+							className="block h-full rounded-full transition-[width,background-color] duration-300 ease-out"
+							style={{
+								width,
+								backgroundColor: importanceProgressColor(ratio),
+							}}
+						/>
+					</span>
+					{reached && (
+						<span
+							aria-hidden
+							className="importance-progress-flame"
+							style={{ width }}
+						/>
+					)}
+					{threshold > 0 && (
+						<span
+							aria-hidden
+							className="importance-progress-marker"
+							style={{ left: `${(threshold / total) * 100}%` }}
+						/>
+					)}
+				</div>
+				<span className="tabular-nums">{pct}%</span>
+			</TooltipTrigger>
+			<TooltipContent className="flex-col items-start gap-0.5">
+				<span>Current target: {targetPct}%</span>
+				<span>More importance changes are worth more</span>
+			</TooltipContent>
+		</Tooltip>
 	);
 }

@@ -10,7 +10,8 @@ function render(value: number, total: number, threshold: number) {
 
 test("renders importance progress accessibility and target details", () => {
 	const withTarget = render(3, 6, 1.5);
-	expect(withTarget).toContain("Importance");
+	expect(withTarget).not.toContain(">Importance</span>");
+	expect(withTarget).not.toContain('title="');
 	expect(withTarget).toContain("50%</span>");
 	expect(withTarget).toContain('role="progressbar"');
 	expect(withTarget).toContain('aria-label="Importance review progress"');
@@ -27,7 +28,6 @@ test("renders proportional fill and threshold marker", () => {
 	const html = render(3, 6, 1.5);
 	expect(html).toContain('style="width:50%;background-color:');
 	expect(html).toContain('class="importance-progress-marker"');
-	expect(html).toContain('title="Target: all High and Critical changes"');
 	expect(html).toContain('style="left:25%"');
 
 	const withoutMarker = render(3, 6, 0);
@@ -43,6 +43,17 @@ test("renders flame only after reaching a positive threshold", () => {
 	expect(reached).toContain('data-reached="true"');
 	expect(reached).toContain('class="importance-progress-flame"');
 	expect(reached).toContain("background-color:var(--color-importance-5)");
+});
+
+test("reaches target at equality and stays below it immediately before", () => {
+	const belowTarget = render(1.124, 2.25, 1.125);
+	expect(belowTarget).toContain('data-reached="false"');
+	expect(belowTarget).not.toContain("importance-progress-flame");
+
+	const atTarget = render(1.125, 2.25, 1.125);
+	expect(atTarget).toContain('data-reached="true"');
+	expect(atTarget).toContain('aria-valuetext="50% reviewed, target 50%"');
+	expect(atTarget).toContain("importance-progress-flame");
 });
 
 test("without threshold, reaches only at the total", () => {
