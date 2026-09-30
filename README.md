@@ -384,13 +384,14 @@ Layers tracks generated review layers and coverage, while Files provides
 changed-file navigation. The centre column is reserved for the selected diff;
 it does not contain a second files browser. The right column provides persistent,
 read-only agent chat. Comments stay local drafts until you explicitly send each
-one as a positioned GitLab discussion. Each published
-discussion has an **Explain** button that opens a new chat pre-loaded with the
-surrounding diff: the chat is titled `Explain: …` after the comment, and its
-first turn uses the active `review-explain-comment` prompt preset, the comment's notes,
-and a diff excerpt around the anchored line (marked `>`) — or
-`No diff excerpt available for this comment.` for a general discussion — so
-the agent replies with a plain-language explanation you can follow up on.
+one. Line comments post GitLab text-position discussions, whole-file comments
+post native file-position discussions, and general comments post unpositioned
+merge-request discussions. **Explain** opens a new chat pre-loaded with the
+discussion's notes and, for line-positioned discussions, a diff excerpt around
+the anchored line (marked `>`). Whole-file, image-positioned, and general
+discussions have no line-anchored excerpt; image positions stay distinct from
+whole-file anchors. Their chat titles say `Explain whole file: …` or
+`Explain image: …`, respectively; line and general titles use `Explain: …`.
 
 Review layers have one completion circle on the right of the title, sized like
 the chevron: Open is neutral, Done is green with a check, and hovering or
@@ -399,9 +400,17 @@ Stale layers retain a warning badge. Layer descriptions render as compact,
 sanitized GitHub-flavoured Markdown with preserved line breaks; unsafe HTML is
 removed and unsafe link targets are neutralized.
 
-Drafts support local Write/Preview Markdown modes. Published positioned and
-general discussions render sanitized GitHub-flavoured Markdown; collapsed
+Drafts support local Write/Preview Markdown modes. Published line, file-level,
+and general discussions render sanitized GitHub-flavoured Markdown; collapsed
 discussion summaries remain plain text.
+
+Reviewers can start general comments from the pinned, labeled Overview comment
+region; these post as unpositioned MR threads and never become stale. An
+unresolved general thread with a non-system note blocks review-babysitter
+auto-approval until resolved. Whole-file comments start from a diff file header
+and use GitLab's native `position_type: "file"`; whole-file discussions are
+labelled `Whole file` in that file's `File comments` block. Image-position
+discussions remain visible in the same block and are labelled `Image position`.
 Rendered Markdown file previews retain horizontal gutters for block actions and wide content such as Mermaid diagrams.
 
 The **Settings** dialog has four tabs: **General**, **Prompts**, **Skills**, and

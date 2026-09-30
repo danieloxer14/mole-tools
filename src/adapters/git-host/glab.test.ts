@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { PortError } from "../../core/errors";
 import type { CreateDiscussionInput } from "../../ports/git-host";
 import { parseFileDiff } from "../../shared/diff-parse";
-import { buildPosition } from "../../shared/gitlab-position";
+import {
+	buildFilePosition,
+	buildPosition,
+	type GitLabFilePositionPayload,
+} from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
 import { GlabAdapter, type GlabExec, type GlabExecResult } from "./glab";
 
@@ -852,6 +856,146 @@ describe("GlabAdapter", () => {
 				{ id: "global-note", individualNote: true, resolved: false },
 			]);
 		});
+
+		test("maps file positions and preserves their kind without line keys", async () => {
+			const ref: MrRef = {
+				host: "gitlab.example.com",
+				projectPath: "group/sub/project",
+				iid: 42,
+			};
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(
+						JSON.stringify([
+							{
+								id: "file-discussion",
+								resolved: false,
+								notes: [
+									{
+										id: 2,
+										author: { username: "reviewer" },
+										body: "file comment",
+										created_at: "2026-08-30T00:00:00Z",
+										system: false,
+										position: {
+											position_type: "file",
+											base_sha: "base",
+											start_sha: "start",
+											head_sha: "head",
+											old_path: "src/a.ts",
+											new_path: "src/a.ts",
+										},
+									},
+								],
+							},
+						]),
+					),
+			});
+
+			await expect(glab.listDiscussions(ref)).resolves.toMatchObject([
+				{
+					id: "file-discussion",
+					position: {
+						positionType: "file",
+						newPath: "src/a.ts",
+						oldPath: "src/a.ts",
+						newLine: null,
+						oldLine: null,
+					},
+				},
+			]);
+		});
+
+		test("preserves image position type when line numbers are null", async () => {
+			const ref: MrRef = {
+				host: "gitlab.example.com",
+				projectPath: "group/sub/project",
+				iid: 42,
+			};
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(
+						JSON.stringify([
+							{
+								id: "image-discussion",
+								resolved: false,
+								notes: [
+									{
+										id: 3,
+										author: { username: "reviewer" },
+										body: "image comment",
+										created_at: "2026-08-30T00:00:00Z",
+										system: false,
+										position: {
+											position_type: "image",
+											old_path: "src/a.ts",
+											new_path: "src/a.ts",
+											old_line: null,
+											new_line: null,
+										},
+									},
+								],
+							},
+						]),
+					),
+			});
+
+			await expect(glab.listDiscussions(ref)).resolves.toMatchObject([
+				{
+					id: "image-discussion",
+					position: {
+						positionType: "image",
+						newPath: "src/a.ts",
+						oldPath: "src/a.ts",
+						newLine: null,
+						oldLine: null,
+					},
+				},
+			]);
+		});
+
+		test("retains legacy null-line positions without an inferred kind", async () => {
+			const ref: MrRef = {
+				host: "gitlab.example.com",
+				projectPath: "group/sub/project",
+				iid: 42,
+			};
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(
+						JSON.stringify([
+							{
+								id: "legacy-discussion",
+								resolved: false,
+								notes: [
+									{
+										id: 4,
+										author: { username: "reviewer" },
+										body: "legacy comment",
+										created_at: "2026-08-30T00:00:00Z",
+										system: false,
+										position: {
+											old_path: "src/a.ts",
+											new_path: "src/a.ts",
+											old_line: null,
+											new_line: null,
+										},
+									},
+								],
+							},
+						]),
+					),
+			});
+
+			const [discussion] = await glab.listDiscussions(ref);
+
+			expect(discussion?.position).toEqual({
+				newPath: "src/a.ts",
+				oldPath: "src/a.ts",
+				newLine: null,
+				oldLine: null,
+			});
+		});
 	});
 
 	describe("createDiscussion", () => {
@@ -935,6 +1079,115 @@ describe("GlabAdapter", () => {
 				position,
 			});
 		});
+		test("posts file position and maps the returned discussion", async () => {
+			const position = buildFilePosition(parsedDiff, refs);
+			const calls: { args: string[]; input?: string }[] = [];
+			const response = JSON.stringify({
+				id: "file-discussion",
+				resolved: false,
+				notes: [
+					{
+						id: 3,
+						author: { username: "alice" },
+						body: "Review whole file",
+						created_at: "2026-08-16T00:00:00Z",
+						system: false,
+						position,
+					},
+				],
+			});
+			const exec: GlabExec = async (args, input) => {
+				calls.push({ args, input });
+				return ok(response);
+			};
+
+			const discussion = await new GlabAdapter(exec).createDiscussion({
+				ref,
+				body: "Review whole file",
+				position,
+				parsedDiff,
+				diffRefs: refs,
+			});
+
+			expect(discussion).toMatchObject({
+				id: "file-discussion",
+				position: {
+					newPath: "src/app.ts",
+					oldPath: "src/app.ts",
+					newLine: null,
+					oldLine: null,
+				},
+			});
+			expect(calls).toHaveLength(1);
+			expect(calls[0]?.args).toEqual([
+				"api",
+				"--hostname",
+				"gitlab.example.com",
+				"--method",
+				"POST",
+				"--header",
+				"Content-Type: application/json",
+				"--input",
+				"-",
+				"projects/group%2Fsub%2Fproject/merge_requests/42/discussions",
+			]);
+			expect(JSON.parse(calls[0]?.input ?? "")).toEqual({
+				body: "Review whole file",
+				position: buildFilePosition(parsedDiff, refs),
+			});
+		});
+
+		test("rejects stale file paths and refs before host write", async () => {
+			const position = buildFilePosition(parsedDiff, refs);
+			const calls: string[][] = [];
+			const exec: GlabExec = async (args) => {
+				calls.push(args);
+				return ok("unreachable");
+			};
+			const stalePath: GitLabFilePositionPayload = {
+				...position,
+				new_path: "src/other.ts",
+			};
+
+			await expect(
+				new GlabAdapter(exec).createDiscussion({
+					ref,
+					body: "Review whole file",
+					position: stalePath,
+					parsedDiff,
+					diffRefs: refs,
+				}),
+			).rejects.toBeInstanceOf(PortError);
+			const staleRefs = { ...position, head_sha: "stale-head" };
+			await expect(
+				new GlabAdapter(exec).createDiscussion({
+					ref,
+					body: "Review whole file",
+					position: staleRefs,
+					parsedDiff,
+					diffRefs: refs,
+				}),
+			).rejects.toBeInstanceOf(PortError);
+			expect(calls).toEqual([]);
+		});
+
+		test("surfaces GitLab errors for unsupported file positions", async () => {
+			const position = buildFilePosition(parsedDiff, refs);
+			const gitlabError = "400 Bad request - position_type is invalid";
+			const exec: GlabExec = async () =>
+				fail(JSON.stringify({ message: gitlabError }), 1);
+
+			await expect(
+				new GlabAdapter(exec).createDiscussion({
+					ref,
+					body: "Review whole file",
+					position,
+					parsedDiff,
+					diffRefs: refs,
+				}),
+			).rejects.toThrow(gitlabError);
+		});
+
 		test("posts unpositioned discussion body as JSON stdin", async () => {
 			const calls: { args: string[]; input?: string }[] = [];
 			const exec: GlabExec = async (args, input) => {

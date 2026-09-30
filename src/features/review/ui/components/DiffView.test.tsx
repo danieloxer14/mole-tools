@@ -174,6 +174,355 @@ function mountDiff(props: Partial<Parameters<typeof DiffView>[0]> = {}): {
 	return { container, root };
 }
 
+function fileDraft(
+	id: string,
+	path: string,
+	status: Draft["status"] = "draft",
+	error: string | null = null,
+): Draft {
+	return {
+		id,
+		body: "Review this file.",
+		selection: { kind: "file", path },
+		filePath: path,
+		status,
+		error,
+		postedDiscussionId: status === "posted" ? `discussion-${id}` : null,
+		staleSince: null,
+	};
+}
+
+const fromChat = {
+	availability: { kind: "ready" as const, chatLabel: "Chat 1" },
+	generations: {},
+	onGenerate: () => {},
+	onStop: () => {},
+};
+
+test("renders matching file drafts after the sticky header in diff mode", () => {
+	const draft = fileDraft("file-draft", "src/app.ts");
+	const { container, root } = mountDiff({
+		drafts: [draft],
+		fromChat,
+	});
+	const header = container.querySelector("header.sticky");
+	const section = container.querySelector(
+		'section[aria-label="File comments"]',
+	);
+
+	expect(section).not.toBeNull();
+	expect(header?.nextElementSibling).toBe(section);
+	expect(section?.textContent).toContain("src/app.ts (whole file)");
+	expect(
+		section?.querySelector('button[aria-label="From chat"]'),
+	).not.toBeNull();
+	expect(section?.querySelector(".inline-comment-row")).toBeNull();
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("renders matching file-level discussions before file drafts", () => {
+	const renamedFile: ParsedFileDiff = {
+		...file,
+		oldPath: "src/old-app.ts",
+		newPath: "src/app.ts",
+	};
+	const { container, root } = mountDiff({
+		file: renamedFile,
+		discussions: [
+			discussion("file-discussion", {
+				positionType: "file",
+				newPath: "src/app.ts",
+				oldPath: "src/other-app.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+		],
+		drafts: [fileDraft("file-draft", "src/app.ts")],
+	});
+	const section = container.querySelector(
+		'section[aria-label="File comments"]',
+	);
+	const fileCard = section?.querySelector(
+		'article[data-discussion-id="file-discussion"]',
+	);
+	const draftCard = section?.querySelector(
+		'article[data-draft-id="file-draft"]',
+	);
+
+	expect(section).not.toBeNull();
+	expect(container.querySelector("header.sticky")?.nextElementSibling).toBe(
+		section,
+	);
+	expect(section?.textContent).toContain("Please consider this edge case.");
+	expect(fileCard?.textContent).toContain("Whole file");
+	expect(fileCard?.nextElementSibling).toBe(draftCard);
+	act(() => root.unmount());
+	container.remove();
+});
+test("renders image-position discussions without labeling them whole-file", () => {
+	const { container, root } = mountDiff({
+		discussions: [
+			discussion("image-discussion", {
+				positionType: "image",
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+		],
+	});
+	const section = container.querySelector(
+		'section[aria-label="File comments"]',
+	);
+	const imageCard = section?.querySelector(
+		'article[data-discussion-id="image-discussion"]',
+	);
+
+	expect(section).not.toBeNull();
+	expect(imageCard).not.toBeNull();
+	expect(imageCard?.textContent).toContain("Image position");
+	expect(imageCard?.textContent).not.toContain("Whole file");
+	expect(
+		container.querySelector(
+			'tr.inline-comment-row article[data-discussion-id="image-discussion"]',
+		),
+	).toBeNull();
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("matches file-level discussions by old path for deleted files", () => {
+	const deletedFile: ParsedFileDiff = {
+		...file,
+		newPath: null,
+		status: "deleted",
+	};
+	const markup = renderDiff({
+		file: deletedFile,
+		discussions: [
+			discussion("deleted-file-discussion", {
+				newPath: null,
+				oldPath: "src/app.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+		],
+	});
+
+	expect(markup).toContain('aria-label="File comments"');
+	expect(markup).toContain('data-discussion-id="deleted-file-discussion"');
+	expect(markup).toContain(">Whole file</span>");
+});
+
+test("keeps other-file and line discussions out of File comments", () => {
+	const { container, root } = mountDiff({
+		discussions: [
+			discussion("matching-file-discussion", {
+				newPath: "src/app.ts",
+				oldPath: "src/other-app.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+			discussion("other-file-discussion", {
+				newPath: "src/other.ts",
+				oldPath: "src/other.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+			discussion("line-discussion", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+	});
+	const section = container.querySelector(
+		'section[aria-label="File comments"]',
+	);
+
+	expect(
+		section?.querySelector(
+			'article[data-discussion-id="matching-file-discussion"]',
+		),
+	).not.toBeNull();
+	expect(
+		section?.querySelector(
+			'article[data-discussion-id="other-file-discussion"]',
+		),
+	).toBeNull();
+	expect(
+		section?.querySelector('article[data-discussion-id="line-discussion"]'),
+	).toBeNull();
+	expect(
+		container.querySelector(
+			'tr.inline-comment-row article[data-discussion-id="line-discussion"]',
+		),
+	).not.toBeNull();
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("shows collapse-all and toggles file-level discussion IDs", () => {
+	const updates: string[][] = [];
+	const { container, root } = mountDiff({
+		discussions: [
+			discussion("file-discussion", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+		],
+		onCollapsedDiscussionIdsChange: (ids) => updates.push(ids),
+	});
+	const collapseAll = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse all comments"]',
+	);
+
+	expect(collapseAll).not.toBeNull();
+	act(() => collapseAll?.click());
+	expect(updates).toEqual([["file-discussion"]]);
+	act(() =>
+		container
+			.querySelector<HTMLButtonElement>(
+				'button[aria-label="Expand all comments"]',
+			)
+			?.click(),
+	);
+	expect(updates).toEqual([["file-discussion"], []]);
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("collapse-all toggles file-level and line-matched discussion IDs together", () => {
+	const updates: string[][] = [];
+	const { container, root } = mountDiff({
+		discussions: [
+			discussion("file-discussion", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: null,
+				oldLine: null,
+			}),
+			discussion("line-discussion", {
+				newPath: "src/app.ts",
+				oldPath: "src/app.ts",
+				newLine: 1,
+				oldLine: null,
+			}),
+		],
+		onCollapsedDiscussionIdsChange: (ids) => updates.push(ids),
+	});
+
+	act(() =>
+		container
+			.querySelector<HTMLButtonElement>(
+				'button[aria-label="Collapse all comments"]',
+			)
+			?.click(),
+	);
+	expect(updates).toEqual([["file-discussion", "line-discussion"]]);
+	act(() =>
+		container
+			.querySelector<HTMLButtonElement>(
+				'button[aria-label="Expand all comments"]',
+			)
+			?.click(),
+	);
+	expect(updates).toEqual([["file-discussion", "line-discussion"], []]);
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("renders matching file drafts in rendered Markdown mode", () => {
+	const markup = renderDiff({
+		file: markdownFile,
+		viewMode: "rendered",
+		fileContents: "# Title",
+		drafts: [fileDraft("markdown-file-draft", "README.md")],
+	});
+
+	expect(markup).toContain('aria-label="File comments"');
+	expect(markup).toContain("README.md (whole file)");
+});
+
+test("renders matching file drafts for binary files", () => {
+	const markup = renderDiff({
+		file: {
+			oldPath: "assets/logo.png",
+			newPath: "assets/logo.png",
+			status: "modified",
+			binary: true,
+			insertions: 1,
+			deletions: 1,
+			hunks: [],
+		},
+		drafts: [fileDraft("binary-file-draft", "assets/logo.png")],
+	});
+
+	expect(markup).toContain('aria-label="File comments"');
+	expect(markup).toContain("assets/logo.png (whole file)");
+});
+
+test("omits File comments when no file drafts exist", () => {
+	expect(renderDiff()).not.toContain('aria-label="File comments"');
+});
+
+test("excludes other-path, posted file, and general drafts from File comments", () => {
+	const generalDraft: Draft = {
+		id: "general-draft",
+		body: "General comment.",
+		selection: { kind: "general" },
+		filePath: "",
+		status: "draft",
+		error: null,
+		postedDiscussionId: null,
+		staleSince: null,
+	};
+	const markup = renderDiff({
+		drafts: [
+			fileDraft("other-file-draft", "src/other.ts"),
+			fileDraft("posted-file-draft", "src/app.ts", "posted"),
+			generalDraft,
+		],
+	});
+
+	expect(markup).not.toContain('aria-label="File comments"');
+	expect(markup).not.toContain("whole file");
+	expect(markup).not.toContain("General comment.");
+	expect(markup).not.toContain("inline-comment-row");
+});
+
+test("retries a failed file draft once from File comments", () => {
+	const retryCalls: string[] = [];
+	const { container, root } = mountDiff({
+		drafts: [
+			fileDraft(
+				"failed-file-draft",
+				"src/app.ts",
+				"failed",
+				"glab unauthenticated",
+			),
+		],
+		onRetryDraft: (id) => retryCalls.push(id),
+	});
+	const section = container.querySelector(
+		'section[aria-label="File comments"]',
+	);
+	const retry = Array.from(section?.querySelectorAll("button") ?? []).find(
+		(button) => button.textContent?.includes("Retry"),
+	);
+
+	expect(section?.textContent).toContain("glab unauthenticated");
+	expect(retry).not.toBeUndefined();
+	act(() => retry?.click());
+	expect(retryCalls).toEqual(["failed-file-draft"]);
+	act(() => root.unmount());
+	container.remove();
+});
+
 function setInputValue(input: HTMLInputElement, value: string): void {
 	Object.getOwnPropertyDescriptor(
 		window.HTMLInputElement.prototype,
@@ -280,6 +629,63 @@ test("tags a deleted file by its old path", () => {
 
 	expect(markup).toContain('aria-label="Tag whole file"');
 	expect(markup).toMatch(/<h2[^>]*>src\/gone\.ts<\/h2>/);
+});
+test("hides Comment on file when no file comment handler is supplied", () => {
+	const markup = renderDiff();
+
+	expect(markup).not.toContain('aria-label="Comment on file"');
+});
+
+test("comments on the whole file from the diff header", () => {
+	const calls: string[] = [];
+	const onFileComment = (path: string) => calls.push(path);
+	const { container, root } = mountDiff({
+		onFileTag: () => {},
+		onFileComment,
+	});
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Comment on file"]',
+	);
+
+	expect(button).not.toBeNull();
+	expect(button?.previousElementSibling?.getAttribute("aria-label")).toBe(
+		"Tag whole file",
+	);
+	act(() => {
+		button?.click();
+	});
+	expect(calls).toEqual(["src/app.ts"]);
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("comments on a renamed file using its new path", () => {
+	const calls: string[] = [];
+	const onFileComment = (path: string) => calls.push(path);
+	const { container, root } = mountDiff({
+		file: renamedFile,
+		onFileComment,
+	});
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Comment on file"]',
+	);
+
+	expect(button).not.toBeNull();
+	act(() => {
+		button?.click();
+	});
+	expect(calls).toEqual(["src/new.ts"]);
+	act(() => root.unmount());
+	container.remove();
+});
+
+test("hides Comment on file when the file path is unknown", () => {
+	const markup = renderDiff({
+		file: { ...file, oldPath: null, newPath: null },
+		onFileComment: () => {},
+	});
+
+	expect(markup).not.toContain('aria-label="Comment on file"');
 });
 
 test("offers Tag whole file for a collapsed stat-only file", () => {
@@ -1280,8 +1686,9 @@ test("does not offer a collapse control for general discussions", () => {
 	expect(markup).not.toContain("Expand all comments");
 });
 
-test("does not count file-level discussions that render no diff row", () => {
-	const markup = renderDiff({
+test("shows collapse-all for file-level discussions without diff rows", () => {
+	const updates: string[][] = [];
+	const { container, root } = mountDiff({
 		discussions: [
 			discussion("discussion-1", {
 				newPath: "src/app.ts",
@@ -1290,9 +1697,17 @@ test("does not count file-level discussions that render no diff row", () => {
 				oldLine: null,
 			}),
 		],
+		onCollapsedDiscussionIdsChange: (ids) => updates.push(ids),
 	});
+	const collapseAll = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Collapse all comments"]',
+	);
 
-	expect(markup).not.toContain("Collapse all comments");
+	expect(collapseAll).not.toBeNull();
+	act(() => collapseAll?.click());
+	expect(updates).toEqual([["discussion-1"]]);
+	act(() => root.unmount());
+	container.remove();
 });
 
 test("hides the collapse control while the large-diff placeholder replaces the table", () => {

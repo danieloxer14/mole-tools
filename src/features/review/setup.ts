@@ -14,6 +14,9 @@ import type { MrRef } from "../../shared/mr-url";
 import { getReviewPaths, type ReviewPaths } from "./paths";
 import {
 	createChatMeta,
+	isFileSelection,
+	isGeneralSelection,
+	isMarkdownSelection,
 	LEGACY_CHAT_ID,
 	type ReviewState,
 	ReviewStateSchema,
@@ -235,15 +238,28 @@ function draftAnchorResolves(
 	diff: ParsedFileDiff[],
 	diffRefs: ReviewDiffRefs,
 ): boolean {
-	if (draft.filePath !== draft.selection.path) return false;
+	if (isGeneralSelection(draft.selection)) return true;
+	if (isFileSelection(draft.selection)) {
+		return diff.some(
+			(file) => (file.newPath ?? file.oldPath) === draft.filePath,
+		);
+	}
+	if (isMarkdownSelection(draft.selection)) {
+		return (
+			draft.filePath === draft.selection.path &&
+			diff.some((file) => (file.newPath ?? file.oldPath) === draft.filePath)
+		);
+	}
+	const selection = draft.selection;
+	if (draft.filePath !== selection.path) return false;
 	const file = diff.find((candidate) => {
 		const path =
-			draft.selection.side === "new" ? candidate.newPath : candidate.oldPath;
+			selection.side === "new" ? candidate.newPath : candidate.oldPath;
 		return path === draft.filePath;
 	});
 	if (!file) return false;
 	try {
-		buildPosition(draft.selection, file, diffRefs);
+		buildPosition(selection, file, diffRefs);
 		return true;
 	} catch {
 		return false;

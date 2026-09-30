@@ -1,4 +1,8 @@
-import type { HostDiscussion } from "../../ports/git-host";
+import {
+	type HostDiscussion,
+	isFileDiscussionPosition,
+	isImageDiscussionPosition,
+} from "../../ports/git-host";
 import type { DiffLine, ParsedFileDiff } from "../../shared/diff-parse";
 import type { LineSelection } from "./state";
 import { deriveChatTitle } from "./state";
@@ -18,7 +22,13 @@ interface Anchor {
  * anchors on the new side whenever it carries a new line, else on the old side.
  */
 function resolveAnchor(position: HostDiscussion["position"]): Anchor | null {
-	if (!position) return null;
+	if (
+		!position ||
+		isFileDiscussionPosition(position) ||
+		isImageDiscussionPosition(position)
+	) {
+		return null;
+	}
 	const side = position.newLine !== null ? "new" : "old";
 	return {
 		path: position.newPath ?? position.oldPath ?? "(unknown file)",
@@ -27,13 +37,28 @@ function resolveAnchor(position: HostDiscussion["position"]): Anchor | null {
 	};
 }
 
-/** "Explain: <excerpt>" | "Explain: <path>:<line>" | "Explain comment" (D3). */
+function discussionPath(
+	position: NonNullable<HostDiscussion["position"]>,
+): string {
+	return position.newPath ?? position.oldPath ?? "(unknown file)";
+}
+/** Titles Explain chats by note text or explicit image/whole-file scope (D3). */
 export function explainChatTitle(discussion: HostDiscussion): string {
 	const note = discussion.notes.find(
 		(candidate) => !candidate.system && candidate.body.trim().length > 0,
 	);
-	if (note) return `Explain: ${deriveChatTitle(note.body)}`;
-	const anchor = resolveAnchor(discussion.position);
+	const noteTitle = note ? deriveChatTitle(note.body) : null;
+	const position = discussion.position;
+	if (isImageDiscussionPosition(position)) {
+		const scope = noteTitle ?? discussionPath(position);
+		return `Explain image: ${scope}`;
+	}
+	if (isFileDiscussionPosition(position)) {
+		const scope = noteTitle ?? discussionPath(position);
+		return `Explain whole file: ${scope}`;
+	}
+	if (noteTitle) return `Explain: ${noteTitle}`;
+	const anchor = resolveAnchor(position);
 	if (anchor) return `Explain: ${anchor.path}:${anchor.line ?? "unknown"}`;
 	return "Explain comment";
 }
@@ -129,11 +154,21 @@ export function buildExplainMessage(input: {
 	diffs: readonly (readonly ParsedFileDiff[])[];
 }): string {
 	const { prefix, discussion, diffs } = input;
-	const anchor = resolveAnchor(discussion.position);
+	const position = discussion.position;
+	const anchor = resolveAnchor(position);
 	const status = discussion.resolved ? "Resolved" : "Unresolved";
-	const statusLine = anchor
-		? `${status} discussion at ${anchor.path}:${anchor.side}:${anchor.line ?? "unknown"}`
-		: `${status} general MR discussion (no diff position)`;
+	let statusLine: string;
+	if (isImageDiscussionPosition(position)) {
+		const path = discussionPath(position);
+		statusLine = `${status} discussion at image position in ${path}`;
+	} else if (isFileDiscussionPosition(position)) {
+		const path = discussionPath(position);
+		statusLine = `${status} discussion on file ${path} (whole file)`;
+	} else if (anchor) {
+		statusLine = `${status} discussion at ${anchor.path}:${anchor.side}:${anchor.line ?? "unknown"}`;
+	} else {
+		statusLine = `${status} general MR discussion (no diff position)`;
+	}
 	const noteParagraphs = discussion.notes
 		.filter((note) => !note.system)
 		.map((note) => `${note.author} (${note.createdAt}):\n${note.body}`);

@@ -233,6 +233,150 @@ test("keeps the shared mode selector for diff-line and Markdown-block drafts", (
 		expect(article?.lastElementChild?.textContent).toContain("Send");
 	}
 });
+test("keeps general and whole-file scope separate from draft status", () => {
+	const longPath = `src/${"nested/".repeat(20)}file.ts`;
+	const drafts: Array<{ draft: Draft; label: string }> = [
+		{
+			draft: {
+				...draftFor(),
+				selection: { kind: "general" },
+				filePath: "",
+			},
+			label: "Merge request",
+		},
+		{
+			draft: {
+				...draftFor(),
+				selection: { kind: "file", path: longPath },
+				filePath: longPath,
+			},
+			label: `${longPath} (whole file)`,
+		},
+	];
+
+	for (const { draft, label } of drafts) {
+		const markup = renderToStaticMarkup(
+			<CommentDraft
+				draft={draft}
+				onCancel={() => {}}
+				onEdit={() => {}}
+				onSend={() => {}}
+				onRetry={() => {}}
+			/>,
+		);
+		const container = document.createElement("div");
+		container.innerHTML = markup;
+		const header = container.querySelector("header");
+		const badge = header?.querySelector('[data-slot="badge"]');
+		const scope = header?.querySelector("span.font-mono");
+
+		expect(badge?.textContent).toBe("Draft");
+		expect(scope?.textContent).toBe(label);
+		expect(scope?.className).toContain("[overflow-wrap:anywhere]");
+	}
+});
+
+test("shows sending and failed status for general and file drafts", () => {
+	const drafts: Array<{
+		draft: Draft;
+		statusLabel: string;
+		scopeLabel: string;
+	}> = [
+		{
+			draft: {
+				...draftFor("", "sending"),
+				selection: { kind: "general" },
+				filePath: "",
+			},
+			statusLabel: "Sending…",
+			scopeLabel: "Merge request",
+		},
+		{
+			draft: {
+				...draftFor("", "failed"),
+				selection: { kind: "general" },
+				filePath: "",
+			},
+			statusLabel: "Failed",
+			scopeLabel: "Merge request",
+		},
+		{
+			draft: {
+				...draftFor("", "sending"),
+				selection: { kind: "file", path: "src/deeply/nested/file.ts" },
+				filePath: "src/deeply/nested/file.ts",
+			},
+			statusLabel: "Sending…",
+			scopeLabel: "src/deeply/nested/file.ts (whole file)",
+		},
+		{
+			draft: {
+				...draftFor("", "failed"),
+				selection: { kind: "file", path: "src/deeply/nested/file.ts" },
+				filePath: "src/deeply/nested/file.ts",
+			},
+			statusLabel: "Failed",
+			scopeLabel: "src/deeply/nested/file.ts (whole file)",
+		},
+	];
+
+	for (const { draft, statusLabel, scopeLabel } of drafts) {
+		const markup = renderToStaticMarkup(
+			<CommentDraft
+				draft={draft}
+				onCancel={() => {}}
+				onEdit={() => {}}
+				onSend={() => {}}
+				onRetry={() => {}}
+			/>,
+		);
+		const container = document.createElement("div");
+		container.innerHTML = markup;
+		const header = container.querySelector("header");
+		const badge = header?.querySelector('[data-slot="badge"]');
+		const scope = header?.querySelector("span.font-mono");
+
+		expect(badge?.textContent).toBe(statusLabel);
+		expect(scope?.textContent).toBe(scopeLabel);
+	}
+});
+test("keeps line and Markdown labels outside the status badge", () => {
+	const drafts: Array<{ draft: Draft; label: string }> = [
+		{ draft: draftFor(), label: "src/app.ts:new:5-5" },
+		{
+			draft: {
+				...draftFor(),
+				selection: {
+					kind: "markdown",
+					path: "src/app.ts",
+					startLine: 5,
+					endLine: 6,
+					quote: "Shared draft",
+				},
+			},
+			label: "src/app.ts:5-6",
+		},
+	];
+
+	for (const { draft, label } of drafts) {
+		const markup = renderToStaticMarkup(
+			<CommentDraft
+				draft={draft}
+				onCancel={() => {}}
+				onEdit={() => {}}
+				onSend={() => {}}
+				onRetry={() => {}}
+			/>,
+		);
+		const container = document.createElement("div");
+		container.innerHTML = markup;
+
+		expect(container.querySelector("header span")?.textContent).toBe(label);
+		expect(
+			container.querySelector('header [data-slot="badge"]')?.textContent,
+		).toBe("Draft");
+	}
+});
 
 test("bounds long draft paths and Markdown regions without removing draft actions", () => {
 	const longPath =

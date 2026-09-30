@@ -147,6 +147,50 @@ describe("comment from chat", () => {
 				"It needs validation.\n\n_(interrupted)_",
 		);
 	});
+	test("general draft uses whole-merge-request anchor without diff excerpt", () => {
+		const draft: Draft = {
+			...lineDraft,
+			body: "Existing general comment",
+			selection: { kind: "general" },
+			filePath: "",
+		};
+		const markdown = buildCommentConversationMarkdown({
+			draft,
+			chatLabel: "General chat",
+			entries,
+			diffs: [],
+		});
+
+		expect(markdown.startsWith("# Comment anchor")).toBe(true);
+		expect(markdown).toContain("Scope: whole merge request (general comment)");
+		expect(markdown).not.toMatch(/^File:/m);
+		expect(markdown).not.toContain("## Diff excerpt");
+		expect(markdown).toContain("## Existing comment text");
+		expect(markdown).toContain("# Conversation: General chat");
+		expect(markdown).toContain("Why?");
+	});
+
+	test("file draft uses whole-file anchor without diff excerpt", () => {
+		const draft: Draft = {
+			...lineDraft,
+			body: "Existing file comment",
+			selection: { kind: "file", path: "src/a.ts" },
+			filePath: "src/a.ts",
+		};
+		const markdown = buildCommentConversationMarkdown({
+			draft,
+			chatLabel: "File chat",
+			entries,
+			diffs: [],
+		});
+
+		expect(markdown).toContain("File: `src/a.ts`");
+		expect(markdown).toContain("Scope: whole file");
+		expect(markdown).not.toContain("## Diff excerpt");
+		expect(markdown).toContain("## Existing comment text");
+		expect(markdown).toContain("# Conversation: File chat");
+		expect(markdown).toContain("Why?");
+	});
 
 	test("conversation markdown labels whole and ranged description tags", () => {
 		const descriptionEntry: ChatEntry = {

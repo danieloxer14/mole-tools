@@ -15,14 +15,22 @@ import type {
 	MrDetail,
 	WatchedMrRef,
 } from "../../ports/git-host";
-import { validatePosition } from "../../shared/gitlab-position";
+import {
+	validateFilePosition,
+	validatePosition,
+} from "../../shared/gitlab-position";
 import { encodeProjectPath, type MrRef, parseMrUrl } from "../../shared/mr-url";
-import type { GitLabLabel, GitLabMergeRequest } from "./glab-schemas";
+import type {
+	GitLabDiscussion,
+	GitLabLabel,
+	GitLabMergeRequest,
+} from "./glab-schemas";
 import {
 	GitLabApprovalStateSchema,
 	GitLabAutoApprovalMergeRequestSchema,
 	GitLabDiscussionPageSchema,
 	GitLabDiscussionSchema,
+	GitLabFilePositionPayloadSchema,
 	GitLabMergeRequestSchema,
 	GitLabOpenedMergeRequestSchema,
 	GitLabPipelinePageSchema,
@@ -653,16 +661,29 @@ export class GlabAdapter implements GitHost {
 					"Positioned GitLab discussions require parsedDiff and diffRefs",
 				);
 			}
-			const parsedPosition = parsePayload(
-				GitLabPositionPayloadSchema,
-				input.position,
-				"discussion position",
-			);
-			position = validatePosition(
-				parsedPosition,
-				input.parsedDiff,
-				input.diffRefs,
-			);
+			if (input.position.position_type === "file") {
+				const parsedPosition = parsePayload(
+					GitLabFilePositionPayloadSchema,
+					input.position,
+					"discussion position",
+				);
+				position = validateFilePosition(
+					parsedPosition,
+					input.parsedDiff,
+					input.diffRefs,
+				);
+			} else {
+				const parsedPosition = parsePayload(
+					GitLabPositionPayloadSchema,
+					input.position,
+					"discussion position",
+				);
+				position = validatePosition(
+					parsedPosition,
+					input.parsedDiff,
+					input.diffRefs,
+				);
+			}
 		} else if ("parsedDiff" in input || "diffRefs" in input) {
 			throw new PortError(
 				"Unpositioned GitLab discussions cannot include parsedDiff or diffRefs",
@@ -710,6 +731,9 @@ export class GlabAdapter implements GitHost {
 					oldPath: positionedNote.position.old_path,
 					newLine: positionedNote.position.new_line,
 					oldLine: positionedNote.position.old_line,
+					...(positionedNote.position.position_type === undefined
+						? {}
+						: { positionType: positionedNote.position.position_type }),
 				}
 			: null;
 		return {

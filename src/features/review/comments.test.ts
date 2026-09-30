@@ -303,3 +303,393 @@ describe("comment drafts", () => {
 		}
 	});
 });
+
+describe("general draft send", () => {
+	test("posts body verbatim as an unpositioned MR discussion", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comments-general-"));
+		try {
+			const draft = {
+				id: "draft-general-send",
+				body: "Overall looks good.",
+				selection: { kind: "general" as const },
+				filePath: "",
+				status: "draft" as const,
+				error: null,
+				postedDiscussionId: null,
+				staleSince: null,
+			};
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+			});
+			await store.write(state([draft]));
+			let created = 0;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				gitHost: {
+					createDiscussion: async (input: unknown) => {
+						created++;
+						expect(input).toEqual({
+							ref: {
+								host: "gitlab.example.com",
+								projectPath: "group/project",
+								iid: 42,
+							},
+							body: draft.body,
+						});
+						return discussion("discussion-general-1");
+					},
+				},
+			});
+
+			const sent = await routes(
+				request(`/api/comments/${draft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+
+			expect(sent.status).toBe(200);
+			expect(created).toBe(1);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: draft.body,
+				status: "posted",
+				postedDiscussionId: "discussion-general-1",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("retains a failed body and retries the same draft successfully", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-comments-general-retry-"),
+		);
+		try {
+			const draft = {
+				id: "draft-general-retry",
+				body: "Overall looks good.",
+				selection: { kind: "general" as const },
+				filePath: "",
+				status: "draft" as const,
+				error: null,
+				postedDiscussionId: null,
+				staleSince: null,
+			};
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+			});
+			await store.write(state([draft]));
+			const firstRoutes = createReviewRoutes({
+				token,
+				store,
+				gitHost: {
+					createDiscussion: async () => {
+						throw new Error("glab unauthenticated");
+					},
+				},
+			});
+			const failed = await firstRoutes(
+				request(`/api/comments/${draft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			expect(failed.status).toBe(502);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: draft.body,
+				status: "failed",
+				error: "glab unauthenticated",
+			});
+
+			const retryRoutes = createReviewRoutes({
+				token,
+				store,
+				gitHost: {
+					createDiscussion: async () =>
+						discussion("discussion-general-retry-1"),
+				},
+			});
+			const retried = await retryRoutes(
+				request(`/api/comments/${draft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+
+			expect(retried.status).toBe(200);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: draft.body,
+				status: "posted",
+				postedDiscussionId: "discussion-general-retry-1",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("general and file draft creation", () => {
+	test("creates valid drafts, rejects invalid paths, and restores persisted drafts", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-comments-draft-creation-"),
+		);
+		try {
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			await store.write(state());
+			const routes = createReviewRoutes({ token, store });
+			const create = (selection: unknown, filePath: string) =>
+				routes(
+					jsonRequest(`/api/comments/draft?t=${token}`, "POST", {
+						selection,
+						filePath,
+					}),
+				);
+
+			const generalResponse = await create({ kind: "general" }, "");
+			expect(generalResponse.status).toBe(201);
+			const generalDraft = DraftSchema.parse(await generalResponse.json());
+			expect(generalDraft).toMatchObject({
+				body: "",
+				selection: { kind: "general" },
+				filePath: "",
+				status: "draft",
+			});
+			expect((await store.read())?.drafts).toContainEqual(generalDraft);
+
+			const generalWithPath = await create({ kind: "general" }, "src/app.ts");
+			expect(generalWithPath.status).toBe(400);
+			expect(await generalWithPath.json()).toEqual({
+				error: "Comment file path must be empty for a general comment",
+			});
+
+			const fileSelection = { kind: "file", path: "src/app.ts" } as const;
+			const fileResponse = await create(fileSelection, fileSelection.path);
+			expect(fileResponse.status).toBe(201);
+			expect(DraftSchema.parse(await fileResponse.json())).toMatchObject({
+				selection: fileSelection,
+				filePath: fileSelection.path,
+				status: "draft",
+			});
+
+			for (const [filePath, error] of [
+				["src/other.ts", "Comment file path must match selection path"],
+				["", "Comment file path must not be empty"],
+				["src/\0app.ts", "Comment file path contains a NUL byte"],
+			] as const) {
+				const invalid = await create(fileSelection, filePath);
+				expect(invalid.status).toBe(400);
+				expect(await invalid.json()).toEqual({ error });
+			}
+
+			const failedFileDraft = {
+				id: "draft-file-failed",
+				body: "File note",
+				selection: fileSelection,
+				filePath: fileSelection.path,
+				status: "failed" as const,
+				error: "glab unauthenticated",
+				postedDiscussionId: null,
+				staleSince: null,
+			};
+			const persistedGeneralDraft = {
+				id: "draft-general",
+				body: "MR note",
+				selection: { kind: "general" as const },
+				filePath: "",
+				status: "draft" as const,
+				error: null,
+				postedDiscussionId: null,
+				staleSince: null,
+			};
+			const persistedDrafts: ReviewState["drafts"] = [
+				persistedGeneralDraft,
+				failedFileDraft,
+			];
+			await store.write(state(persistedDrafts));
+
+			const restoredResponse = await routes(request(`/api/state?t=${token}`));
+			expect(restoredResponse.status).toBe(200);
+			const restored = (await restoredResponse.json()) as {
+				drafts: typeof persistedDrafts;
+			};
+			expect(restored.drafts).toEqual(persistedDrafts);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("file draft send", () => {
+	const fileDraft = {
+		id: "draft-file-send",
+		body: "Please review this file.",
+		selection: { kind: "file" as const, path: "src/app.ts" },
+		filePath: "src/app.ts",
+		status: "draft" as const,
+		error: null,
+		postedDiscussionId: null,
+		staleSince: null,
+	};
+
+	test("posts a file-position discussion with current diff refs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-comments-file-"));
+		try {
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+			});
+			await store.write(state([fileDraft]));
+			let capturedInput: unknown;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				diff,
+				gitHost: {
+					createDiscussion: async (input: unknown) => {
+						capturedInput = input;
+						return discussion("discussion-file-1");
+					},
+				},
+			});
+
+			const sent = await routes(
+				request(`/api/comments/${fileDraft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+
+			expect(sent.status).toBe(200);
+			expect(capturedInput).toEqual({
+				ref: {
+					host: "gitlab.example.com",
+					projectPath: "group/project",
+					iid: 42,
+				},
+				body: fileDraft.body,
+				position: {
+					position_type: "file",
+					base_sha: "base",
+					start_sha: "start",
+					head_sha: "head",
+					old_path: "src/app.ts",
+					new_path: "src/app.ts",
+				},
+				parsedDiff: diff[0],
+				diffRefs: { baseSha: "base", startSha: "start", headSha: "head" },
+			});
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: fileDraft.body,
+				status: "posted",
+				postedDiscussionId: "discussion-file-1",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("fails when file draft path is absent from current diff", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-comments-file-missing-"),
+		);
+		try {
+			const missingDraft = {
+				...fileDraft,
+				id: "draft-file-missing",
+				selection: { kind: "file" as const, path: "src/removed.ts" },
+				filePath: "src/removed.ts",
+			};
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+			});
+			await store.write(state([missingDraft]));
+			let created = 0;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				diff,
+				gitHost: {
+					createDiscussion: async () => {
+						created++;
+						return discussion();
+					},
+				},
+			});
+
+			const sent = await routes(
+				request(`/api/comments/${missingDraft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+
+			expect(sent.status).toBe(400);
+			expect(created).toBe(0);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				status: "failed",
+				error: "Draft position does not match the current diff",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("retains failed file draft and retries successfully", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-comments-file-retry-"),
+		);
+		try {
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+			});
+			await store.write(state([fileDraft]));
+			const failingRoutes = createReviewRoutes({
+				token,
+				store,
+				diff,
+				gitHost: {
+					createDiscussion: async () => {
+						throw new Error("glab unauthenticated");
+					},
+				},
+			});
+
+			const failed = await failingRoutes(
+				request(`/api/comments/${fileDraft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+			expect(failed.status).toBe(502);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: fileDraft.body,
+				status: "failed",
+				error: "glab unauthenticated",
+			});
+
+			const retryRoutes = createReviewRoutes({
+				token,
+				store,
+				diff,
+				gitHost: {
+					createDiscussion: async () => discussion("discussion-file-retry-1"),
+				},
+			});
+			const retried = await retryRoutes(
+				request(`/api/comments/${fileDraft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+
+			expect(retried.status).toBe(200);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				body: fileDraft.body,
+				status: "posted",
+				postedDiscussionId: "discussion-file-retry-1",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});

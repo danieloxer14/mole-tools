@@ -18,7 +18,7 @@ import {
 	type DescriptionChatTag,
 } from "../chat-tags";
 import type { ReviewApiState, ReviewProgressResponse } from "../routes";
-import type { Draft, LineSelection } from "../state";
+import type { Draft, DraftSelection, LineSelection } from "../state";
 import type { ChatEntry, ChatEntryWithOptimistic } from "../store";
 import type { VersionStatus } from "../version-check";
 import { createRequestSequence } from "./chat-request-sequence";
@@ -69,7 +69,11 @@ import {
 } from "./components/ui/dialog";
 import { Spinner } from "./components/ui/spinner";
 import { projectWebUrl } from "./description-media";
-import { type DraftGeneration, fromChatAvailability } from "./from-chat";
+import {
+	type DraftGeneration,
+	type FromChatContext,
+	fromChatAvailability,
+} from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
 	consumeLayerStream,
@@ -1151,13 +1155,7 @@ function ReviewApp() {
 				);
 			});
 	};
-	const createCommentDraft = (selection: DiffLineSelection) => {
-		const target: LineSelection = {
-			path: selection.path,
-			side: selection.side,
-			startLine: selection.startLine,
-			endLine: selection.endLine,
-		};
+	const requestCommentDraft = (selection: DraftSelection, filePath: string) => {
 		setCommentError(null);
 		void fetch(apiUrl("/api/comments/draft", token), {
 			method: "POST",
@@ -1165,10 +1163,7 @@ function ReviewApp() {
 				"content-type": "application/json",
 				"X-Mole-Token": token,
 			},
-			body: JSON.stringify({
-				selection: target,
-				filePath: target.path,
-			}),
+			body: JSON.stringify({ selection, filePath }),
 		})
 			.then(async (response) => {
 				if (!response.ok)
@@ -1189,43 +1184,33 @@ function ReviewApp() {
 			});
 	};
 
-	const createMarkdownCommentDraft = (selection: MarkdownBlockSelection) => {
-		setCommentError(null);
-		void fetch(apiUrl("/api/comments/draft", token), {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				"X-Mole-Token": token,
-			},
-			body: JSON.stringify({
-				selection: {
-					kind: "markdown",
-					path: selection.path,
-					startLine: selection.startLine,
-					endLine: selection.endLine,
-					quote: selection.quote,
-				},
-				filePath: selection.path,
-			}),
-		})
-			.then(async (response) => {
-				if (!response.ok)
-					throw new Error(`Comment creation failed (${response.status})`);
-				return (await response.json()) as Draft;
-			})
-			.then((draft) => {
-				setData((current) =>
-					current
-						? { ...current, drafts: [...current.drafts, draft] }
-						: current,
-				);
-			})
-			.catch((reason: unknown) => {
-				setCommentError(
-					reason instanceof Error ? reason.message : String(reason),
-				);
-			});
+	const createCommentDraft = (selection: DiffLineSelection) => {
+		const target: LineSelection = {
+			path: selection.path,
+			side: selection.side,
+			startLine: selection.startLine,
+			endLine: selection.endLine,
+		};
+		requestCommentDraft(target, target.path);
 	};
+
+	const createMarkdownCommentDraft = (selection: MarkdownBlockSelection) =>
+		requestCommentDraft(
+			{
+				kind: "markdown",
+				path: selection.path,
+				startLine: selection.startLine,
+				endLine: selection.endLine,
+				quote: selection.quote,
+			},
+			selection.path,
+		);
+
+	const createGeneralCommentDraft = () =>
+		requestCommentDraft({ kind: "general" }, "");
+
+	const createFileCommentDraft = (path: string) =>
+		requestCommentDraft({ kind: "file", path }, path);
 
 	const updateCommentDraft = (id: string, body: string) => {
 		const revision = (draftEditSequence.current.get(id) ?? 0) + 1;
@@ -1421,6 +1406,12 @@ function ReviewApp() {
 			delete next[id];
 			return next;
 		});
+	};
+	const fromChatContext: FromChatContext = {
+		availability: activeFromChatAvailability,
+		generations: draftGenerations,
+		onGenerate: generateFromChat,
+		onStop: stopFromChat,
 	};
 
 	const cancelCommentDraft = (id: string) => {
@@ -2130,16 +2121,12 @@ function ReviewApp() {
 						onMarkdownTag={handleMarkdownTag}
 						onFileTag={handleFileTag}
 						onMarkdownComment={createMarkdownCommentDraft}
+						onFileComment={createFileCommentDraft}
 						onCancelDraft={cancelCommentDraft}
 						onEditDraft={updateCommentDraft}
 						onSendDraft={sendCommentDraft}
 						onRetryDraft={retryCommentDraft}
-						fromChat={{
-							availability: activeFromChatAvailability,
-							generations: draftGenerations,
-							onGenerate: generateFromChat,
-							onStop: stopFromChat,
-						}}
+						fromChat={fromChatContext}
 					/>
 				</section>
 				{reviewView === "overview" ? (
@@ -2148,6 +2135,15 @@ function ReviewApp() {
 						projectWebUrl={projectWebUrl(data.mr)}
 						mediaToken={token}
 						discussions={generalDiscussions(data.discussions)}
+						drafts={data.drafts}
+						commentComposer={{
+							onCreateGeneralComment: createGeneralCommentDraft,
+							onCancelDraft: cancelCommentDraft,
+							onEditDraft: updateCommentDraft,
+							onSendDraft: sendCommentDraft,
+							onRetryDraft: retryCommentDraft,
+						}}
+						fromChat={fromChatContext}
 						onTagDescription={handleDescriptionTag}
 						onExplainDiscussion={explainDiscussion}
 						explainDisabled={creatingChat}

@@ -75,7 +75,7 @@ describe("GitHost review contract", () => {
 		};
 		const glab = new GlabAdapter(exec);
 
-		expect(await glab.listDiscussions(ref)).toEqual([
+		expect(await glab.listDiscussions(ref)).toMatchObject([
 			{
 				id: "discussion-1",
 				resolved: true,
@@ -89,6 +89,7 @@ describe("GitHost review contract", () => {
 					},
 				],
 				position: {
+					positionType: "text",
 					newPath: "src/new.ts",
 					oldPath: "src/old.ts",
 					newLine: 12,

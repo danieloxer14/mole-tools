@@ -58,11 +58,41 @@ export const MarkdownSelectionSchema = z
 	});
 export type MarkdownSelection = z.infer<typeof MarkdownSelectionSchema>;
 
+/**
+ * Whole-file comment anchored to its display path in the current diff.
+ */
+export const FileSelectionSchema = z
+	.object({ kind: z.literal("file"), path: z.string().min(1) })
+	.strict();
+export type FileSelection = z.infer<typeof FileSelectionSchema>;
+
+/**
+ * Whole-merge-request comment; its persisted draft uses an empty filePath.
+ */
+export const GeneralSelectionSchema = z
+	.object({ kind: z.literal("general") })
+	.strict();
+export type GeneralSelection = z.infer<typeof GeneralSelectionSchema>;
+
 export const DraftSelectionSchema = z.union([
 	LineSelectionSchema,
 	MarkdownSelectionSchema,
+	FileSelectionSchema,
+	GeneralSelectionSchema,
 ]);
 export type DraftSelection = z.infer<typeof DraftSelectionSchema>;
+
+export function isFileSelection(
+	selection: DraftSelection,
+): selection is FileSelection {
+	return "kind" in selection && selection.kind === "file";
+}
+
+export function isGeneralSelection(
+	selection: DraftSelection,
+): selection is GeneralSelection {
+	return "kind" in selection && selection.kind === "general";
+}
 
 export function isMarkdownSelection(
 	selection: DraftSelection,

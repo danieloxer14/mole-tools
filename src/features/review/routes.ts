@@ -51,6 +51,7 @@ import { logger } from "../../core/logger";
 import type {
 	CreateDiscussionInput,
 	GitHost,
+	GitLabFilePositionPayload,
 	GitLabPositionPayload,
 	HostDiscussion,
 	MrApprovalState,
@@ -61,7 +62,7 @@ import type { FileDiff, Vcs } from "../../ports/vcs";
 import { APP_VERSION } from "../../shared/app-version";
 import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
-import { buildPosition } from "../../shared/gitlab-position";
+import { buildFilePosition, buildPosition } from "../../shared/gitlab-position";
 import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
 import {
 	expandSkillTokens,
@@ -75,6 +76,7 @@ import {
 	effectiveAgentSelection,
 } from "./agent-selection";
 import { runChatTurn, validateChatTags } from "./chat";
+import type { ChatTag } from "./chat-tags";
 import {
 	appendGeneratedBody,
 	buildCommentConversationMarkdown,
@@ -105,6 +107,8 @@ import {
 	type DraftSelection,
 	DraftSelectionSchema,
 	deriveChatTitle,
+	isFileSelection,
+	isGeneralSelection,
 	isMarkdownSelection,
 	type MarkdownSelection,
 	type ReviewState,
@@ -622,7 +626,15 @@ function validateCommentDraftRequest(
 	const selection = DraftSelectionSchema.safeParse(body.selection);
 	if (!selection.success)
 		return `Invalid comment selection: ${selection.error.message}`;
-	if (selection.data.endLine < selection.data.startLine)
+	if (isGeneralSelection(selection.data)) {
+		if (body.filePath !== "")
+			return "Comment file path must be empty for a general comment";
+		return { selection: selection.data, filePath: "" };
+	}
+	if (
+		!isFileSelection(selection.data) &&
+		selection.data.endLine < selection.data.startLine
+	)
 		return "Comment selection range is reversed";
 	if (typeof body.filePath !== "string" || body.filePath.length === 0)
 		return "Comment file path must not be empty";
@@ -1659,13 +1671,25 @@ export function createReviewRoutes(
 
 	function diffForDraft(draft: Draft): ParsedFileDiff | null {
 		const selection = draft.selection;
-		if (draft.filePath !== selection.path) return null;
-		if (isMarkdownSelection(selection)) return null;
+		if (
+			isGeneralSelection(selection) ||
+			isFileSelection(selection) ||
+			isMarkdownSelection(selection) ||
+			draft.filePath !== selection.path
+		)
+			return null;
 		return (
 			currentDiff.find((file) => {
 				const path = selection.side === "new" ? file.newPath : file.oldPath;
 				return path === draft.filePath;
 			}) ?? null
+		);
+	}
+	function fileDiffForDraft(draft: Draft): ParsedFileDiff | null {
+		return (
+			currentDiff.find(
+				(file) => (file.newPath ?? file.oldPath) === draft.filePath,
+			) ?? null
 		);
 	}
 
@@ -2541,10 +2565,37 @@ export function createReviewRoutes(
 				return fail("Comment is generating", 409);
 
 			let discussionInput: CreateDiscussionInput;
-			if (isMarkdownSelection(draft.selection)) {
+			if (isGeneralSelection(draft.selection)) {
+				discussionInput = {
+					ref: reviewRef(state),
+					body: draft.body,
+				};
+			} else if (isMarkdownSelection(draft.selection)) {
 				discussionInput = {
 					ref: reviewRef(state),
 					body: formatMarkdownCommentBody(draft, draft.selection),
+				};
+			} else if (isFileSelection(draft.selection)) {
+				const file = fileDiffForDraft(draft);
+				if (!file) {
+					const message = "Draft position does not match the current diff";
+					await markFailed(message);
+					return fail(message, 400);
+				}
+				let position: GitLabFilePositionPayload;
+				try {
+					position = buildFilePosition(file, state.revision.diffRefs);
+				} catch (error) {
+					const message = errorMessage(error);
+					await markFailed(message);
+					return fail(message, 400);
+				}
+				discussionInput = {
+					ref: reviewRef(state),
+					body: draft.body,
+					position,
+					parsedDiff: file,
+					diffRefs: state.revision.diffRefs,
 				};
 			} else {
 				const file = diffForDraft(draft);

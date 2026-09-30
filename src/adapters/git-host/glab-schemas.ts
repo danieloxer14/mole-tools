@@ -103,10 +103,23 @@ export const GitLabApprovalStateSchema = z
 
 export const GitLabPositionSchema = z
 	.object({
+		position_type: z.string().nullable().optional(),
 		old_path: z.string().nullable(),
 		new_path: z.string().nullable(),
-		old_line: z.number().int().nonnegative().nullable(),
-		new_line: z.number().int().nonnegative().nullable(),
+		old_line: z
+			.number()
+			.int()
+			.nonnegative()
+			.nullable()
+			.optional()
+			.default(null),
+		new_line: z
+			.number()
+			.int()
+			.nonnegative()
+			.nullable()
+			.optional()
+			.default(null),
 	})
 	.passthrough();
 
@@ -187,6 +200,16 @@ export const GitLabPositionPayloadSchema = z
 			message: "GitLab line range must be ordered and match its anchor side",
 		},
 	);
+export const GitLabFilePositionPayloadSchema = z
+	.object({
+		position_type: z.literal("file"),
+		base_sha: NonEmptyString,
+		start_sha: NonEmptyString,
+		head_sha: NonEmptyString,
+		old_path: NonEmptyString,
+		new_path: NonEmptyString,
+	})
+	.passthrough();
 
 export const GitLabNoteSchema = z
 	.object({

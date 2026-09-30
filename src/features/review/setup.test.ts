@@ -619,6 +619,87 @@ describe("syncReview viewed files", () => {
 	});
 });
 
+describe("syncReview draft staleness", () => {
+	test("keeps general and present-file drafts fresh and stales removed-file drafts", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-drafts-"));
+		try {
+			const paths = pathsFor(dir);
+			const existing = stateFor(paths, {
+				drafts: [
+					{
+						id: "general",
+						body: "General comment",
+						selection: { kind: "general" },
+						filePath: "",
+						status: "draft",
+						error: null,
+						postedDiscussionId: null,
+						staleSince: null,
+					},
+					{
+						id: "present-file",
+						body: "Present file comment",
+						selection: { kind: "file", path: "src/present.ts" },
+						filePath: "src/present.ts",
+						status: "draft",
+						error: null,
+						postedDiscussionId: null,
+						staleSince: null,
+					},
+					{
+						id: "removed-file",
+						body: "Removed file comment",
+						selection: { kind: "file", path: "src/removed.ts" },
+						filePath: "src/removed.ts",
+						status: "draft",
+						error: null,
+						postedDiscussionId: null,
+						staleSince: null,
+					},
+				],
+			});
+			const store = new ReviewStore(paths);
+			await store.write(existing);
+
+			const result = await syncReview({
+				vcs: new FakeVcs({
+					repoRoot: paths.repoPath,
+					worktrees: [],
+					mergeBase: "base-2",
+					diffRange: [rawDiff("src/present.ts", "@@ -1 +1 @@\n-old\n+new\n")],
+				}),
+				ref,
+				mr: {
+					...mergeRequest(),
+					headSha: "head-2",
+					diffRefs: {
+						baseSha: "base-2",
+						startSha: "base-2",
+						headSha: "head-2",
+					},
+				},
+				state: existing,
+				store,
+				paths,
+			});
+
+			expect(
+				result.state.drafts.find((draft) => draft.id === "general")?.staleSince,
+			).toBeNull();
+			expect(
+				result.state.drafts.find((draft) => draft.id === "present-file")
+					?.staleSince,
+			).toBeNull();
+			expect(
+				result.state.drafts.find((draft) => draft.id === "removed-file")
+					?.staleSince,
+			).toBe(result.state.revision.syncedAt);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("syncReview MR description", () => {
 	test("replaces supplied description and keeps it when the next input omits it", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-sync-description-"));

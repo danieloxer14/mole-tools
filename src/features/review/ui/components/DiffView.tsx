@@ -29,7 +29,11 @@ import {
 	useState,
 } from "react";
 import { codeToHtml, codeToTokens, type ThemedToken } from "shiki";
-import type { HostDiscussion } from "../../../../ports/git-host";
+import {
+	type HostDiscussion,
+	isFileDiscussionPosition,
+	isImageDiscussionPosition,
+} from "../../../../ports/git-host";
 import {
 	CONTEXT_CHUNK_SIZE,
 	type ContextGap,
@@ -44,8 +48,13 @@ import type {
 	DiffLine,
 	ParsedFileDiff,
 } from "../../../../shared/diff-parse";
-import { type Draft, isMarkdownSelection } from "../../state";
-import type { FromChatContext } from "../from-chat";
+import {
+	type Draft,
+	isFileSelection,
+	isGeneralSelection,
+	isMarkdownSelection,
+} from "../../state";
+import { draftFromChat, type FromChatContext } from "../from-chat";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 import { CommentMarkdown } from "./CommentMarkdown";
 import {
@@ -144,6 +153,7 @@ interface DiffViewProps {
 	onMarkdownTag?: (selection: MarkdownBlockSelection) => void;
 	onFileTag?: (path: string) => void;
 	onMarkdownComment?: (selection: MarkdownBlockSelection) => void;
+	onFileComment?: (path: string) => void;
 	onCancelDraft?: CommentDraftProps["onCancel"];
 	onEditDraft?: CommentDraftProps["onEdit"];
 	onSendDraft?: CommentDraftProps["onSend"];
@@ -159,19 +169,6 @@ type CommentDraftCallbacks = Pick<
 	CommentDraftProps,
 	"onCancel" | "onEdit" | "onSend" | "onRetry"
 >;
-
-function draftFromChat(
-	fromChat: FromChatContext | undefined,
-	draftId: string,
-): CommentDraftProps["fromChat"] {
-	if (!fromChat) return undefined;
-	return {
-		availability: fromChat.availability,
-		generation: fromChat.generations[draftId],
-		onGenerate: fromChat.onGenerate,
-		onStop: fromChat.onStop,
-	};
-}
 
 export function isMarkdownPath(path: string): boolean {
 	return /\.(?:md|mdx)$/i.test(path);
@@ -452,6 +449,8 @@ interface SelectableLine {
 }
 function discussionPositionLabel(position: HostDiscussion["position"]): string {
 	if (!position) return "General discussion";
+	if (isImageDiscussionPosition(position)) return "Image position";
+	if (isFileDiscussionPosition(position)) return "Whole file";
 	const side = position.newLine !== null ? "new" : "old";
 	const line = position.newLine ?? position.oldLine;
 	return `${side}:${line ?? "unknown"}`;
@@ -596,7 +595,13 @@ function discussionMatchesLine(
 	line: DiffLine,
 ): boolean {
 	const position = discussion.position;
-	if (!position) return false;
+	if (
+		!position ||
+		isFileDiscussionPosition(position) ||
+		isImageDiscussionPosition(position)
+	) {
+		return false;
+	}
 	return (
 		(position.newPath === file.newPath &&
 			position.newLine !== null &&
@@ -622,7 +627,13 @@ function draftMatchesLine(
 	line: DiffLine,
 	endOnly: boolean,
 ): boolean {
-	if (isMarkdownSelection(draft.selection)) return false;
+	if (
+		isMarkdownSelection(draft.selection) ||
+		isFileSelection(draft.selection) ||
+		isGeneralSelection(draft.selection)
+	) {
+		return false;
+	}
 	const lineNumber =
 		draft.selection.side === "old" ? line.oldLine : line.newLine;
 	const path = draft.selection.side === "old" ? file.oldPath : file.newPath;
@@ -1517,6 +1528,7 @@ export function DiffView({
 	onMarkdownTag,
 	onFileTag,
 	onMarkdownComment,
+	onFileComment,
 	onCancelDraft,
 	onEditDraft,
 	onSendDraft,
@@ -1613,6 +1625,11 @@ export function DiffView({
 		},
 		[],
 	);
+	const onFileCommentRef = useRef(onFileComment);
+	onFileCommentRef.current = onFileComment;
+	const stableOnFileComment = useCallback((path: string) => {
+		onFileCommentRef.current?.(path);
+	}, []);
 	const fromChatRef = useRef(fromChat);
 	fromChatRef.current = fromChat;
 	const stableFromChat = useMemo<FromChatContext>(
@@ -1660,6 +1677,12 @@ export function DiffView({
 		);
 	}
 	const path = file.newPath ?? file.oldPath ?? "(unknown file)";
+	const fileDrafts = drafts.filter(
+		(draft) =>
+			draft.status !== "posted" &&
+			isFileSelection(draft.selection) &&
+			draft.filePath === path,
+	);
 	const markdown = isMarkdownPath(path);
 	const showingRendered = markdown && viewMode === "rendered";
 	const noPatch = file.hunks.length === 0;
@@ -1674,19 +1697,34 @@ export function DiffView({
 	const fileDiscussions = discussions.filter((discussion) =>
 		discussionMatchesDiff(discussion, displayFile),
 	);
+	const fileScopedDiscussions = discussions.filter((discussion) => {
+		const position = discussion.position;
+		if (
+			!position ||
+			(!isFileDiscussionPosition(position) &&
+				!isImageDiscussionPosition(position))
+		) {
+			return false;
+		}
+		return (
+			(position.newPath !== null && position.newPath === file.newPath) ||
+			(position.oldPath !== null && position.oldPath === file.oldPath)
+		);
+	});
+	const collapsibleDiscussions = [...fileScopedDiscussions, ...fileDiscussions];
 	const allCommentsCollapsed =
-		fileDiscussions.length > 0 &&
-		fileDiscussions.every((discussion) =>
+		collapsibleDiscussions.length > 0 &&
+		collapsibleDiscussions.every((discussion) =>
 			collapsedDiscussionIds.has(discussion.id),
 		);
 	const collapseAllComments = () => {
 		const next = new Set(collapsedDiscussionIdsRef.current);
 		if (allCommentsCollapsed) {
-			for (const discussion of fileDiscussions) {
+			for (const discussion of collapsibleDiscussions) {
 				next.delete(discussion.id);
 			}
 		} else {
-			for (const discussion of fileDiscussions) {
+			for (const discussion of collapsibleDiscussions) {
 				next.add(discussion.id);
 			}
 		}
@@ -1947,9 +1985,19 @@ export function DiffView({
 							<Tag aria-hidden />
 						</IconButton>
 					) : null}
-					{!showingRendered &&
-					fileDiscussions.length > 0 &&
-					(!collapsed || expanded) ? (
+					{onFileComment && path !== "(unknown file)" ? (
+						<IconButton
+							label="Comment on file"
+							tooltip="Comment on this whole file"
+							onClick={() => stableOnFileComment(path)}
+						>
+							<MessageSquarePlus aria-hidden />
+						</IconButton>
+					) : null}
+					{fileScopedDiscussions.length > 0 ||
+					(!showingRendered &&
+						fileDiscussions.length > 0 &&
+						(!collapsed || expanded)) ? (
 						<IconButton
 							label={commentsLabel}
 							tooltip={commentsLabel}
@@ -1973,6 +2021,33 @@ export function DiffView({
 					<span>Viewed</span>
 				</label>
 			</header>
+			{fileScopedDiscussions.length > 0 || fileDrafts.length > 0 ? (
+				<section
+					aria-label="File comments"
+					className="flex min-w-0 max-w-full flex-col gap-2 border-b p-3"
+				>
+					{fileScopedDiscussions.map((discussion) => (
+						<DiscussionCard
+							key={discussion.id}
+							discussion={discussion}
+							collapsed={collapsedDiscussionIds.has(discussion.id)}
+							onToggleCollapse={() => toggleDiscussionCollapse(discussion.id)}
+							onExplainDiscussion={onExplainDiscussion}
+							explainDisabled={explainDisabled}
+						/>
+					))}
+					{fileDrafts.map((draft) => (
+						<CommentDraft
+							key={draft.id}
+							draft={draft}
+							{...stableCommentDraftProps}
+							fromChat={
+								fromChat ? draftFromChat(stableFromChat, draft.id) : undefined
+							}
+						/>
+					))}
+				</section>
+			) : null}
 			{binary ? (
 				<p className="flex flex-col items-center gap-2 p-8 text-sm text-muted-foreground">
 					Binary file; {file.insertions} additions, {file.deletions} deletions.

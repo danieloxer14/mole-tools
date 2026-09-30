@@ -371,6 +371,84 @@ describe("chat prompt construction", () => {
 			prompt.indexOf("Inline note here."),
 		);
 	});
+	test("explains image, whole-file, and legacy position kinds in chat context", () => {
+		const prompt = buildChatPrompt({
+			firstTurn: true,
+			basePrompt: "Base",
+			mr: { ...state().mr },
+			guide: [],
+			changedFiles: ["src/a.ts"],
+			discussions: [
+				{
+					id: "image-discussion",
+					resolved: false,
+					position: {
+						positionType: "image",
+						newPath: "src/a.ts",
+						oldPath: "src/a.ts",
+						newLine: null,
+						oldLine: null,
+					},
+					notes: [
+						{
+							id: "image-note",
+							author: "reviewer",
+							body: "Image note",
+							createdAt: "2026-01-01T00:00:00.000Z",
+							system: false,
+						},
+					],
+				},
+				{
+					id: "file-discussion",
+					resolved: false,
+					position: {
+						positionType: "file",
+						newPath: "src/a.ts",
+						oldPath: "src/a.ts",
+						newLine: null,
+						oldLine: null,
+					},
+					notes: [
+						{
+							id: "file-note",
+							author: "reviewer",
+							body: "Whole-file note",
+							createdAt: "2026-01-01T00:00:00.000Z",
+							system: false,
+						},
+					],
+				},
+				{
+					id: "legacy-discussion",
+					resolved: false,
+					position: {
+						newPath: "src/a.ts",
+						oldPath: "src/a.ts",
+						newLine: null,
+						oldLine: null,
+					},
+					notes: [
+						{
+							id: "legacy-note",
+							author: "reviewer",
+							body: "Legacy note",
+							createdAt: "2026-01-01T00:00:00.000Z",
+							system: false,
+						},
+					],
+				},
+			],
+			message: "Review these positions.",
+			worktreePath: "/tmp/review-worktree",
+		});
+
+		expect(prompt).toContain('"positionType": "image"');
+		expect(prompt).toContain('"positionType": "file"');
+		expect(prompt).toContain(
+			'"image" = image position, not whole-file; when positionType is absent, null line numbers are the legacy whole-file fallback',
+		);
+	});
 
 	test("omits the discussion section on later turns and for empty data", () => {
 		const later = buildChatPrompt({

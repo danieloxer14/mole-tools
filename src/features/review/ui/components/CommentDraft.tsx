@@ -8,7 +8,12 @@ import {
 	Square,
 } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { type Draft, isMarkdownSelection } from "../../state";
+import {
+	type Draft,
+	isFileSelection,
+	isGeneralSelection,
+	isMarkdownSelection,
+} from "../../state";
 import type { DraftGeneration, FromChatAvailability } from "../from-chat";
 import { CommentMarkdown } from "./CommentMarkdown";
 import { composerEnterAction } from "./composer-keydown";
@@ -43,9 +48,11 @@ function statusLabel(status: Draft["status"]): string {
 }
 
 function draftPositionLabel(draft: Draft): string {
-	return isMarkdownSelection(draft.selection)
-		? `${draft.filePath}:${draft.selection.startLine}-${draft.selection.endLine}`
-		: `${draft.filePath}:${draft.selection.side}:${draft.selection.startLine}-${draft.selection.endLine}`;
+	if (isGeneralSelection(draft.selection)) return "Merge request";
+	if (isFileSelection(draft.selection)) return `${draft.filePath} (whole file)`;
+	if (isMarkdownSelection(draft.selection))
+		return `${draft.filePath}:${draft.selection.startLine}-${draft.selection.endLine}`;
+	return `${draft.filePath}:${draft.selection.side}:${draft.selection.startLine}-${draft.selection.endLine}`;
 }
 
 export function CommentDraft({
@@ -67,6 +74,7 @@ export function CommentDraft({
 				? "failed"
 				: "draft";
 	const generation = fromChat?.generation;
+	const positionLabel = draftPositionLabel(draft);
 	const generationRunning = generation?.status === "running";
 	const editorRef = useRef<HTMLTextAreaElement>(null);
 	const previousDraftBody = useRef(draft.body);
@@ -115,7 +123,7 @@ export function CommentDraft({
 			<header className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs">
 				<strong className="shrink-0 font-medium">Draft comment</strong>
 				<span className="min-w-0 flex-1 break-words whitespace-normal font-mono text-muted-foreground [overflow-wrap:anywhere]">
-					{draftPositionLabel(draft)}
+					{positionLabel}
 				</span>
 				<div className="flex shrink-0 items-center gap-1">
 					{status === "sending" ? (

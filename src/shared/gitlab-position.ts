@@ -31,6 +31,15 @@ export interface GitLabPositionPayload {
 	};
 }
 
+export interface GitLabFilePositionPayload {
+	position_type: "file";
+	base_sha: string;
+	start_sha: string;
+	head_sha: string;
+	old_path: string;
+	new_path: string;
+}
+
 /** Builds GitLab line code from raw old/new diff cursor positions. */
 function lineCode(filePath: string, oldLine: number, newLine: number): string {
 	const hasher = new Bun.CryptoHasher("sha1");
@@ -40,6 +49,10 @@ function lineCode(filePath: string, oldLine: number, newLine: number): string {
 
 function invalidSelection(message: string): never {
 	throw new PortError(`Invalid GitLab line selection: ${message}`);
+}
+
+function invalidFileSelection(message: string): never {
+	throw new PortError(`Invalid GitLab file selection: ${message}`);
 }
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
@@ -354,6 +367,74 @@ export function validatePosition(
 		!rangeMatches
 	) {
 		return invalidSelection("position does not match parsed diff lines");
+	}
+	return expected;
+}
+
+export function buildFilePosition(
+	file: ParsedFileDiff,
+	refs: DiffRefs,
+): GitLabFilePositionPayload {
+	validateRefs(refs);
+	const oldPath = file.oldPath ?? file.newPath;
+	const newPath = file.newPath ?? file.oldPath;
+	if (!isNonEmptyString(oldPath) || !isNonEmptyString(newPath)) {
+		return invalidFileSelection("diff has no path");
+	}
+	return {
+		position_type: "file",
+		base_sha: refs.baseSha,
+		start_sha: refs.startSha,
+		head_sha: refs.headSha,
+		old_path: oldPath,
+		new_path: newPath,
+	};
+}
+
+export function validateFilePosition(
+	position: GitLabFilePositionPayload,
+	file: ParsedFileDiff,
+	refs?: DiffRefs,
+): GitLabFilePositionPayload {
+	if (!position || typeof position !== "object") {
+		return invalidFileSelection("position is missing");
+	}
+	if (position.position_type !== "file") {
+		return invalidFileSelection("position_type must be file");
+	}
+	if (
+		!isNonEmptyString(position.base_sha) ||
+		!isNonEmptyString(position.start_sha) ||
+		!isNonEmptyString(position.head_sha)
+	) {
+		return invalidFileSelection("position refs must be non-empty strings");
+	}
+
+	const positionRefs: DiffRefs = {
+		baseSha: position.base_sha,
+		startSha: position.start_sha,
+		headSha: position.head_sha,
+	};
+	validateRefs(positionRefs);
+	if (refs) {
+		validateRefs(refs);
+		if (
+			position.base_sha !== refs.baseSha ||
+			position.start_sha !== refs.startSha ||
+			position.head_sha !== refs.headSha
+		) {
+			return invalidFileSelection(
+				`position refs ${position.base_sha}/${position.start_sha}/${position.head_sha} do not match current diff refs ${refs.baseSha}/${refs.startSha}/${refs.headSha}`,
+			);
+		}
+	}
+
+	const expected = buildFilePosition(file, refs ?? positionRefs);
+	if (
+		position.old_path !== expected.old_path ||
+		position.new_path !== expected.new_path
+	) {
+		return invalidFileSelection("position does not match parsed diff paths");
 	}
 	return expected;
 }

@@ -3,7 +3,12 @@ import { join } from "node:path";
 import type { AgentEvent, ReviewAgent } from "../../ports/review-agent";
 import type { ParsedFileDiff } from "../../shared/diff-parse";
 import { draftDiffExcerpt, NO_SELECTION_EXCERPT } from "./explain";
-import { type Draft, isMarkdownSelection } from "./state";
+import {
+	type Draft,
+	isFileSelection,
+	isGeneralSelection,
+	isMarkdownSelection,
+} from "./state";
 import type { ChatEntry } from "./store";
 
 export const COMMENT_FROM_CHAT_TIMEOUT_MS = 600_000;
@@ -53,10 +58,15 @@ export function buildCommentConversationMarkdown(input: {
 }): string {
 	const { draft, chatLabel, entries, diffs } = input;
 	const selection = draft.selection;
-	const lines = ["# Comment anchor", "", `File: \`${draft.filePath}\``];
+	const lines = ["# Comment anchor", ""];
 
-	if (isMarkdownSelection(selection)) {
+	if (isGeneralSelection(selection)) {
+		lines.push("Scope: whole merge request (general comment)");
+	} else if (isFileSelection(selection)) {
+		lines.push(`File: \`${draft.filePath}\``, "Scope: whole file");
+	} else if (isMarkdownSelection(selection)) {
 		lines.push(
+			`File: \`${draft.filePath}\``,
 			`Lines: ${rangeLabel(selection.startLine, selection.endLine)} (rendered Markdown block)`,
 			"",
 			"## Quoted Markdown",
@@ -65,6 +75,7 @@ export function buildCommentConversationMarkdown(input: {
 		);
 	} else {
 		lines.push(
+			`File: \`${draft.filePath}\``,
 			`Lines: ${rangeLabel(selection.startLine, selection.endLine)} (${selection.side} side)`,
 			"",
 			"## Diff excerpt",
@@ -133,7 +144,7 @@ export async function runCommentFromChat(run: {
 	let timeoutId: ReturnType<typeof setTimeout> | undefined;
 	let timedOut = false;
 	let removeAbortListener: (() => void) | undefined;
-	let result: CommentFromChatResult | null = null;
+	const result: { current: CommentFromChatResult | null } = { current: null };
 
 	try {
 		await mkdir(run.runDir, { recursive: true });
@@ -165,8 +176,11 @@ export async function runCommentFromChat(run: {
 					while (true) {
 						const next = await iterator?.next();
 						if (!next || next.done) return;
-						if (next.value.kind === "error" && result === null) {
-							result = { status: "failed", error: next.value.message };
+						if (next.value.kind === "error" && result.current === null) {
+							result.current = {
+								status: "failed",
+								error: next.value.message,
+							};
 						}
 					}
 				})();
@@ -206,7 +220,8 @@ export async function runCommentFromChat(run: {
 				error: `Comment generation timed out after ${run.timeoutMs / 1000} seconds`,
 			};
 		}
-		if (result?.status === "failed") return result;
+		const generationResult = result.current;
+		if (generationResult?.status === "failed") return generationResult;
 		if (thrownError) return { status: "failed", error: thrownError };
 
 		const output = Bun.file(outputPath);
@@ -218,9 +233,8 @@ export async function runCommentFromChat(run: {
 			return { status: "failed", error: "Agent returned no comment text" };
 		return { status: "ok", text };
 	} catch (error) {
-		if (run.signal.aborted) result = { status: "stopped" };
-		else result = { status: "failed", error: errorMessage(error) };
-		return result;
+		if (run.signal.aborted) return { status: "stopped" };
+		return { status: "failed", error: errorMessage(error) };
 	} finally {
 		if (timeoutId !== undefined) clearTimeout(timeoutId);
 		removeAbortListener?.();

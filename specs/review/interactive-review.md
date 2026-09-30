@@ -178,12 +178,12 @@ Implemented HTTP surface:
 | `POST /api/chat/cancel`                              | Accept `{ chatId }`, abort that chat's active turn, and return `204`.                                                                                                                                                                                                                                                                   |
 | `POST /api/chats`                                    | Create and activate a chat; return `201` with `{ chats, activeChatId }`.                                                                                                                                                                                                                                                                |
 | `POST /api/chats/active`                             | Accept `{ chatId }`, persist the selection, and return `204` (`404` for an unknown chat).                                                                                                                                                                                                                                               |
-| `POST /api/comments/draft`                           | Accept `{ selection, filePath }`; persist and return an empty local draft.                                                                                                                                                                                                                                                              |
+| `POST /api/comments/draft`                           | Accept `{ selection, filePath }`; `selection` is line (`path/side/startLine/endLine`), Markdown (`kind: "markdown"`), file (`kind: "file", path`), or general (`kind: "general"`). General requires `filePath: ""`; other kinds require `filePath` to match the selection path. Persist and return an empty local draft. |
 | `POST /api/comments/explain`                         | Accept `{ discussionId }`; create and activate a chat titled after that published discussion and return `201` with `{ chatId, chats, activeChatId, message }`, where `message` is the first-turn text the browser then sends through `POST /api/chat`. `400` for a missing id, `404` for an unknown discussion; neither creates a chat. |
 | `POST /api/comments/:id/from-chat`                    | Accept `{ chatId }`; run the active chat transcript through the `review-comment-from-chat` prompt and stream generated comment status. |
 | `PUT /api/comments/:id`                              | Edit a local draft body. Posted comments return a conflict and cannot be edited.                                                                                                                                                                                                                                                        |
 | `DELETE /api/comments/:id`                           | Cancel/remove a local draft.                                                                                                                                                                                                                                                                                                            |
-| `POST /api/comments/:id/send`                        | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread.                                                                                                                       |
+| `POST /api/comments/:id/send`                        | Validate the anchor and post one GitLab discussion: line drafts use a text position, file drafts use `position_type: "file"` with both `old_path` and `new_path`, and Markdown/general drafts are unpositioned (a general draft posts its body verbatim as an MR note). Refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread. |
 
 ## 4. Code/Overview UI and diff contract
 
@@ -262,10 +262,17 @@ from persisted MR metadata, never a browser-supplied host or project. The route
 uses `glab auth token` and streams bytes, forwarding `Range` and `206` metadata;
 other media sources, including external GitLab URLs, stay direct.
 
+The Overview scroll area ends above a pinned, labeled `Merge request comment`
+region. It shows a `Comment on this merge request…` button or each unposted
+general draft's composer (Write/Preview, From chat, Send, Retry, and Cancel).
+The region renders only when its create, cancel, edit, send, and retry callbacks
+are all supplied, and its composer area is capped at half the viewport height.
+
 At the bottom of Overview, `General discussion` has a count badge, the
 read-only discussion cards, and an Explain action for each discussion. It
 excludes known activity-note prefixes for title changes, left review comments,
 resolved threads, and approvals, even when GitLab's `system` flag is false.
+
 Overview content fills the available center column, including description
 Markdown and media; the Agent pane remains separate and resizable. With no
 discussions, it shows `No general discussion yet.` Agent-authored Markdown links
@@ -309,33 +316,37 @@ The header also offers a `Viewed` checkbox for the selected file, mirroring the
 
 Existing GitLab discussions are read-only except for **Explain**, which opens a
 new chat titled after the discussion and asks the agent to explain it (§6).
-Positioned discussions appear below their matching diff lines with
-resolved/unresolved styling, all notes, and an Explain button; unpositioned
-discussions appear in Overview's `General discussion` section, each with its
-own Explain button. Local drafts have no Explain.
+Line-positioned discussions appear below their matching diff lines with
+resolved/unresolved styling, all notes, and an Explain button. Native
+file-position discussions appear in that file's `File comments` block.
+Unpositioned discussions appear in Overview's `General discussion` section.
+Local drafts have no Explain.
 
-Existing GitLab discussions are read-only. Positioned discussions appear below
-their matching diff lines with resolved/unresolved styling and all notes;
-unpositioned discussions appear in Overview's `General discussion` section.
-Every positioned discussion has its own chevron that animates that one
-discussion's notes open and closed; a collapsed discussion stays in the DOM
-but shrinks to a single non-wrapping line showing its Resolved/Open status and
-the first line of its comment body, truncated with an ellipsis. Files with
-discussions rendered in the diff also expose a `Collapse all comments` /
-`Expand all comments` button in the diff header that toggles every discussion
-in that file at once. Each discussion's collapse state persists across file
-selection and review reloads.
+Line-positioned discussions have individual chevrons that animate their notes
+open and closed; file-level discussions in `File comments` are collapsible too.
+A collapsed discussion stays in the DOM but shrinks to a single non-wrapping
+line showing its Resolved/Open status and the first line of its comment body,
+truncated with an ellipsis. `Collapse all comments` / `Expand all comments` in
+the diff header toggles every line- or file-level discussion for that file,
+including file-level threads when no line discussions exist. Each discussion's
+collapse state persists across file selection and review reloads.
+Discussions can have text line positions, native file positions, image
+positions, or no position. Image-position threads remain visible in the
+matching file's `File comments` block with an `Image position` label; they are
+never classified as whole-file comments. For legacy payloads with null line
+numbers and no position type, the conservative fallback is whole-file.
 
 Published discussion notes render GitHub-flavoured Markdown through the shared
 sanitized comment-rendering boundary, for both positioned notes in the diff
 and general notes in Overview's `General discussion` section. Collapsed
-discussion summaries remain plain-text
-previews rather than rendered Markdown. Local comment drafts start in Write
-mode when empty and Preview mode when they already contain text. Editable
-drafts, including failed drafts, expose a compact segmented Preview/Write icon
-selector in the header beside the status badge; sending drafts have no selector.
-Switching modes changes only local editor state and does not alter draft
-persistence or comment posting transport.
+discussion summaries remain plain-text previews rather than rendered Markdown.
+Local comment drafts start in Write mode when empty and Preview mode when they
+already contain text. Every draft keeps a textual status badge (`Draft`,
+`Sending…`, or `Failed`); general and whole-file scope labels stay separate,
+with long file paths wrapping. Editable drafts, including failed drafts, expose
+a compact segmented Preview/Write icon selector in the header beside the status
+badge; sending drafts have no selector. Switching modes changes only local
+editor state and does not alter draft persistence or comment posting transport.
 While the diff is hidden behind the large-diff placeholder, both controls stay
 hidden until the table expands.
 
@@ -554,12 +565,35 @@ before `GitHost.createDiscussion`; the UI shows `Sending…`, disables Edit and
 Send, and keeps Cancel available. A post failure transitions the draft to
 `failed` with its error.
 
+### Whole-file comments
+
+Choose **Comment on file** in a diff file header to open an empty local draft.
+The draft and published file-level threads appear in a `File comments` block
+under that file's header in every view mode. Native GitLab file-position
+discussions are labelled `Whole file`; image-position discussions remain in the
+same block and are labelled `Image position`, never as whole-file comments.
+GitLab native `position_type: "file"` anchors the comment to the whole file,
+with both old and new paths populated even for added or deleted files. A file
+draft becomes stale only when its path is no longer in the current diff. If a
+GitLab instance rejects file positions, the draft fails with the host error and
+can be retried; it is not silently posted as an unpositioned note.
+
+### General comments
+
+Choose **Comment on this merge request…** in the pinned Overview comment region
+to write a general comment. It posts the body verbatim as an unpositioned,
+resolvable merge-request discussion, displayed in `General discussion`, and
+never becomes stale because it has no file or diff anchor. An unresolved
+general thread with a non-system note blocks review-babysitter auto-approval
+until the thread is resolved.
+
 ### From chat
 
 Drafts can be generated from the chat currently selected in the agent pane.
-The **From chat** action is available for positioned diff-line drafts and
-rendered-Markdown block drafts when the selected chat has an assistant reply
-with non-blank text and is not busy. It snapshots that transcript, anchor,
+The **From chat** action is available for line, rendered-Markdown block,
+whole-file, and general drafts when the selected chat has an assistant reply
+with non-blank text and is not busy. Whole-file and general anchors include
+their scope but no diff excerpt. It snapshots that transcript, anchor,
 and any context tags at click time, then runs one fresh read-only agent session
 with the active `review-comment-from-chat` prompt version. The session reads a
 temporary conversation file containing the anchor and transcript and writes

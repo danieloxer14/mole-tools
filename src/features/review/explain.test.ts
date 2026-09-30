@@ -158,6 +158,80 @@ describe("explainChatTitle", () => {
 			),
 		).toBe("Explain: src/old.ts:7");
 	});
+	test("titles file-level discussions by path when only system or blank notes exist", () => {
+		const position = {
+			newPath: "src/a.ts",
+			oldPath: "src/a.ts",
+			newLine: null,
+			oldLine: null,
+		};
+		expect(
+			explainChatTitle(
+				discussion({
+					notes: [
+						note({ body: "changed this file", system: true }),
+						note({ body: " \n " }),
+					],
+					position,
+				}),
+			),
+		).toBe("Explain whole file: src/a.ts");
+	});
+
+	test("keeps whole-file scope in titles with comment text", () => {
+		const title = explainChatTitle(
+			discussion({
+				position: {
+					positionType: "file",
+					newPath: "src/a.ts",
+					oldPath: "src/a.ts",
+					newLine: null,
+					oldLine: null,
+				},
+			}),
+		);
+
+		expect(title).toBe("Explain whole file: Please rename this helper");
+	});
+
+	test("titles image discussions distinctly from whole-file discussions", () => {
+		const imagePosition = {
+			positionType: "image",
+			newPath: "src/a.ts",
+			oldPath: "src/a.ts",
+			newLine: null,
+			oldLine: null,
+		};
+		expect(explainChatTitle(discussion({ position: imagePosition }))).toBe(
+			"Explain image: Please rename this helper",
+		);
+		expect(
+			explainChatTitle(
+				discussion({
+					notes: [note({ system: true })],
+					position: imagePosition,
+				}),
+			),
+		).toBe("Explain image: src/a.ts");
+	});
+
+	test("uses null-line whole-file fallback only when position type is absent", () => {
+		const textPosition = {
+			positionType: "text",
+			newPath: "src/a.ts",
+			oldPath: "src/a.ts",
+			newLine: null,
+			oldLine: null,
+		};
+		expect(
+			explainChatTitle(
+				discussion({
+					notes: [note({ system: true })],
+					position: textPosition,
+				}),
+			),
+		).toBe("Explain: src/a.ts:unknown");
+	});
 
 	test("uses a generic title for unpositioned discussions without a usable body", () => {
 		expect(explainChatTitle(discussion({ notes: [], position: null }))).toBe(
@@ -230,6 +304,22 @@ describe("discussionDiffExcerpt", () => {
 		).toBeNull();
 	});
 
+	test("does not create a line excerpt for image positions even with line values", () => {
+		expect(
+			discussionDiffExcerpt(
+				discussion({
+					position: {
+						positionType: "image",
+						newPath: "src/a.ts",
+						oldPath: "src/a.ts",
+						newLine: 15,
+						oldLine: null,
+					},
+				}),
+				[[fileDiff()]],
+			),
+		).toBeNull();
+	});
 	test("prefers the first diff set and falls back through later ones", () => {
 		const expanded = fileDiff({}, "expanded");
 		const compact = fileDiff({}, "compact");
@@ -354,6 +444,69 @@ describe("buildExplainMessage", () => {
 			"Explain prefix.\n\n## Comment\nUnresolved general MR discussion (no diff position)\n\n" +
 				`alice (2026-08-15T10:00:00.000Z):\nPlease rename this helper\n\n## Diff excerpt\n${NO_EXCERPT}`,
 		);
+	});
+	test("describes unresolved and resolved file-level discussions as whole-file threads", () => {
+		const position = {
+			newPath: "src/a.ts",
+			oldPath: "src/a.ts",
+			newLine: null,
+			oldLine: null,
+		};
+		for (const resolved of [false, true]) {
+			const status = resolved ? "Resolved" : "Unresolved";
+			const message = buildExplainMessage({
+				prefix: "Explain prefix.",
+				discussion: discussion({
+					resolved,
+					position,
+				}),
+				diffs: [],
+			});
+			expect(message).toContain(
+				`${status} discussion on file src/a.ts (whole file)`,
+			);
+			expect(message).toContain(`## Diff excerpt\n${NO_EXCERPT}`);
+		}
+	});
+	test("describes image-position discussions without claiming whole-file scope", () => {
+		const message = buildExplainMessage({
+			prefix: "Explain prefix.",
+			discussion: discussion({
+				position: {
+					positionType: "image",
+					newPath: "src/a.ts",
+					oldPath: "src/a.ts",
+					newLine: null,
+					oldLine: null,
+				},
+			}),
+			diffs: [[fileDiff()]],
+		});
+
+		expect(message).toContain(
+			"Unresolved discussion at image position in src/a.ts",
+		);
+		expect(message).not.toContain("(whole file)");
+		expect(message).toContain(`## Diff excerpt\n${NO_EXCERPT}`);
+	});
+
+	test("does not infer whole-file scope when an explicit text kind has null lines", () => {
+		const message = buildExplainMessage({
+			prefix: "Explain prefix.",
+			discussion: discussion({
+				position: {
+					positionType: "text",
+					newPath: "src/a.ts",
+					oldPath: "src/a.ts",
+					newLine: null,
+					oldLine: null,
+				},
+			}),
+			diffs: [],
+		});
+
+		expect(message).toContain("Unresolved discussion at src/a.ts:old:unknown");
+		expect(message).not.toContain("(whole file)");
 	});
 
 	test("substitutes a placeholder paragraph when no non-system note exists", () => {

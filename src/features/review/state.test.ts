@@ -6,9 +6,12 @@ import { getReviewPaths } from "./paths";
 import {
 	CHAT_ID_PATTERN,
 	ChatMetaSchema,
+	DraftSchema,
 	DraftSelectionSchema,
 	deriveChatTitle,
 	ensureChats,
+	isFileSelection,
+	isGeneralSelection,
 	isMarkdownSelection,
 	LayerDocSchema,
 	LEGACY_CHAT_ID,
@@ -611,6 +614,8 @@ describe("DraftSelectionSchema", () => {
 			endLine: 6,
 		});
 		expect(isMarkdownSelection(selection)).toBe(false);
+		expect(isFileSelection(selection)).toBe(false);
+		expect(isGeneralSelection(selection)).toBe(false);
 	});
 
 	test("accepts a markdown-block selection and reports it as markdown", () => {
@@ -622,6 +627,46 @@ describe("DraftSelectionSchema", () => {
 			quote: "## Heading\n\nBody.",
 		});
 		expect(isMarkdownSelection(selection)).toBe(true);
+		expect(isFileSelection(selection)).toBe(false);
+		expect(isGeneralSelection(selection)).toBe(false);
+	});
+	test("accepts file and general selections", () => {
+		const fileSelection = DraftSelectionSchema.parse({
+			kind: "file",
+			path: "src/a.ts",
+		});
+		expect(isFileSelection(fileSelection)).toBe(true);
+		expect(isGeneralSelection(fileSelection)).toBe(false);
+		expect(isMarkdownSelection(fileSelection)).toBe(false);
+
+		const generalSelection = DraftSelectionSchema.parse({ kind: "general" });
+		expect(isGeneralSelection(generalSelection)).toBe(true);
+		expect(isFileSelection(generalSelection)).toBe(false);
+		expect(isMarkdownSelection(generalSelection)).toBe(false);
+	});
+
+	test("rejects extra general fields and an empty file path", () => {
+		expect(() =>
+			DraftSelectionSchema.parse({ kind: "general", path: "x" }),
+		).toThrow();
+		expect(() =>
+			DraftSelectionSchema.parse({ kind: "file", path: "" }),
+		).toThrow();
+	});
+
+	test("persists a general draft with an empty file path", () => {
+		expect(
+			DraftSchema.parse({
+				id: "draft-general",
+				body: "Review this merge request",
+				selection: { kind: "general" },
+				filePath: "",
+				status: "draft",
+			}),
+		).toMatchObject({
+			selection: { kind: "general" },
+			filePath: "",
+		});
 	});
 
 	test("rejects a markdown-block selection with a reversed line range", () => {
@@ -655,5 +700,7 @@ describe("DraftSelectionSchema", () => {
 			endLine: 1,
 		});
 		expect(isMarkdownSelection(selection)).toBe(false);
+		expect(isFileSelection(selection)).toBe(false);
+		expect(isGeneralSelection(selection)).toBe(false);
 	});
 });

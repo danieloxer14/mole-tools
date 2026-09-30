@@ -1,4 +1,5 @@
 import { type ChatSummary, chatLabel } from "./components/ChatPane";
+import type { CommentDraftProps } from "./components/CommentDraft";
 
 export type FromChatAvailability =
 	| { kind: "ready"; chatLabel: string }
@@ -13,6 +14,19 @@ export interface FromChatContext {
 	generations: Readonly<Record<string, DraftGeneration>>;
 	onGenerate: (draftId: string) => void;
 	onStop: (draftId: string) => void;
+}
+
+export function draftFromChat(
+	fromChat: FromChatContext | undefined,
+	draftId: string,
+): CommentDraftProps["fromChat"] {
+	if (!fromChat) return undefined;
+	return {
+		availability: fromChat.availability,
+		generation: fromChat.generations[draftId],
+		onGenerate: fromChat.onGenerate,
+		onStop: fromChat.onStop,
+	};
 }
 
 const NO_REPLIES = "Selected chat has no replies yet";

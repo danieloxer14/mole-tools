@@ -1,11 +1,16 @@
 import type { ParsedFileDiff } from "../shared/diff-parse";
-import type { GitLabPositionPayload } from "../shared/gitlab-position";
+import type {
+	GitLabFilePositionPayload,
+	GitLabPositionPayload,
+} from "../shared/gitlab-position";
 import type { MrRef } from "../shared/mr-url";
 
 export type {
+	GitLabFilePositionPayload,
 	GitLabLineRangeEntry,
 	GitLabPositionPayload,
 } from "../shared/gitlab-position";
+
 export interface HostUser {
 	id: string;
 	handle: string;
@@ -86,10 +91,37 @@ export interface HostNote {
 }
 
 export interface DiscussionPosition {
+	/** Original GitLab position_type; absent on older API payloads. */
+	positionType?: string | null;
 	newPath: string | null;
 	oldPath: string | null;
 	newLine: number | null;
 	oldLine: number | null;
+}
+
+/** Legacy null-line positions count as files only when positionType is absent. */
+export function isFileDiscussionPosition(
+	position: DiscussionPosition | null,
+): position is
+	| (DiscussionPosition & { positionType: "file" })
+	| (DiscussionPosition & {
+			positionType?: undefined;
+			newLine: null;
+			oldLine: null;
+	  }) {
+	return (
+		position !== null &&
+		(position.positionType === "file" ||
+			(position.positionType === undefined &&
+				position.newLine === null &&
+				position.oldLine === null))
+	);
+}
+
+export function isImageDiscussionPosition(
+	position: DiscussionPosition | null,
+): position is DiscussionPosition & { positionType: "image" } {
+	return position?.positionType === "image";
 }
 
 export interface HostDiscussion {
@@ -115,7 +147,7 @@ export interface UnpositionedCreateDiscussionInput {
 export interface PositionedCreateDiscussionInput {
 	ref: MrRef;
 	body: string;
-	position: GitLabPositionPayload;
+	position: GitLabPositionPayload | GitLabFilePositionPayload;
 	parsedDiff: ParsedFileDiff;
 	diffRefs: DiffRefs;
 }

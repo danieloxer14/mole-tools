@@ -99,11 +99,22 @@ changed-file tree; global and per-layer viewed-file coverage are separate.
 A local comment draft anchored to one diff side and inclusive line range.
 New-side anchors use `new_line`; deleted-side anchors use `old_line`. Ranges
 cannot cross sides and must resolve against current diff refs before explicit
-Send posts one GitLab discussion. Existing discussions remain read-only.
+Send posts one GitLab text-position discussion. Whole-file discussions use a
+native file position; general discussions have no position. Existing
+discussions remain read-only.
 
 ### General discussion
-An unpositioned merge-request discussion shown at the bottom of the Overview
-view, with an Explain action that opens a chat asking the agent to explain it.
+An unpositioned, resolvable merge-request discussion shown at the bottom of
+the Overview view. Reviewers can start one from the pinned Overview footer;
+posted general comments appear here with an Explain action that opens a chat
+asking the agent to explain them. An unresolved general thread with a
+non-system note blocks review-babysitter auto-approval until resolved.
+
+### File comment
+A whole-file review comment anchored to a file path and posted to GitLab with
+`position_type: "file"`. Drafts and published file-level threads appear in the
+file's `File comments` block below its header; a draft becomes stale only when
+its path leaves the current diff.
 
 ### Description tag
 A chat tag `{ kind: "description", startLine?, endLine?, quote }` for the MR
@@ -112,8 +123,8 @@ inclusive source-line range; without them, the tag means the whole description.
 The quote carries the tagged text.
 
 Review comment bodies support GitHub-flavoured Markdown in local previews and
-published positioned/general discussion cards; rendered output is sanitized,
-while collapsed discussion summaries stay plain text.
+published line-, file-level, and general discussion cards; rendered output is
+sanitized, while collapsed discussion summaries stay plain text.
 
 ### Review sync
 Explicit re-synchronization after a head-SHA change. Refresh checks current

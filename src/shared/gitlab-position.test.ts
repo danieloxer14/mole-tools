@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { PortError } from "../core/errors";
 import { parseFileDiff } from "./diff-parse";
 import {
+	buildFilePosition,
 	buildPosition,
+	type GitLabFilePositionPayload,
 	type GitLabPositionPayload,
+	validateFilePosition,
 	validatePosition,
 } from "./gitlab-position";
 
@@ -44,6 +47,55 @@ function expectedHash(path: string, oldLine: number, newLine: number) {
 	hasher.update(path);
 	return `${hasher.digest("hex")}_${oldLine}_${newLine}`;
 }
+
+describe("buildFilePosition", () => {
+	test("falls back to the present path for added and deleted files", () => {
+		expect(
+			buildFilePosition(
+				{ ...modified, oldPath: null, newPath: "new.ts" },
+				refs,
+			),
+		).toEqual({
+			position_type: "file",
+			base_sha: "base-sha",
+			start_sha: "start-sha",
+			head_sha: "head-sha",
+			old_path: "new.ts",
+			new_path: "new.ts",
+		});
+		expect(
+			buildFilePosition(
+				{ ...modified, oldPath: "old.ts", newPath: null },
+				refs,
+			),
+		).toEqual({
+			position_type: "file",
+			base_sha: "base-sha",
+			start_sha: "start-sha",
+			head_sha: "head-sha",
+			old_path: "old.ts",
+			new_path: "old.ts",
+		});
+	});
+
+	test("preserves old and new paths for renamed files", () => {
+		expect(
+			buildFilePosition(
+				{ ...modified, oldPath: "old.ts", newPath: "new.ts" },
+				refs,
+			),
+		).toMatchObject({ old_path: "old.ts", new_path: "new.ts" });
+	});
+
+	test("rejects missing paths and empty refs", () => {
+		expect(() =>
+			buildFilePosition({ ...modified, oldPath: null, newPath: null }, refs),
+		).toThrow("Invalid GitLab file selection: diff has no path");
+		expect(() => buildFilePosition(modified, { ...refs, headSha: "" })).toThrow(
+			PortError,
+		);
+	});
+});
 
 describe("buildPosition", () => {
 	test("maps a single new-side line with refs", () => {
@@ -265,5 +317,52 @@ describe("validatePosition", () => {
 				headSha: "new-head-sha",
 			}),
 		).toThrow("current diff refs");
+	});
+});
+
+describe("validateFilePosition", () => {
+	test("returns rebuilt payload for matching file paths and refs", () => {
+		const position: GitLabFilePositionPayload = {
+			position_type: "file",
+			base_sha: "base-sha",
+			start_sha: "start-sha",
+			head_sha: "head-sha",
+			old_path: "src/app.ts",
+			new_path: "src/app.ts",
+		};
+		expect(validateFilePosition(position, modified, refs)).toEqual(position);
+	});
+
+	test("rejects a ref mismatch", () => {
+		const position = buildFilePosition(modified, refs);
+		expect(() =>
+			validateFilePosition(position, modified, {
+				...refs,
+				headSha: "new-head",
+			}),
+		).toThrow("current diff refs");
+	});
+
+	test("rejects parsed-diff path mismatch with exact error", () => {
+		const position = buildFilePosition(modified, refs);
+		expect(() =>
+			validateFilePosition(
+				{ ...position, new_path: "other.ts" },
+				modified,
+				refs,
+			),
+		).toThrow(
+			"Invalid GitLab file selection: position does not match parsed diff paths",
+		);
+	});
+
+	test("rejects non-file positions", () => {
+		const position = {
+			...buildFilePosition(modified, refs),
+			position_type: "text",
+		} as unknown as GitLabFilePositionPayload;
+		expect(() => validateFilePosition(position, modified, refs)).toThrow(
+			PortError,
+		);
 	});
 });
