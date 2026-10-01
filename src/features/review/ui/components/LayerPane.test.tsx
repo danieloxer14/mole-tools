@@ -82,11 +82,13 @@ function reviewState(overrides: Partial<ReviewState> = {}): ReviewState {
 			},
 		],
 		viewedFiles: [],
+		collapsedDiscussionIds: [],
 		chatSessionId: null,
 		chats: [],
 		activeChatId: null,
 		drafts: [],
 		...overrides,
+		showWhitespaceChanges: overrides.showWhitespaceChanges ?? true,
 	};
 }
 
@@ -557,7 +559,7 @@ test("falls back to literal layer text when Markdown rendering throws", () => {
 	try {
 		marked.parse = (() => {
 			throw new Error("renderer unavailable");
-		}) as typeof marked.parse;
+		}) as unknown as typeof marked.parse;
 		pane = parseMarkup(renderLayerPane({ state }));
 	} finally {
 		marked.parse = originalParse;
@@ -917,7 +919,7 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 		state: reviewState({
 			layers: [
 				{
-					...reviewState().layers[0],
+					...firstLayer(),
 					files: paths,
 				},
 			],
@@ -1011,7 +1013,7 @@ test("keeps long layer file labels readable and accessible", () => {
 		state: reviewState({
 			layers: [
 				{
-					...reviewState().layers[0],
+					...firstLayer(),
 					files: [longPath],
 				},
 			],
@@ -1078,7 +1080,9 @@ test("renders chevron and completion controls for each layer", () => {
 	const markup = renderCollapseLayers();
 	for (const layerId of ["done-layer", "open-layer"]) {
 		const card = parseMarkup(layerCardMarkup(markup, layerId));
-		const header = card.querySelector("div.flex.items-center.gap-2.p-3");
+		const header = card.querySelector<HTMLElement>(
+			"div.flex.items-center.gap-2.p-3",
+		);
 		const collapseControl = header?.querySelector<HTMLButtonElement>(
 			'button[aria-controls^="layer-details-"]',
 		);

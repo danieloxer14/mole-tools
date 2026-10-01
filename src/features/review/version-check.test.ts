@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { withMockFetch } from "../../../test/fakes/mockFetch";
 import {
 	checkForUpdate,
 	RELEASE_CATALOG_URL,
@@ -30,7 +31,9 @@ const CATALOG = [
 ];
 
 function catalogFetcher(body: unknown = CATALOG, status = 200): typeof fetch {
-	return async () => new Response(JSON.stringify(body), { status });
+	return withMockFetch(
+		async () => new Response(JSON.stringify(body), { status }),
+	);
 }
 
 function failClosed(current: string) {
@@ -41,10 +44,10 @@ describe("checkForUpdate", () => {
 	test("requests raw main catalog once with existing timeout and user-agent", async () => {
 		const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> =
 			[];
-		const fetcher: typeof fetch = async (input, init) => {
+		const fetcher: typeof fetch = withMockFetch(async (input, init) => {
 			requests.push({ input, init });
 			return new Response(JSON.stringify(CATALOG));
-		};
+		});
 
 		await checkForUpdate({ current: "0.9.0", fetcher });
 
@@ -103,7 +106,9 @@ describe("checkForUpdate", () => {
 	}
 
 	test("fails closed on invalid JSON", async () => {
-		const fetcher: typeof fetch = async () => new Response("not json");
+		const fetcher: typeof fetch = withMockFetch(
+			async () => new Response("not json"),
+		);
 		expect(await checkForUpdate({ current: "0.9.0", fetcher })).toEqual(
 			failClosed("0.9.0"),
 		);
@@ -128,10 +133,10 @@ describe("checkForUpdate", () => {
 
 	test("fails closed when installed version is malformed without requesting", async () => {
 		let requested = false;
-		const fetcher: typeof fetch = async () => {
+		const fetcher: typeof fetch = withMockFetch(async () => {
 			requested = true;
 			return new Response(JSON.stringify(CATALOG));
-		};
+		});
 		expect(await checkForUpdate({ current: "malformed", fetcher })).toEqual(
 			failClosed("malformed"),
 		);
@@ -140,12 +145,12 @@ describe("checkForUpdate", () => {
 
 	test("fails closed when fetch throws or rejects", async () => {
 		for (const fetcher of [
-			(() => {
+			withMockFetch(() => {
 				throw new Error("offline");
-			}) as typeof fetch,
-			(async () => {
+			}),
+			withMockFetch(async () => {
 				throw new Error("offline");
-			}) as typeof fetch,
+			}),
 		]) {
 			expect(await checkForUpdate({ current: "0.9.0", fetcher })).toEqual(
 				failClosed("0.9.0"),
@@ -154,17 +159,19 @@ describe("checkForUpdate", () => {
 	});
 
 	test("fails closed when request times out", async () => {
-		const fetcher: typeof fetch = (_input, init) =>
-			new Promise<Response>((_resolve, reject) => {
-				const signal = init?.signal;
-				if (!signal || signal.aborted) {
-					reject(signal?.reason ?? new Error("missing abort signal"));
-					return;
-				}
-				signal.addEventListener("abort", () => reject(signal.reason), {
-					once: true,
-				});
-			});
+		const fetcher: typeof fetch = withMockFetch(
+			(_input, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					const signal = init?.signal;
+					if (!signal || signal.aborted) {
+						reject(signal?.reason ?? new Error("missing abort signal"));
+						return;
+					}
+					signal.addEventListener("abort", () => reject(signal.reason), {
+						once: true,
+					});
+				}),
+		);
 
 		expect(
 			await checkForUpdate({ current: "0.9.0", fetcher, timeoutMs: 10 }),

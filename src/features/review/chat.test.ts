@@ -262,6 +262,7 @@ describe("chat prompt construction", () => {
 	test("rejects malformed line tags", () => {
 		expect(() =>
 			buildChatPrompt({
+				worktreePath: "/tmp/review-worktree",
 				firstTurn: false,
 				message: "Explain",
 				tags: [
@@ -308,6 +309,7 @@ describe("chat prompt construction", () => {
 	test("rejects malformed file tags", () => {
 		expect(() =>
 			buildChatPrompt({
+				worktreePath: "/tmp/review-worktree",
 				firstTurn: false,
 				message: "Explain",
 				tags: [{ kind: "file", path: "src/api.ts", startLine: 4 }],
@@ -462,9 +464,9 @@ describe("chat prompt construction", () => {
 		expect(ids).toContain("d-individual");
 		expect(ids).not.toContain("d-system");
 		expect(ids).toHaveLength(20);
-		expect(projected[0].id).toBe("d-individual");
-		expect(projected[1].id).toBe("d-long");
-		expect(projected[1].notes[0].body).toBe(
+		expect(projected[0]?.id).toBe("d-individual");
+		expect(projected[1]?.id).toBe("d-long");
+		expect(projected[1]?.notes[0]?.body).toBe(
 			`${"x".repeat(2000)}
 [truncated]`,
 		);

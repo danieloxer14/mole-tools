@@ -44,6 +44,7 @@ test("does not render a general discussions trigger", () => {
 		<ChatPane
 			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
+			tools={[]}
 			tags={[]}
 			chats={[
 				{
@@ -179,6 +180,7 @@ test("renders parent-owned composer draft", () => {
 		<ChatPane
 			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
+			tools={[]}
 			tags={[]}
 			chats={[
 				{
@@ -256,15 +258,7 @@ test("bounds long agent paths in message markdown and context tags", () => {
 	const longPath =
 		"packages/review/features/agent/components/very-long-file-name.ts";
 	const markup = renderComposer({
-		transcript: [
-			{
-				role: "assistant",
-				text: `See \`${longPath}:42\`.`,
-				tags: [],
-				at: "2026-08-24T00:00:00Z",
-				sessionId: "session-1",
-			},
-		],
+		transcript: [transcriptEntry("assistant", `See \`${longPath}:42\`.`)],
 		tags: [{ kind: "file", path: longPath }],
 	});
 	const container = parseMarkup(markup);
@@ -498,6 +492,7 @@ function renderComposer(
 			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
 			tags={[]}
+			tools={[]}
 			chats={[
 				{
 					id: "chat-1",
@@ -569,6 +564,7 @@ function renderInteractive(
 				worktreePath={TEST_WORKTREE_PATH}
 				transcript={[]}
 				tags={[]}
+				tools={[]}
 				chats={[
 					{
 						id: "chat-1",
@@ -695,13 +691,7 @@ test("opens Skills settings from the skill picker plus button", () => {
 });
 
 test("keeps persisted assistant card DOM stable across history refresh", () => {
-	const entry = {
-		role: "assistant" as const,
-		text: "Completed answer",
-		tags: [],
-		at: "2026-08-24T00:00:00Z",
-		sessionId: "session-1",
-	};
+	const entry = transcriptEntry("assistant", "Completed answer");
 	const rendered = renderInteractive({ transcript: [entry] });
 	const firstCard = rendered.container.querySelector('[data-role="assistant"]');
 	expect(firstCard).not.toBeNull();
@@ -803,6 +793,7 @@ test("does not submit Enter while busy but submits only plain Enter while idle",
 		busy: true,
 		onSend: () => {
 			busySends += 1;
+			return true;
 		},
 	});
 	const busyTextarea = busyRender.container.querySelector("textarea");
@@ -830,6 +821,7 @@ test("does not submit Enter while busy but submits only plain Enter while idle",
 		draft: "send this",
 		onSend: () => {
 			idleSends += 1;
+			return true;
 		},
 	});
 	const idleTextarea = idleRender.container.querySelector("textarea");
@@ -862,6 +854,7 @@ test("leaves parent-owned draft clearing to the accepted send path", () => {
 		},
 		onSend: () => {
 			sends += 1;
+			return true;
 		},
 	});
 	const textarea = rendered.container.querySelector("textarea");
@@ -878,22 +871,8 @@ test("leaves parent-owned draft clearing to the accepted send path", () => {
 test("exposes semantic message and streaming state", () => {
 	const markup = renderComposer({
 		transcript: [
-			{
-				role: "user",
-				text: "What changed?",
-				tags: [],
-				skills: [],
-				at: "2026-08-24T00:00:00Z",
-				sessionId: "session-1",
-			},
-			{
-				role: "assistant",
-				text: "First answer",
-				tags: [],
-				at: "2026-08-24T00:00:01Z",
-				skills: [],
-				sessionId: "session-1",
-			},
+			transcriptEntry("user", "What changed?"),
+			transcriptEntry("assistant", "First answer"),
 		],
 		streamingSegments: ["Live before"],
 		sending: true,
@@ -946,13 +925,10 @@ test("opens issue-shaped Markdown file links without browser navigation", () => 
 	const openedPaths: string[] = [];
 	const rendered = renderInteractive({
 		transcript: [
-			{
-				role: "assistant",
-				text: `[postgres-task-store.ts:51](http://127.0.0.1:49272${TEST_WORKTREE_PATH}/${file}:51)`,
-				tags: [],
-				at: "2026-08-24T00:00:00Z",
-				sessionId: "session-1",
-			},
+			transcriptEntry(
+				"assistant",
+				`[postgres-task-store.ts:51](http://127.0.0.1:49272${TEST_WORKTREE_PATH}/${file}:51)`,
+			),
 		],
 		onOpenFileRef: (path) => openedPaths.push(path),
 	});
@@ -971,13 +947,10 @@ test("leaves external and out-of-worktree Markdown links untouched", () => {
 	const openedPaths: string[] = [];
 	const rendered = renderInteractive({
 		transcript: [
-			{
-				role: "assistant",
-				text: `[external](https://example.com/src/index.ts:12) and [outside](http://127.0.0.1:49272/other/src/index.ts:12)`,
-				tags: [],
-				at: "2026-08-24T00:00:00Z",
-				sessionId: "session-1",
-			},
+			transcriptEntry(
+				"assistant",
+				"[external](https://example.com/src/index.ts:12) and [outside](http://127.0.0.1:49272/other/src/index.ts:12)",
+			),
 		],
 		onOpenFileRef: (path) => openedPaths.push(path),
 	});
@@ -997,15 +970,7 @@ test("leaves external and out-of-worktree Markdown links untouched", () => {
 test("opens file references from rendered assistant markdown", () => {
 	let openedPath = "";
 	const rendered = renderInteractive({
-		transcript: [
-			{
-				role: "assistant",
-				text: "See `src/index.ts:12`.",
-				tags: [],
-				at: "2026-08-24T00:00:00Z",
-				sessionId: "session-1",
-			},
-		],
+		transcript: [transcriptEntry("assistant", "See `src/index.ts:12`.")],
 		onOpenFileRef: (path) => {
 			openedPath = path;
 		},

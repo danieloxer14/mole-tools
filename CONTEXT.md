@@ -144,6 +144,17 @@ with head and merge-base SHA stamps at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 Running status exists in memory only.
 
+**Importance ledger** is the append-only `ledger.ndjson` beside
+`importance.json`, with `run` and `contest` entries.
+**Importance contest** starts from the diff-gutter tooltip's **Contest** button.
+Its two-stage dialog accepts a new level and reason; override persists until
+next revision re-score. It provides a Markdown report for a GitHub issue with
+app version, revision SHAs, run/prompt/agent details, file and lines, scores,
+code excerpt (up to 80 lines), and full system prompt. GitHub issues are public;
+redact confidential code, paths, and names before posting.
+Keyboard focus returns to the originating diff-gutter strip after Escape,
+Cancel, or closing the report.
+
 **Importance review progress** appears as one shared bar directly beneath the
 Layers/Files tabs when the flag is on and scoring is ready. It shows the weighted
 share of added and deleted lines in viewed files against all scored changed lines

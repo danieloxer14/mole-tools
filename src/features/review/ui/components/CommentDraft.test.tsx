@@ -745,6 +745,9 @@ test("from-chat draft targeting keeps same-anchor requests with clicked draft", 
 		const buttons = container.querySelectorAll<HTMLButtonElement>(
 			'button[aria-label="From chat"]',
 		);
+		const draftA = drafts[0];
+		const draftB = drafts[1];
+		if (!draftA || !draftB) throw new Error("Expected draft fixtures");
 		act(() => buttons[0]?.click());
 		activeChatId = "chat-b";
 		act(() => buttons[1]?.click());
@@ -753,8 +756,8 @@ test("from-chat draft targeting keeps same-anchor requests with clicked draft", 
 			{ draftId: "draft-b", chatId: "chat-b" },
 		]);
 		act(() => {
-			resolveB?.({ ...drafts[1], body: "Existing B\n\nGenerated B" });
-			resolveA?.({ ...drafts[0], body: "Existing A\n\nGenerated A" });
+			resolveB?.({ ...draftB, body: "Existing B\n\nGenerated B" });
+			resolveA?.({ ...draftA, body: "Existing A\n\nGenerated A" });
 		});
 		expect(drafts.map(({ id, body }) => [id, body])).toEqual([
 			["draft-a", "Existing A\n\nGenerated A"],

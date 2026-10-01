@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { withMockFetch } from "../../../../test/fakes/mockFetch";
 import type { FeatureFlagView } from "../../../shared/feature-flags";
 import type { FeatureFlagsSnapshot } from "./feature-flags";
 import {
@@ -344,7 +345,7 @@ test("ignores stale GET responses that resolve after a successful toggle", async
 test("only latest concurrent flag load can update the shared snapshot", async () => {
 	let finishOlderGet!: (value: Response) => void;
 	let getCalls = 0;
-	globalThis.fetch = (async () => {
+	globalThis.fetch = withMockFetch(async () => {
 		getCalls++;
 		if (getCalls === 1) {
 			return new Promise<Response>((resolve) => {
@@ -352,7 +353,7 @@ test("only latest concurrent flag load can update the shared snapshot", async ()
 			});
 		}
 		return response({ flags: [enabledFlag] });
-	}) as typeof fetch;
+	});
 	const container = mountConsumers();
 
 	let olderLoad!: Promise<void>;
@@ -380,7 +381,7 @@ test("only latest concurrent flag load can update the shared snapshot", async ()
 test("keeps current flags and latest error when older flag loads finish later", async () => {
 	let finishOlderGet!: (value: Response) => void;
 	let getCalls = 0;
-	globalThis.fetch = (async () => {
+	globalThis.fetch = withMockFetch(async () => {
 		getCalls++;
 		if (getCalls === 1) return response({ flags: [disabledFlag] });
 		if (getCalls === 2) {
@@ -389,7 +390,7 @@ test("keeps current flags and latest error when older flag loads finish later", 
 			});
 		}
 		return response({ error: "feature service unavailable" }, 503);
-	}) as typeof fetch;
+	});
 	const container = mountConsumers();
 	let state: FeatureFlagsSnapshot | undefined;
 	function StateReader() {

@@ -23,21 +23,22 @@ export const ImportanceScoreSchema = z.union([
 	z.literal(5),
 ]);
 export type ImportanceScore = z.infer<typeof ImportanceScoreSchema>;
+export const ImportanceReasonSchema = z
+	.string()
+	.max(144)
+	.refine((reason) => reason.trim().length > 0, {
+		message: "reason must not be blank",
+	})
+	.refine((reason) => !/[\r\n]/.test(reason), {
+		message: "reason must be a single line",
+	});
 export const ImportanceSpanSchema = z
 	.object({
 		side: z.enum(["new", "old"]),
 		startLine: z.number().int().positive(),
 		endLine: z.number().int().positive(),
 		score: ImportanceScoreSchema,
-		reason: z
-			.string()
-			.max(144)
-			.refine((reason) => reason.trim().length > 0, {
-				message: "reason must not be blank",
-			})
-			.refine((reason) => !/[\r\n]/.test(reason), {
-				message: "reason must be a single line",
-			}),
+		reason: ImportanceReasonSchema,
 	})
 	.refine((span) => span.endLine >= span.startLine, {
 		message: "endLine must be greater than or equal to startLine",
@@ -124,7 +125,19 @@ export const ImportanceResultSchema = z.object({
 	error: z.string().nullable(),
 	files: z.array(ImportanceFileSchema),
 	generatedAt: z.string(),
+	runId: z.string().min(1).optional(),
 });
+export const ImportanceContestRequestSchema = z
+	.object({
+		revisionKey: z.string().min(1),
+		path: z.string().min(1),
+		fileIndex: z.number().int().nonnegative(),
+		spanIndex: z.number().int().nonnegative(),
+		expected: ImportanceSpanSchema,
+		score: ImportanceScoreSchema,
+		reason: z.string(),
+	})
+	.strict();
 
 export type ImportanceSpan = z.infer<typeof ImportanceSpanSchema>;
 export type ImportanceFile = z.infer<typeof ImportanceFileSchema>;
@@ -139,6 +152,13 @@ export interface ImportanceSnapshot {
 	error: string | null;
 	files: ImportanceFile[];
 }
+export type ImportanceContestRequest = z.input<
+	typeof ImportanceContestRequestSchema
+>;
+export type ImportanceContestResponse = {
+	snapshot: ImportanceSnapshot;
+	report: string;
+};
 
 export interface ImportanceGenerationOptions {
 	agent: ReviewAgent;
@@ -159,6 +179,9 @@ export interface ImportanceGenerationResult {
 	files: ImportanceFile[];
 	runId: string;
 	attempts: number;
+	systemPrompt: string | null;
+	input: string | null;
+	messages: string[];
 }
 
 const IMPORTANCE_OUTPUT_RULES = [
@@ -234,6 +257,9 @@ function errorMessage(error: unknown): string {
 function cancelledImportanceResult(
 	runId: string,
 	attempts: number,
+	systemPrompt: string | null,
+	input: string | null,
+	messages: string[],
 ): ImportanceGenerationResult {
 	return {
 		status: "failed",
@@ -241,6 +267,9 @@ function cancelledImportanceResult(
 		files: [],
 		runId,
 		attempts,
+		systemPrompt,
+		input,
+		messages,
 	};
 }
 
@@ -326,11 +355,20 @@ export async function generateImportance(
 	const runId = options.runId ?? crypto.randomUUID();
 	const runDir = join(options.dir, runId);
 	let attempts = 0;
+	let systemPrompt: string | null = null;
+	let input: string | null = null;
+	const messages: string[] = [];
 	try {
 		await mkdir(runDir, { recursive: true });
 		await options.agent.preflight();
 		if (options.signal?.aborted)
-			return cancelledImportanceResult(runId, attempts);
+			return cancelledImportanceResult(
+				runId,
+				attempts,
+				systemPrompt,
+				input,
+				messages,
+			);
 
 		const promptText =
 			options.promptText ??
@@ -341,16 +379,15 @@ export async function generateImportance(
 		const systemPromptPath = join(runDir, "system.md");
 		const inputPath = join(runDir, "input.md");
 		const outputPath = join(runDir, "output.json");
-		await Bun.write(systemPromptPath, buildImportanceSystemPrompt(promptText));
-		await Bun.write(
-			inputPath,
-			renderImportanceInput({
-				title: options.state.mr.title,
-				mergeBaseSha: options.state.revision.mergeBaseSha,
-				headSha: options.state.revision.headSha,
-				files: options.parsedDiff,
-			}),
-		);
+		systemPrompt = buildImportanceSystemPrompt(promptText);
+		input = renderImportanceInput({
+			title: options.state.mr.title,
+			mergeBaseSha: options.state.revision.mergeBaseSha,
+			headSha: options.state.revision.headSha,
+			files: options.parsedDiff,
+		});
+		await Bun.write(systemPromptPath, systemPrompt);
+		await Bun.write(inputPath, input);
 
 		const firstMessage = buildImportanceMessage(inputPath, outputPath);
 		const attemptOptions = {
@@ -366,22 +403,36 @@ export async function generateImportance(
 		};
 		let attempt: ImportanceAttempt;
 		attempts++;
+		messages.push(firstMessage);
 		attempt = await runAgentFileAttempt({
 			...attemptOptions,
 			message: firstMessage,
 		});
 		if (options.signal?.aborted)
-			return cancelledImportanceResult(runId, attempts);
+			return cancelledImportanceResult(
+				runId,
+				attempts,
+				systemPrompt,
+				input,
+				messages,
+			);
 
 		if (!attempt.ok && attempt.kind === "output") {
 			const retryMessage = `${firstMessage}\n\nPrevious output validation failed. Write a complete replacement JSON file following the required schema exactly: include version 1, a files array, and side, startLine, endLine, score, and reason on every span. Do not return prose or rename fields. Fix every listed validation error:\n${attempt.error}`;
 			attempts++;
+			messages.push(retryMessage);
 			attempt = await runAgentFileAttempt({
 				...attemptOptions,
 				message: retryMessage,
 			});
 			if (options.signal?.aborted)
-				return cancelledImportanceResult(runId, attempts);
+				return cancelledImportanceResult(
+					runId,
+					attempts,
+					systemPrompt,
+					input,
+					messages,
+				);
 		}
 		if (!attempt.ok) {
 			return {
@@ -390,6 +441,9 @@ export async function generateImportance(
 				files: [],
 				runId,
 				attempts,
+				systemPrompt,
+				input,
+				messages,
 			};
 		}
 
@@ -414,6 +468,9 @@ export async function generateImportance(
 			files,
 			runId,
 			attempts,
+			systemPrompt,
+			input,
+			messages,
 		};
 	} catch (error) {
 		return {
@@ -424,6 +481,9 @@ export async function generateImportance(
 			files: [],
 			runId,
 			attempts,
+			systemPrompt,
+			input,
+			messages,
 		};
 	} finally {
 		await rm(runDir, { recursive: true, force: true }).catch(() => undefined);

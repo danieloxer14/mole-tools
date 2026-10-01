@@ -272,7 +272,9 @@ test("keeps review controls when an update is available", () => {
 	const header = container.querySelector("header");
 	const viewToggle = header?.querySelector('[aria-label="Review view"]');
 	const title = header?.querySelector("h1");
-	const actionGroup = container.querySelector("[data-header-actions]");
+	const actionGroup = container.querySelector<HTMLElement>(
+		"[data-header-actions]",
+	);
 	const updateButton = container.querySelector<HTMLButtonElement>(
 		"[data-update-available]",
 	);

@@ -161,12 +161,13 @@ export async function runCommentFromChat(run: {
 					signal: controller.signal,
 				});
 				iterator = iterable[Symbol.asyncIterator]();
-				const consume = (async () => {
+				const consume = (async (): Promise<CommentFromChatResult | null> => {
+					let failure: CommentFromChatResult | null = null;
 					while (true) {
 						const next = await iterator?.next();
-						if (!next || next.done) return;
-						if (next.value.kind === "error" && result === null) {
-							result = { status: "failed", error: next.value.message };
+						if (!next || next.done) return failure;
+						if (next.value.kind === "error" && failure === null) {
+							failure = { status: "failed", error: next.value.message };
 						}
 					}
 				})();
@@ -193,6 +194,8 @@ export async function runCommentFromChat(run: {
 					} catch {
 						// Iterator cleanup must not delay cancellation.
 					}
+				} else if (outcome !== null) {
+					result = outcome;
 				}
 			}
 		} catch (error) {

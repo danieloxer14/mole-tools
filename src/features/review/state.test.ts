@@ -186,7 +186,8 @@ describe("ReviewState", () => {
 			expect(
 				(normalized as Record<string, unknown>)[legacySessionKey],
 			).toBeNull();
-			expect(ensureChats(normalized as ReviewState)).toBe(normalized);
+			if (!normalized) throw new Error("Expected migrated review state");
+			expect(ensureChats(normalized)).toBe(normalized);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

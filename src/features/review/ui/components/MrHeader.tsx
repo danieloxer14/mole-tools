@@ -36,6 +36,7 @@ export interface MrHeaderProps {
 		autoOpen: boolean;
 	} | null;
 	onUpdateAutoOpened: (version: string) => void;
+	onOpenSettings?: () => void;
 }
 
 export function headerTitle(title: string, iid: number): string {

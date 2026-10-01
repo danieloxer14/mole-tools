@@ -34,6 +34,7 @@ import {
 	isFileChatTag,
 	isMarkdownChatTag,
 } from "../../chat-tags";
+import type { ChatEntryWithOptimistic } from "../../store";
 import { composerEnterAction } from "./composer-keydown";
 import { IconButton } from "./IconButton";
 import { SkillTextarea } from "./SkillTextarea";
@@ -308,14 +309,12 @@ function ChatMessageBody({
 		const target = event.target as HTMLElement;
 		const link = target.closest<HTMLAnchorElement>("a");
 		if (!link) return;
+		const dataPath = link.getAttribute("data-file-path");
+		const href = link.getAttribute("href");
 		const path =
-			link.getAttribute("data-file-path") ??
-			(link.getAttribute("href")
-				? resolveMarkdownFileHref(
-						link.getAttribute("href"),
-						worktreePath,
-						window.location.href,
-					)
+			dataPath ??
+			(href
+				? resolveMarkdownFileHref(href, worktreePath, window.location.href)
 				: null);
 		if (!path) return;
 		event.preventDefault();

@@ -33,7 +33,7 @@ export interface ReviewFlowResult extends ReviewSetupResult {
 }
 
 interface ReviewGitHost {
-	fetchMr?(ref: MrRef): Promise<ReviewMergeRequest>;
+	fetchMr?: NonNullable<Context["gitHost"]>["fetchMr"];
 	listDiscussions?(ref: MrRef): Promise<HostDiscussion[]>;
 	createDiscussion?: NonNullable<Context["gitHost"]>["createDiscussion"];
 	fetchApprovalState?: NonNullable<Context["gitHost"]>["fetchApprovalState"];
@@ -114,7 +114,11 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 	},
 	async run(ctx, args) {
 		const versionStatus = checkForUpdate();
-		const result = await runReviewFlow(ctx, args);
+		const result = await runReviewFlow(ctx, {
+			...args,
+			noOpen: args.noOpen ?? false,
+			refresh: args.refresh ?? false,
+		});
 		const host = ctx.gitHost as unknown as ReviewGitHost | null;
 		const getFileContents = ctx.vcs.readFileAtRevision
 			? async ({ path, revision }: ReviewFileRequest): Promise<string | null> =>

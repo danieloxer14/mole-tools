@@ -48,6 +48,7 @@ import {
 	isMarkdownPath,
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
+import { ImportanceContestDialog } from "./components/ImportanceContestDialog";
 import { LayerPane } from "./components/LayerPane";
 import {
 	type ApprovalAction,
@@ -76,6 +77,7 @@ import { loadFeatureFlags, useConfirmedFeatureFlag } from "./feature-flags";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
+	type ContestableImportanceSpan,
 	fileImportanceMap,
 	importanceReviewFileTotals,
 	importanceReviewProgressForViewedFiles,
@@ -124,7 +126,7 @@ function apiUrl(path: string, token: string): string {
 function resolveFileRef(ref: string, files: readonly string[]): string | null {
 	if (files.includes(ref)) return ref;
 	const suffixMatches = files.filter((file) => file.endsWith(`/${ref}`));
-	if (suffixMatches.length === 1) return suffixMatches[0];
+	if (suffixMatches.length === 1) return suffixMatches[0] ?? null;
 	if (suffixMatches.length > 1) {
 		return suffixMatches.reduce((shortest, candidate) =>
 			candidate.length < shortest.length ? candidate : shortest,
@@ -469,7 +471,7 @@ function ReviewApp() {
 	}));
 	const [columnWidths, setColumnWidths] =
 		useState<ColumnWidths>(columnMinimums);
-	const reviewShell = useRef<HTMLElement | null>(null);
+	const reviewShell = useRef<HTMLDivElement | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const importanceEnabled = useConfirmedFeatureFlag("layer-importance");
@@ -505,12 +507,27 @@ function ReviewApp() {
 	const selectedImportance = useMemo(
 		() =>
 			importanceEnabled && importance.status === "ready"
-				? importance.files
-						.filter((file) => file.path === selectedPath)
-						.flatMap((file) => file.spans)
+				? importance.files.flatMap((file, fileIndex) =>
+						file.path === selectedPath
+							? file.spans.map((span, spanIndex) => ({
+									...span,
+									fileIndex,
+									spanIndex,
+								}))
+							: [],
+					)
 				: undefined,
 		[importanceEnabled, importance.status, importance.files, selectedPath],
 	);
+	const [contestTarget, setContestTarget] = useState<{
+		path: string;
+		span: ContestableImportanceSpan;
+	} | null>(null);
+	const contestFocusRef = useRef<HTMLButtonElement | null>(null);
+	useEffect(() => {
+		if (!importanceEnabled || importance.status !== "ready")
+			setContestTarget(null);
+	}, [importanceEnabled, importance.status]);
 	const [reviewView, setReviewView] = useState<ReviewView>("code");
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
 	const [fileViewModes, setFileViewModes] = useState<
@@ -1661,7 +1678,9 @@ function ReviewApp() {
 			finishDraftOperation(id);
 		};
 		void (async () => {
-			let postedDiscussion: HostDiscussion | null = null;
+			const postedDiscussion: { current: HostDiscussion | null } = {
+				current: null,
+			};
 			let streamError: string | null = null;
 			let editQueueFailed = false;
 			try {
@@ -1699,20 +1718,21 @@ function ReviewApp() {
 						const discussion = (frame.data as Record<string, unknown>)
 							.discussion;
 						if (discussion && typeof discussion === "object")
-							postedDiscussion = discussion as HostDiscussion;
+							postedDiscussion.current = discussion as HostDiscussion;
 					}
 				});
 				finishSend();
 				await fetchReviewState();
-				if (postedDiscussion) {
+				const discussion = postedDiscussion.current;
+				if (discussion) {
 					setData((current) =>
 						current &&
 						!current.discussions.some(
-							(discussion) => discussion.id === postedDiscussion?.id,
+							(candidate) => candidate.id === discussion.id,
 						)
 							? {
 									...current,
-									discussions: [...current.discussions, postedDiscussion],
+									discussions: [...current.discussions, discussion],
 								}
 							: current,
 					);
@@ -2337,6 +2357,14 @@ function ReviewApp() {
 						drafts={data.drafts}
 						onModeChange={setDiffMode}
 						importance={selectedImportance}
+						onContestImportance={
+							selectedImportance && selectedPath
+								? (span, restoreFocusTarget) => {
+										contestFocusRef.current = restoreFocusTarget;
+										setContestTarget({ path: selectedPath, span });
+									}
+								: undefined
+						}
 						wholeFile={selectedWholeFile}
 						onWholeFileChange={changeWholeFile}
 						onViewModeChange={changeViewMode}
@@ -2500,6 +2528,40 @@ function ReviewApp() {
 					/>
 				</DialogContent>
 			</Dialog>
+			<ImportanceContestDialog
+				target={contestTarget}
+				onClose={() => setContestTarget(null)}
+				finalFocusTarget={() =>
+					contestFocusRef.current?.isConnected ? contestFocusRef.current : null
+				}
+				onSubmit={(score, reason) => {
+					if (!contestTarget)
+						return Promise.reject(new Error("No span selected"));
+					const {
+						side,
+						startLine,
+						endLine,
+						score: currentScore,
+						reason: currentReason,
+						fileIndex,
+						spanIndex,
+					} = contestTarget.span;
+					return importance.contest({
+						path: contestTarget.path,
+						fileIndex,
+						spanIndex,
+						expected: {
+							side,
+							startLine,
+							endLine,
+							score: currentScore,
+							reason: currentReason,
+						},
+						score,
+						reason,
+					});
+				}}
+			/>
 		</main>
 	);
 }

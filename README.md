@@ -497,6 +497,21 @@ tooltip and **Retry** on failure. Results persist at
 The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
 importance immediately without a reload, but does not cancel an in-flight run;
 that run can still finish and persist its result.
+Each persisted run also appends a `run` entry to the append-only ledger at
+`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/ledger.ndjson`.
+Run entries record the prompt preset/version, agent/model/effort, full system
+prompt, messages, rendered diff input, and scores. `contest` entries record the
+before/after span and report. When scoring is ready, the diff-gutter tooltip's
+**Contest** button opens a two-stage dialog: choose a new level and enter a
+one-sentence reason (≤144 characters), then review the Markdown report and copy
+it or open a mole-tools GitHub issue. The override persists in `importance.json`
+until the next revision re-score. The report includes the app version, revision
+SHAs, run ID, prompt, agent, file and lines, model and contested scores, a code
+excerpt of up to 80 lines, and the full system prompt. GitHub issues are public;
+remove confidential code, file paths, and names before posting.
+Keyboard focus returns to opening diff-gutter strip after Escape, Cancel, or
+closing the report.
+
 
 With the feature flag on and scoring ready, a shared importance review progress
 bar appears directly beneath the Layers/Files tabs. It shows the weighted share

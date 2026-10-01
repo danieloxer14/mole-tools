@@ -3,6 +3,7 @@ import type {
 	DiffLine,
 	ParsedFileDiff,
 } from "../../../shared/diff-parse";
+import { IMPORTANCE_LABELS } from "../../../shared/importance-labels";
 import type {
 	ImportanceFile,
 	ImportanceScore,
@@ -16,11 +17,18 @@ export interface ImportanceRating {
 	reason: string;
 }
 
-export function lineImportanceMap(
-	spans: readonly ImportanceSpan[],
+export interface ImportanceSpanRef {
+	fileIndex: number;
+	spanIndex: number;
+}
+
+export type ContestableImportanceSpan = ImportanceSpan & ImportanceSpanRef;
+
+export function lineImportanceMap<S extends ImportanceSpan = ImportanceSpan>(
+	spans: readonly S[],
 	hunks: readonly DiffHunk[],
-): ImportanceLineMap {
-	const ratings: ImportanceLineMap = new Map();
+): ImportanceLineMap<S> {
+	const ratings: ImportanceLineMap<S> = new Map();
 	for (const hunk of hunks) {
 		for (const line of hunk.lines) {
 			const oldRating =
@@ -34,12 +42,12 @@ export function lineImportanceMap(
 	return ratings;
 }
 
-function ratingAt(
-	spans: readonly ImportanceSpan[],
+function ratingAt<S extends ImportanceSpan>(
+	spans: readonly S[],
 	side: ImportanceSpan["side"],
 	line: number,
-): ImportanceRating | null {
-	let rating: ImportanceRating | null = null;
+): S | null {
+	let rating: S | null = null;
 	for (const span of spans) {
 		if (
 			span.side === side &&
@@ -53,20 +61,24 @@ function ratingAt(
 	return rating;
 }
 
-export type ImportanceLineMap = Map<string, ImportanceRating>;
+export type ImportanceLineMap<S extends ImportanceSpan = ImportanceSpan> = Map<
+	string,
+	S
+>;
 
-export function indexedLineImportance(
-	ratings: ImportanceLineMap,
+export function indexedLineImportance<
+	S extends ImportanceSpan = ImportanceSpan,
+>(
+	ratings: ImportanceLineMap<S>,
 	side: ImportanceSpan["side"],
 	line: number | null,
-): ImportanceRating | null {
+): S | null {
 	return line === null ? null : (ratings.get(`${side}:${line}`) ?? null);
 }
 
-export function indexedDiffLineImportance(
-	ratings: ImportanceLineMap,
-	line: DiffLine,
-): ImportanceRating | null {
+export function indexedDiffLineImportance<
+	S extends ImportanceSpan = ImportanceSpan,
+>(ratings: ImportanceLineMap<S>, line: DiffLine): S | null {
 	if (line.kind === "del")
 		return indexedLineImportance(ratings, "old", line.oldLine);
 	if (line.kind === "add")
@@ -178,14 +190,6 @@ export function importanceProgressColor(ratio: number): string {
 export function importanceTitle(score: ImportanceScore): string {
 	return `Importance ${score}/5 (${IMPORTANCE_LABELS[score]})`;
 }
-
-export const IMPORTANCE_LABELS: Record<ImportanceScore, string> = {
-	1: "Skip",
-	2: "Low",
-	3: "Moderate",
-	4: "High",
-	5: "Critical",
-};
 
 export const IMPORTANCE_BG_CLASS: Record<ImportanceScore, string> = {
 	1: "bg-importance-1",
