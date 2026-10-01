@@ -53,6 +53,23 @@ const diffFile = (
 		},
 	],
 });
+const scoredAddedFile = (
+	path: string,
+	score: ImportanceSpan["score"],
+	count: number,
+): { diff: ParsedFileDiff; file: ImportanceFile } => ({
+	diff: diffFile(
+		path,
+		path,
+		Array.from({ length: count }, (_, index) =>
+			diffLine("add", null, index + 1),
+		),
+	),
+	file: {
+		path,
+		spans: [span("new", 1, count, score)],
+	},
+});
 
 const hunks: DiffHunk[] = [
 	{
@@ -144,62 +161,86 @@ test("context rating ties choose new side with its matching reason", () => {
 	});
 });
 
-test("importance progress weights counted lines and only viewed files", () => {
-	const diff = [
-		diffFile(
-			"src/a.ts",
-			"src/a.ts",
-			[1, 2, 3, 4, 5].map((line) => diffLine("add", null, line)),
-		),
-	];
-	const files: ImportanceFile[] = [
-		{
-			path: "src/a.ts",
-			spans: [1, 2, 3, 4, 5].map((line, index) =>
-				span("new", line, line, (index + 1) as ImportanceSpan["score"]),
-			),
-		},
-	];
+test("score-5 progress keeps denominator and threshold fixed as viewed paths change", () => {
+	const first = scoredAddedFile("src/a.ts", 5, 50);
+	const second = scoredAddedFile("src/b.ts", 5, 50);
+	const diff = [first.diff, second.diff];
+	const files = [first.file, second.file];
 
-	const fileTotals = importanceReviewFileTotals(diff, files);
-	expect(fileTotals).toEqual({
-		byPath: new Map([["src/a.ts", { total: 5, threshold: 3.75 }]]),
-		total: 5,
-		threshold: 3.75,
-	});
-	expect(
-		importanceReviewProgressForViewedFiles(fileTotals, ["src/a.ts"]),
-	).toEqual({
-		value: 5,
-		total: 5,
-		threshold: 3.75,
-	});
-	expect(importanceReviewProgressForViewedFiles(fileTotals, [])).toEqual({
-		value: 0,
-		total: 5,
-		threshold: 3.75,
-	});
-	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
-		value: 5,
-		total: 5,
-		threshold: 3.75,
-	});
 	expect(importanceReviewProgress(diff, files, [])).toEqual({
 		value: 0,
-		total: 5,
-		threshold: 3.75,
+		total: 18,
+		threshold: 13,
+	});
+	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
+		value: 4,
+		total: 18,
+		threshold: 13,
 	});
 });
 
-test("importance progress uses highest span score and excludes uncounted lines", () => {
-	const diff = [
-		diffFile("src/a.ts", "src/a.ts", [
-			diffLine("context", 1, 1),
-			diffLine("add", null, 2),
-			diffLine("add", null, 3),
-			diffLine("del", 4, null),
+test("score-3 progress aggregates files and view state changes numerator only", () => {
+	const first = scoredAddedFile("src/a.ts", 3, 50);
+	const second = scoredAddedFile("src/b.ts", 3, 150);
+	const diff = [first.diff, second.diff];
+	const files = [first.file, second.file];
+	const totals = importanceReviewFileTotals(diff, files);
+
+	expect(totals.byScore).toEqual({ 1: 0, 2: 0, 3: 200, 4: 0, 5: 0 });
+	expect(importanceReviewProgressForViewedFiles(totals, ["src/a.ts"])).toEqual({
+		value: 0.75,
+		total: 18,
+		threshold: 13,
+	});
+	expect(
+		importanceReviewProgressForViewedFiles(totals, [
+			"src/a.ts",
+			"src/a.ts",
+			"src/b.ts",
 		]),
-	];
+	).toEqual({ value: 3, total: 18, threshold: 13 });
+	expect(importanceReviewProgressForViewedFiles(totals, [])).toEqual({
+		value: 0,
+		total: 18,
+		threshold: 13,
+	});
+});
+
+test("sparse score buckets contribute fixed shares", () => {
+	const low = scoredAddedFile("src/low.ts", 1, 2);
+	const high = scoredAddedFile("src/high.ts", 4, 4);
+
+	expect(
+		importanceReviewProgress(
+			[low.diff, high.diff],
+			[low.file, high.file],
+			["src/low.ts", "src/high.ts"],
+		),
+	).toEqual({ value: 6, total: 18, threshold: 13 });
+});
+
+test("full view across five levels preserves raw value of 19", () => {
+	const levels = ([1, 2, 3, 4, 5] as const).map((score) =>
+		scoredAddedFile(`src/${score}.ts`, score, 1),
+	);
+
+	expect(
+		importanceReviewProgress(
+			levels.map(({ diff }) => diff),
+			levels.map(({ file }) => file),
+			levels.map(({ file }) => file.path),
+		),
+	).toEqual({ value: 19, total: 18, threshold: 13 });
+});
+
+test("importance progress counts highest-overlap added and deleted lines once", () => {
+	const changed = diffFile("src/a.ts", "src/a.ts", [
+		diffLine("context", 1, 1),
+		diffLine("add", null, 2),
+		diffLine("add", null, 3),
+		diffLine("del", 4, null),
+		diffLine("add", null, 5),
+	]);
 	const files: ImportanceFile[] = [
 		{
 			path: "src/a.ts",
@@ -213,69 +254,40 @@ test("importance progress uses highest span score and excludes uncounted lines",
 		},
 	];
 
-	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
-		value: 2.5,
-		total: 2.5,
-		threshold: 2.5,
-	});
+	expect(
+		importanceReviewProgress([changed, changed], files, [
+			"src/a.ts",
+			"src/a.ts",
+		]),
+	).toEqual({ value: 11, total: 18, threshold: 13 });
 });
 
-test("importance progress target includes moderate lines and has a 50% minimum", () => {
-	const diff = [
-		diffFile("src/moderate.ts", "src/moderate.ts", [diffLine("add", null, 1)]),
-		diffFile("src-low.ts", "src-low.ts", [
-			diffLine("add", null, 1),
-			diffLine("add", null, 2),
-		]),
-	];
-	const files: ImportanceFile[] = [
-		{ path: "src/moderate.ts", spans: [span("new", 1, 1, 3)] },
-		{
-			path: "src-low.ts",
-			spans: [span("new", 1, 1, 1), span("new", 2, 2, 2)],
-		},
-	];
-
-	const fileTotals = importanceReviewFileTotals(diff, files);
-	expect(fileTotals).toEqual({
-		byPath: new Map([
-			["src/moderate.ts", { total: 1, threshold: 1 }],
-			["src-low.ts", { total: 1.25, threshold: 0 }],
-		]),
-		total: 2.25,
-		threshold: 1.125,
-	});
-	expect(importanceReviewProgress(diff, files, ["src-low.ts"])).toEqual({
-		value: 1.25,
-		total: 2.25,
-		threshold: 1.125,
-	});
-});
-
-test("importance progress keys deleted files by old path and deduplicates paths", () => {
+test("deleted paths, merged importance spans, and unmatched data retain handling", () => {
 	const deleted = diffFile("gone.ts", null, [diffLine("del", 1, null)]);
+	const duplicate = diffFile("gone.ts", null, [diffLine("del", 1, null)]);
 	const files: ImportanceFile[] = [
 		{ path: "gone.ts", spans: [span("old", 1, 1, 4)] },
 		{ path: "gone.ts", spans: [span("old", 1, 1, 5)] },
 	];
 
 	expect(
-		importanceReviewProgress([deleted, deleted], files, [
+		importanceReviewProgress([deleted, duplicate], files, [
 			"gone.ts",
 			"gone.ts",
 			"absent.ts",
 		]),
-	).toEqual({ value: 1.5, total: 1.5, threshold: 1.5 });
+	).toEqual({ value: 8, total: 18, threshold: 13 });
 });
 
-test("importance progress ignores unmatched files and empty importance data", () => {
+test("importance progress ignores unmatched files and empty score data", () => {
 	const diff = [diffFile("src/a.ts", "src/a.ts", [diffLine("add", null, 1)])];
-	const rated = importanceReviewProgress(
-		diff,
-		[{ path: "other.ts", spans: [span("new", 1, 1, 5)] }],
-		["src/a.ts", "other.ts"],
-	);
-	expect(rated).toEqual({ value: 0, total: 0, threshold: 0 });
+	expect(
+		importanceReviewProgress(
+			diff,
+			[{ path: "other.ts", spans: [span("new", 1, 1, 5)] }],
+			["src/a.ts", "other.ts"],
+		),
+	).toEqual({ value: 0, total: 0, threshold: 0 });
 	expect(importanceReviewProgress(diff, [], ["src/a.ts"])).toEqual({
 		value: 0,
 		total: 0,

@@ -90,8 +90,13 @@ export function ImportanceProgressBar({
 				<span className="tabular-nums">{pct}%</span>
 			</TooltipTrigger>
 			<TooltipContent className="flex-col items-start gap-0.5">
-				<span>Current target: {targetPct}%</span>
-				<span>More importance changes are worth more</span>
+				<span>
+					Fixed contributions: level 1 1/18, 2 2/18, 3 3/18, 4 5/18, 5 8/18
+				</span>
+				<span>
+					Fixed target: 13/18 for High+Critical review, not a completeness
+					guarantee
+				</span>
 			</TooltipContent>
 		</Tooltip>
 	);

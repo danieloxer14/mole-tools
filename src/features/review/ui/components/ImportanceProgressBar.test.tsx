@@ -8,30 +8,23 @@ function render(value: number, total: number, threshold: number) {
 	);
 }
 
-test("renders importance progress accessibility and target details", () => {
-	const withTarget = render(3, 6, 1.5);
-	expect(withTarget).not.toContain(">Importance</span>");
-	expect(withTarget).not.toContain('title="');
-	expect(withTarget).toContain("50%</span>");
-	expect(withTarget).toContain('role="progressbar"');
-	expect(withTarget).toContain('aria-label="Importance review progress"');
-	expect(withTarget).toContain('aria-valuemin="0"');
-	expect(withTarget).toContain('aria-valuemax="6"');
-	expect(withTarget).toContain('aria-valuenow="3"');
-	expect(withTarget).toContain('aria-valuetext="50% reviewed, target 25%"');
-
-	const withoutTarget = render(3, 6, 0);
-	expect(withoutTarget).toContain('aria-valuetext="50% reviewed"');
+test("renders fixed target accessibility, fill, and marker", () => {
+	const html = render(4, 18, 13);
+	expect(html).toContain('role="progressbar"');
+	expect(html).toContain('aria-label="Importance review progress"');
+	expect(html).toContain('aria-valuemin="0"');
+	expect(html).toContain('aria-valuemax="18"');
+	expect(html).toContain('aria-valuenow="4"');
+	expect(html).toContain('aria-valuetext="22% reviewed, target 72%"');
+	expect(html).toContain('style="width:22.22222222222222%;background-color:');
+	expect(html).toContain('class="importance-progress-marker"');
+	expect(html).toContain('style="left:72.22222222222221%"');
 });
 
-test("renders proportional fill and threshold marker", () => {
-	const html = render(3, 6, 1.5);
-	expect(html).toContain('style="width:50%;background-color:');
-	expect(html).toContain('class="importance-progress-marker"');
-	expect(html).toContain('style="left:25%"');
-
-	const withoutMarker = render(3, 6, 0);
-	expect(withoutMarker).not.toContain("importance-progress-marker");
+test("renders progress without target details when threshold is absent", () => {
+	const withoutTarget = render(3, 6, 0);
+	expect(withoutTarget).toContain('aria-valuetext="50% reviewed"');
+	expect(withoutTarget).not.toContain("importance-progress-marker");
 });
 
 test("renders flame only after reaching a positive threshold", () => {
@@ -87,4 +80,18 @@ test("clamps over-range values and never overstates progress", () => {
 	expect(nearlyAtTarget).toContain('aria-valuetext="25% reviewed, target 26%"');
 	const atTarget = render(25.9, 100, 25.9);
 	expect(atTarget).toContain('aria-valuetext="26% reviewed, target 26%"');
+});
+test("saturates raw 19/18 progress at the visible 18-unit cap", () => {
+	const html = render(19, 18, 13);
+	expect(html).toContain('aria-valuemax="18"');
+	expect(html).toContain('aria-valuenow="18"');
+	expect(html).toContain('aria-valuetext="100% reviewed, target 72%"');
+	expect(html).toContain(
+		'style="width:100%;background-color:var(--color-importance-5)"',
+	);
+	expect(html).toContain(
+		'class="importance-progress-flame" style="width:100%"',
+	);
+	expect(html).toContain(">100%</span>");
+	expect(html).not.toContain("105%");
 });
