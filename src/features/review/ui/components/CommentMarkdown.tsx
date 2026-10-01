@@ -29,7 +29,7 @@ export function CommentMarkdown({ body }: { body: string }) {
 		<div
 			className="comment-markdown min-w-0 w-full max-w-full [overflow-wrap:anywhere]"
 			// biome-ignore lint/security/noDangerouslySetInnerHtml: Markdown output is sanitized with DOMPurify.
-			dangerouslySetInnerHTML={{ __html: parsed.html }}
+			dangerouslySetInnerHTML={{ __html: parsed.html ?? "" }}
 		/>
 	);
 }

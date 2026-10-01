@@ -10,6 +10,8 @@ import type {
 } from "../../ports/review-agent";
 import type { ParsedFileDiff } from "../../shared/diff-parse";
 import {
+	buildImportanceMessage,
+	buildImportanceSystemPrompt,
 	generateImportance,
 	type ImportanceDoc,
 	ImportanceDocSchema,
@@ -177,7 +179,7 @@ class HangingAgent implements ReviewAgent {
 		this.markStarted();
 		if (this.signal && !this.signal.aborted) {
 			const { promise, resolve } = Promise.withResolvers<void>();
-			this.signal.addEventListener("abort", resolve, { once: true });
+			this.signal.addEventListener("abort", () => resolve(), { once: true });
 			await promise;
 		}
 		yield { kind: "turn_end" };
@@ -516,14 +518,24 @@ describe("review importance", () => {
 			]);
 			const warning = spyOn(logger, "warn");
 			try {
-				const result = await generateImportance(generationOptions(dir, agent));
-				expect(result).toEqual({
+				const options = generationOptions(dir, agent);
+				const result = await generateImportance(options);
+				expect(result).toMatchObject({
 					status: "ready",
 					error: null,
 					files: validDoc.files,
 					runId: "run-1",
 					attempts: 1,
+					systemPrompt: buildImportanceSystemPrompt(options.promptText ?? ""),
+					input: expect.stringContaining("# Merge request:"),
+					messages: [
+						buildImportanceMessage(
+							join(dir, "run-1", "input.md"),
+							join(dir, "run-1", "output.json"),
+						),
+					],
 				});
+				expect(result.messages).toHaveLength(1);
 				expect(warning).toHaveBeenCalledWith("review.importance.unknown-file", {
 					path: "outside.ts",
 				});
@@ -548,6 +560,8 @@ describe("review importance", () => {
 			expect(result.attempts).toBe(2);
 			expect(agent.turns).toHaveLength(2);
 			expect(result.files).toEqual(validDoc.files);
+			expect(result.messages).toHaveLength(2);
+			expect(result.messages[1]).toContain("Previous output validation failed");
 			expect(await Bun.file(join(dir, "run-1")).exists()).toBe(false);
 		});
 	});
@@ -579,6 +593,11 @@ describe("review importance", () => {
 				"Importance output failed schema validation:",
 			);
 			expect(result.attempts).toBe(2);
+			expect(result.systemPrompt).toBe(
+				buildImportanceSystemPrompt("Score changed lines."),
+			);
+			expect(result.input).toContain("# Merge request:");
+			expect(result.messages).toHaveLength(2);
 			expect(agent.turns).toHaveLength(2);
 			expect(await Bun.file(join(dir, "run-1")).exists()).toBe(false);
 		});
@@ -626,8 +645,24 @@ describe("review importance", () => {
 				error: "run exploded",
 				attempts: 1,
 			});
+			expect(thrownResult.systemPrompt).toBe(
+				buildImportanceSystemPrompt("Score changed lines."),
+			);
+			expect(thrownResult.input).toContain("# Merge request:");
+			expect(thrownResult.messages).toHaveLength(1);
 			expect(thrownAgent.turns).toHaveLength(1);
 			expect(await Bun.file(join(dir, "thrown-run")).exists()).toBe(false);
+			const notDirectory = join(dir, "not-a-directory");
+			await Bun.write(notDirectory, "file");
+			const earlyThrowResult = await generateImportance(
+				generationOptions(notDirectory, new WritingAgent([validDoc])),
+			);
+			expect(earlyThrowResult).toMatchObject({
+				status: "failed",
+				systemPrompt: null,
+				input: null,
+				messages: [],
+			});
 		});
 	});
 	test("empty agent error event does not fail importance generation", async () => {
@@ -673,6 +708,25 @@ describe("review importance", () => {
 				status: "failed",
 				error: "Importance run was cancelled",
 				attempts: 1,
+			});
+			expect(result.systemPrompt).toBe(
+				buildImportanceSystemPrompt("Score changed lines."),
+			);
+			expect(result.input).toContain("# Merge request:");
+			expect(result.messages).toHaveLength(1);
+
+			const alreadyAborted = new AbortController();
+			alreadyAborted.abort();
+			const earlyCancelledResult = await generateImportance(
+				generationOptions(dir, new WritingAgent([validDoc]), {
+					signal: alreadyAborted.signal,
+				}),
+			);
+			expect(earlyCancelledResult).toMatchObject({
+				status: "failed",
+				systemPrompt: null,
+				input: null,
+				messages: [],
 			});
 			expect(await Bun.file(join(dir, "run-1")).exists()).toBe(false);
 		});

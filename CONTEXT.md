@@ -144,6 +144,16 @@ with head and merge-base SHA stamps at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 Running status exists in memory only.
 
+**Importance ledger** is the append-only `ledger.ndjson` beside
+`importance.json`, with `run` and `contest` entries.
+**Importance contest** starts from the diff-gutter tooltip's **Contest** button.
+Its two-stage dialog accepts a new level and reason; override persists until
+next revision re-score. It provides a Markdown report for a GitHub issue with
+app version, revision SHAs, run/prompt/agent details, file and lines, scores,
+code excerpt (up to 80 lines), and full system prompt. GitHub issues are public;
+redact confidential code, paths, and names before posting.
+Keyboard focus returns to the originating diff-gutter strip after Escape,
+Cancel, or closing the report.
 ### One pager
 An agent-written, reviewer-facing one-page Markdown summary of a merge
 request, stored per MR at
@@ -168,7 +178,6 @@ A chat kind bound to the `review-one-pager-chat` prompt slot. It answers
 questions about the one pager. Claude and Codex may edit only the one pager
 document in place; OMP stays read-only because it lacks enforced directory-scoped
 writes. Supported-provider edits trigger a debounced document reload.
-
 
 **Importance review progress** appears as one shared bar directly beneath the
 Layers/Files tabs when the flag is on and scoring is ready. It shows viewed

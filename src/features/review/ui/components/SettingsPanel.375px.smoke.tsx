@@ -1,6 +1,7 @@
 import { Window as HappyWindow } from "happy-dom";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
+import { withMockFetch } from "../../../../../test/fakes/mockFetch";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import {
 	type PromptSnapshot,
@@ -55,6 +56,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const viewport = new HappyWindow({ width: 375, height: 667 });
+const smokeDocument = viewport.document as unknown as Document;
 const browserGlobals: Record<string, unknown> = {
 	window: viewport,
 	document: viewport.document,
@@ -90,7 +92,7 @@ for (const [name, value] of Object.entries(browserGlobals)) {
 }
 
 const originalFetch = globalThis.fetch;
-globalThis.fetch = (async (input) => {
+globalThis.fetch = withMockFetch(async (input) => {
 	if (String(input).includes("/api/settings/models?")) {
 		return jsonResponse({
 			models: [
@@ -104,13 +106,13 @@ globalThis.fetch = (async (input) => {
 		});
 	}
 	return jsonResponse({});
-}) as typeof fetch;
+});
 
-const container = viewport.document.createElement("div");
+const container = smokeDocument.createElement("div");
 container.style.width = "343px";
 container.style.height = "635px";
 container.style.overflow = "hidden";
-viewport.document.body.append(container);
+smokeDocument.body.append(container);
 const root = createRoot(container);
 
 function focusControl(
@@ -120,19 +122,24 @@ function focusControl(
 	assert(!control.disabled, "Expected settings control to be enabled");
 	assert(control.tabIndex === 0, "Expected settings control to be tabbable");
 	const scrollPanel = control.closest<HTMLElement>(".overflow-auto");
+	if (!scrollPanel)
+		throw new Error("Expected settings control inside a scroll panel");
 	assert(
-		scrollPanel?.className.includes("overflow-auto"),
+		scrollPanel.className.includes("overflow-auto"),
 		"Expected settings control inside a scrollable panel",
 	);
 	assert(
 		scrollPanel.contains(control),
 		"Expected scroll panel to contain settings control",
 	);
-	if (control instanceof viewport.HTMLSelectElement)
-		assert(control.labels?.length, "Expected select to have a visible label");
+	if (control.tagName === "SELECT")
+		assert(
+			(control as HTMLSelectElement).labels?.length,
+			"Expected select to have a visible label",
+		);
 	act(() => control.focus());
 	assert(
-		viewport.document.activeElement === control,
+		smokeDocument.activeElement === control,
 		"Expected settings control to receive keyboard focus",
 	);
 }
@@ -236,7 +243,7 @@ try {
 		);
 		assert(promptEffort, "Missing prompt effort select");
 		promptEffort.value = "high";
-		promptEffort.dispatchEvent(new viewport.Event("change", { bubbles: true }));
+		promptEffort.dispatchEvent(new Event("change", { bubbles: true }));
 		await flushReact();
 	});
 	const promptControls = [

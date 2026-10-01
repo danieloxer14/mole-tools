@@ -19,7 +19,6 @@ import {
 	type OmpModelCatalogProcessRunner,
 } from "../../adapters/agent/model-catalog-omp";
 import {
-	type ColorTheme,
 	ColorThemeSchema,
 	type Config,
 	ReviewConfigSchema,
@@ -93,11 +92,22 @@ import {
 import { buildExplainMessage, explainChatTitle } from "./explain";
 import {
 	generateImportance,
+	ImportanceContestRequestSchema,
+	type ImportanceContestResponse,
+	ImportanceReasonSchema,
 	type ImportanceResult,
 	type ImportanceSnapshot,
+	importanceFilePath,
 	readImportanceResult,
 	writeImportanceResult,
 } from "./importance";
+import {
+	appendImportanceLedgerEntry,
+	buildImportanceContestReport,
+	findImportanceRunEntry,
+	IMPORTANCE_LEDGER_FILE,
+	type ImportanceLedgerRunEntry,
+} from "./importance-ledger";
 import {
 	generateLayers,
 	type LayerGenerationResult,
@@ -771,8 +781,9 @@ export function createReviewRoutes(
 					?.review?.effort ?? null,
 		},
 		appearance: {
-			colorTheme: (options.config?.appearance?.colorTheme ??
-				"default") as ColorTheme,
+			colorTheme:
+				(options.config as Config | undefined)?.appearance?.colorTheme ??
+				"default",
 		},
 	};
 	let persistedReviewConfig: Config["review"] = ReviewConfigSchema.parse(
@@ -1196,6 +1207,7 @@ export function createReviewRoutes(
 			if (
 				effort !== null &&
 				selectedModel !== null &&
+				selectedModel !== undefined &&
 				selectedAgent !== "claude"
 			) {
 				const supportedEfforts = await modelEffortsFor(selectedAgent);
@@ -1554,12 +1566,23 @@ export function createReviewRoutes(
 		return join(importanceDirFor(state), "importance.json");
 	}
 
+	function importanceLedgerPathFor(state: ReviewState): string {
+		return join(importanceDirFor(state), IMPORTANCE_LEDGER_FILE);
+	}
+
 	let importanceRun: {
 		key: string;
 		controller: AbortController;
 		promise: Promise<ImportanceSnapshot>;
 	} | null = null;
 	let importanceStartGate: Promise<unknown> = Promise.resolve();
+	let importanceWriteGate: Promise<unknown> = Promise.resolve();
+
+	function serializeImportanceWrite<T>(run: () => Promise<T>): Promise<T> {
+		const next = importanceWriteGate.then(run, run);
+		importanceWriteGate = next.catch(() => undefined);
+		return next;
+	}
 
 	async function importanceSnapshot(
 		state?: ReviewState,
@@ -1583,6 +1606,151 @@ export function createReviewRoutes(
 		}
 		return { revisionKey, status: "pending", error: null, files: [] };
 	}
+	async function contestImportance(request: Request): Promise<Response> {
+		if (!(await featureFlags())["layer-importance"]) {
+			return jsonResponse({ error: "Feature disabled" }, 404);
+		}
+
+		const parsed = ImportanceContestRequestSchema.safeParse(
+			await parseBody(request),
+		);
+		if (!parsed.success) {
+			return jsonResponse({ error: parsed.error.message }, 400);
+		}
+		const { revisionKey, path, fileIndex, spanIndex, expected, score, reason } =
+			parsed.data;
+		const reasonTrimmed = reason.trim();
+		const parsedReason = ImportanceReasonSchema.safeParse(reasonTrimmed);
+		if (!parsedReason.success) {
+			return jsonResponse({ error: parsedReason.error.message }, 400);
+		}
+		if (score === expected.score && reasonTrimmed === expected.reason) {
+			return jsonResponse(
+				{ error: "Contest must change the score or reason" },
+				400,
+			);
+		}
+
+		return serializeImportanceWrite(async () => {
+			const { state, parsedDiff } = await serializeDisplayMutation(
+				async () => ({ state: await currentState(), parsedDiff: currentDiff }),
+			);
+			const key = importanceRevisionKey(state.revision);
+			if (key !== revisionKey || importanceRun?.key === key) {
+				return jsonResponse(
+					{ error: "Importance results changed. Reload the review." },
+					409,
+				);
+			}
+
+			const result = await readImportanceResult(importanceResultPathFor(state));
+			if (
+				result?.status !== "ready" ||
+				importanceRevisionKey(result.revision) !== key
+			) {
+				return jsonResponse(
+					{ error: "Importance results changed. Reload the review." },
+					409,
+				);
+			}
+
+			const file = result.files[fileIndex];
+			const before = file?.spans[spanIndex];
+			if (
+				!file ||
+				file.path !== path ||
+				!before ||
+				before.side !== expected.side ||
+				before.startLine !== expected.startLine ||
+				before.endLine !== expected.endLine ||
+				before.score !== expected.score ||
+				before.reason !== expected.reason
+			) {
+				return jsonResponse(
+					{ error: "Importance results changed. Reload the review." },
+					409,
+				);
+			}
+
+			const after = { ...before, score, reason: reasonTrimmed };
+			let run: ImportanceLedgerRunEntry | null = null;
+			if (result.runId) {
+				const candidate = await findImportanceRunEntry(
+					importanceLedgerPathFor(state),
+					result.runId,
+				).catch(() => null);
+				if (candidate && importanceRevisionKey(candidate.revision) === key) {
+					run = candidate;
+				}
+			}
+			const parsedFile = parsedDiff.find(
+				(candidate) => importanceFilePath(candidate) === path,
+			);
+			const report = buildImportanceContestReport({
+				appVersion: APP_VERSION,
+				revision: state.revision,
+				path,
+				before,
+				after,
+				run,
+				runId: result.runId ?? null,
+				fileIndex,
+				spanIndex,
+				file: parsedFile,
+			});
+			const files = result.files.map((resultFile, resultFileIndex) =>
+				resultFileIndex === fileIndex
+					? {
+							...resultFile,
+							spans: resultFile.spans.map((span, resultSpanIndex) =>
+								resultSpanIndex === spanIndex ? after : span,
+							),
+						}
+					: resultFile,
+			);
+			try {
+				await writeImportanceResult(importanceResultPathFor(state), {
+					...result,
+					files,
+				});
+			} catch (error) {
+				return jsonResponse(
+					{ error: `Unable to save importance: ${errorMessage(error)}` },
+					500,
+				);
+			}
+
+			try {
+				await appendImportanceLedgerEntry(importanceLedgerPathFor(state), {
+					version: 1,
+					kind: "contest",
+					contestId: crypto.randomUUID(),
+					recordedAt: new Date().toISOString(),
+					runId: result.runId ?? null,
+					revision: {
+						headSha: state.revision.headSha,
+						mergeBaseSha: state.revision.mergeBaseSha,
+					},
+					path,
+					fileIndex,
+					spanIndex,
+					before,
+					after,
+					report,
+				});
+			} catch (error) {
+				logger.warn("review.importance.ledger-failed", {
+					error: errorMessage(error),
+				});
+			}
+
+			const response: ImportanceContestResponse = {
+				snapshot: { revisionKey: key, status: "ready", error: null, files },
+				report,
+			};
+			return jsonResponse(response);
+		});
+	}
 
 	async function runImportance(
 		state: ReviewState,
@@ -1590,9 +1758,44 @@ export function createReviewRoutes(
 		parsedDiff: ParsedFileDiff[],
 		controller: AbortController,
 	): Promise<ImportanceSnapshot> {
-		let result: Omit<ImportanceSnapshot, "revisionKey">;
+		const runId = crypto.randomUUID();
+		const prompt = {
+			slot: "review-importance" as const,
+			preset: presetFor("review-importance"),
+			version: null as number | null,
+		};
+		let agentMeta: {
+			agent: string;
+			model: string | null;
+			effort: string | null;
+		} | null = null;
+		let result: Omit<ImportanceSnapshot, "revisionKey"> = {
+			status: "failed",
+			error: null,
+			files: [],
+		};
+		let attempts = 0;
+		let systemPrompt: string | null = null;
+		let input: string | null = null;
+		let messages: string[] = [];
 		try {
-			const agent = await agentForSlot("review-importance", layerAgent);
+			const promptVersion = await readPrompt("review-importance", {
+				preset: prompt.preset,
+				dir: promptDirOption(),
+			});
+			prompt.version = promptVersion.version;
+			let agent: ReviewAgent | undefined;
+			if (options.createReviewAgent) {
+				const selection = await effectivePromptSelection(promptVersion);
+				agentMeta = {
+					agent: selection.agent,
+					model: selection.model,
+					effort: selection.effort,
+				};
+				agent = agentForSelection(selection);
+			} else {
+				agent = layerAgent;
+			}
 			if (!agent) {
 				result = {
 					status: "failed",
@@ -1605,8 +1808,8 @@ export function createReviewRoutes(
 					state,
 					parsedDiff,
 					dir: importanceDirFor(state),
-					promptSourceDir: options.promptSourceDir,
-					promptPreset: presetFor("review-importance"),
+					promptText: promptVersion.text.trim(),
+					runId,
 					config: options.config,
 					signal: controller.signal,
 				});
@@ -1615,6 +1818,10 @@ export function createReviewRoutes(
 					error: generated.error,
 					files: generated.files,
 				};
+				attempts = generated.attempts;
+				systemPrompt = generated.systemPrompt;
+				input = generated.input;
+				messages = generated.messages;
 			}
 		} catch (error) {
 			result = {
@@ -1627,9 +1834,74 @@ export function createReviewRoutes(
 		if (controller.signal.aborted) {
 			return { revisionKey: key, status: "pending", error: null, files: [] };
 		}
-		let latest: ReviewState;
 		try {
-			latest = await currentState();
+			return await serializeImportanceWrite(async () => {
+				if (controller.signal.aborted) {
+					return {
+						revisionKey: key,
+						status: "pending",
+						error: null,
+						files: [],
+					};
+				}
+				const latest = await currentState();
+				const latestKey = importanceRevisionKey(latest.revision);
+				if (latestKey !== key) {
+					return {
+						revisionKey: latestKey,
+						status: "pending",
+						error: null,
+						files: [],
+					};
+				}
+
+				const persisted: ImportanceResult = {
+					version: 1,
+					revision: {
+						headSha: state.revision.headSha,
+						mergeBaseSha: state.revision.mergeBaseSha,
+					},
+					status: result.status === "ready" ? "ready" : "failed",
+					error: result.error,
+					files: result.files,
+					generatedAt: new Date().toISOString(),
+					runId,
+				};
+				try {
+					await writeImportanceResult(
+						importanceResultPathFor(state),
+						persisted,
+					);
+				} catch (error) {
+					return {
+						revisionKey: key,
+						status: "failed",
+						error: `Unable to save importance: ${errorMessage(error)}`,
+						files: [],
+					};
+				}
+				await appendImportanceLedgerEntry(importanceLedgerPathFor(state), {
+					version: 1,
+					kind: "run",
+					runId,
+					recordedAt: new Date().toISOString(),
+					revision: persisted.revision,
+					status: persisted.status,
+					error: persisted.error,
+					attempts,
+					prompt,
+					agent: agentMeta,
+					systemPrompt,
+					input,
+					messages,
+					files: persisted.files,
+				}).catch((error) =>
+					logger.warn("review.importance.ledger-failed", {
+						error: errorMessage(error),
+					}),
+				);
+				return { revisionKey: key, ...result };
+			});
 		} catch (error) {
 			return {
 				revisionKey: key,
@@ -1638,38 +1910,6 @@ export function createReviewRoutes(
 				files: [],
 			};
 		}
-		const latestKey = importanceRevisionKey(latest.revision);
-		if (latestKey !== key) {
-			return {
-				revisionKey: latestKey,
-				status: "pending",
-				error: null,
-				files: [],
-			};
-		}
-
-		try {
-			const persisted: ImportanceResult = {
-				version: 1,
-				revision: {
-					headSha: state.revision.headSha,
-					mergeBaseSha: state.revision.mergeBaseSha,
-				},
-				status: result.status === "ready" ? "ready" : "failed",
-				error: result.error,
-				files: result.files,
-				generatedAt: new Date().toISOString(),
-			};
-			await writeImportanceResult(importanceResultPathFor(state), persisted);
-		} catch (error) {
-			return {
-				revisionKey: key,
-				status: "failed",
-				error: `Unable to save importance: ${errorMessage(error)}`,
-				files: [],
-			};
-		}
-		return { revisionKey: key, ...result };
 	}
 
 	function startImportance(
@@ -2798,6 +3038,7 @@ export function createReviewRoutes(
 			return commentSseError(errorMessage(error), 500);
 		}
 		if (!agent) return commentSseError("Review agent is unavailable", 503);
+		const commentAgent = agent;
 
 		const controller = new AbortController();
 		activeCommentGenerations.set(draftId, controller);
@@ -2831,7 +3072,7 @@ export function createReviewRoutes(
 			async function* frames(): AsyncIterable<SseFrame> {
 				try {
 					const outcome = await runCommentFromChat({
-						agent,
+						agent: commentAgent,
 						worktreePath: state.worktreePath,
 						runDir,
 						promptText,
@@ -2915,6 +3156,10 @@ export function createReviewRoutes(
 		draftId: string,
 	): Promise<Response> {
 		const body = await parseBody(request);
+		const bodyText = body?.body;
+		if (typeof bodyText !== "string") {
+			return jsonResponse({ error: "Comment body must be a string" }, 400);
+		}
 		const state = await currentState();
 		const existing = state.drafts.find((draft) => draft.id === draftId);
 		if (!existing) return jsonResponse({ error: "Draft not found" }, 404);
@@ -2929,7 +3174,7 @@ export function createReviewRoutes(
 			if (!current) return drafts;
 			drafts[index] = {
 				...current,
-				body: body.body as string,
+				body: bodyText,
 				status: "draft",
 				error: null,
 			};
@@ -3537,6 +3782,12 @@ export function createReviewRoutes(
 				} catch (error) {
 					return jsonResponse({ error: errorMessage(error) }, 500);
 				}
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/importance/contest"
+			) {
+				return contestImportance(request);
 			}
 			if (request.method === "GET" && url.pathname === "/api/importance") {
 				if (!(await featureFlags())["layer-importance"]) {

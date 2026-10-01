@@ -19,16 +19,21 @@ import {
 } from "lucide-react";
 import {
 	Fragment,
-	type KeyboardEvent,
 	type MouseEvent,
 	memo,
+	type KeyboardEvent as ReactKeyboardEvent,
 	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
-import { codeToHtml, codeToTokens, type ThemedToken } from "shiki";
+import {
+	type BundledLanguage,
+	codeToHtml,
+	codeToTokens,
+	type ThemedToken,
+} from "shiki";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import {
 	CONTEXT_CHUNK_SIZE,
@@ -44,13 +49,12 @@ import type {
 	DiffLine,
 	ParsedFileDiff,
 } from "../../../../shared/diff-parse";
-import type { ImportanceSpan } from "../../importance";
 import { type Draft, isMarkdownSelection } from "../../state";
 import type { FromChatContext } from "../from-chat";
 import {
+	type ContestableImportanceSpan,
 	IMPORTANCE_BG_CLASS,
 	type ImportanceLineMap,
-	type ImportanceRating,
 	importanceTitle,
 	indexedDiffLineImportance,
 	lineImportanceMap,
@@ -132,6 +136,11 @@ export interface MarkdownBlockSelection {
 	quote: string;
 }
 
+type ContestImportanceHandler = (
+	span: ContestableImportanceSpan,
+	restoreFocusTarget: HTMLButtonElement,
+) => void;
+
 interface DiffViewProps {
 	file: ParsedFileDiff | null;
 	mode: DiffMode;
@@ -141,7 +150,8 @@ interface DiffViewProps {
 	fileContentsError: string | null;
 	discussions?: readonly HostDiscussion[];
 	drafts?: readonly Draft[];
-	importance?: readonly ImportanceSpan[];
+	importance?: readonly ContestableImportanceSpan[];
+	onContestImportance?: ContestImportanceHandler;
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	onModeChange: (mode: DiffMode) => void;
@@ -268,7 +278,7 @@ function useCodeHighlights(
 			sources.map(async (source) => {
 				try {
 					const result = await codeToTokens(source.source, {
-						lang: language || "text",
+						lang: (language || "text") as BundledLanguage,
 						themes: SHIKI_THEMES,
 						defaultColor: "dark",
 					});
@@ -817,30 +827,136 @@ function LineActions({
 		</span>
 	);
 }
+function focusNextTabbableAfter(element: HTMLElement): void {
+	const tabbables = Array.from(
+		document.querySelectorAll<HTMLElement>(
+			'a[href], area[href], button, input, select, textarea, iframe, object, embed, summary, audio[controls], video[controls], [contenteditable="true"], [tabindex]',
+		),
+	).filter(
+		(candidate) =>
+			candidate.tabIndex >= 0 &&
+			!candidate.matches(":disabled") &&
+			!candidate.closest("[hidden], [inert], [aria-hidden='true']"),
+	);
+	const index = tabbables.indexOf(element);
+	tabbables[index + 1]?.focus();
+}
 
-function ImportanceStrip({ rating }: { rating: ImportanceRating }) {
+function ImportanceStrip({
+	rating,
+	onContest,
+}: {
+	rating: ContestableImportanceSpan;
+	onContest?: ContestImportanceHandler;
+}) {
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const contestButtonRef = useRef<HTMLButtonElement>(null);
+	const [tooltipOpen, setTooltipOpen] = useState(false);
+	const closeOnFocusLeave = (nextTarget: EventTarget | null) => {
+		if (
+			nextTarget !== triggerRef.current &&
+			nextTarget !== contestButtonRef.current
+		) {
+			setTooltipOpen(false);
+		}
+	};
+	const openContest = () => {
+		const restoreFocusTarget = triggerRef.current;
+		if (restoreFocusTarget) onContest?.(rating, restoreFocusTarget);
+	};
+
 	return (
 		<TooltipProvider delay={0}>
-			<Tooltip>
+			<Tooltip
+				open={tooltipOpen}
+				onOpenChange={(open) => {
+					setTooltipOpen(open);
+					if (!open && document.activeElement === contestButtonRef.current)
+						triggerRef.current?.focus();
+				}}
+			>
 				<TooltipTrigger
 					render={
-						<span
-							role="img"
+						<button
+							ref={triggerRef}
+							type="button"
 							aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
-							tabIndex={-1}
-							className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]}`}
+							className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]} focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring`}
+							onKeyDown={(event) => {
+								if (
+									event.key !== "Tab" ||
+									event.shiftKey ||
+									!onContest ||
+									contestButtonRef.current === null
+								) {
+									return;
+								}
+								event.preventDefault();
+								contestButtonRef.current.focus();
+							}}
+							onBlur={(event) => closeOnFocusLeave(event.relatedTarget)}
 						/>
 					}
 				/>
-				<TooltipContent className="flex-col items-start gap-0.5">
-					<span className="font-medium">{importanceTitle(rating.score)}</span>
+				<TooltipContent
+					sideOffset={0}
+					className="flex-col items-stretch gap-0.5"
+				>
+					<div className="flex items-start justify-between gap-2">
+						<span className="font-medium">{importanceTitle(rating.score)}</span>
+						{onContest ? (
+							<Button
+								type="button"
+								size="xs"
+								variant="secondary"
+								className="-mr-1 shrink-0"
+								ref={contestButtonRef}
+								onClick={(event) => {
+									event.stopPropagation();
+									openContest();
+								}}
+								onKeyDown={(event) => {
+									if (event.key === "Escape") {
+										event.preventDefault();
+										event.stopPropagation();
+										triggerRef.current?.focus();
+										return;
+									}
+									event.stopPropagation();
+									if (event.key === "Enter") {
+										event.preventDefault();
+										openContest();
+									} else if (event.key === " ") {
+										event.preventDefault();
+									} else if (event.key === "Tab") {
+										event.preventDefault();
+										if (event.shiftKey) {
+											triggerRef.current?.focus();
+										} else {
+											setTooltipOpen(false);
+											if (triggerRef.current)
+												focusNextTabbableAfter(triggerRef.current);
+										}
+									}
+								}}
+								onBlur={(event) => closeOnFocusLeave(event.relatedTarget)}
+								onKeyUp={(event) => {
+									if (event.key !== " ") return;
+									event.preventDefault();
+									event.stopPropagation();
+									openContest();
+								}}
+							>
+								Contest
+							</Button>
+						) : null}
+					</div>
 					<span>{rating.reason}</span>
 				</TooltipContent>
 			</Tooltip>
 		</TooltipProvider>
 	);
 }
-
 function DiffLineRow({
 	line,
 	mode,
@@ -856,6 +972,7 @@ function DiffLineRow({
 	drag,
 	onDragStart,
 	importance,
+	onContestImportance,
 }: {
 	line: DiffLine;
 	mode: DiffMode;
@@ -870,7 +987,8 @@ function DiffLineRow({
 	selected?: boolean;
 	drag?: { hunkIndex: number; side: "new" | "old"; line: number };
 	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
-	importance?: ImportanceLineMap;
+	importance?: ImportanceLineMap<ContestableImportanceSpan>;
+	onContestImportance?: ContestImportanceHandler;
 }) {
 	const isMatch = lineTextMatches(line.text, find.query);
 	const isCurrent = find.currentId === findId;
@@ -888,10 +1006,27 @@ function DiffLineRow({
 				"aria-label": "Select diff line",
 				onClick: (event: MouseEvent<HTMLTableRowElement>) => {
 					const target = event.target as HTMLElement | null;
-					if (target?.closest?.(".line-actions")) return;
+					const interactiveTarget = target?.closest(
+						"button, a, input, select, textarea, [role='button'], [contenteditable='true']",
+					);
+					if (
+						target?.closest?.(".line-actions") ||
+						(interactiveTarget && interactiveTarget !== event.currentTarget)
+					) {
+						return;
+					}
 					onSelect(event);
 				},
-				onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
+				onKeyDown: (event: ReactKeyboardEvent<HTMLTableRowElement>) => {
+					const target = event.target as HTMLElement | null;
+					if (
+						target !== event.currentTarget &&
+						target?.closest(
+							"button, a, input, select, textarea, [role='button'], [contenteditable='true']",
+						)
+					) {
+						return;
+					}
 					if (event.key === "Enter" || event.key === " ") {
 						event.preventDefault();
 						onSelect(event);
@@ -939,7 +1074,12 @@ function DiffLineRow({
 					lineRating === null ? "line-number" : "line-number importance-cell"
 				}
 			>
-				{lineRating === null ? null : <ImportanceStrip rating={lineRating} />}
+				{lineRating === null ? null : (
+					<ImportanceStrip
+						rating={lineRating}
+						onContest={onContestImportance}
+					/>
+				)}
 				{line.oldLine ?? ""}
 			</td>
 			<td className="line-number">{line.newLine ?? ""}</td>
@@ -971,7 +1111,9 @@ function DiffLineRow({
 					oldRating === null ? "line-number" : "line-number importance-cell"
 				}
 			>
-				{oldRating === null ? null : <ImportanceStrip rating={oldRating} />}
+				{oldRating === null ? null : (
+					<ImportanceStrip rating={oldRating} onContest={onContestImportance} />
+				)}
 				{line.oldLine ?? ""}
 			</td>
 			<td className={`side-line ${line.kind === "del" ? "removed" : ""}`}>
@@ -999,7 +1141,9 @@ function DiffLineRow({
 					newRating === null ? "line-number" : "line-number importance-cell"
 				}
 			>
-				{newRating === null ? null : <ImportanceStrip rating={newRating} />}
+				{newRating === null ? null : (
+					<ImportanceStrip rating={newRating} onContest={onContestImportance} />
+				)}
 				{line.newLine ?? ""}
 			</td>
 			<td className={`side-line ${line.kind === "add" ? "added" : ""}`}>
@@ -1183,6 +1327,7 @@ function HunkRows({
 	collapsedDiscussionIds,
 	onToggleDiscussionCollapse,
 	importance,
+	onContestImportance,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
@@ -1217,7 +1362,8 @@ function HunkRows({
 	dragSelected?: (row: DiffDragRow) => boolean;
 	collapsedDiscussionIds: ReadonlySet<string>;
 	onToggleDiscussionCollapse: (discussionId: string) => void;
-	importance?: ImportanceLineMap;
+	importance?: ImportanceLineMap<ContestableImportanceSpan>;
+	onContestImportance?: ContestImportanceHandler;
 }) {
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
@@ -1284,6 +1430,7 @@ function HunkRows({
 									: undefined
 							}
 							importance={importance}
+							onContestImportance={onContestImportance}
 						/>
 						<InlineCommentRows
 							file={file}
@@ -1344,6 +1491,7 @@ function DiffTable({
 	collapsedDiscussionIds,
 	onToggleDiscussionCollapse,
 	importance,
+	onContestImportance,
 }: {
 	file: ParsedFileDiff;
 	mode: DiffMode;
@@ -1360,10 +1508,13 @@ function DiffTable({
 	onCommentSelection?: (selection: DiffLineSelection) => void;
 	collapsedDiscussionIds: ReadonlySet<string>;
 	onToggleDiscussionCollapse: (discussionId: string) => void;
-	importance?: readonly ImportanceSpan[];
+	importance?: readonly ContestableImportanceSpan[];
+	onContestImportance?: ContestImportanceHandler;
 }) {
 	const path = file.newPath ?? file.oldPath ?? "";
-	const importanceIndex = useMemo(
+	const importanceIndex:
+		| ImportanceLineMap<ContestableImportanceSpan>
+		| undefined = useMemo(
 		() => (importance ? lineImportanceMap(importance, file.hunks) : undefined),
 		[file.hunks, importance],
 	);
@@ -1565,6 +1716,7 @@ function DiffTable({
 								collapsedDiscussionIds={collapsedDiscussionIds}
 								onToggleDiscussionCollapse={onToggleDiscussionCollapse}
 								importance={importanceIndex}
+								onContestImportance={onContestImportance}
 							/>
 						</Fragment>
 					);
@@ -1609,6 +1761,7 @@ export function DiffView({
 	onRetryDraft,
 	fromChat,
 	importance,
+	onContestImportance,
 	collapsedDiscussionIds: savedCollapsedDiscussionIds = [],
 	onCollapsedDiscussionIdsChange,
 	findQuery: findQueryProp,
@@ -2131,6 +2284,7 @@ export function DiffView({
 							collapsedDiscussionIds={collapsedDiscussionIds}
 							onToggleDiscussionCollapse={toggleDiscussionCollapse}
 							importance={importance}
+							onContestImportance={onContestImportance}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { withMockFetch } from "../../../test/fakes/mockFetch";
 import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
 import { createReviewRoutes } from "./routes";
 
@@ -117,7 +118,7 @@ describe("model catalog route", () => {
 		process.env.ANTHROPIC_API_KEY = apiKey;
 		try {
 			const requestHeaders: Headers[] = [];
-			const fetcher: typeof fetch = async (_input, init) => {
+			const fetcher: typeof fetch = withMockFetch(async (_input, init) => {
 				requestHeaders.push(new Headers(init?.headers));
 				return new Response(
 					JSON.stringify({
@@ -129,7 +130,7 @@ describe("model catalog route", () => {
 					}),
 					{ headers: { "content-type": "application/json" } },
 				);
-			};
+			});
 			const routes = createReviewRoutes({
 				token: TOKEN,
 				claudeModelCatalogFetcher: fetcher,
@@ -169,10 +170,10 @@ describe("model catalog route", () => {
 			let fetchCalls = 0;
 			const routes = createReviewRoutes({
 				token: TOKEN,
-				claudeModelCatalogFetcher: async () => {
+				claudeModelCatalogFetcher: withMockFetch(async () => {
 					fetchCalls += 1;
 					throw new Error("fetch must not run without a key");
-				},
+				}),
 			});
 
 			const response = await routes(

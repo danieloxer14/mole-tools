@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
+import { withMockFetch } from "../../../../test/fakes/mockFetch";
 import type {
 	AgentEvent,
 	AgentTurn,
@@ -132,14 +133,14 @@ test("reattaches to a running layer stream and renders its terminal state", asyn
 				expect(activeState.layerStatus).toBe("running");
 
 				const observerStarted = Promise.withResolvers<void>();
-				globalThis.fetch = async (input, init) => {
+				globalThis.fetch = withMockFetch(async (input, init) => {
 					const url = input instanceof Request ? input.url : input.toString();
 					const response = await routes(
 						new Request(new URL(url, "http://127.0.0.1"), init),
 					);
 					observerStarted.resolve();
 					return response;
-				};
+				});
 				let clientState = activeState;
 				const stream = startInitialLayerStream(token, activeState, (frame) => {
 					clientState = mergeLayerStreamFrame(clientState, frame);
