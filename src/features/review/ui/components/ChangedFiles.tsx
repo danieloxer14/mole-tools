@@ -475,18 +475,15 @@ function ChangedFileRow({
 				<Tooltip>
 					<TooltipTrigger
 						render={
-							<span
-								role="img"
+							<button
+								type="button"
 								aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
-								tabIndex={0}
-								className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[rating.score]}`}
+								className={`size-2.5 shrink-0 appearance-none rounded-full border-0 bg-transparent p-0 ${IMPORTANCE_BG_CLASS[rating.score]}`}
 							/>
 						}
 					/>
 					<TooltipContent className="flex-col items-start gap-0.5">
-						<span className="font-medium">
-							{importanceTitle(rating.score)}
-						</span>
+						<span className="font-medium">{importanceTitle(rating.score)}</span>
 						<span>{rating.reason}</span>
 					</TooltipContent>
 				</Tooltip>

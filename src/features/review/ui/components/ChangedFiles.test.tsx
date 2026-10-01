@@ -1449,16 +1449,18 @@ test("opens a reason tooltip from a focused list importance pip", async () => {
 		onSelectFile: (selected) => {
 			selectedPath = selected;
 		},
-		importanceByPath: new Map([
-			[path, { score: 5 as const, reason }],
-		]),
+		importanceByPath: new Map([[path, { score: 5 as const, reason }]]),
 	});
 	const nav = changedFilesNav(rendered.container);
-	const scoredRow = nav.querySelector<HTMLElement>(`[data-file-path="${path}"]`);
+	const scoredRow = nav.querySelector<HTMLElement>(
+		`[data-file-path="${path}"]`,
+	);
 	const unscoredRow = nav.querySelector<HTMLElement>(
 		'[data-file-path="src/unscored.ts"]',
 	);
-	const pip = scoredRow?.querySelector<HTMLElement>('[role="img"]');
+	const pip = scoredRow?.querySelector<HTMLElement>(
+		'button[aria-label^="Importance "]',
+	);
 	if (!pip || !scoredRow || !unscoredRow) {
 		throw new Error("Scored list row or importance pip is missing");
 	}
@@ -1473,15 +1475,13 @@ test("opens a reason tooltip from a focused list importance pip", async () => {
 	expect(
 		counts.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING,
 	).toBeTruthy();
-	expect(unscoredRow.querySelector('[role="img"]')).toBeNull();
+	expect(
+		unscoredRow.querySelector('button[aria-label^="Importance "]'),
+	).toBeNull();
 
 	await act(async () => {
-		pip.dispatchEvent(
-			new window.MouseEvent("pointerover", { bubbles: true }),
-		);
-		pip.dispatchEvent(
-			new window.MouseEvent("pointermove", { bubbles: true }),
-		);
+		pip.dispatchEvent(new window.MouseEvent("pointerover", { bubbles: true }));
+		pip.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true }));
 		document.dispatchEvent(
 			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
 		);
@@ -1508,9 +1508,7 @@ test("opens a reason tooltip on tree file leaves, not directories", async () => 
 	const reason = "This path supports changed behavior.";
 	const rendered = renderInteractive({
 		files: [parsedFile(path)],
-		importanceByPath: new Map([
-			[path, { score: 3 as const, reason }],
-		]),
+		importanceByPath: new Map([[path, { score: 3 as const, reason }]]),
 	});
 	act(() => modeButton(rendered.container, "Tree view").click());
 	const nav = changedFilesNav(rendered.container);
@@ -1521,8 +1519,12 @@ test("opens a reason tooltip on tree file leaves, not directories", async () => 
 	if (!folderRow || !leafRow) {
 		throw new Error("Tree folder or file row is missing");
 	}
-	expect(folderRow.querySelector('[role="img"]')).toBeNull();
-	const pip = leafRow.querySelector<HTMLElement>('[role="img"]');
+	expect(
+		folderRow.querySelector('button[aria-label^="Importance "]'),
+	).toBeNull();
+	const pip = leafRow.querySelector<HTMLElement>(
+		'button[aria-label^="Importance "]',
+	);
 	if (!pip) throw new Error("Tree leaf importance pip is missing");
 	expect(pip.getAttribute("aria-label")).toBe(
 		`Importance 3/5 (Moderate): ${reason}`,
@@ -1547,7 +1549,7 @@ test("opens a reason tooltip on tree file leaves, not directories", async () => 
 	expect(tooltip?.textContent).toBe(`Importance 3/5 (Moderate)${reason}`);
 	expect(
 		changedFilesNav(rendered.container).querySelector(
-			'[data-folder-row="src/nested"] [role="img"]',
+			'[data-folder-row="src/nested"] button[aria-label^="Importance "]',
 		),
 	).toBeNull();
 });
@@ -1558,7 +1560,7 @@ test("omits importance pips when importanceByPath is undefined", () => {
 	});
 	expect(
 		changedFilesNav(rendered.container).querySelector(
-			'[role="img"][aria-label^="Importance "]',
+			'button[aria-label^="Importance "]',
 		),
 	).toBeNull();
 });
