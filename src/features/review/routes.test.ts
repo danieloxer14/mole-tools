@@ -2888,6 +2888,7 @@ describe("review routes", () => {
 					webUrl: previous.mr.webUrl,
 					sourceBranch: "updated-feature",
 					targetBranch: previous.mr.targetBranch,
+					state: "merged",
 					headSha: previous.revision.headSha,
 					diffRefs: previous.revision.diffRefs,
 				}),
@@ -2902,6 +2903,7 @@ describe("review routes", () => {
 			expect(api.mr).toMatchObject({
 				title: "Updated title",
 				description: "",
+				state: "merged",
 				sourceBranch: "updated-feature",
 			});
 			expect(api.discussions).toEqual([latest]);
@@ -2912,10 +2914,13 @@ describe("review routes", () => {
 					...previous.mr,
 					title: "Updated title",
 					description: "",
+					state: "merged",
 					sourceBranch: "updated-feature",
 				},
 			});
+			expect(persisted?.mr.state).toBe("merged");
 			expect(persisted?.revision).toEqual(previous.revision);
+			expect(persisted?.worktreePath).toBe(previous.worktreePath);
 			expect(persisted?.layers).toEqual(previous.layers);
 			expect(persisted?.viewedFiles).toEqual(previous.viewedFiles);
 			expect(persisted?.chats).toEqual(previous.chats);

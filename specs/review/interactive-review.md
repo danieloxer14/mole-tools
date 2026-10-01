@@ -187,19 +187,23 @@ Implemented HTTP surface:
 
 ## 4. Code/Overview UI and diff contract
 
-The review header sits above the panes and starts with a segmented `Code` /
-`Overview` toggle. `Code` is selected by default; the selection is local and
-is not persisted. At narrow widths, the toggle is compact and the MR title
-receives a full-width row before metadata and header actions; wider layouts keep
-the header on one line.
+The MR header presents lifecycle and approval status alongside diff statistics.
+An MR whose persisted GitLab lifecycle state is exactly `merged` shows a
+**Merged** badge instead of an approval badge, regardless of approval state or
+loading status. Its header omits the Approve/Unapprove control and its tooltip
+and accessible description. Other lifecycle values—including `opened`,
+`closed`, unknown strings, and legacy `null`—retain the existing approval
+badge and action behavior. The approval API remains available and unchanged;
+this presentation rule does not change its endpoint contract.
+
+The MR title sits in the header above the panes.
 
 In `Code` view, the left sidebar holds review layers and the changed-file tree,
 the centre column shows the selected file's diff, and the right column is the
-agent chat. The MR title sits in the header above the panes.
+agent chat.
 
-- **Left — Review layers and changed files.** Open in GitLab, live approval
-  status with Approve/Remove approval actions, layer status, Regenerate/Retry,
-  suffix (usually the basename) with the full path in the accessible label and
+- **Left — Review layers and changed files.** Open in GitLab, layer status,
+  Regenerate/Retry,
   hover tooltip, per-layer file coverage, and a global Viewed-files progress
   bar. The complete changed-file tree remains available even when a layer does
   not mention a file. Navigation starts in grouped list mode: each distinct
@@ -667,12 +671,13 @@ reviews/<host>/<projectPath>/mr-<iid>/layers/<run>.json
 `review.json` is written through a temp file followed by atomic rename and a
 serialized write queue. Each `chats/<chatId>.ndjson` stores one JSON object per
 user or assistant entry: `{ role, text, tags, at, sessionId }`. State includes
-MR identity, mode, revision/diff refs, repo/worktree paths, layer status and
-guide, viewed files, `chats`, `activeChatId`, and comment drafts. The legacy
-`chatSessionId` field is read-only and retained only for reading pre-multi-chat
-v1 files. The legacy `chat.ndjson` file is adopted once into the per-chat
-directory. State and transcript are validated when read. A state version
-mismatch discards the old v1 file and starts fresh; there is no schema migration.
+MR identity and nullable lifecycle state (`mr.state`), mode, revision/diff refs,
+repo/worktree paths, layer status and guide, viewed files, `chats`,
+`activeChatId`, and comment drafts. The legacy `chatSessionId` field is
+read-only and retained only for reading pre-multi-chat v1 files. The legacy
+`chat.ndjson` file is adopted once into the per-chat directory. State and
+transcript are validated when read. A state version mismatch discards the old
+v1 file and starts fresh; there is no schema migration.
 
 The read-only freshness check is not itself a sync:
 
@@ -682,17 +687,21 @@ The read-only freshness check is not itself a sync:
    it does not mutate review state or the worktree.
 2. After every successful freshness check, whether the head is unchanged or
    stale, the UI calls `POST /api/sync` and replaces its current API state with
-   the returned complete state before regenerating layers. The header exposes
-   one **Refresh** control and a freshness badge when stale; there is no
+   the returned complete state before regenerating layers; the header uses
+   lifecycle metadata from that returned state. The header exposes one
+   **Refresh** control and a freshness badge when stale; there is no
    separate Sync control or polling/background sync.
-3. Sync fetches current MR metadata and the complete discussion list. If head
-   SHA and all fetched diff refs exist and match persisted refs, it updates MR
-   metadata only: title, description, URL, and branches refresh without
-   rebuilding the worktree/diffs or changing revision `syncedAt` or layer
-   state. If head SHA or refs differ, or refs are unavailable, full code sync
-   recomputes merge base, worktree, diffs, refs, and revision and marks
-   existing layers stale. Both paths return current MR metadata and discussions;
-   discussions replace the in-memory list wholesale and are not persisted.
+3. Setup and every sync fetch current MR metadata, including lifecycle state.
+   A missing lifecycle value is persisted as `null`, including for legacy
+   review files without `mr.state`; it is not inferred from approval or
+   mergeability. If head SHA and all fetched diff refs exist and match persisted
+   refs, sync updates metadata only—including lifecycle state—without rebuilding
+   the worktree/diffs or changing revision `syncedAt` or layer state. This also
+   applies when only lifecycle metadata changed at the same revision. If head
+   SHA or refs differ, or refs are unavailable, full code sync recomputes merge
+   base, worktree, diffs, refs, and revision, and marks existing layers stale.
+   Both paths return current MR metadata and discussions; discussions replace
+   the in-memory list wholesale and are not persisted.
 4. When a discussion provider exists, sync fetches discussions before changing
    persisted state, worktree, or cached discussions. A discussion preflight
    failure returns a non-2xx error and retains prior persisted/local review
