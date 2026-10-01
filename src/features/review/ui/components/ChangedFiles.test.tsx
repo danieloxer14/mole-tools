@@ -1440,52 +1440,76 @@ test("filters complete effective paths in list and tree without changing global 
 	).not.toBeNull();
 	expect(nav.querySelector('[data-file-path="elsewhere.ts"]')).not.toBeNull();
 });
-test("renders importance dots on scored list files after counts", () => {
+test("opens a reason tooltip from a focused list importance pip", async () => {
+	const path = "src/scored.ts";
+	const reason = "This path changes behavior.";
+	let selectedPath: string | null = null;
 	const rendered = renderInteractive({
-		files: [parsedFile("src/scored.ts"), parsedFile("src/unscored.ts")],
+		files: [parsedFile(path), parsedFile("src/unscored.ts")],
+		onSelectFile: (selected) => {
+			selectedPath = selected;
+		},
 		importanceByPath: new Map([
-			[
-				"src/scored.ts",
-				{ score: 5 as const, reason: "This path changes behavior." },
-			],
+			[path, { score: 5 as const, reason }],
 		]),
 	});
 	const nav = changedFilesNav(rendered.container);
-	const scoredRow = nav.querySelector<HTMLElement>(
-		'[data-file-path="src/scored.ts"]',
-	);
+	const scoredRow = nav.querySelector<HTMLElement>(`[data-file-path="${path}"]`);
 	const unscoredRow = nav.querySelector<HTMLElement>(
 		'[data-file-path="src/unscored.ts"]',
 	);
-	const dot = scoredRow?.querySelector<HTMLElement>(
-		'[role="img"][aria-label="Importance 5 of 5"]',
-	);
-	if (!dot || !scoredRow || !unscoredRow) {
-		throw new Error("Scored list row or importance dot is missing");
+	const pip = scoredRow?.querySelector<HTMLElement>('[role="img"]');
+	if (!pip || !scoredRow || !unscoredRow) {
+		throw new Error("Scored list row or importance pip is missing");
 	}
-	expect(dot.className.split(/\s+/)).toContain("bg-importance-5");
-	expect(dot.title).toBe("Importance 5/5 (Critical)");
+	expect(pip.getAttribute("aria-label")).toBe(
+		`Importance 5/5 (Critical): ${reason}`,
+	);
+	expect(pip.tabIndex).toBe(0);
+	expect(pip.getAttribute("title")).toBeNull();
+	expect(pip.className.split(/\s+/)).toContain("bg-importance-5");
 	const counts = scoredRow.querySelector("span.text-success");
 	if (!counts) throw new Error("File counts are missing");
 	expect(
-		counts.compareDocumentPosition(dot) & Node.DOCUMENT_POSITION_FOLLOWING,
+		counts.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING,
 	).toBeTruthy();
+	expect(unscoredRow.querySelector('[role="img"]')).toBeNull();
+
+	await act(async () => {
+		pip.dispatchEvent(
+			new window.MouseEvent("pointerover", { bubbles: true }),
+		);
+		pip.dispatchEvent(
+			new window.MouseEvent("pointermove", { bubbles: true }),
+		);
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		pip.focus();
+		await Bun.sleep(0);
+	});
+	expect(document.activeElement).toBe(pip);
+	expect(selectedPath).toBeNull();
+	const tooltips = document.body.querySelectorAll(
+		'[data-slot="tooltip-content"]',
+	);
+	expect(tooltips).toHaveLength(1);
+	expect(tooltips[0]?.textContent).toBe(`Importance 5/5 (Critical)${reason}`);
+	expect(tooltips[0]?.querySelectorAll("span")).toHaveLength(2);
+
+	act(() => modeButton(rendered.container, "Tree view").click());
 	expect(
-		unscoredRow.querySelector('[role="img"][aria-label^="Importance "]'),
+		document.body.querySelector('[data-slot="tooltip-content"]'),
 	).toBeNull();
 });
 
-test("renders importance dots on tree leaves but never on folders", () => {
+test("opens a reason tooltip on tree file leaves, not directories", async () => {
+	const path = "src/nested/scored.ts";
+	const reason = "This path supports changed behavior.";
 	const rendered = renderInteractive({
-		files: [parsedFile("src/nested/scored.ts")],
+		files: [parsedFile(path)],
 		importanceByPath: new Map([
-			[
-				"src/nested/scored.ts",
-				{
-					score: 3 as const,
-					reason: "This path supports changed behavior.",
-				},
-			],
+			[path, { score: 3 as const, reason }],
 		]),
 	});
 	act(() => modeButton(rendered.container, "Tree view").click());
@@ -1493,29 +1517,42 @@ test("renders importance dots on tree leaves but never on folders", () => {
 	const folderRow = nav.querySelector<HTMLElement>(
 		'[data-folder-row="src/nested"]',
 	);
-	const leafRow = nav.querySelector<HTMLElement>(
-		'[data-file-path="src/nested/scored.ts"]',
-	);
+	const leafRow = nav.querySelector<HTMLElement>(`[data-file-path="${path}"]`);
 	if (!folderRow || !leafRow) {
 		throw new Error("Tree folder or file row is missing");
 	}
-	expect(
-		folderRow.querySelector('[role="img"][aria-label^="Importance "]'),
-	).toBeNull();
-	const dot = leafRow.querySelector<HTMLElement>(
-		'[role="img"][aria-label="Importance 3 of 5"]',
+	expect(folderRow.querySelector('[role="img"]')).toBeNull();
+	const pip = leafRow.querySelector<HTMLElement>('[role="img"]');
+	if (!pip) throw new Error("Tree leaf importance pip is missing");
+	expect(pip.getAttribute("aria-label")).toBe(
+		`Importance 3/5 (Moderate): ${reason}`,
 	);
-	if (!dot) throw new Error("Tree leaf importance dot is missing");
-	expect(dot.className.split(/\s+/)).toContain("bg-importance-3");
-	expect(dot.title).toBe("Importance 3/5 (Moderate)");
+	expect(pip.tabIndex).toBe(0);
+	expect(pip.getAttribute("title")).toBeNull();
+	expect(pip.className.split(/\s+/)).toContain("bg-importance-3");
 	const counts = leafRow.querySelector("span.text-success");
 	if (!counts) throw new Error("File counts are missing");
 	expect(
-		counts.compareDocumentPosition(dot) & Node.DOCUMENT_POSITION_FOLLOWING,
+		counts.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING,
 	).toBeTruthy();
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		pip.focus();
+		await Bun.sleep(0);
+	});
+	const tooltip = document.body.querySelector('[data-slot="tooltip-content"]');
+	expect(tooltip?.textContent).toBe(`Importance 3/5 (Moderate)${reason}`);
+	expect(
+		changedFilesNav(rendered.container).querySelector(
+			'[data-folder-row="src/nested"] [role="img"]',
+		),
+	).toBeNull();
 });
 
-test("omits importance dots when importanceByPath is undefined", () => {
+test("omits importance pips when importanceByPath is undefined", () => {
 	const rendered = renderInteractive({
 		files: [parsedFile("src/scored.ts")],
 	});

@@ -210,11 +210,10 @@ agent chat. The MR title sits in the header above the panes.
   eligible single-directory chains and stops at a branch or directory
   containing a direct file, with indentation based on displayed depth.
   Directory rows disclose descendants only; insertion/deletion statistics
-  appear on file rows only. File rows expose checkbox-only Viewed controls
-  with custom tooltip text exactly `Viewed`; each checkbox's accessible label
-  includes the full file path. Names display in full
-  when they fit and use middle ellipsis while retaining a visible suffix when
-  constrained; controls keep complete paths in accessible labels and tooltips.
+  appear on file rows only. Rated changed-file pips show the file's score/level
+  and selected reason in a custom tooltip. File rows expose checkbox-only Viewed
+  controls with custom tooltip text exactly `Viewed`; each checkbox's accessible
+  label includes the full file path. Names display in full
   Navigation scrolls vertically without horizontal overflow, shrinking names
   before file stats and Viewed controls. Selecting a changed file from any
   surface expands its displayed tree ancestors when needed and scrolls its row
