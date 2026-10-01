@@ -2,8 +2,18 @@ import { afterEach, expect, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { HostDiscussion } from "../../../../ports/git-host";
-import { ChatTagSchema, type DescriptionChatTag } from "../../chat-tags";
-import { OverviewPane, type OverviewPaneProps } from "./OverviewPane";
+import {
+	ChatTagSchema,
+	type DescriptionChatTag,
+	type OnePagerChatTag,
+	OnePagerChatTagSchema,
+} from "../../chat-tags";
+import type { OnePagerView } from "../use-one-pager";
+import {
+	OverviewPane,
+	type OverviewPaneProps,
+	type OverviewTab,
+} from "./OverviewPane";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -183,4 +193,149 @@ test("forwards Explain clicks with the general discussion id", () => {
 	act(() => button?.click());
 
 	expect(explainedId).toBe("general-discussion-1");
+});
+
+test("keeps the legacy Overview markup when one pager is not supplied", () => {
+	const { container } = mountOverview();
+
+	expect(container.querySelector("h2#description-heading")?.textContent).toBe(
+		"Description",
+	);
+	expect(container.textContent).toContain("Tag file");
+	expect(container.textContent).toContain("General discussion");
+	expect(
+		container.querySelector('[aria-label="Overview sections"]'),
+	).toBeNull();
+});
+
+const readyOnePagerView: OnePagerView = {
+	status: "ready",
+	markdown: "# Summary\n\nSecond one-pager block",
+	error: null,
+};
+
+function onePagerProps(
+	tab: OverviewTab,
+	view: OnePagerView = readyOnePagerView,
+	overrides: Partial<NonNullable<OverviewPaneProps["onePager"]>> = {},
+): NonNullable<OverviewPaneProps["onePager"]> {
+	return {
+		tab,
+		onTabChange: () => {},
+		view,
+		onCreate: () => {},
+		onRegenerate: () => {},
+		onTagOnePager: () => {},
+		...overrides,
+	};
+}
+
+test("shows Overview section tabs and keeps description actions and discussion together", () => {
+	const { container } = mountOverview({
+		discussions,
+		onePager: onePagerProps("description"),
+	});
+	const sectionTabs = container.querySelector(
+		'[aria-label="Overview sections"]',
+	);
+
+	expect(sectionTabs?.textContent).toContain("MR Description");
+	expect(sectionTabs?.textContent).toContain("One pager");
+	expect(container.querySelector("h2#description-heading")).toBeNull();
+	expect(
+		container.querySelector('button[aria-label="Tag whole description"]')
+			?.textContent,
+	).toContain("Tag file");
+	expect(
+		container.querySelector("#general-discussion-heading")?.textContent,
+	).toBe("General discussion");
+	expect(
+		container.querySelector('[aria-label="Overview"]')?.textContent,
+	).toContain("A merge request description.");
+});
+
+test("reports selected Overview tab changes", () => {
+	let selectedTab: OverviewTab | undefined;
+	const { container } = mountOverview({
+		onePager: onePagerProps("description", readyOnePagerView, {
+			onTabChange: (tab) => {
+				selectedTab = tab;
+			},
+		}),
+	});
+	const onePagerTab = [
+		...container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+	].find((tab) => tab.textContent?.trim() === "One pager");
+
+	act(() => onePagerTab?.click());
+
+	expect(selectedTab).toBe("one-pager");
+});
+
+test("regenerates a ready one pager from its secondary action", () => {
+	let regenerated = 0;
+	const { container } = mountOverview({
+		onePager: onePagerProps("one-pager", readyOnePagerView, {
+			onRegenerate: () => {
+				regenerated += 1;
+			},
+		}),
+	});
+	const button = container.querySelector<HTMLButtonElement>(
+		'button[aria-label="Regenerate one pager"]',
+	);
+
+	expect(button?.textContent?.trim()).toBe("Regenerate");
+	act(() => button?.click());
+	expect(regenerated).toBe(1);
+});
+
+test("does not offer regeneration when one pager is not ready", () => {
+	for (const status of ["idle", "running"] as const) {
+		const { container } = mountOverview({
+			onePager: onePagerProps("one-pager", {
+				status,
+				markdown: null,
+				error: null,
+			}),
+		});
+
+		expect(
+			container.querySelector('button[aria-label="Regenerate one pager"]'),
+		).toBeNull();
+		act(() => roots.at(-1)?.unmount());
+		roots.pop();
+	}
+});
+
+test("tags one-pager Markdown blocks as validated one-pager chat tags", () => {
+	let tagged: OnePagerChatTag | undefined;
+	const { container } = mountOverview({
+		onePager: onePagerProps("one-pager", readyOnePagerView, {
+			onTagOnePager: (tag) => {
+				tagged = tag;
+			},
+		}),
+	});
+	const secondBlockTag = container.querySelectorAll<HTMLButtonElement>(
+		".markdown-block-tag",
+	)[1];
+
+	if (!secondBlockTag) throw new Error("second one-pager Markdown tag missing");
+	act(() =>
+		secondBlockTag.dispatchEvent(
+			new window.KeyboardEvent("keydown", {
+				key: "Enter",
+				bubbles: true,
+				cancelable: true,
+			}),
+		),
+	);
+
+	expect(OnePagerChatTagSchema.parse(tagged)).toEqual({
+		kind: "one-pager",
+		startLine: 3,
+		endLine: 3,
+		quote: "Second one-pager block",
+	});
 });

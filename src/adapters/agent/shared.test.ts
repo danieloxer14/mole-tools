@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentExec } from "./exec";
 import {
 	diagnostic,
@@ -8,9 +10,28 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedWritePaths,
 } from "./shared";
 
 describe("shared agent adapter plumbing", () => {
+	test("allows scoped writes only outside the worktree", () => {
+		const cwd = process.cwd();
+		const sibling = join(cwd, "..", "review-output");
+		const external = join(tmpdir(), "review-output");
+
+		expect(resolveScopedWritePaths(cwd, sibling)).toEqual({
+			cwd,
+			writeDir: sibling,
+		});
+		expect(resolveScopedWritePaths(cwd, external)).toEqual({
+			cwd,
+			writeDir: external,
+		});
+		expect(resolveScopedWritePaths(cwd, join(cwd, "review-output"))).toBeNull();
+		expect(resolveScopedWritePaths(cwd, join(cwd, ".git"))).toBeNull();
+		expect(resolveScopedWritePaths(cwd, cwd)).toBeNull();
+		expect(resolveScopedWritePaths(cwd, join(cwd, ".."))).toBeNull();
+	});
 	test("preserves provider labels and diagnostic/error formatting", () => {
 		expect(errorMessage(new Error("failed"))).toBe("failed");
 		expect(errorMessage("failed")).toBe("failed");

@@ -83,6 +83,7 @@ import {
 	effectiveAgentSelection,
 } from "./agent-selection";
 import { runChatTurn, validateChatTags } from "./chat";
+import { type ChatTag, isOnePagerChatTag } from "./chat-tags";
 import {
 	appendGeneratedBody,
 	buildCommentConversationMarkdown,
@@ -104,6 +105,14 @@ import {
 	type ReviewLayerConfig,
 	reviewLayerPromptName,
 } from "./layers";
+import {
+	generateOnePager,
+	type OnePagerGenerationResult,
+	type OnePagerLocation,
+	type OnePagerSnapshot,
+	onePagerLocation,
+	readOnePagerDocument,
+} from "./one-pager";
 import type { ReviewPaths } from "./paths";
 import {
 	compareReviewHead,
@@ -114,6 +123,7 @@ import {
 import { type SseFrame, sseResponse } from "./sse";
 import {
 	CHAT_ID_PATTERN,
+	ChatKindSchema,
 	type ChatMeta,
 	createChatMeta,
 	type Draft,
@@ -145,6 +155,8 @@ export interface ReviewRoutesOptions {
 	skillStore?: SkillStore;
 	featureFlagStore?: FeatureFlagStore;
 	importanceDir?: string;
+	onePagerDir?: string;
+	readOnePagerDocument?: typeof readOnePagerDocument;
 	paths?: Pick<
 		ReviewPaths,
 		"layersDir" | "promptDir" | "layerPath" | "promptPath"
@@ -1531,6 +1543,13 @@ export function createReviewRoutes(
 		);
 	}
 
+	function onePagerDirFor(state: ReviewState): string {
+		return (
+			options.onePagerDir ??
+			join(dirname(state.worktreePath), "review-one-pager")
+		);
+	}
+
 	function importanceResultPathFor(state: ReviewState): string {
 		return join(importanceDirFor(state), "importance.json");
 	}
@@ -1744,6 +1763,98 @@ export function createReviewRoutes(
 		return sseResponse(frames());
 	}
 
+	let onePagerRun: {
+		promise: Promise<OnePagerGenerationResult>;
+	} | null = null;
+	const activeOnePagerTurns = new Set<string>();
+	const readOnePager = options.readOnePagerDocument ?? readOnePagerDocument;
+
+	async function onePagerSnapshot(): Promise<OnePagerSnapshot> {
+		const state = await currentState();
+		const { documentPath } = onePagerLocation(onePagerDirFor(state));
+		const document = await readOnePager(documentPath);
+		return {
+			status: onePagerRun ? "running" : document ? "ready" : "idle",
+			markdown: document?.markdown ?? null,
+			updatedAt: document?.updatedAt ?? null,
+		};
+	}
+
+	function startOnePager(): Promise<OnePagerGenerationResult> {
+		if (onePagerRun) return onePagerRun.promise;
+		if (activeOnePagerTurns.size > 0) {
+			return Promise.resolve({
+				status: "failed",
+				error: "Wait for the one pager chat to finish before regenerating",
+			} satisfies OnePagerGenerationResult);
+		}
+
+		const promise = Promise.resolve().then(async () => {
+			const agent = await agentForSlot("review-one-pager", layerAgent);
+			if (!agent) {
+				return {
+					status: "failed",
+					error: "One pager agent is unavailable",
+				} satisfies OnePagerGenerationResult;
+			}
+
+			const state = await currentState();
+			return generateOnePager({
+				agent,
+				state,
+				parsedDiff: currentDiff,
+				dir: onePagerDirFor(state),
+				promptSourceDir: options.promptSourceDir,
+				promptPreset: presetFor("review-one-pager"),
+				config: options.config,
+			});
+		});
+		const tracked = { promise };
+		onePagerRun = tracked;
+		void promise.then(
+			() => {
+				if (onePagerRun === tracked) onePagerRun = null;
+			},
+			() => {
+				if (onePagerRun === tracked) onePagerRun = null;
+			},
+		);
+		return promise;
+	}
+
+	async function onePagerStream(start: boolean): Promise<Response> {
+		async function* frames(): AsyncIterable<SseFrame> {
+			try {
+				const run = start ? startOnePager() : onePagerRun?.promise;
+				if (!run) {
+					const snapshot = await onePagerSnapshot();
+					yield { event: "status", data: snapshot };
+					yield {
+						event: "done",
+						data: { status: snapshot.status },
+					};
+					return;
+				}
+
+				yield { event: "status", data: { status: "running" } };
+				const result = await run;
+				yield { event: "status", data: await onePagerSnapshot() };
+				if (result.status === "failed") {
+					yield { event: "error", data: { message: result.error } };
+				}
+				yield { event: "done", data: { status: result.status } };
+			} catch (error) {
+				yield {
+					event: "error",
+					data: { message: errorMessage(error) },
+				};
+				yield { event: "done", data: { status: "failed" } };
+			}
+		}
+
+		return sseResponse(frames());
+	}
+
 	async function descriptionMedia(request: Request): Promise<Response> {
 		if (request.method !== "GET") return emptyResponse(404);
 		const url = new URL(request.url);
@@ -1884,7 +1995,11 @@ export function createReviewRoutes(
 			const binding =
 				hasTranscript || chat.sessionId !== null
 					? defaultSelection()
-					: await slotSelection("review-chat");
+					: await slotSelection(
+							chat.kind === "one-pager"
+								? "review-one-pager-chat"
+								: "review-chat",
+						);
 			state = await mutateState((base) => ({
 				...base,
 				chats: base.chats.map((entry) =>
@@ -2233,8 +2348,6 @@ export function createReviewRoutes(
 
 		const store = options.store;
 		if (!store) return chatErrorStream("Review store is unavailable");
-		if (!options.createReviewAgent && !chatAgent)
-			return chatErrorStream("Review chat agent is unavailable");
 		if (activeTurns.has(input.chatId))
 			return chatErrorStream("Chat turn already in progress");
 		const controller = new AbortController();
@@ -2242,8 +2355,8 @@ export function createReviewRoutes(
 		const release = () => {
 			if (activeTurns.get(input.chatId) === controller)
 				activeTurns.delete(input.chatId);
+			activeOnePagerTurns.delete(input.chatId);
 		};
-
 		let expanded: {
 			message: string;
 			skills: SkillRef[];
@@ -2272,12 +2385,49 @@ export function createReviewRoutes(
 
 		let agent: ReviewAgent | undefined;
 		let chatState: ReviewState;
+		let chat: ChatMeta;
+		let onePager: OnePagerLocation | undefined;
 		try {
 			chatState = await currentState();
-			let chat = requireChat(chatState, input.chatId);
-			if (!chat) {
+			const selectedChat = requireChat(chatState, input.chatId);
+			if (!selectedChat) {
 				release();
 				return chatErrorStream(`Unknown chat: ${input.chatId}`);
+			}
+			chat = selectedChat;
+			if (chat.kind === "review" && input.tags.some(isOnePagerChatTag)) {
+				release();
+				return chatErrorStream("One pager tags require a one pager chat");
+			}
+			if (chat.kind === "one-pager") {
+				if (!(await featureFlags())["one-pager"]) {
+					release();
+					return chatErrorStream("One pager feature is disabled");
+				}
+				if (input.tags.some((tag) => !isOnePagerChatTag(tag))) {
+					release();
+					return chatErrorStream("One pager chats accept only one pager tags");
+				}
+				if (onePagerRun) {
+					release();
+					return chatErrorStream("Wait for the one pager to finish generating");
+				}
+				onePager = onePagerLocation(onePagerDirFor(chatState));
+				if (activeOnePagerTurns.size > 0) {
+					release();
+					return chatErrorStream("Wait for the other one pager chat to finish");
+				}
+				activeOnePagerTurns.add(input.chatId);
+				if (!(await readOnePager(onePager.documentPath))) {
+					release();
+					return chatErrorStream(
+						"Create the one pager before chatting about it",
+					);
+				}
+			}
+			if (!options.createReviewAgent && !chatAgent) {
+				release();
+				return chatErrorStream("Review chat agent is unavailable");
 			}
 			if (chat.agent === null && options.createReviewAgent) {
 				const entries = await store.readChat(input.chatId);
@@ -2297,11 +2447,12 @@ export function createReviewRoutes(
 						entry.id === input.chatId ? { ...entry, title } : entry,
 					),
 				}));
-				chat = requireChat(chatState, input.chatId);
-				if (!chat) {
+				const titledChat = requireChat(chatState, input.chatId);
+				if (!titledChat) {
 					release();
 					return chatErrorStream(`Unknown chat: ${input.chatId}`);
 				}
+				chat = titledChat;
 			}
 			agent = options.createReviewAgent
 				? chat.agent === null
@@ -2345,8 +2496,10 @@ export function createReviewRoutes(
 			chatId: input.chatId,
 			paths: options.paths,
 			promptSourceDir: options.promptSourceDir,
-			promptText: options.promptText,
-			promptPreset: presetFor("review-chat"),
+			promptText: chat.kind === "one-pager" ? undefined : options.promptText,
+			promptPreset: presetFor(
+				chat.kind === "one-pager" ? "review-one-pager-chat" : "review-chat",
+			),
 			tags: input.tags,
 			message: expanded.message,
 			sourceText: input.message,
@@ -2359,6 +2512,14 @@ export function createReviewRoutes(
 				const frame = chatEventFrame(event);
 				if (frame) queue.push(frame);
 			},
+			...(onePager
+				? {
+						onePager: {
+							documentPath: onePager.documentPath,
+							documentDir: onePager.documentDir,
+						},
+					}
+				: {}),
 		});
 		const finish = () => {
 			release();
@@ -2420,18 +2581,60 @@ export function createReviewRoutes(
 		generation.abort();
 		return emptyResponse(204);
 	}
-	async function createChat(): Promise<Response> {
+	async function createChat(request: Request): Promise<Response> {
+		let body: unknown = null;
+		if (request.body !== null) {
+			try {
+				body = await request.json();
+			} catch {
+				return jsonResponse({ error: "Chat kind is invalid" }, 400);
+			}
+		}
+		const parsed = z
+			.object({ kind: ChatKindSchema.optional() })
+			.safeParse(body ?? {});
+		if (!parsed.success)
+			return jsonResponse({ error: "Chat kind is invalid" }, 400);
+		const kind = parsed.data.kind ?? "review";
 		try {
-			const binding = options.createReviewAgent
-				? await slotSelection("review-chat")
-				: { agent: null, model: null, effort: null };
-			const chat = createChatMeta(undefined, binding);
+			if (kind === "one-pager" && !(await featureFlags())["one-pager"]) {
+				return jsonResponse({ error: "Feature disabled" }, 404);
+			}
+
+			const state = await currentState();
+			const location =
+				kind === "one-pager" ? onePagerLocation(onePagerDirFor(state)) : null;
+			if (location && !(await readOnePager(location.documentPath))) {
+				return jsonResponse(
+					{
+						error: "Create the one pager before starting a one pager chat",
+					},
+					409,
+				);
+			}
+
+			const binding =
+				kind === "one-pager"
+					? await slotSelection("review-one-pager-chat")
+					: options.createReviewAgent
+						? await slotSelection("review-chat")
+						: { agent: null, model: null, effort: null };
+			const chat = createChatMeta(undefined, binding, kind);
 			const next = await mutateState((base) => ({
 				...base,
 				chats: [...base.chats, chat],
-				activeChatId: chat.id,
+				...(kind === "one-pager"
+					? { activeOnePagerChatId: chat.id }
+					: { activeChatId: chat.id }),
 			}));
-			return jsonResponse({ chats: next.chats, activeChatId: chat.id }, 201);
+			return jsonResponse(
+				{
+					chats: next.chats,
+					activeChatId: next.activeChatId,
+					activeOnePagerChatId: next.activeOnePagerChatId,
+				},
+				201,
+			);
 		} catch (error) {
 			return promptErrorResponse(error);
 		}
@@ -2490,9 +2693,13 @@ export function createReviewRoutes(
 		if (typeof chatId !== "string" || !CHAT_ID_PATTERN.test(chatId))
 			return jsonResponse({ error: "Chat id is invalid" }, 400);
 		const state = await currentState();
-		if (!requireChat(state, chatId))
-			return jsonResponse({ error: `Unknown chat: ${chatId}` }, 404);
-		await mutateState((base) => ({ ...base, activeChatId: chatId }));
+		const chat = requireChat(state, chatId);
+		if (!chat) return jsonResponse({ error: `Unknown chat: ${chatId}` }, 404);
+		await mutateState((base) =>
+			chat.kind === "one-pager"
+				? { ...base, activeOnePagerChatId: chatId }
+				: { ...base, activeChatId: chatId },
+		);
 		return emptyResponse(204);
 	}
 
@@ -2596,9 +2803,9 @@ export function createReviewRoutes(
 		activeCommentGenerations.set(draftId, controller);
 		let removeDisconnectListener: (() => void) | undefined;
 		try {
-			const chatIndex = state.chats.findIndex(
-				(candidate) => candidate.id === chatId,
-			);
+			const chatIndex = state.chats
+				.filter((candidate) => candidate.kind === chat.kind)
+				.findIndex((candidate) => candidate.id === chatId);
 			const chatLabel = chat.title || `New chat ${chatIndex + 1}`;
 			const conversationMarkdown = buildCommentConversationMarkdown({
 				draft,
@@ -3216,7 +3423,7 @@ export function createReviewRoutes(
 				return chat(request);
 			}
 			if (request.method === "POST" && url.pathname === "/api/chats") {
-				return createChat();
+				return createChat(request);
 			}
 			if (request.method === "POST" && url.pathname === "/api/chats/active") {
 				return selectChat(request);
@@ -3357,6 +3564,22 @@ export function createReviewRoutes(
 				if (!expectedRevisionKey)
 					return jsonResponse({ error: "Missing revisionKey" }, 400);
 				return importanceStream(true, expectedRevisionKey);
+			}
+			if (request.method === "GET" && url.pathname === "/api/one-pager") {
+				if (!(await featureFlags())["one-pager"]) {
+					return jsonResponse({ error: "Feature disabled" }, 404);
+				}
+				return jsonResponse(await onePagerSnapshot());
+			}
+			if (
+				request.method === "POST" &&
+				(url.pathname === "/api/one-pager/generate" ||
+					url.pathname === "/api/one-pager/observe")
+			) {
+				if (!(await featureFlags())["one-pager"]) {
+					return jsonResponse({ error: "Feature disabled" }, 404);
+				}
+				return onePagerStream(url.pathname === "/api/one-pager/generate");
 			}
 			if (request.method === "GET" && url.pathname === "/api/settings") {
 				return settingsSnapshot();

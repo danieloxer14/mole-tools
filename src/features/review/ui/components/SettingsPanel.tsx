@@ -30,7 +30,11 @@ import { Textarea } from "./ui/textarea";
 export const FEATURE_SLOTS: readonly {
 	slot: PromptName;
 	flag: FeatureFlagId;
-}[] = [{ slot: "review-importance", flag: "layer-importance" }];
+}[] = [
+	{ slot: "review-importance", flag: "layer-importance" },
+	{ slot: "review-one-pager", flag: "one-pager" },
+	{ slot: "review-one-pager-chat", flag: "one-pager" },
+];
 export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-layers-code",
 	"review-layers-plan",
@@ -49,6 +53,8 @@ export const SLOT_LABELS: Record<PromptName, string> = {
 	"review-explain-comment": "Explain review comment",
 	"review-comment-from-chat": "Comment from chat",
 	"review-importance": "Review importance",
+	"review-one-pager": "One pager",
+	"review-one-pager-chat": "One pager chat",
 };
 export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 	"commit-system":
@@ -69,8 +75,11 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 	"review-importance":
 		"System prompt the importance agent uses to score changed line spans 1–5 and provide a concise reason for each (Features → File important must be on).",
+	"review-one-pager":
+		"System prompt the one pager agent uses to write a one-page Markdown summary of the MR (Features → One pager must be on).",
+	"review-one-pager-chat":
+		"Base system prompt for the one pager chat agent, which answers questions about the summary and may edit it in place (Features → One pager must be on).",
 };
-
 type ReviewAgent = PromptAgentName;
 type PromptAgent = "default" | ReviewAgent;
 export type SettingsTab =

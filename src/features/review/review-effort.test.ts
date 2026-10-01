@@ -381,7 +381,7 @@ describe("review effort selection", () => {
 		}
 	});
 
-	test("OMP adds thinking only when selected and preserves scoped write tools", async () => {
+	test("OMP adds thinking only when selected and preserves generic write tools", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-effort-omp-"));
 		try {
 			const promptPath = join(dir, "system.md");
@@ -464,7 +464,7 @@ describe("review effort selection", () => {
 		}
 	});
 
-	test("Claude adds effort only when selected and preserves scoped write tools", async () => {
+	test("Claude adds effort only when selected and preserves generic write tools", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-effort-claude-"));
 		try {
 			const promptPath = join(dir, "system.md");

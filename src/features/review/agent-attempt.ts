@@ -16,19 +16,24 @@ interface AgentEventFailure {
 interface AgentEventAttempt {
 	iterator: AsyncIterator<AgentEvent>;
 	result: Promise<AgentEventFailure | null>;
+	text: string[] | null;
 }
 
 function consumeAgentAttempt(
 	iterable: AsyncIterable<AgentEvent>,
+	captureText: boolean,
 ): AgentEventAttempt {
 	const iterator = iterable[Symbol.asyncIterator]();
+	const text: string[] | null = captureText ? [] : null;
 	const result = (async (): Promise<AgentEventFailure | null> => {
 		let agentError: string | null = null;
 		try {
 			while (true) {
 				const next = await iterator.next();
 				if (next.done) return agentError ? { error: agentError } : null;
-				if (next.value.kind === "error") agentError = next.value.message;
+				if (next.value.kind === "text" && text) text.push(next.value.delta);
+				else if (next.value.kind === "tool" && text) text.length = 0;
+				else if (next.value.kind === "error") agentError = next.value.message;
 			}
 		} catch (error) {
 			return {
@@ -36,7 +41,7 @@ function consumeAgentAttempt(
 			};
 		}
 	})();
-	return { iterator, result };
+	return { iterator, result, text };
 }
 
 export type AgentFileAttempt<T> =
@@ -58,19 +63,33 @@ export function agentAttemptTimeoutSeconds(
 		: 600;
 }
 
-export async function runAgentFileAttempt<T>(options: {
+type AgentFileAttemptOptions<T> = {
 	agent: ReviewAgent;
 	cwd: string;
 	systemPromptFile: string;
 	message: string;
-	writeDir: string;
-	outputPath: string;
+	writeScope?: "directory";
 	timeoutSeconds: number;
 	signal?: AbortSignal;
 	label: string;
 	schema: AgentOutputSchema<T>;
-}): Promise<AgentFileAttempt<T>> {
-	await rm(options.outputPath, { force: true });
+} & (
+	| {
+			outputPath: string;
+			writeDir: string;
+			format?: "json" | "text";
+	  }
+	| {
+			outputPath?: never;
+			writeDir?: never;
+			format: "text";
+	  }
+);
+
+export async function runAgentFileAttempt<T>(
+	options: AgentFileAttemptOptions<T>,
+): Promise<AgentFileAttempt<T>> {
+	if (options.outputPath) await rm(options.outputPath, { force: true });
 	const controller = new AbortController();
 	const { promise: cancelled, resolve: resolveCancelled } =
 		Promise.withResolvers<"cancelled">();
@@ -84,17 +103,21 @@ export async function runAgentFileAttempt<T>(options: {
 			once: true,
 		});
 
+	let outputText: string[] | null = null;
 	let timeoutId: ReturnType<typeof setTimeout> | undefined;
 	try {
-		const { iterator, result } = consumeAgentAttempt(
+		const { iterator, result, text } = consumeAgentAttempt(
 			options.agent.run({
 				cwd: options.cwd,
 				systemPromptFile: options.systemPromptFile,
 				message: options.message,
-				writeDir: options.writeDir,
+				...(options.writeDir ? { writeDir: options.writeDir } : {}),
+				...(options.writeScope ? { writeScope: options.writeScope } : {}),
 				signal: controller.signal,
 			}),
+			options.outputPath === undefined,
 		);
+		outputText = text;
 		const { promise: timedOut, resolve: resolveTimedOut } =
 			Promise.withResolvers<"timeout">();
 		timeoutId = setTimeout(() => {
@@ -129,23 +152,31 @@ export async function runAgentFileAttempt<T>(options: {
 		options.signal?.removeEventListener("abort", handleParentAbort);
 	}
 
-	const file = Bun.file(options.outputPath);
-	if (!(await file.exists())) {
-		return {
-			ok: false,
-			kind: "output",
-			error: `${options.label} agent did not write output file: ${options.outputPath}`,
-		};
-	}
 	let raw: unknown;
-	try {
-		raw = JSON.parse(await file.text());
-	} catch (error) {
-		return {
-			ok: false,
-			kind: "output",
-			error: `${options.label} output is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-		};
+	if (options.outputPath === undefined) {
+		raw = outputText?.join("") ?? "";
+	} else {
+		const file = Bun.file(options.outputPath);
+		if (!(await file.exists())) {
+			return {
+				ok: false,
+				kind: "output",
+				error: `${options.label} agent did not write output file: ${options.outputPath}`,
+			};
+		}
+		if (options.format === "text") {
+			raw = await file.text();
+		} else {
+			try {
+				raw = JSON.parse(await file.text());
+			} catch (error) {
+				return {
+					ok: false,
+					kind: "output",
+					error: `${options.label} output is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+				};
+			}
+		}
 	}
 	const parsed = options.schema.safeParse(raw);
 	if (!parsed.success) {

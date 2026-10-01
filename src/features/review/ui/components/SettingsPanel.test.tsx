@@ -101,6 +101,56 @@ test("importance slot stays hidden while Layer importance is off", () => {
 	expect(nav).not.toContain("Review importance");
 	resetFeatureFlagsForTests();
 });
+test("one-pager prompt slots are shown only when the confirmed flag is enabled", async () => {
+	resetFeatureFlagsForTests();
+	const originalFetch = globalThis.fetch;
+	let enabled = true;
+	globalThis.fetch = (async () =>
+		jsonResponse({
+			flags: [
+				{
+					id: "one-pager",
+					label: "One pager",
+					description: "test",
+					enabled,
+				},
+			],
+		})) as typeof fetch;
+	const renderPrompts = () =>
+		renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialSettings,
+				initialPrompt,
+				initialTab: "prompts",
+			}),
+		);
+	try {
+		await loadFeatureFlags("settings-test-token");
+		const enabledMarkup = renderPrompts();
+		const enabledNav = enabledMarkup.match(
+			/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/,
+		)?.[1];
+		expect(enabledNav).toContain("One pager</span>");
+		expect(enabledNav).toContain("One pager chat</span>");
+		expect(enabledMarkup).toContain(">Agent</label>");
+		expect(enabledMarkup).toContain(">Model</label>");
+		expect(enabledMarkup).toContain(">Effort</label>");
+
+		resetFeatureFlagsForTests();
+		enabled = false;
+		await loadFeatureFlags("settings-test-token");
+		const disabledNav = renderPrompts().match(
+			/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/,
+		)?.[1];
+		expect(disabledNav).not.toContain("One pager");
+		expect(disabledNav).not.toContain("One pager chat");
+	} finally {
+		globalThis.fetch = originalFetch;
+		resetFeatureFlagsForTests();
+	}
+});
 
 test("importance slot appears after existing slots when Layer importance is on", async () => {
 	resetFeatureFlagsForTests();

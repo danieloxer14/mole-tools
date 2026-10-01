@@ -354,16 +354,22 @@ describe("prompt store", () => {
 		const dir = await promptsDir();
 		await loadPrompt("review-explain-comment", { dir });
 		await loadPrompt("review-importance", { dir });
-		expect(
-			await Bun.file(
-				join(dir, "review-explain-comment", "default", "001.md"),
-			).exists(),
-		).toBe(true);
-		expect(
-			await Bun.file(
-				join(dir, "review-importance", "default", "001.md"),
-			).exists(),
-		).toBe(true);
+		expect(await loadPrompt("review-one-pager", { dir })).toBe(
+			DEFAULT_PROMPTS["review-one-pager"].trim(),
+		);
+		expect(await loadPrompt("review-one-pager-chat", { dir })).toBe(
+			DEFAULT_PROMPTS["review-one-pager-chat"].trim(),
+		);
+		for (const slot of [
+			"review-explain-comment",
+			"review-importance",
+			"review-one-pager",
+			"review-one-pager-chat",
+		]) {
+			expect(
+				await Bun.file(join(dir, slot, "default", "001.md")).exists(),
+			).toBe(true);
+		}
 	});
 
 	test("defines a default for every prompt name", () => {
@@ -377,6 +383,8 @@ describe("prompt store", () => {
 			"review-importance",
 			"review-layers-code",
 			"review-layers-plan",
+			"review-one-pager",
+			"review-one-pager-chat",
 		]);
 		for (const value of Object.values(DEFAULT_PROMPTS)) {
 			expect(typeof value).toBe("string");

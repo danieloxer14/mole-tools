@@ -566,6 +566,7 @@ export async function setupReview(
 		chatSessionId: null,
 		chats,
 		activeChatId: previous ? previous.activeChatId : (chats[0]?.id ?? null),
+		activeOnePagerChatId: previous?.activeOnePagerChatId ?? null,
 		drafts: previous?.drafts ?? [],
 	});
 
