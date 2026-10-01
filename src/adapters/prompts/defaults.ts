@@ -10,6 +10,8 @@ export const PROMPT_NAMES = [
 	"review-explain-comment",
 	"review-comment-from-chat",
 	"review-importance",
+	"review-one-pager",
+	"review-one-pager-chat",
 ] as const;
 export type PromptName = (typeof PROMPT_NAMES)[number];
 export const PromptNameSchema = z.enum(PROMPT_NAMES);
@@ -132,4 +134,60 @@ Be careful to understand the type of file you are in: business-logic or helper c
 Do not force a distribution: several files may contain important parts.
 Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.
 For every scored span, provide exactly one concise sentence explaining its score and the hunk, no more than 144 characters and with no line breaks.`,
+	"review-one-pager": `Write a one-page Markdown summary that helps a reviewer understand this merge request as quickly as possible.
+
+
+Use this template:
+
+## Summary
+
+<one or two sentences on what changes and why, then the smallest visual that makes the key point clear>
+
+## Evidence
+
+- **Before:** <behaviour, output, or failing test before the change>
+  **After:** <behaviour, output, or passing test after the change>
+
+## Merge Danger
+
+**Door:** <one-way or two-way>
+
+<optional: description>
+
+**Blast Radius:** <one-word description>
+
+<optional: potential ramifications of merge>
+
+## Sections
+
+Skip all preambles and keep prose brief. Use the repository's own domain language, for example terms defined in CONTEXT.md or GLOSSARY.md when present.
+
+### Summary
+
+Pick the smallest view that makes the key point clear:
+
+- Logic or an algorithm as pseudocode in a \`\`\`text block.
+- Runtime control flow as a call tree in a \`\`\`text block.
+- UI structure as a component tree, including state and module boundaries that matter.
+- File responsibility or a broad refactor as a shallow file tree.
+- Component interaction, control flow, or data flow as a \`\`\`mermaid diagram such as a sequenceDiagram or flowchart.
+- A \`\`\`diff block when the point is what changes and the surrounding shape already exists; match the diff shape to the topic (component tree, file layout, call tree, or state and control flow).
+- A whole code block in the relevant language when most of it is new or the reviewer needs a copyable target shape.
+
+Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to understand the change. Use one or several views, rarely all of them; do not overwhelm the reader.
+
+### Evidence
+
+Concrete evidence that the change works, shown as a before and after. You cannot take screenshots: use execution-based evidence visible in the diff, such as the exact test that now passes, described in pseudocode. If the diff contains no evidence, say so plainly; never invent test results.
+
+### Merge Danger
+
+State whether this is a one-way door (destructive or hard to reverse) or a two-way door (cheap to roll back). The blast radius is the potential scope of impact: consider consumers, data, configuration, layout, and performance.
+
+## Output rules
+
+Use only Markdown headings, paragraphs, bold and italic text, lists, tables, inline code, and fenced code blocks (\`\`\`text, \`\`\`diff, \`\`\`mermaid, or a language name). Never use raw HTML or images.`,
+	"review-one-pager-chat": `You are the one pager chat agent for a merge request review. The reviewer is reading a one-page Markdown summary of this merge request and asks follow-up questions about it and about the change.
+
+Answer concisely and ground every claim in the worktree or the one pager. When the reviewer asks for more explanation, a breakdown, a correction, or a different visual, and the answer belongs in the document, edit the one pager in place only when runtime permissions allow editing: change the smallest section that answers the request and keep the rest intact. Runtime read-only policy overrides any editing request in this prompt; when editing is unavailable, explain that and suggest Markdown text the reviewer can apply. Keep the document to Markdown headings, paragraphs, lists, tables, inline code, and fenced \`\`\`text, \`\`\`diff, \`\`\`mermaid, or language code blocks; never add raw HTML or images. After editing, reply in one or two sentences saying what changed and where. When no edit is needed, just answer.`,
 };

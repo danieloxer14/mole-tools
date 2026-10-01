@@ -144,5 +144,30 @@ with head and merge-base SHA stamps at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 Running status exists in memory only.
 
+### One pager
+An agent-written, reviewer-facing one-page Markdown summary of a merge
+request, stored per MR at
+`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/one-pager/document/one-pager.md`.
+The **One pager** feature adds an Overview tab for creating and regenerating
+the summary. The host persists Markdown returned by the agent: Claude and
+Codex write only within the temporary run directory, while OMP returns text
+without file-write tools.
+Codex one-pager generation and chat scoped-write turns deliberately pass
+`--ignore-user-config --strict-config`, so user `config.toml` settings,
+including provider and default model, are not loaded. The prompt version can
+select Codex agent/model/effort, but not provider; users relying on a
+non-default provider or other user-config settings must ensure scoped turns can
+run without user config.
+Generation input is bounded to 64 KiB of serialized metadata/diff and a 96 KiB
+combined system prompt plus message. Description, file rows and hunks can be
+truncated; markers identify omitted data so the agent must not infer it.
+
+
+### One pager chat
+A chat kind bound to the `review-one-pager-chat` prompt slot. It answers
+questions about the one pager. Claude and Codex may edit only the one pager
+document in place; OMP stays read-only because it lacks enforced directory-scoped
+writes. Supported-provider edits trigger a debounced document reload.
+
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

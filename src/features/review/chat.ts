@@ -111,6 +111,10 @@ export interface ChatPromptInput {
 	currentFile?: string | null;
 	/** Absolute path of the pinned review worktree; enforced only by prompt policy. */
 	worktreePath: string;
+	/** Absolute one-pager document path, when this is a one-pager chat. */
+	onePagerPath?: string;
+	/** True only when the agent enforces writes inside the one-pager directory. */
+	onePagerWritable?: boolean;
 }
 
 export interface ChatPromptPaths {
@@ -130,6 +134,7 @@ export interface ChatTurnOptions {
 	/** Active preset for the chat prompt slot. */
 	promptPreset?: string;
 	promptText?: string;
+	onePager?: { documentPath: string; documentDir: string };
 	turnId?: string;
 	context?: ChatPromptContext;
 	mr?: ChatMrMetadata;
@@ -169,6 +174,22 @@ export function readOnlyWorktreeContext(worktreePath: string): string {
 	return `The review worktree is read-only and pinned at the absolute path ${worktreePath}. Use only read, grep, glob, and bash tools, scoped to files inside that path. Use bash only for read-only inspection commands. Never invoke write or edit tools, never run commands that modify files, and never modify files; if asked to change the worktree, refuse and explain that chat review is read-only. Do not read, grep, or glob anything outside the worktree for any reason, including this application's own configuration, session, or review-data directories, or any other project's files on this machine, even though the tools are not sandboxed and would technically allow it. If the worktree does not contain enough information to answer, say so explicitly instead of guessing or reporting an unrelated file path as the answer.`;
 }
 
+/** Explicit read-only policy for providers without secure directory writes. */
+export function onePagerReadOnlyContext(
+	worktreePath: string,
+	documentPath: string,
+): string {
+	return `The review worktree is read-only and pinned at the absolute path ${worktreePath}. Inspect only files inside that worktree. The one-pager document at ${documentPath} may be read, but this provider is configured without write access for this chat. This runtime read-only policy overrides any base-prompt request to edit the document. Do not invoke write or edit tools, run commands that modify files, or claim to have changed the document. If asked to edit it, explain that one-pager editing is unavailable with this provider and suggest Markdown text instead.`;
+}
+
+/** Prompt policy for editing the one-pager document outside the worktree. */
+export function onePagerEditContext(
+	worktreePath: string,
+	documentPath: string,
+): string {
+	return `The review worktree is read-only and pinned at the absolute path ${worktreePath}. Use available tools to inspect files inside that path; never modify worktree files. You may read and edit exactly one file outside the worktree: the one pager Markdown document at ${documentPath}. Any reads or writes outside the worktree must target that exact path; never create, rename, or delete any other file. Do not read or search anything else outside the worktree. Runtime permissions restrict write and edit tools to the one-pager document directory.`;
+}
+
 export type LineTag = ChatTag;
 export { ChatTagSchema };
 
@@ -203,6 +224,9 @@ export const validateLineTags = validateChatTags;
  */
 const TAG_SEMANTICS =
 	'Tag semantics: tags are agent-chat context only, never host comments. A tag without a kind names an inclusive line range on one side of the diff with its hunk header; a tag with kind "markdown" names an inclusive source-line range of a rendered markdown block; a tag with kind "file" and a path only means inspect the entire file at that path. A tag with kind "description" refers to the merge request description, never a file: with startLine/endLine it names an inclusive source-line range of the description Markdown, without them it means the entire description; its quote carries the tagged text.';
+const ONE_PAGER_TAG_SEMANTICS =
+	'A tag with kind "one-pager" refers to the one pager summary document, never a worktree file: with startLine/endLine it names an inclusive source-line range of the one pager Markdown, without them it means the entire document; its quote carries the tagged text.';
+
 function normalizedMessage(message: unknown): string {
 	if (typeof message !== "string" || message.trim().length === 0) {
 		throw new Error("Chat message must not be empty");
@@ -267,16 +291,20 @@ export function buildChatMessage(input: {
 	newTags?: readonly unknown[];
 	openFile?: string | null;
 	currentFile?: string | null;
+	onePager?: boolean;
 }): string {
 	const message = normalizedMessage(input.message);
 	const tags = validateChatTags(input.tags ?? input.newTags ?? []);
 	const openFile = normalizedOpenFile(input.openFile ?? input.currentFile);
+	const tagSemantics = input.onePager
+		? `${TAG_SEMANTICS} ${ONE_PAGER_TAG_SEMANTICS}`
+		: TAG_SEMANTICS;
 	return [
 		"Reviewer message:",
 		message,
 		"New context tags:",
 		json(tags),
-		TAG_SEMANTICS,
+		tagSemantics,
 		"Current file:",
 		openFile ?? "(none)",
 	].join("\n\n");
@@ -294,9 +322,24 @@ export function buildChatPrompt(input: ChatPromptInput): string {
 		input.message ?? "Review the merge request.",
 	);
 	const openFile = normalizedOpenFile(input.openFile ?? input.currentFile);
-	const base = input.basePrompt ?? DEFAULT_PROMPTS["review-chat"];
+	const base =
+		input.basePrompt ??
+		(input.onePagerPath === undefined
+			? DEFAULT_PROMPTS["review-chat"]
+			: DEFAULT_PROMPTS["review-one-pager-chat"]);
 	const worktreePath = normalizedWorktreePath(input.worktreePath);
-	const sections = [base.trim(), readOnlyWorktreeContext(worktreePath)];
+	const onePagerWritable = input.onePagerWritable === true;
+	const worktreeContext =
+		input.onePagerPath === undefined
+			? readOnlyWorktreeContext(worktreePath)
+			: onePagerWritable
+				? onePagerEditContext(worktreePath, input.onePagerPath)
+				: onePagerReadOnlyContext(worktreePath, input.onePagerPath);
+	const tagSemantics =
+		input.onePagerPath === undefined
+			? TAG_SEMANTICS
+			: `${TAG_SEMANTICS} ${ONE_PAGER_TAG_SEMANTICS}`;
+	const sections = [base.trim(), worktreeContext];
 
 	if (first) {
 		const firstContext = requireFirstContext(context);
@@ -305,6 +348,13 @@ export function buildChatPrompt(input: ChatPromptInput): string {
 			`Layer guide:\n${json(firstContext.guide)}`,
 			`Changed files:\n${json(firstContext.changedFiles)}`,
 		);
+		if (input.onePagerPath !== undefined) {
+			sections.push(
+				input.onePagerWritable
+					? `One pager document (read it before answering; edit it in place when helpful):\n${input.onePagerPath}`
+					: `One pager document (read-only in this chat; explain that editing is unavailable and suggest Markdown changes instead):\n${input.onePagerPath}`,
+			);
+		}
 		if (firstContext.discussions.length > 0) {
 			sections.push(
 				`Existing review discussions (snapshot at chat start; host comment data):\n${json(
@@ -321,7 +371,7 @@ export function buildChatPrompt(input: ChatPromptInput): string {
 				newTags: tags,
 				currentFile: openFile,
 			}) +
-			`\n\n${TAG_SEMANTICS}`,
+			`\n\n${tagSemantics}`,
 		`Current file:\n${openFile ?? "(none)"}`,
 	);
 	return `${sections.join("\n\n")}\n`;
@@ -402,7 +452,7 @@ function latestSession(entries: ChatEntry[]): string | null {
 	return null;
 }
 
-/** Run one persistent, read-only chat turn and retain partial assistant text. */
+/** Run one persistent chat turn and retain partial assistant text. */
 export async function runChatTurn(
 	options: ChatTurnOptions,
 ): Promise<ChatTurnResult> {
@@ -432,10 +482,16 @@ export async function runChatTurn(
 	const paths = promptPaths(state, options, turnId);
 	const basePrompt =
 		options.promptText ??
-		(await loadPrompt("review-chat", {
-			preset: options.promptPreset,
-			dir: options.promptSourceDir,
-		}));
+		(await loadPrompt(
+			options.onePager ? "review-one-pager-chat" : "review-chat",
+			{
+				preset: options.promptPreset,
+				dir: options.promptSourceDir,
+			},
+		));
+	const onePagerWritable =
+		options.onePager !== undefined &&
+		options.agent.supportsScopedWrites === true;
 	const prompt = buildChatPrompt({
 		basePrompt,
 		firstTurn,
@@ -444,6 +500,8 @@ export async function runChatTurn(
 		tags,
 		openFile,
 		worktreePath: state.worktreePath,
+		onePagerPath: options.onePager?.documentPath,
+		onePagerWritable,
 	});
 
 	await mkdir(paths.promptDir, { recursive: true });
@@ -486,11 +544,36 @@ export async function runChatTurn(
 		cwd: state.worktreePath,
 		sessionId: sessionIdFromState ?? undefined,
 		systemPromptFile: paths.promptPath,
-		message: buildChatMessage({ message, tags, openFile }),
+		message: buildChatMessage({
+			message,
+			tags,
+			openFile,
+			onePager: options.onePager !== undefined,
+		}),
 		signal: options.signal,
+		...(options.onePager
+			? {
+					writeScope: "directory" as const,
+					...(onePagerWritable
+						? { writeDir: options.onePager.documentDir }
+						: {}),
+				}
+			: {}),
 	};
 
 	try {
+		if (options.onePager && !onePagerWritable) {
+			const event: AgentEvent = {
+				kind: "text",
+				delta:
+					"One-pager editing is unavailable with this provider. " +
+					"This chat is read-only; Markdown suggestions must be applied manually.\n\n",
+			};
+			events.push(event);
+			assistantText += event.delta;
+			currentAssistantSegment += event.delta;
+			await notify(options.onEvent, event);
+		}
 		for await (const event of options.agent.run(turn)) {
 			events.push(event);
 			await notify(options.onEvent, event);

@@ -45,6 +45,7 @@ test("does not render a general discussions trigger", () => {
 			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
 			tags={[]}
+			tools={[]}
 			chats={[
 				{
 					id: "chat-1",
@@ -196,6 +197,7 @@ test("renders parent-owned composer draft", () => {
 			draft="unsent question"
 			onDraftChange={() => {}}
 			streamingSegments={[]}
+			tools={[]}
 			error={null}
 			sending={false}
 			stopping={false}
@@ -261,6 +263,8 @@ test("bounds long agent paths in message markdown and context tags", () => {
 				role: "assistant",
 				text: `See \`${longPath}:42\`.`,
 				tags: [],
+				skills: [],
+				partial: false,
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
 			},
@@ -498,6 +502,7 @@ function renderComposer(
 			worktreePath={TEST_WORKTREE_PATH}
 			transcript={[]}
 			tags={[]}
+			tools={[]}
 			chats={[
 				{
 					id: "chat-1",
@@ -550,6 +555,33 @@ test("renders description context tags with labels and quoted titles", () => {
 	expect(blockChip?.getAttribute("title")).toBe("Block");
 });
 
+test("renders one-pager context tags with labels and quoted titles", () => {
+	const container = parseMarkup(
+		renderComposer({
+			tags: [
+				{ kind: "one-pager", quote: "Whole summary" },
+				{
+					kind: "one-pager",
+					startLine: 2,
+					endLine: 4,
+					quote: "Summary section",
+				},
+			],
+		}),
+	);
+	const wholeChip = container.querySelector<HTMLElement>(
+		'[title="Whole summary"]',
+	);
+	const rangedChip = container.querySelector<HTMLElement>(
+		'[title="Summary section"]',
+	);
+
+	expect(wholeChip?.textContent).toContain("One pager (whole)");
+	expect(wholeChip?.getAttribute("title")).toBe("Whole summary");
+	expect(rangedChip?.textContent).toContain("One pager:2-4");
+	expect(rangedChip?.getAttribute("title")).toBe("Summary section");
+});
+
 interface InteractiveRender {
 	container: HTMLDivElement;
 	root: Root;
@@ -569,6 +601,7 @@ function renderInteractive(
 				worktreePath={TEST_WORKTREE_PATH}
 				transcript={[]}
 				tags={[]}
+				tools={[]}
 				chats={[
 					{
 						id: "chat-1",
@@ -701,6 +734,8 @@ test("keeps persisted assistant card DOM stable across history refresh", () => {
 		tags: [],
 		at: "2026-08-24T00:00:00Z",
 		sessionId: "session-1",
+		skills: [],
+		partial: false,
 	};
 	const rendered = renderInteractive({ transcript: [entry] });
 	const firstCard = rendered.container.querySelector('[data-role="assistant"]');
@@ -803,6 +838,7 @@ test("does not submit Enter while busy but submits only plain Enter while idle",
 		busy: true,
 		onSend: () => {
 			busySends += 1;
+			return true;
 		},
 	});
 	const busyTextarea = busyRender.container.querySelector("textarea");
@@ -830,6 +866,7 @@ test("does not submit Enter while busy but submits only plain Enter while idle",
 		draft: "send this",
 		onSend: () => {
 			idleSends += 1;
+			return true;
 		},
 	});
 	const idleTextarea = idleRender.container.querySelector("textarea");
@@ -862,6 +899,7 @@ test("leaves parent-owned draft clearing to the accepted send path", () => {
 		},
 		onSend: () => {
 			sends += 1;
+			return true;
 		},
 	});
 	const textarea = rendered.container.querySelector("textarea");
@@ -885,6 +923,7 @@ test("exposes semantic message and streaming state", () => {
 				skills: [],
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
+				partial: false,
 			},
 			{
 				role: "assistant",
@@ -893,6 +932,7 @@ test("exposes semantic message and streaming state", () => {
 				at: "2026-08-24T00:00:01Z",
 				skills: [],
 				sessionId: "session-1",
+				partial: false,
 			},
 		],
 		streamingSegments: ["Live before"],
@@ -952,6 +992,8 @@ test("opens issue-shaped Markdown file links without browser navigation", () => 
 				tags: [],
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
+				skills: [],
+				partial: false,
 			},
 		],
 		onOpenFileRef: (path) => openedPaths.push(path),
@@ -977,6 +1019,8 @@ test("leaves external and out-of-worktree Markdown links untouched", () => {
 				tags: [],
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
+				skills: [],
+				partial: false,
 			},
 		],
 		onOpenFileRef: (path) => openedPaths.push(path),
@@ -1004,6 +1048,8 @@ test("opens file references from rendered assistant markdown", () => {
 				tags: [],
 				at: "2026-08-24T00:00:00Z",
 				sessionId: "session-1",
+				skills: [],
+				partial: false,
 			},
 		],
 		onOpenFileRef: (path) => {

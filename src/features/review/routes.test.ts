@@ -31,7 +31,13 @@ import type {
 import type { DiffOptions, FileDiff } from "../../ports/vcs";
 import { APP_VERSION } from "../../shared/app-version";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
-import { createReviewRoutes, resolveReviewFilePath } from "./routes";
+import { readOnePagerDocument as readOnePagerDocumentFromDisk } from "./one-pager";
+import {
+	createReviewRoutes,
+	type ReviewRouteHandler,
+	type ReviewRoutesOptions,
+	resolveReviewFilePath,
+} from "./routes";
 import { sseResponse } from "./sse";
 import { deriveChatTitle, type ReviewState, ReviewStateSchema } from "./state";
 import { ReviewStore } from "./store";
@@ -279,6 +285,7 @@ function appearanceSettingsRequest(body: unknown): Request {
 
 class StreamChatAgent implements ReviewAgent {
 	readonly turns: AgentTurn[] = [];
+	supportsScopedWrites = false;
 
 	async preflight(): Promise<void> {}
 
@@ -1500,7 +1507,6 @@ describe("review routes", () => {
 			const prompt = await Bun.file(join(dir, "prompt", written[0]));
 			expect(await prompt.text()).toContain('"kind": "file"');
 			expect(await prompt.text()).toContain('"path": "src/whole.ts"');
-			expect(await prompt.text()).toContain("inspect the entire file");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -1551,9 +1557,7 @@ describe("review routes", () => {
 			expect(written.length).toBe(1);
 			const prompt = await Bun.file(join(dir, "prompt", written[0])).text();
 			expect(prompt).toContain('"kind": "description"');
-			expect(prompt).toContain(
-				'A tag with kind "description" refers to the merge request description, never a file: with startLine/endLine it names an inclusive source-line range of the description Markdown, without them it means the entire description; its quote carries the tagged text.',
-			);
+			expect(prompt).toContain('"quote": "Body"');
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -4706,7 +4710,7 @@ describe("prompt settings read API", () => {
 			const response = await routes(request(`/api/settings?t=${token}`));
 			expect(response.status).toBe(200);
 			const body = await response.json();
-			expect(body.slots).toHaveLength(9);
+			expect(body.slots).toHaveLength(11);
 			expect(body.slots.map((slot: { slot: string }) => slot.slot)).toEqual([
 				"commit-system",
 				"mr-code",
@@ -4717,6 +4721,8 @@ describe("prompt settings read API", () => {
 				"review-explain-comment",
 				"review-comment-from-chat",
 				"review-importance",
+				"review-one-pager",
+				"review-one-pager-chat",
 			]);
 			expect(body.slots).toContainEqual({
 				slot: "review-chat",
@@ -7033,14 +7039,18 @@ describe("feature flags API", () => {
 			flags: Array<{
 				id: string;
 				label: string;
-				description: string;
 				enabled: boolean;
 			}>;
 		};
-		expect(payload.flags).toHaveLength(1);
+		expect(payload.flags).toHaveLength(2);
 		expect(payload.flags[0]).toMatchObject({
 			id: "layer-importance",
 			label: "File important",
+			enabled: false,
+		});
+		expect(payload.flags[1]).toMatchObject({
+			id: "one-pager",
+			label: "One pager",
 			enabled: false,
 		});
 	});
@@ -7058,16 +7068,19 @@ describe("feature flags API", () => {
 			const response = await routes(
 				featureRequest(
 					"/api/features",
-					JSON.stringify({ id: "layer-importance", enabled: true }),
+					JSON.stringify({ id: "one-pager", enabled: true }),
 				),
 			);
 			expect(response.status).toBe(200);
 			expect(await response.json()).toMatchObject({
-				flags: [{ id: "layer-importance", enabled: true }],
+				flags: [
+					{ id: "layer-importance", enabled: false },
+					{ id: "one-pager", enabled: true },
+				],
 			});
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
 				future: true,
-				"layer-importance": true,
+				"one-pager": true,
 			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -7094,7 +7107,10 @@ describe("feature flags API", () => {
 
 			expect(response.status).toBe(200);
 			expect(await response.json()).toMatchObject({
-				flags: [{ id: "layer-importance", enabled: true }],
+				flags: [
+					{ id: "layer-importance", enabled: true },
+					{ id: "one-pager", enabled: false },
+				],
 			});
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
 				"layer-importance": true,
@@ -7802,6 +7818,925 @@ describe("importance API", () => {
 				files: [],
 			});
 		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("one pager routes", () => {
+	class OnePagerRouteAgent implements ReviewAgent {
+		runs = 0;
+		readonly supportsScopedWrites = true;
+		readonly releaseFirst = Promise.withResolvers<void>();
+		private readonly startWaiters = new Map<number, () => void>();
+
+		constructor(
+			private readonly options: {
+				blockFirst?: boolean;
+				failWith?: string;
+			} = {},
+		) {}
+
+		waitForRun(run: number): Promise<void> {
+			if (this.runs >= run) return Promise.resolve();
+			const { promise, resolve } = Promise.withResolvers<void>();
+			this.startWaiters.set(run, resolve);
+			return promise;
+		}
+
+		async preflight(): Promise<void> {}
+
+		async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+			const run = ++this.runs;
+			this.startWaiters.get(run)?.();
+			if (this.options.blockFirst && run === 1) {
+				await this.releaseFirst.promise;
+			}
+			if (this.options.failWith) {
+				yield { kind: "error", message: this.options.failWith };
+				return;
+			}
+
+			const outputPath = turn.message.match(
+				/^Write the one pager Markdown document to this absolute path: ([^\n]+)$/m,
+			)?.[1];
+			if (!outputPath) throw new Error("missing one pager output path");
+			await Bun.write(outputPath, "# Generated one pager\n");
+			yield { kind: "turn_end" };
+		}
+	}
+
+	async function fixture(
+		dir: string,
+		options: { agent?: ReviewAgent; enabled?: boolean } = {},
+	) {
+		const paths = {
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		};
+		const store = new ReviewStore(paths);
+		await store.write(state());
+		const featureFlagStore = new FeatureFlagStore(join(dir, "features.json"));
+		await featureFlagStore.set("one-pager", options.enabled ?? true);
+		const onePagerDir = join(dir, "one-pager");
+		const routes = createReviewRoutes({
+			token,
+			store,
+			paths: chatPaths(dir),
+			diff,
+			featureFlagStore,
+			onePagerDir,
+			...(options.agent ? { layerAgent: options.agent } : {}),
+		});
+		return { onePagerDir, routes };
+	}
+
+	function onePagerRequest(
+		path: string,
+		method: "GET" | "POST" = "GET",
+	): Request {
+		return request(`${path}?t=${token}`, {
+			method,
+			headers: { "X-Mole-Token": token },
+		});
+	}
+
+	function eventFrames(body: string): { event: string; data: unknown }[] {
+		return body
+			.split("\n\n")
+			.filter((frame) => frame.startsWith("event: "))
+			.map((frame) => {
+				const [eventLine, dataLine] = frame.split("\n");
+				return {
+					event: eventLine?.slice("event: ".length) ?? "",
+					data: JSON.parse(dataLine?.slice("data: ".length) ?? "null"),
+				};
+			});
+	}
+
+	test("gates all endpoints when the feature flag is off", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-off-"));
+		try {
+			const agent = new OnePagerRouteAgent();
+			const { routes } = await fixture(dir, { agent, enabled: false });
+			for (const [path, method] of [
+				["/api/one-pager", "GET"],
+				["/api/one-pager/generate", "POST"],
+				["/api/one-pager/observe", "POST"],
+			] as const) {
+				const response = await routes(onePagerRequest(path, method));
+				expect(response.status).toBe(404);
+				expect(await response.json()).toEqual({
+					error: "Feature disabled",
+				});
+			}
+			expect(agent.runs).toBe(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("snapshots, generates, and observes ready state", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-ready-"));
+		try {
+			const agent = new OnePagerRouteAgent();
+			const { routes } = await fixture(dir, { agent });
+			const initial = await routes(onePagerRequest("/api/one-pager"));
+			expect(initial.status).toBe(200);
+			expect(await initial.json()).toEqual({
+				status: "idle",
+				markdown: null,
+				updatedAt: null,
+			});
+
+			const generated = await routes(
+				onePagerRequest("/api/one-pager/generate", "POST"),
+			);
+			const frames = eventFrames(await generated.text());
+			expect(frames.map(({ event }) => event)).toEqual([
+				"status",
+				"status",
+				"done",
+			]);
+			expect(frames[0]).toEqual({
+				event: "status",
+				data: { status: "running" },
+			});
+			expect(frames[1]).toMatchObject({
+				event: "status",
+				data: {
+					status: "ready",
+					markdown: "# Generated one pager\n",
+					updatedAt: expect.any(String),
+				},
+			});
+			expect(frames[2]).toEqual({
+				event: "done",
+				data: { status: "ready" },
+			});
+
+			const ready = await routes(onePagerRequest("/api/one-pager"));
+			expect(await ready.json()).toMatchObject({
+				status: "ready",
+				markdown: "# Generated one pager\n",
+				updatedAt: expect.any(String),
+			});
+			expect(agent.runs).toBe(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("streams generation errors and keeps the snapshot idle", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-failed-"));
+		try {
+			const message = "one pager agent failed exactly";
+			const agent = new OnePagerRouteAgent({ failWith: message });
+			const { routes } = await fixture(dir, { agent });
+			const failed = await routes(
+				onePagerRequest("/api/one-pager/generate", "POST"),
+			);
+			expect(eventFrames(await failed.text())).toEqual([
+				{ event: "status", data: { status: "running" } },
+				{
+					event: "status",
+					data: { status: "idle", markdown: null, updatedAt: null },
+				},
+				{ event: "error", data: { message } },
+				{ event: "done", data: { status: "failed" } },
+			]);
+
+			const afterFailure = await routes(onePagerRequest("/api/one-pager"));
+			expect(await afterFailure.json()).toEqual({
+				status: "idle",
+				markdown: null,
+				updatedAt: null,
+			});
+			expect(agent.runs).toBe(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("observes idle state without starting generation", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-observe-"));
+		try {
+			const agent = new OnePagerRouteAgent();
+			const { routes } = await fixture(dir, { agent });
+			const observed = await routes(
+				onePagerRequest("/api/one-pager/observe", "POST"),
+			);
+			expect(eventFrames(await observed.text())).toEqual([
+				{
+					event: "status",
+					data: { status: "idle", markdown: null, updatedAt: null },
+				},
+				{ event: "done", data: { status: "idle" } },
+			]);
+			expect(agent.runs).toBe(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("joins concurrent generate requests into one agent turn", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-join-"));
+		const agent = new OnePagerRouteAgent({ blockFirst: true });
+		try {
+			const { routes } = await fixture(dir, { agent });
+			const first = await routes(
+				onePagerRequest("/api/one-pager/generate", "POST"),
+			);
+			const firstBody = first.text();
+			await agent.waitForRun(1);
+			const second = await routes(
+				onePagerRequest("/api/one-pager/generate", "POST"),
+			);
+			const secondBody = second.text();
+
+			agent.releaseFirst.resolve();
+			const [firstFrames, secondFrames] = await Promise.all([
+				firstBody.then(eventFrames),
+				secondBody.then(eventFrames),
+			]);
+			expect(firstFrames.at(-1)).toEqual({
+				event: "done",
+				data: { status: "ready" },
+			});
+			expect(secondFrames.at(-1)).toEqual({
+				event: "done",
+				data: { status: "ready" },
+			});
+			expect(agent.runs).toBe(1);
+		} finally {
+			agent.releaseFirst.resolve();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+describe("one pager chat", () => {
+	async function fixture(
+		dir: string,
+		options: {
+			enabled?: boolean;
+			initialState?: ReviewState;
+			reviewAgent?: ReviewAgent;
+			layerAgent?: ReviewAgent;
+			createReviewAgent?: NonNullable<ReviewRoutesOptions["createReviewAgent"]>;
+			config?: ReviewRoutesOptions["config"];
+			readDocument?: NonNullable<ReviewRoutesOptions["readOnePagerDocument"]>;
+		} = {},
+	) {
+		const store = new ReviewStore({
+			statePath: join(dir, "review.json"),
+			chatPath: join(dir, "chat.ndjson"),
+			chatsDir: join(dir, "chats"),
+		});
+		await store.write(options.initialState ?? state());
+		const featureFlagStore = new FeatureFlagStore(join(dir, "features.json"));
+		await featureFlagStore.set("one-pager", options.enabled ?? true);
+		const onePagerDir = join(dir, "one-pager");
+		const routes = createReviewRoutes({
+			token,
+			store,
+			paths: chatPaths(dir),
+			featureFlagStore,
+			onePagerDir,
+			promptSourceDir: dir,
+			...(options.reviewAgent ? { reviewAgent: options.reviewAgent } : {}),
+			...(options.layerAgent ? { layerAgent: options.layerAgent } : {}),
+			...(options.createReviewAgent
+				? { createReviewAgent: options.createReviewAgent }
+				: {}),
+			...(options.readDocument
+				? { readOnePagerDocument: options.readDocument }
+				: {}),
+			...(options.config ? { config: options.config } : {}),
+		});
+		return { featureFlagStore, onePagerDir, routes, store };
+	}
+
+	function onePagerChatState(): ReviewState {
+		const initial = state();
+		const chat = {
+			id: "one-pager-chat",
+			title: "",
+			sessionId: null,
+			createdAt: "2026-01-01T00:00:00.000Z",
+			agent: null,
+			model: null,
+			effort: null,
+			kind: "one-pager" as const,
+		};
+		return ReviewStateSchema.parse({
+			...initial,
+			chats: [...initial.chats, chat],
+			activeOnePagerChatId: chat.id,
+		});
+	}
+
+	async function writeDocument(onePagerDir: string): Promise<string> {
+		const documentDir = join(onePagerDir, "document");
+		const documentPath = join(documentDir, "one-pager.md");
+		await mkdir(documentDir, { recursive: true });
+		await writeFile(documentPath, "# One pager\n", "utf8");
+		return documentPath;
+	}
+
+	function createChatRequest(body?: unknown): Request {
+		return request(`/api/chats?t=${token}`, {
+			method: "POST",
+			...(body === undefined
+				? {}
+				: {
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					}),
+		});
+	}
+	function createChatRawRequest(body: string): Request {
+		return request(`/api/chats?t=${token}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body,
+		});
+	}
+
+	function selectChatRequest(chatId: string): Request {
+		return request(`/api/chats/active?t=${token}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ chatId }),
+		});
+	}
+
+	function chatTurnRequest(chatId: string, tags: unknown[] = []): Request {
+		return request(`/api/chat?t=${token}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				chatId,
+				message: "Explain this one pager",
+				tags,
+				openFile: null,
+			}),
+		});
+	}
+
+	function onePagerRequest(path: string, method: "GET" | "POST" = "POST") {
+		return request(`${path}?t=${token}`, {
+			method,
+			headers: { "X-Mole-Token": token },
+		});
+	}
+
+	async function expectRejectedTurn(
+		routes: ReviewRouteHandler,
+		store: ReviewStore,
+		chatId: string,
+		tags: unknown[],
+		message: string,
+	): Promise<void> {
+		const stateBefore = await store.read();
+		const transcriptBefore = await store.readChat(chatId);
+		const response = await routes(chatTurnRequest(chatId, tags));
+		const body = await response.text();
+		expect(response.status).toBe(200);
+		expect(body).toContain(
+			`event: error\ndata: ${JSON.stringify({ message })}`,
+		);
+		expect(body).toContain("event: done\ndata: null");
+		expect(await store.read()).toEqual(stateBefore);
+		expect(await store.readChat(chatId)).toEqual(transcriptBefore);
+	}
+
+	test("creates one-pager chats behind feature and document guards, then selects by kind", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-chats-"));
+		try {
+			const { featureFlagStore, onePagerDir, routes, store } = await fixture(
+				dir,
+				{ enabled: false },
+			);
+			const initial = await store.read();
+
+			const disabled = await routes(createChatRequest({ kind: "one-pager" }));
+			expect(disabled.status).toBe(404);
+			expect(await disabled.json()).toEqual({ error: "Feature disabled" });
+
+			const invalid = await routes(
+				createChatRequest({ kind: "not-a-chat-kind" }),
+			);
+			expect(invalid.status).toBe(400);
+			expect(await invalid.json()).toEqual({
+				error: "Chat kind is invalid",
+			});
+
+			await featureFlagStore.set("one-pager", true);
+			const missingDocument = await routes(
+				createChatRequest({ kind: "one-pager" }),
+			);
+			expect(missingDocument.status).toBe(409);
+			expect(await missingDocument.json()).toEqual({
+				error: "Create the one pager before starting a one pager chat",
+			});
+			expect(await store.read()).toEqual(initial);
+
+			await writeDocument(onePagerDir);
+			const firstResponse = await routes(
+				createChatRequest({ kind: "one-pager" }),
+			);
+			expect(firstResponse.status).toBe(201);
+			const first = (await firstResponse.json()) as {
+				chats: ReviewState["chats"];
+				activeChatId: string | null;
+				activeOnePagerChatId: string | null;
+			};
+			const firstId = first.activeOnePagerChatId;
+			if (!firstId) throw new Error("one-pager chat was not selected");
+			expect(first.activeChatId).toBe("chat-a");
+			expect(first.chats.find((chat) => chat.id === firstId)?.kind).toBe(
+				"one-pager",
+			);
+
+			const secondResponse = await routes(
+				createChatRequest({ kind: "one-pager" }),
+			);
+			const second = (await secondResponse.json()) as {
+				activeChatId: string | null;
+				activeOnePagerChatId: string | null;
+			};
+			const secondId = second.activeOnePagerChatId;
+			if (!secondId) throw new Error("second one-pager chat was not selected");
+			expect(second.activeChatId).toBe("chat-a");
+			expect(secondId).not.toBe(firstId);
+
+			const selectedOnePager = await routes(selectChatRequest(firstId));
+			expect(selectedOnePager.status).toBe(204);
+			const reviewCreatedResponse = await routes(createChatRequest());
+			expect(reviewCreatedResponse.status).toBe(201);
+			const reviewCreated = (await reviewCreatedResponse.json()) as {
+				activeChatId: string;
+				activeOnePagerChatId: string | null;
+			};
+			expect(reviewCreated.activeOnePagerChatId).toBe(firstId);
+
+			const selectedReview = await routes(selectChatRequest("chat-a"));
+			expect(selectedReview.status).toBe(204);
+			const selectedState = await routes(request(`/api/state?t=${token}`));
+			expect(await selectedState.json()).toMatchObject({
+				activeChatId: "chat-a",
+				activeOnePagerChatId: firstId,
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects malformed and non-object create-chat bodies without persistence", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-chat-invalid-body-"),
+		);
+		try {
+			const { routes, store } = await fixture(dir);
+			const initial = await store.read();
+			const requests = [
+				createChatRawRequest("{ invalid json"),
+				createChatRequest(["review"]),
+				createChatRequest("review"),
+				createChatRequest(42),
+			];
+
+			for (const invalidRequest of requests) {
+				const response = await routes(invalidRequest);
+				expect(response.status).toBe(400);
+				expect(await response.json()).toEqual({
+					error: "Chat kind is invalid",
+				});
+				expect(await store.read()).toEqual(initial);
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("defaults absent and null bodies to review chats", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-chat-review-default-"),
+		);
+		try {
+			const { routes } = await fixture(dir);
+			for (const body of [undefined, null, { kind: "review" }]) {
+				const response = await routes(createChatRequest(body));
+				expect(response.status).toBe(201);
+				const created = (await response.json()) as {
+					chats: ReviewState["chats"];
+					activeChatId: string | null;
+					activeOnePagerChatId: string | null;
+				};
+				expect(created.activeChatId).not.toBeNull();
+				expect(created.activeOnePagerChatId).toBeNull();
+				expect(
+					created.chats.find((chat) => chat.id === created.activeChatId)?.kind,
+				).toBe("review");
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("binds one-pager turns from prompt front matter and grants document writeDir", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-chat-binding-"),
+		);
+		try {
+			const promptDir = join(dir, "review-one-pager-chat", "default");
+			await mkdir(promptDir, { recursive: true });
+			await writeFile(
+				join(promptDir, "001.md"),
+				"---\nagent: claude\nmodel: one-pager-model\n---\nOne pager prompt",
+				"utf8",
+			);
+			const agent = new StreamChatAgent();
+			agent.supportsScopedWrites = true;
+			const factoryCalls: Parameters<
+				NonNullable<ReviewRoutesOptions["createReviewAgent"]>
+			>[0][] = [];
+			const { onePagerDir, routes, store } = await fixture(dir, {
+				reviewAgent: agent,
+				createReviewAgent: (override) => {
+					factoryCalls.push(override);
+					return agent;
+				},
+				config: {
+					review: { agent: "claude", model: "default-model" },
+				},
+			});
+			const documentPath = await writeDocument(onePagerDir);
+			const createdResponse = await routes(
+				createChatRequest({ kind: "one-pager" }),
+			);
+			expect(createdResponse.status).toBe(201);
+			const created = (await createdResponse.json()) as {
+				chats: ReviewState["chats"];
+				activeOnePagerChatId: string;
+			};
+			const chat = created.chats.find(
+				(entry) => entry.id === created.activeOnePagerChatId,
+			);
+			expect(chat).toMatchObject({
+				kind: "one-pager",
+				agent: "claude",
+				model: "one-pager-model",
+			});
+
+			const turnResponse = await routes(
+				chatTurnRequest(created.activeOnePagerChatId),
+			);
+			expect(turnResponse.status).toBe(200);
+			await turnResponse.text();
+
+			expect(factoryCalls).toEqual([
+				{ agent: "claude", model: "one-pager-model" },
+			]);
+			const turn = agent.turns[0];
+			if (!turn) throw new Error("one-pager chat agent did not run");
+			expect(turn.writeDir).toBe(join(onePagerDir, "document"));
+			const prompt = await Bun.file(turn.systemPromptFile).text();
+			expect(prompt).toContain(documentPath);
+			const persistedChat = (await store.read())?.chats.find(
+				(entry) => entry.id === chat?.id,
+			);
+			expect(persistedChat).toMatchObject({
+				kind: "one-pager",
+				agent: "claude",
+				model: "one-pager-model",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("streams every one-pager chat guard rejection without persistence", async () => {
+		const onePagerTag = { kind: "one-pager", quote: "Summary" };
+		const cases = [
+			{
+				kind: "review",
+				enabled: true,
+				document: false,
+				tags: [onePagerTag],
+				message: "One pager tags require a one pager chat",
+			},
+			{
+				kind: "one-pager",
+				enabled: false,
+				document: false,
+				tags: [],
+				message: "One pager feature is disabled",
+			},
+			{
+				kind: "one-pager",
+				enabled: true,
+				document: true,
+				tags: [{ kind: "file", path: "src/app.ts" }],
+				message: "One pager chats accept only one pager tags",
+			},
+			{
+				kind: "one-pager",
+				enabled: true,
+				document: false,
+				tags: [],
+				message: "Create the one pager before chatting about it",
+			},
+		] as const;
+
+		for (const [index, scenario] of cases.entries()) {
+			const dir = await mkdtemp(
+				join(tmpdir(), `mole-review-one-pager-chat-reject-${index}-`),
+			);
+			try {
+				const chatId =
+					scenario.kind === "one-pager" ? "one-pager-chat" : "chat-a";
+				const { onePagerDir, routes, store } = await fixture(dir, {
+					enabled: scenario.enabled,
+					initialState:
+						scenario.kind === "one-pager" ? onePagerChatState() : state(),
+					reviewAgent: new StreamChatAgent(),
+				});
+				if (scenario.document) await writeDocument(onePagerDir);
+				await expectRejectedTurn(
+					routes,
+					store,
+					chatId,
+					[...scenario.tags],
+					scenario.message,
+				);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("rejects one-pager chat while generation is active without persistence", async () => {
+		class DeferredGenerationAgent implements ReviewAgent {
+			runs = 0;
+			readonly supportsScopedWrites = true;
+			readonly started = Promise.withResolvers<void>();
+			readonly release = Promise.withResolvers<void>();
+
+			async preflight(): Promise<void> {}
+
+			async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+				this.runs += 1;
+				const outputPath = turn.message.match(
+					/^Write the one pager Markdown document to this absolute path: ([^\n]+)$/m,
+				)?.[1];
+				if (!outputPath) throw new Error("missing one pager output path");
+				this.started.resolve();
+				await this.release.promise;
+				await Bun.write(outputPath, "# Regenerated one pager\n");
+				yield { kind: "turn_end" };
+			}
+		}
+
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-chat-during-generation-"),
+		);
+		const generationAgent = new DeferredGenerationAgent();
+		let generationBody: Promise<string> | undefined;
+		try {
+			const { onePagerDir, routes, store } = await fixture(dir, {
+				initialState: onePagerChatState(),
+				reviewAgent: new StreamChatAgent(),
+				layerAgent: generationAgent,
+			});
+			await writeDocument(onePagerDir);
+			const generationResponse = await routes(
+				onePagerRequest("/api/one-pager/generate"),
+			);
+			generationBody = generationResponse.text();
+			await generationAgent.started.promise;
+
+			await expectRejectedTurn(
+				routes,
+				store,
+				"one-pager-chat",
+				[],
+				"Wait for the one pager to finish generating",
+			);
+		} finally {
+			generationAgent.release.resolve();
+			if (generationBody) await generationBody.catch(() => "");
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("reserves one-pager turns across deferred document reads and releases on rejection", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-chat-document-read-race-"),
+		);
+		const documentReadStarted = Promise.withResolvers<void>();
+		const releaseDocumentRead = Promise.withResolvers<void>();
+		let deferDocumentRead = true;
+		const readDocument: NonNullable<
+			ReviewRoutesOptions["readOnePagerDocument"]
+		> = async (documentPath) => {
+			if (deferDocumentRead) {
+				deferDocumentRead = false;
+				documentReadStarted.resolve();
+				await releaseDocumentRead.promise;
+				return null;
+			}
+			return readOnePagerDocumentFromDisk(documentPath);
+		};
+		class GenerationAgent implements ReviewAgent {
+			runs = 0;
+			readonly supportsScopedWrites = true;
+
+			async preflight(): Promise<void> {}
+
+			async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+				this.runs += 1;
+				const outputPath = turn.message.match(
+					/^Write the one pager Markdown document to this absolute path: ([^\n]+)$/m,
+				)?.[1];
+				if (!outputPath) throw new Error("missing one pager output path");
+				await Bun.write(outputPath, "# Generated one pager\n");
+				yield { kind: "turn_end" };
+			}
+		}
+
+		const generationAgent = new GenerationAgent();
+		const chatAgent = new StreamChatAgent();
+		let chatResponsePromise: Promise<Response> | undefined;
+		let chatBody: Promise<string> | undefined;
+		try {
+			const { routes, store } = await fixture(dir, {
+				initialState: onePagerChatState(),
+				reviewAgent: chatAgent,
+				layerAgent: generationAgent,
+				readDocument,
+			});
+			const stateBefore = await store.read();
+			const transcriptBefore = await store.readChat("one-pager-chat");
+			chatResponsePromise = routes(chatTurnRequest("one-pager-chat"));
+			await documentReadStarted.promise;
+
+			const generateResponse = await routes(
+				onePagerRequest("/api/one-pager/generate"),
+			);
+			const duringRead = await generateResponse.text();
+			expect(duringRead).toContain(
+				"Wait for the one pager chat to finish before regenerating",
+			);
+			expect(generationAgent.runs).toBe(0);
+
+			releaseDocumentRead.resolve();
+			const chatResponse = await chatResponsePromise;
+			chatBody = chatResponse.text();
+			const rejectedTurn = await chatBody;
+			expect(rejectedTurn).toContain(
+				`event: error\ndata: ${JSON.stringify({
+					message: "Create the one pager before chatting about it",
+				})}`,
+			);
+			expect(await store.read()).toEqual(stateBefore);
+			expect(await store.readChat("one-pager-chat")).toEqual(transcriptBefore);
+
+			const afterRejection = await routes(
+				onePagerRequest("/api/one-pager/generate"),
+			);
+			expect(await afterRejection.text()).toContain(
+				'event: done\ndata: {"status":"ready"}',
+			);
+			expect(generationAgent.runs).toBe(1);
+		} finally {
+			releaseDocumentRead.resolve();
+			if (chatResponsePromise) {
+				const response = await chatResponsePromise.catch(() => null);
+				if (response && !chatBody) await response.text().catch(() => "");
+			}
+			if (chatBody) await chatBody.catch(() => "");
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects overlapping turns for separate one-pager chats", async () => {
+		class DeferredChatAgent implements ReviewAgent {
+			readonly turns: AgentTurn[] = [];
+			readonly started = Promise.withResolvers<void>();
+			readonly release = Promise.withResolvers<void>();
+
+			async preflight(): Promise<void> {}
+
+			async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+				this.turns.push(turn);
+				this.started.resolve();
+				await this.release.promise;
+				yield { kind: "turn_end" };
+			}
+		}
+
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-chat-overlap-"),
+		);
+		const agent = new DeferredChatAgent();
+		let firstBody: Promise<string> | undefined;
+		try {
+			const initialState = onePagerChatState();
+			const firstChat = initialState.chats.find(
+				(chat) => chat.id === "one-pager-chat",
+			);
+			if (!firstChat) throw new Error("one-pager chat missing from state");
+			const secondChat = { ...firstChat, id: "second-one-pager-chat" };
+			const withTwoChats = ReviewStateSchema.parse({
+				...initialState,
+				chats: [...initialState.chats, secondChat],
+			});
+			const { onePagerDir, routes, store } = await fixture(dir, {
+				initialState: withTwoChats,
+				reviewAgent: agent,
+			});
+			await writeDocument(onePagerDir);
+
+			const firstResponse = await routes(chatTurnRequest("one-pager-chat"));
+			firstBody = firstResponse.text();
+			await agent.started.promise;
+
+			const stateBeforeSecond = await store.read();
+			const firstTranscriptBeforeSecond =
+				await store.readChat("one-pager-chat");
+			const secondTranscriptBefore = await store.readChat(
+				"second-one-pager-chat",
+			);
+			const secondResponse = await routes(
+				chatTurnRequest("second-one-pager-chat"),
+			);
+			const secondBody = await secondResponse.text();
+
+			expect(secondBody).toContain(
+				`event: error\ndata: ${JSON.stringify({
+					message: "Wait for the other one pager chat to finish",
+				})}`,
+			);
+			expect(await store.read()).toEqual(stateBeforeSecond);
+			expect(await store.readChat("one-pager-chat")).toEqual(
+				firstTranscriptBeforeSecond,
+			);
+			expect(await store.readChat("second-one-pager-chat")).toEqual(
+				secondTranscriptBefore,
+			);
+			expect(agent.turns).toHaveLength(1);
+			expect(agent.turns[0]?.message).toContain("Explain this one pager");
+		} finally {
+			agent.release.resolve();
+			if (firstBody) await firstBody.catch(() => "");
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("refuses generation until one-pager chat turn finishes", async () => {
+		class DeferredChatAgent implements ReviewAgent {
+			readonly started = Promise.withResolvers<void>();
+			readonly release = Promise.withResolvers<void>();
+
+			async preflight(): Promise<void> {}
+
+			async *run(_turn: AgentTurn): AsyncIterable<AgentEvent> {
+				this.started.resolve();
+				await this.release.promise;
+				yield { kind: "turn_end" };
+			}
+		}
+
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-one-pager-generation-during-chat-"),
+		);
+		const chatAgent = new DeferredChatAgent();
+		let chatBody: Promise<string> | undefined;
+		try {
+			const { onePagerDir, routes } = await fixture(dir, {
+				initialState: onePagerChatState(),
+				reviewAgent: chatAgent,
+			});
+			await writeDocument(onePagerDir);
+			const chatResponse = await routes(chatTurnRequest("one-pager-chat"));
+			chatBody = chatResponse.text();
+			await chatAgent.started.promise;
+
+			const generateResponse = await routes(
+				onePagerRequest("/api/one-pager/generate"),
+			);
+			const body = await generateResponse.text();
+			expect(body).toContain(
+				"Wait for the one pager chat to finish before regenerating",
+			);
+
+			chatAgent.release.resolve();
+			await chatBody;
+		} finally {
+			chatAgent.release.resolve();
+			if (chatBody) await chatBody.catch(() => "");
 			await rm(dir, { recursive: true, force: true });
 		}
 	});

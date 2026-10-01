@@ -2,7 +2,7 @@ import type { ReviewApiState } from "../routes";
 import { apiUrl } from "./api-json";
 
 export type LayerAction = "regenerate" | "retry";
-type LayerStreamAction = LayerAction | "observe";
+type LayerStreamErrorAction = LayerAction | "observe" | "generate";
 
 export interface LayerStreamFrame {
 	event: string;
@@ -72,8 +72,8 @@ export async function readSseFrames(
 export async function postSseStream(
 	token: string,
 	path: string,
-	streamName: "Layer" | "Importance",
-	action: LayerStreamAction,
+	streamName: "Layer" | "Importance" | "One pager",
+	action: LayerStreamErrorAction,
 	onFrame: (frame: LayerStreamFrame) => void,
 	signal?: AbortSignal,
 ): Promise<void> {
@@ -98,7 +98,7 @@ export async function postSseStream(
 
 export function consumeLayerStream(
 	token: string,
-	action: LayerStreamAction,
+	action: LayerAction | "observe",
 	onFrame: (frame: LayerStreamFrame) => void,
 ): Promise<void> {
 	return postSseStream(

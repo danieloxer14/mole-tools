@@ -3,6 +3,7 @@ import type {
 	AgentTurn,
 	ReviewAgent,
 } from "../../ports/review-agent";
+
 import { type AgentEffort, assertAgentEffort } from "./effort";
 import { type AgentExec, defaultAgentExec } from "./exec";
 import {
@@ -14,6 +15,8 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedWritePaths,
+	SCOPED_WRITE_PATH_ERROR,
 } from "./shared";
 
 export interface CodexAgentOptions {
@@ -164,10 +167,11 @@ function mapCodexEvent(
 }
 
 export class CodexAgentAdapter implements ReviewAgent {
+	private readonly execFn: AgentExec;
 	private readonly binary: string;
 	private readonly effort?: AgentEffort;
 	private readonly model?: string;
-	private readonly execFn: AgentExec;
+	readonly supportsScopedWrites = true;
 
 	constructor(
 		execOrOptions: AgentExec | CodexAgentOptions = defaultAgentExec,
@@ -198,27 +202,55 @@ export class CodexAgentAdapter implements ReviewAgent {
 			yield { kind: "turn_end" };
 			return;
 		}
+		const directoryWrite = turn.writeScope === "directory";
+		const scopedPaths = directoryWrite
+			? resolveScopedWritePaths(turn.cwd, turn.writeDir)
+			: null;
+		if (directoryWrite && !scopedPaths) {
+			yield {
+				kind: "error",
+				message: SCOPED_WRITE_PATH_ERROR,
+			};
+			yield { kind: "turn_end" };
+			return;
+		}
+		const resolvedCwd = scopedPaths?.cwd ?? turn.cwd;
+		const resolvedWriteDir = scopedPaths?.writeDir ?? turn.cwd;
 
-		const sandbox = turn.writeDir ? "workspace-write" : "read-only";
-		const args = [
-			"exec",
-			"--json",
-			"--skip-git-repo-check",
-			"-C",
-			turn.cwd,
-			"--sandbox",
-			sandbox,
-		];
-		args.push(
-			"-c",
-			`projects={${tomlBasicString(turn.cwd)}={trust_level="untrusted"}}`,
-		);
+		const sandbox =
+			turn.writeDir && !directoryWrite ? "workspace-write" : "read-only";
+		const args = ["exec", "--json", "--skip-git-repo-check"];
+		if (directoryWrite) {
+			const filesystemPermissions =
+				`${tomlBasicString(resolvedCwd)}="read",` +
+				`${tomlBasicString(resolvedWriteDir)}="write"`;
+			args.push(
+				"--ignore-user-config",
+				"--strict-config",
+				"-C",
+				resolvedWriteDir,
+			);
+			args.push(
+				"-c",
+				'default_permissions="one_pager_write"',
+				"-c",
+				'permissions.one_pager_write.extends=":read-only"',
+				"-c",
+				`permissions.one_pager_write.filesystem={${filesystemPermissions}}`,
+			);
+		} else {
+			args.push("-C", turn.cwd, "--sandbox", sandbox);
+			args.push(
+				"-c",
+				`projects={${tomlBasicString(turn.cwd)}={trust_level="untrusted"}}`,
+			);
+		}
 		if (this.model) args.push("-m", this.model);
 		if (this.effort) {
 			args.push("-c", `model_reasoning_effort=${this.effort}`);
 		}
 		args.push("-c", `developer_instructions=${tomlBasicString(systemPrompt)}`);
-		if (turn.writeDir) args.push("--add-dir", turn.writeDir);
+		if (turn.writeDir && !directoryWrite) args.push("--add-dir", turn.writeDir);
 		if (turn.sessionId) {
 			args.push("resume", turn.sessionId, "--", turn.message);
 		} else {
@@ -240,7 +272,7 @@ export class CodexAgentAdapter implements ReviewAgent {
 
 		try {
 			for await (const line of this.execFn(this.binary, args, {
-				cwd: turn.cwd,
+				cwd: directoryWrite ? resolvedWriteDir : turn.cwd,
 				signal: turn.signal,
 			})) {
 				if (turn.signal?.aborted) return;

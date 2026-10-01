@@ -242,6 +242,7 @@ describe("setupReview chat state", () => {
 						agent: null,
 						model: null,
 						effort: null,
+						kind: "review",
 					},
 					{
 						id: "chat-two",
@@ -251,9 +252,31 @@ describe("setupReview chat state", () => {
 						agent: null,
 						model: null,
 						effort: null,
+						kind: "review",
+					},
+					{
+						id: "pager-chat",
+						title: "One pager chat",
+						sessionId: null,
+						createdAt: "2026-08-25T00:02:00.000Z",
+						agent: null,
+						model: null,
+						effort: null,
+						kind: "one-pager",
+					},
+					{
+						id: "pager-last",
+						title: "Latest one pager chat",
+						sessionId: null,
+						createdAt: "2026-08-25T00:03:00.000Z",
+						agent: null,
+						model: null,
+						effort: null,
+						kind: "one-pager",
 					},
 				],
 				activeChatId: "chat-two",
+				activeOnePagerChatId: "pager-chat",
 				drafts: [
 					{
 						id: "draft-1",
@@ -282,12 +305,14 @@ describe("setupReview chat state", () => {
 
 			expect(result.state.chats).toEqual(existing.chats);
 			expect(result.state.activeChatId).toBe(existing.activeChatId);
+			expect(result.state.activeOnePagerChatId).toBe("pager-chat");
 			expect(result.state.layers).toEqual(existing.layers);
 			expect(result.state.viewedFiles).toEqual(existing.viewedFiles);
 			expect(result.state.collapsedDiscussionIds).toEqual(["discussion-1"]);
 			expect(result.state.drafts).toEqual(existing.drafts);
 			expect(persisted.chats).toEqual(existing.chats);
 			expect(persisted.activeChatId).toBe(existing.activeChatId);
+			expect(persisted.activeOnePagerChatId).toBe("pager-chat");
 			expect(persisted.collapsedDiscussionIds).toEqual(["discussion-1"]);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -335,6 +360,7 @@ describe("setupReview chat state", () => {
 							agent: null,
 							model: null,
 							effort: null,
+							kind: "review",
 						},
 					],
 					activeChatId: "chat-one",

@@ -184,6 +184,42 @@ describe("comment from chat", () => {
 		);
 	});
 
+	test("conversation markdown labels whole and ranged one-pager tags", () => {
+		const onePagerEntry: ChatEntry = {
+			role: "user",
+			text: "Review this summary.",
+			tags: [
+				{ kind: "one-pager", quote: "Whole summary" },
+				{
+					kind: "one-pager",
+					startLine: 3,
+					endLine: 5,
+					quote: "Details",
+				},
+				{
+					kind: "one-pager",
+					startLine: 7,
+					endLine: 7,
+					quote: "Conclusion",
+				},
+			],
+			skills: [],
+			at: "2026-01-01T00:00:00.000Z",
+			sessionId: null,
+			partial: false,
+		};
+		const markdown = buildCommentConversationMarkdown({
+			draft: lineDraft,
+			chatLabel: "One pager chat",
+			entries: [onePagerEntry],
+			diffs: [diff],
+		});
+
+		expect(markdown).toContain(
+			"Context: One-pager (whole); One-pager lines 3-5 (Markdown); One-pager lines 7 (Markdown)",
+		);
+	});
+
 	test("markdown anchor renders quoted lines", () => {
 		const draft: Draft = {
 			...lineDraft,

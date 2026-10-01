@@ -8,6 +8,13 @@ export const FEATURE_FLAGS = [
 			"Score each changed line span 1–5 with a concise reason and colour diff gutters, layer file pills, and changed files from cool blue (skip) to red (critical).",
 		defaultEnabled: false,
 	},
+	{
+		id: "one-pager",
+		label: "One pager",
+		description:
+			"Switch Overview between the MR description and an agent-written one-page summary of the MR, with a chat agent that answers questions and, with Claude or Codex, can edit the summary in place.",
+		defaultEnabled: false,
+	},
 ] as const;
 
 export type FeatureFlagId = (typeof FEATURE_FLAGS)[number]["id"];

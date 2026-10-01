@@ -1,6 +1,43 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvent } from "../../ports/review-agent";
 import type { AgentEffort } from "./effort";
 import { type AgentExec, defaultAgentExec } from "./exec";
+
+export const SCOPED_WRITE_PATH_ERROR =
+	"Directory-scoped writes require an absolute writeDir outside the worktree and not its parent";
+
+/** Directory-scoped write grants must stay outside the worktree; parent grants are rejected too. */
+export function resolveScopedWritePaths(
+	cwd: string,
+	writeDir: string | undefined,
+): { cwd: string; writeDir: string } | null {
+	if (
+		!writeDir ||
+		!isAbsolute(cwd) ||
+		!isAbsolute(writeDir) ||
+		cwd.includes("\0") ||
+		writeDir.includes("\0") ||
+		cwd.trim() !== cwd ||
+		writeDir.trim() !== writeDir
+	) {
+		return null;
+	}
+
+	const resolvedCwd = resolve(cwd);
+	const resolvedWriteDir = resolve(writeDir);
+	const cwdFromWriteDir = relative(resolvedWriteDir, resolvedCwd);
+	const writeDirFromCwd = relative(resolvedCwd, resolvedWriteDir);
+	if (
+		cwdFromWriteDir === "" ||
+		(cwdFromWriteDir !== ".." && !cwdFromWriteDir.startsWith(`..${sep}`)) ||
+		writeDirFromCwd === "" ||
+		(writeDirFromCwd !== ".." && !writeDirFromCwd.startsWith(`..${sep}`))
+	) {
+		return null;
+	}
+
+	return { cwd: resolvedCwd, writeDir: resolvedWriteDir };
+}
 
 export type JsonRecord = Record<string, unknown>;
 export type ParsedLine =

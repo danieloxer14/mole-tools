@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import type {
 	AgentEvent,
 	AgentTurn,
@@ -18,6 +20,8 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedWritePaths,
+	SCOPED_WRITE_PATH_ERROR,
 } from "./shared";
 
 export interface ClaudeAgentOptions {
@@ -28,6 +32,8 @@ export interface ClaudeAgentOptions {
 }
 
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash"] as const;
+const SCOPED_READ_ONLY_TOOLS = ["Read", "Grep", "Glob"] as const;
+const SCOPED_FILE_TOOLS = [...SCOPED_READ_ONLY_TOOLS, "Write", "Edit"] as const;
 const DEFAULT_CLAUDE_MODEL = "opus";
 
 const IGNORED_STREAM_EVENTS: Record<string, true> = {
@@ -220,6 +226,8 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 		this.effort = config.effort;
 	}
 
+	readonly supportsScopedWrites = true;
+
 	async preflight(): Promise<void> {
 		return preflight(this.execFn, this.binary);
 	}
@@ -236,11 +244,30 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 			yield { kind: "turn_end" };
 			return;
 		}
-
 		const sessionId = turn.sessionId ?? crypto.randomUUID();
-		const allowedTools = turn.writeDir
-			? [...READ_ONLY_TOOLS, `Write(${turn.writeDir}/**)`]
-			: READ_ONLY_TOOLS;
+
+		const scopedWrite = turn.writeScope === "directory";
+		const scopedPaths = scopedWrite
+			? resolveScopedWritePaths(turn.cwd, turn.writeDir)
+			: null;
+		if (scopedWrite && !scopedPaths) {
+			yield {
+				kind: "error",
+				message: SCOPED_WRITE_PATH_ERROR,
+			};
+			yield { kind: "turn_end" };
+			return;
+		}
+		const scopedWriteDir = scopedPaths?.writeDir;
+		const allowedTools = scopedWrite
+			? [
+					...SCOPED_READ_ONLY_TOOLS,
+					`Write(${scopedWriteDir}/**)`,
+					`Edit(${scopedWriteDir}/**)`,
+				]
+			: turn.writeDir
+				? [...READ_ONLY_TOOLS, `Write(${resolve(turn.writeDir)}/**)`]
+				: READ_ONLY_TOOLS;
 		const args = [
 			"-p",
 			"--output-format",
@@ -252,13 +279,19 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 				: ["--session-id", sessionId]),
 			"--append-system-prompt",
 			systemPrompt,
+			...(scopedWrite
+				? ["--safe-mode", "--restricted", "--tools", ...SCOPED_FILE_TOOLS]
+				: []),
 			"--allowedTools",
 			...allowedTools,
 		];
 		if (this.model) args.splice(7, 0, "--model", this.model);
 		if (this.effort)
 			args.splice(this.model ? 9 : 7, 0, "--effort", this.effort);
-		if (turn.writeDir) {
+		if (scopedWrite) {
+			args.push("--permission-mode", "default", "--permission-prompts", "none");
+			args.push("--add-dir", scopedWriteDir as string);
+		} else if (turn.writeDir) {
 			args.push("--permission-mode", "acceptEdits", "--add-dir", turn.writeDir);
 		}
 		args.push("--add-dir", turn.cwd, "--", turn.message);

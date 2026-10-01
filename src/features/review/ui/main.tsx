@@ -17,9 +17,10 @@ import {
 	type ChatTag,
 	chatTagsEqual,
 	type DescriptionChatTag,
+	type OnePagerChatTag,
 } from "../chat-tags";
 import type { ReviewApiState, ReviewProgressResponse } from "../routes";
-import type { Draft, LineSelection } from "../state";
+import type { ChatKind, Draft, LineSelection } from "../state";
 import type { ChatEntry, ChatEntryWithOptimistic } from "../store";
 import type { VersionStatus } from "../version-check";
 import { createRequestSequence } from "./chat-request-sequence";
@@ -55,7 +56,7 @@ import {
 	type ReviewView,
 	tabTitle,
 } from "./components/MrHeader";
-import { OverviewPane } from "./components/OverviewPane";
+import { OverviewPane, type OverviewTab } from "./components/OverviewPane";
 import { ReviewSplitter } from "./components/ReviewSplitter";
 import type { SettingsTab } from "./components/SettingsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -90,6 +91,7 @@ import {
 } from "./review-refresh";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
 import { useImportance } from "./use-importance";
+import { useOnePager } from "./use-one-pager";
 import { useSkills } from "./use-skills";
 import { useSplitterResize } from "./use-splitter-resize";
 import "./app.css";
@@ -468,6 +470,8 @@ function ReviewApp() {
 	const reviewShell = useRef<HTMLElement | null>(null);
 
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
+	const onePagerEnabled = useConfirmedFeatureFlag("one-pager");
+	const onePager = useOnePager(token, onePagerEnabled);
 	const importanceEnabled = useConfirmedFeatureFlag("layer-importance");
 	const importance = useImportance(
 		token,
@@ -491,6 +495,15 @@ function ReviewApp() {
 		[importanceEnabled, importance.status, importance.files, selectedPath],
 	);
 	const [reviewView, setReviewView] = useState<ReviewView>("code");
+	const [overviewTab, setOverviewTab] = useState<OverviewTab>("description");
+	const effectiveOverviewTab = onePagerEnabled ? overviewTab : "description";
+	const chatScope: ChatKind =
+		onePagerEnabled &&
+		reviewView === "overview" &&
+		effectiveOverviewTab === "one-pager" &&
+		onePager.status === "ready"
+			? "one-pager"
+			: "review";
 	const [diffMode, setDiffMode] = useState<DiffMode>("inline");
 	const [fileViewModes, setFileViewModes] = useState<
 		Record<string, FileViewMode>
@@ -539,8 +552,16 @@ function ReviewApp() {
 		{},
 	);
 	const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+	const [selectedOnePagerChatId, setSelectedOnePagerChatId] = useState<
+		string | null
+	>(null);
+	const autoCreateOnePagerChat = useRef(false);
 	const [creatingChat, setCreatingChat] = useState(false);
 	const [commentError, setCommentError] = useState<string | null>(null);
+	const [onePagerChatCreateError, setOnePagerChatCreateError] = useState<
+		string | null
+	>(null);
+
 	const [draftGenerations, setDraftGenerations] = useState<
 		Record<string, DraftGeneration>
 	>({});
@@ -807,20 +828,29 @@ function ReviewApp() {
 		if (mrProjectPath === undefined || mrIid === undefined) return;
 		document.title = tabTitle(mrProjectPath, mrIid);
 	}, [mrProjectPath, mrIid]);
-	const activeChatId = selectedChatId ?? data?.activeChatId ?? null;
+	const selectedScopeChatId =
+		chatScope === "one-pager"
+			? (selectedOnePagerChatId ?? data?.activeOnePagerChatId ?? null)
+			: (selectedChatId ?? data?.activeChatId ?? null);
+	const chatSummaries: ChatSummary[] = [];
+	let activeChatId: string | null = null;
+	for (const chat of data?.chats ?? []) {
+		if ((chat.kind ?? "review") !== chatScope) continue;
+		if (chat.id === selectedScopeChatId) activeChatId = chat.id;
+		chatSummaries.push({
+			id: chat.id,
+			title: chat.title,
+			createdAt: chat.createdAt,
+			agent: chat.agent,
+			model: chat.model,
+			busy:
+				(chatRuntimes[chat.id]?.sending ?? false) ||
+				(data?.busyChatIds ?? []).includes(chat.id),
+		});
+	}
 	const activeChat = activeChatId
 		? (chatRuntimes[activeChatId] ?? EMPTY_CHAT_RUNTIME)
 		: EMPTY_CHAT_RUNTIME;
-	const chatSummaries: ChatSummary[] = (data?.chats ?? []).map((chat) => ({
-		id: chat.id,
-		title: chat.title,
-		createdAt: chat.createdAt,
-		agent: chat.agent,
-		model: chat.model,
-		busy:
-			(chatRuntimes[chat.id]?.sending ?? false) ||
-			(data?.busyChatIds ?? []).includes(chat.id),
-	}));
 	const activeChatSummary = chatSummaries.find(
 		(chat) => chat.id === activeChatId,
 	);
@@ -830,7 +860,7 @@ function ReviewApp() {
 	const activeChatIndex =
 		activeChatId === null
 			? -1
-			: (data?.chats.findIndex((chat) => chat.id === activeChatId) ?? -1);
+			: chatSummaries.findIndex((chat) => chat.id === activeChatId);
 	const activeFromChatAvailability = fromChatAvailability({
 		chat: activeChatSummary ?? null,
 		chatIndex: activeChatIndex,
@@ -838,6 +868,80 @@ function ReviewApp() {
 		loaded: activeChat.loaded,
 		entries: activeChat.entries,
 	});
+
+	const handleNewChat = useCallback(
+		(kind: ChatKind = chatScope) => {
+			if (creatingChat) return;
+			if (kind === "one-pager") setOnePagerChatCreateError(null);
+			setCreatingChat(true);
+			void fetch(apiUrl("/api/chats", token), {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"X-Mole-Token": token,
+				},
+				body: JSON.stringify({ kind }),
+			})
+				.then(async (response) => {
+					if (!response.ok)
+						throw new Error(`Create chat request failed (${response.status})`);
+					return (await response.json()) as {
+						chats: ReviewStateResponse["chats"];
+						activeChatId: string | null;
+						activeOnePagerChatId: string | null;
+					};
+				})
+				.then((next) => {
+					const newChatId =
+						(kind === "one-pager"
+							? next.activeOnePagerChatId
+							: next.activeChatId) ??
+						next.chats.filter((chat) => (chat.kind ?? "review") === kind).at(-1)
+							?.id;
+					if (!newChatId) throw new Error("Create chat response had no chat");
+					setData((current) =>
+						current
+							? {
+									...current,
+									chats: next.chats,
+									activeChatId: next.activeChatId,
+									activeOnePagerChatId: next.activeOnePagerChatId,
+								}
+							: current,
+					);
+					patchChat(newChatId, { ...EMPTY_CHAT_RUNTIME, loaded: true });
+					if (kind === "one-pager") setOnePagerChatCreateError(null);
+					if (kind === "one-pager") setSelectedOnePagerChatId(newChatId);
+					else setSelectedChatId(newChatId);
+				})
+				.catch((reason: unknown) => {
+					const message =
+						reason instanceof Error ? reason.message : String(reason);
+					if (kind === "one-pager") setOnePagerChatCreateError(message);
+					else if (activeChatId) patchChat(activeChatId, { error: message });
+					else setError(message);
+				})
+				.finally(() => setCreatingChat(false));
+		},
+		[activeChatId, chatScope, creatingChat, patchChat, token],
+	);
+
+	useEffect(() => {
+		if (chatScope !== "one-pager") {
+			autoCreateOnePagerChat.current = false;
+			setOnePagerChatCreateError(null);
+			return;
+		}
+		if (
+			!data ||
+			data.chats.some((chat) => (chat.kind ?? "review") === "one-pager") ||
+			creatingChat ||
+			autoCreateOnePagerChat.current
+		)
+			return;
+		autoCreateOnePagerChat.current = true;
+		handleNewChat("one-pager");
+	}, [chatScope, creatingChat, data, handleNewChat]);
 
 	useEffect(() => {
 		if (
@@ -887,6 +991,10 @@ function ReviewApp() {
 				];
 				await Promise.all(
 					chatIds.map(async (chatId) => {
+						const isOnePagerChat = latest.chats.some(
+							(chat) =>
+								chat.id === chatId && (chat.kind ?? "review") === "one-pager",
+						);
 						if (chatControllers.current.has(chatId)) return;
 						const requestId = chatHistoryRequests.current.next(chatId);
 						try {
@@ -897,6 +1005,7 @@ function ReviewApp() {
 								!chatControllers.current.has(chatId)
 							)
 								patchChat(chatId, { entries, loaded: true });
+							if (isOnePagerChat) onePager.scheduleRefresh();
 						} catch {
 							// Keep polling; a transient history failure must not hide
 							// the eventual assistant entry.
@@ -915,7 +1024,13 @@ function ReviewApp() {
 			active = false;
 			window.clearTimeout(timer);
 		};
-	}, [token, busyChatIds, patchChat, fetchReviewState]);
+	}, [
+		token,
+		busyChatIds,
+		patchChat,
+		fetchReviewState,
+		onePager.scheduleRefresh,
+	]);
 
 	const selectedFile =
 		data?.diff.find((file) => filePath(file) === selectedPath) ?? null;
@@ -1854,12 +1969,16 @@ function ReviewApp() {
 			frame.data !== null
 		) {
 			const tool = frame.data as Record<string, unknown>;
+			if (tool.phase !== "start" && tool.phase !== "end") return;
 			if (
-				typeof tool.name !== "string" ||
-				(tool.phase !== "start" && tool.phase !== "end")
-			) {
-				return;
-			}
+				tool.phase === "end" &&
+				data.chats.some(
+					(chat) =>
+						chat.id === chatId && (chat.kind ?? "review") === "one-pager",
+				)
+			)
+				onePager.scheduleRefresh();
+			if (typeof tool.name !== "string") return;
 			patchChat(chatId, (current) => {
 				const streamingSegments =
 					current.streamingSegments.length === 0 ||
@@ -1916,6 +2035,9 @@ function ReviewApp() {
 		}
 	};
 	const startChatTurn = (chatId: string, message: string, tags: ChatTag[]) => {
+		const isOnePagerChat = data.chats.some(
+			(chat) => chat.id === chatId && (chat.kind ?? "review") === "one-pager",
+		);
 		const controller = new AbortController();
 		chatControllers.current.set(chatId, controller);
 		chatHistoryRequests.current.next(chatId);
@@ -1975,6 +2097,7 @@ function ReviewApp() {
 					chatControllers.current.delete(chatId);
 				patchChat(chatId, { sending: false, stopping: false });
 				setSkillsRefreshKey((key) => key + 1);
+				if (isOnePagerChat) onePager.scheduleRefresh();
 			});
 	};
 	const handleChatSend = (message: string) => {
@@ -2014,48 +2137,6 @@ function ReviewApp() {
 					error: reason instanceof Error ? reason.message : String(reason),
 				});
 			});
-	};
-	const handleNewChat = () => {
-		if (creatingChat) return;
-		setCreatingChat(true);
-		void fetch(apiUrl("/api/chats", token), {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				"X-Mole-Token": token,
-			},
-		})
-			.then(async (response) => {
-				if (!response.ok)
-					throw new Error(`Create chat request failed (${response.status})`);
-				return (await response.json()) as {
-					chats: ReviewStateResponse["chats"];
-					activeChatId: string | null;
-				};
-			})
-			.then((next) => {
-				const newChatId =
-					next.activeChatId ?? next.chats[next.chats.length - 1]?.id;
-				if (!newChatId) throw new Error("Create chat response had no chat");
-				setData((current) =>
-					current
-						? {
-								...current,
-								chats: next.chats,
-								activeChatId: next.activeChatId,
-							}
-						: current,
-				);
-				patchChat(newChatId, { ...EMPTY_CHAT_RUNTIME, loaded: true });
-				setSelectedChatId(newChatId);
-			})
-			.catch((reason: unknown) => {
-				const message =
-					reason instanceof Error ? reason.message : String(reason);
-				if (activeChatId) patchChat(activeChatId, { error: message });
-				else setError(message);
-			})
-			.finally(() => setCreatingChat(false));
 	};
 	const explainDiscussion = (discussionId: string) => {
 		if (creatingChat) return;
@@ -2111,9 +2192,12 @@ function ReviewApp() {
 			.finally(() => setCreatingChat(false));
 	};
 	const handleSelectChat = (chatId: string) => {
-		if (!data.chats.some((chat) => chat.id === chatId)) return;
-		setSelectedChatId(chatId);
+		const chat = data.chats.find((candidate) => candidate.id === chatId);
+		if (!chat) return;
 		const requestId = chatSelectionRequests.current.next("active-chat");
+		if ((chat.kind ?? "review") === "one-pager")
+			setSelectedOnePagerChatId(chatId);
+		else setSelectedChatId(chatId);
 		const persistSelection = async () => {
 			const response = await fetch(apiUrl("/api/chats/active", token), {
 				method: "POST",
@@ -2171,6 +2255,19 @@ function ReviewApp() {
 	};
 	const handleDescriptionTag = (tag: DescriptionChatTag) => {
 		if (!activeChatId) return;
+		patchChat(activeChatId, (current) => ({
+			tags: current.tags.some((candidate) => chatTagsEqual(candidate, tag))
+				? current.tags
+				: [...current.tags, tag],
+		}));
+	};
+	const handleOnePagerTag = (tag: OnePagerChatTag) => {
+		if (
+			!activeChatId ||
+			(data.chats.find((chat) => chat.id === activeChatId)?.kind ??
+				"review") !== "one-pager"
+		)
+			return;
 		patchChat(activeChatId, (current) => ({
 			tags: current.tags.some((candidate) => chatTagsEqual(candidate, tag))
 				? current.tags
@@ -2354,6 +2451,18 @@ function ReviewApp() {
 						onTagDescription={handleDescriptionTag}
 						onExplainDiscussion={explainDiscussion}
 						explainDisabled={creatingChat}
+						{...(onePagerEnabled
+							? {
+									onePager: {
+										tab: effectiveOverviewTab,
+										onTabChange: setOverviewTab,
+										view: onePager,
+										onCreate: onePager.create,
+										onRegenerate: onePager.create,
+										onTagOnePager: handleOnePagerTag,
+									},
+								}
+							: {})}
 					/>
 				) : null}
 				<ReviewSplitter
@@ -2375,16 +2484,20 @@ function ReviewApp() {
 					skills={skills}
 					transcript={activeChat.entries}
 					tags={activeChat.tags}
-					streamingSegments={activeChat.streamingSegments}
 					tools={activeChat.tools}
-					error={activeChat.error ?? commentError}
+					streamingSegments={activeChat.streamingSegments}
+					error={
+						activeChat.error ??
+						commentError ??
+						(chatScope === "one-pager" ? onePagerChatCreateError : null)
+					}
 					sending={activeChat.sending}
 					busy={activeChatBusy}
 					stopping={activeChat.stopping}
 					chats={chatSummaries}
 					activeChatId={activeChatId}
 					onSelectChat={handleSelectChat}
-					onNewChat={handleNewChat}
+					onNewChat={() => handleNewChat()}
 					onOpenSkillsSettings={() => {
 						setSettingsInitialTab("skills");
 						setSettingsOpen(true);

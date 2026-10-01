@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import type { AgentEvent, AgentTurn } from "../../ports/review-agent";
 import { ClaudeAgentAdapter } from "./claude";
 import type { AgentExec } from "./exec";
@@ -151,7 +152,7 @@ describe("ClaudeAgentAdapter", () => {
 		]);
 	});
 
-	test("uses resume mode for continuation and permits writes only in the layer output directory", async () => {
+	test("scopes one-pager writes to the allowed directory and denies other tools", async () => {
 		const calls: Call[] = [];
 		const adapter = new ClaudeAgentAdapter(
 			replay(
@@ -162,16 +163,19 @@ describe("ClaudeAgentAdapter", () => {
 				calls,
 			),
 		);
+		const writeDir = resolve(turn.cwd, "..", "review-output");
 		const resumedTurn: AgentTurn = {
 			...turn,
 			sessionId: "resume-session",
-			writeDir: "/tmp/review-output",
+			writeDir,
+			writeScope: "directory",
 		};
 
 		expect(await collect(adapter.run(resumedTurn))).toEqual([
 			{ kind: "session", sessionId: "resume-session" },
 			{ kind: "turn_end" },
 		]);
+		expect(adapter.supportsScopedWrites).toBe(true);
 		expect(calls[0]?.args).toEqual([
 			"-p",
 			"--output-format",
@@ -184,23 +188,71 @@ describe("ClaudeAgentAdapter", () => {
 			"opus",
 			"--append-system-prompt",
 			await Bun.file(turn.systemPromptFile).text(),
+			"--safe-mode",
+			"--restricted",
+			"--tools",
+			"Read",
+			"Grep",
+			"Glob",
+			"Write",
+			"Edit",
 			"--allowedTools",
 			"Read",
 			"Grep",
 			"Glob",
-			"Bash",
-			"Write(/tmp/review-output/**)",
+			`Write(${writeDir}/**)`,
+			`Edit(${writeDir}/**)`,
 			"--permission-mode",
-			"acceptEdits",
+			"default",
+			"--permission-prompts",
+			"none",
 			"--add-dir",
-			"/tmp/review-output",
+			writeDir,
 			"--add-dir",
 			turn.cwd,
 			"--",
 			turn.message,
 		]);
-		expect(calls[0]?.args).not.toContain("--session-id");
-		expect(calls[0]?.args).not.toContain("Edit");
+		expect(calls[0]?.args).not.toContain("Bash");
+		expect(calls[0]?.args).not.toContain("acceptEdits");
+		expect(calls[0]?.args).not.toContain("--dangerously-skip-permissions");
+	});
+
+	test("fails closed for invalid directory-scoped paths in both dimensions", async () => {
+		const calls: Call[] = [];
+		const adapter = new ClaudeAgentAdapter(replay([], calls));
+		const invalidTurns = [
+			{ cwd: turn.cwd, writeDir: undefined },
+			{ cwd: turn.cwd, writeDir: "" },
+			{ cwd: turn.cwd, writeDir: "relative-output" },
+			{ cwd: turn.cwd, writeDir: `${turn.cwd}/review-output ` },
+			{ cwd: turn.cwd, writeDir: `${turn.cwd}/review-\0output` },
+			{ cwd: turn.cwd, writeDir: turn.cwd },
+			{ cwd: turn.cwd, writeDir: `${turn.cwd}/review-output` },
+			{ cwd: turn.cwd, writeDir: `${turn.cwd}/.git` },
+			{ cwd: turn.cwd, writeDir: `${turn.cwd}/.git/config` },
+			{ cwd: turn.cwd, writeDir: `${turn.cwd}/..` },
+			{ cwd: "", writeDir: `${turn.cwd}/review-output` },
+			{ cwd: "relative-cwd", writeDir: `${turn.cwd}/review-output` },
+			{ cwd: `${turn.cwd} `, writeDir: `${turn.cwd}/review-output` },
+			{ cwd: `${turn.cwd}\0`, writeDir: `${turn.cwd}/review-output` },
+		];
+
+		for (const paths of invalidTurns) {
+			expect(
+				await collect(
+					adapter.run({ ...turn, ...paths, writeScope: "directory" }),
+				),
+			).toEqual([
+				{
+					kind: "error",
+					message:
+						"Directory-scoped writes require an absolute writeDir outside the worktree and not its parent",
+				},
+				{ kind: "turn_end" },
+			]);
+		}
+		expect(calls).toEqual([]);
 	});
 
 	test("turns executor failures into one error followed by turn_end", async () => {
