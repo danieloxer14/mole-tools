@@ -266,7 +266,37 @@ describe("one pager mounted review UI smoke", () => {
 			await waitFor("Overview navigation button", () =>
 				Boolean(findButton(container, "Overview")),
 			);
-			act(() => findButton(container, "Overview")?.click());
+			const viewToggle = container.querySelector('[aria-label="Review view"]');
+			if (!viewToggle) throw new Error("Review view toggle is missing");
+			const viewButtons = [
+				...viewToggle.querySelectorAll<HTMLButtonElement>("button"),
+			];
+			expect(viewButtons.map((button) => button.textContent?.trim())).toEqual([
+				"Overview",
+				"Code",
+			]);
+			const [overviewButton, codeButton] = viewButtons;
+			if (!overviewButton || !codeButton)
+				throw new Error("Review view buttons are missing");
+			expect(overviewButton.getAttribute("aria-pressed")).toBe("true");
+			expect(codeButton.getAttribute("aria-pressed")).toBe("false");
+			expect(
+				container.querySelector('[aria-label="MR Description"]')?.textContent,
+			).toContain("Review description.");
+
+			act(() => codeButton.click());
+			expect(codeButton.getAttribute("aria-pressed")).toBe("true");
+			expect(overviewButton.getAttribute("aria-pressed")).toBe("false");
+			expect(
+				container.querySelector('[aria-label="MR Description"]'),
+			).toBeNull();
+
+			act(() => overviewButton.click());
+			expect(overviewButton.getAttribute("aria-pressed")).toBe("true");
+			expect(codeButton.getAttribute("aria-pressed")).toBe("false");
+			expect(
+				container.querySelector('[aria-label="MR Description"]')?.textContent,
+			).toContain("Review description.");
 
 			await waitFor("One pager tab", () => {
 				const overview = container.querySelector('[aria-label="Overview"]');

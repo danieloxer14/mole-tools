@@ -159,23 +159,22 @@ test("renders Review view toggle first with the active option pressed", () => {
 	const header = render().querySelector("header");
 	const toggle = header?.firstElementChild;
 	const defaultOptions = Array.from(toggle?.querySelectorAll("button") ?? []);
-	const code = defaultOptions.find(
-		(button) => button.textContent?.trim() === "Code",
-	);
-	const defaultOverview = defaultOptions.find(
-		(button) => button.textContent?.trim() === "Overview",
-	);
 	const overviewHeader = render({ view: "overview" }).querySelector("header");
 	const overviewToggle = overviewHeader?.firstElementChild;
-	const overview = Array.from(
+	const overviewOptions = Array.from(
 		overviewToggle?.querySelectorAll("button") ?? [],
-	).find((button) => button.textContent?.trim() === "Overview");
+	);
 
 	expect(toggle?.getAttribute("data-slot")).toBe("toggle-group");
 	expect(toggle?.getAttribute("aria-label")).toBe("Review view");
-	expect(code?.getAttribute("aria-pressed")).toBe("true");
-	expect(defaultOverview?.getAttribute("aria-pressed")).toBe("false");
-	expect(overview?.getAttribute("aria-pressed")).toBe("true");
+	expect(defaultOptions.map((button) => button.textContent?.trim())).toEqual([
+		"Overview",
+		"Code",
+	]);
+	expect(defaultOptions[0]?.getAttribute("aria-pressed")).toBe("false");
+	expect(defaultOptions[1]?.getAttribute("aria-pressed")).toBe("true");
+	expect(overviewOptions[0]?.getAttribute("aria-pressed")).toBe("true");
+	expect(overviewOptions[1]?.getAttribute("aria-pressed")).toBe("false");
 });
 
 test("keeps toggle options intrinsic and preserves title on narrow screens", () => {
@@ -215,6 +214,23 @@ test("selecting Overview reports the overview view", () => {
 	act(() => overview?.click());
 
 	expect(changes).toEqual(["overview"]);
+});
+
+test("selecting Code reports the code view", () => {
+	const changes: ReviewView[] = [];
+	const { container } = renderInteractive({
+		view: "overview",
+		onViewChange: (view) => changes.push(view),
+	});
+	const code = Array.from(
+		container
+			.querySelector('[aria-label="Review view"]')
+			?.querySelectorAll("button") ?? [],
+	).find((button) => button.textContent?.trim() === "Code");
+
+	act(() => code?.click());
+
+	expect(changes).toEqual(["code"]);
 });
 
 test("ignores the empty selection when the active Code option is clicked", () => {

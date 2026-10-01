@@ -515,7 +515,7 @@ function ReviewApp() {
 				: undefined,
 		[importanceEnabled, importance.status, importance.files, selectedPath],
 	);
-	const [reviewView, setReviewView] = useState<ReviewView>("code");
+	const [reviewView, setReviewView] = useState<ReviewView>("overview");
 	const [overviewTab, setOverviewTab] = useState<OverviewTab>("description");
 	const effectiveOverviewTab = onePagerEnabled ? overviewTab : "description";
 	const chatScope: ChatKind =

@@ -401,8 +401,10 @@ three review columns. The left sidebar offers **Layers** and **Files** tabs:
 Layers tracks generated review layers and coverage, while Files provides
 changed-file navigation. The centre column is reserved for the selected diff;
 it does not contain a second files browser. The right column provides persistent,
-read-only agent chat. Comments stay local drafts until you explicitly send each
-one as a positioned GitLab discussion. Each published
+read-only agent chat. Overview opens first with the merge-request description;
+use the header to switch to Code for layers, files, and diffs, or back to
+Overview. Comments stay local drafts until you explicitly send each one as a
+positioned GitLab discussion. Each published
 discussion has an **Explain** button that opens a new chat pre-loaded with the
 surrounding diff: the chat is titled `Explain: …` after the comment, and its
 first turn uses the active `review-explain-comment` prompt preset, the comment's notes,
