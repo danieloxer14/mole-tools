@@ -120,7 +120,7 @@ function renderLayerPane(
 test("renders one shared importance progress bar directly below the tab list", () => {
 	const container = parseMarkup(
 		renderLayerPane({
-			importanceProgress: { value: 3, total: 6, threshold: 1.5 },
+			importanceProgress: { value: 4, total: 18, threshold: 13 },
 		}),
 	);
 	const tabList = container.querySelector('[role="tablist"]');
@@ -136,6 +136,8 @@ test("renders one shared importance progress bar directly below the tab list", (
 	).toHaveLength(1);
 	expect(tabList?.parentElement?.lastElementChild).toBe(tooltipTrigger);
 	expect(progress?.closest("header")).toBeNull();
+	expect(progress?.getAttribute("aria-valuenow")).toBe("4");
+	expect(progress?.getAttribute("aria-valuemax")).toBe("18");
 	expect(container.innerHTML).not.toContain('title="Target:');
 	expect(container.innerHTML).not.toContain(">Importance</span>");
 });
@@ -164,7 +166,7 @@ test("explains importance progress in an accessible tooltip", async () => {
 				externallyDisabled={false}
 				onRegenerate={() => {}}
 				onRetry={() => {}}
-				importanceProgress={{ value: 3, total: 6, threshold: 1.5 }}
+				importanceProgress={{ value: 4, total: 18, threshold: 13 }}
 			/>,
 		),
 	);
@@ -184,10 +186,12 @@ test("explains importance progress in an accessible tooltip", async () => {
 	const tooltip = document.body.querySelector('[data-slot="tooltip-content"]');
 	expect(trigger.tabIndex).toBe(0);
 	expect(tooltip).not.toBeNull();
-	expect(tooltip?.textContent).toContain("Current target: 25%");
+	expect(tooltip?.textContent).toContain("Fixed contributions: level 1 1/18");
+	expect(tooltip?.textContent).toContain("5 8/18");
 	expect(tooltip?.textContent).toContain(
-		"More importance changes are worth more",
+		"Fixed target: 13/18 for High+Critical review",
 	);
+	expect(tooltip?.textContent).toContain("not a completeness guarantee");
 });
 
 function parseMarkup(markup: string): HTMLDivElement {
