@@ -205,6 +205,52 @@
 		}
 	}
 
+	.importance-progress-marker {
+		position: absolute;
+		top: -2px;
+		bottom: -2px;
+		width: 2px;
+		transform: translateX(-50%);
+		background: var(--color-foreground);
+		border-radius: 1px;
+		pointer-events: none;
+	}
+
+	.importance-progress-flame {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		height: calc(100% + 6px);
+		background: linear-gradient(
+			to top,
+			var(--color-importance-5),
+			var(--color-importance-4) 60%,
+			transparent
+		);
+		border-radius: 9999px;
+		filter: blur(1px);
+		pointer-events: none;
+		transform-origin: bottom;
+		animation: importance-flame 1.2s ease-in-out infinite alternate;
+	}
+
+	@keyframes importance-flame {
+		from {
+			opacity: 0.45;
+			transform: scaleY(0.7) translateY(0);
+		}
+		to {
+			opacity: 0.8;
+			transform: scaleY(1.1) translateY(-1px);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.importance-progress-flame {
+			animation: none;
+		}
+	}
+
 .diff-table { border-collapse: collapse; font-family: var(--font-mono); font-size: 13px; line-height: 1.25rem; min-width: 100%; width: 100%; max-width: 100%; table-layout: fixed; }
 .diff-table td { padding: 0 --spacing(2); white-space: pre-wrap; }
 .diff-table .line-number { color: var(--color-muted-foreground); padding-right: --spacing(2); text-align: right; user-select: none; width: --spacing(12); }

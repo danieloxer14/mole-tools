@@ -125,12 +125,13 @@ It holds the comment's anchor (file, line range, and the code or quoted Markdown
 
 - 5 — critical: production code business-logic flows that must be reviewed (behaviour changes, decisions, data handling, error handling, security, concurrency, public contracts).
 - 4 — high: logic that supports those flows or changes how existing behaviour is wired.
-- 3 — moderate: supporting code, configuration with behavioural effect, and test bodies that cover new behaviour.
-- 2 — low: documentation, renames, simple wiring, simple updates to types or exports.
-- 1 — skip: imports, constants, type-only changes, formatting, and generated or lock files.
+- 3 — moderate: supporting code, configuration with behavioural effect, and tests bodies that cover new happy path and critical sad-path behaviours.
+- 2 — low: documentation, simple tests that cover less important happy and sad paths, mock setup, renames, simple wiring, simple updates to types or exports.
+- 1 — skip: imports, constants, type-only changes, formatting, config files, package files, auto-generated files, or lock files.
 
 Understand what the merge request does across all changed files before scoring; judge each part in the context of the whole change set.
-Be careful to understand the type of file you are in: business-logic or helper code in production exercised areas is more important than similar code in tests or scripts.
+Be careful to understand the type of file you are in, i.e business logic/helper looking code in production exercised areas is more important than similar code in tests or scripts.
+Also in a test file try to consider each test individually, putting a reason/explanation for each. Considering the importance of the behaviour it is testing.
 Do not force a distribution: several files may contain important parts.
 Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.
 For every scored span, provide exactly one concise sentence explaining its score and the hunk, no more than 144 characters and with no line breaks.`,

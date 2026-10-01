@@ -410,6 +410,11 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
+Positioned comments support both single-line and multiline selections. If a
+failed draft follows sending, GitLab may already have created the discussion
+before its response could be processed. Check GitLab for an existing discussion
+before using **Retry** to avoid posting a duplicate.
+
 Review layers have one completion circle on the right of the title, sized like
 the chevron: Open is neutral, Done is green with a check, and hovering or
 focusing the circle previews the action (check to complete, cross to reopen).
@@ -503,9 +508,9 @@ Layer **Regenerate** and **Retry** do not rerun importance. The
 1 (skip), 2 (low), 3 (moderate), 4 (high), 5 (critical), and writes one concise
 reason sentence of at most 144 characters for every span. Pastel blue-to-red
 colours mark diff gutters, changed-file rows (using each file's highest span
-score), and layer file pills. Diff gutters and layer pills show each span's
-score label and reason in custom tooltips. The Changed files header shows
-**Scoring…** while running or **Importance failed** with an error
+score), and layer file pills. Rated changed-file pips and diff gutters and layer
+pills show each score label and selected reason in custom tooltips. The Changed
+files header shows **Scoring…** while running or **Importance failed** with an error
 tooltip and **Retry** on failure. Results persist at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
@@ -523,6 +528,17 @@ The separate **One pager chat** uses its own prompt and model to answer
 follow-up questions. Claude and Codex can edit the summary in place; OMP remains
 read-only because its tools do not enforce directory-scoped writes. After
 supported-provider edits, the rendered document reloads after a 500 ms debounce.
+
+
+With the feature flag on and scoring ready, a shared importance review progress
+bar appears directly beneath the Layers/Files tabs. It shows the weighted share
+of added and deleted lines in viewed files against all scored changed lines.
+Importance levels 1–5 weigh 0.5, 0.75, 1, 1.25, and 1.5; context and unscored
+lines don't count. The target is the greater of the weighted total of level 3–5
+lines or 50% of all scored changed lines. A marker shows the target. Fill colour
+blends through importance colours toward level 5 as progress approaches the
+target and stays level 5 once reached; a subtle flame animates at that point,
+but stays static with reduced motion.
 
 
 

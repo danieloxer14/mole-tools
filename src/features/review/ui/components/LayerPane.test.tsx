@@ -117,6 +117,78 @@ function renderLayerPane(
 		/>,
 	);
 }
+test("renders one shared importance progress bar directly below the tab list", () => {
+	const container = parseMarkup(
+		renderLayerPane({
+			importanceProgress: { value: 3, total: 6, threshold: 1.5 },
+		}),
+	);
+	const tabList = container.querySelector('[role="tablist"]');
+	const progress = container.querySelector(
+		'[aria-label="Importance review progress"]',
+	);
+	const tooltipTrigger = container.querySelector(
+		'[data-slot="tooltip-trigger"]',
+	);
+
+	expect(
+		container.querySelectorAll('[aria-label="Importance review progress"]'),
+	).toHaveLength(1);
+	expect(tabList?.parentElement?.lastElementChild).toBe(tooltipTrigger);
+	expect(progress?.closest("header")).toBeNull();
+	expect(container.innerHTML).not.toContain('title="Target:');
+	expect(container.innerHTML).not.toContain(">Importance</span>");
+});
+
+test("omits importance progress when no progress is provided", () => {
+	expect(renderLayerPane()).not.toContain("Importance review progress");
+});
+
+test("explains importance progress in an accessible tooltip", async () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() =>
+		root.render(
+			<LayerPane
+				state={reviewState()}
+				files={[]}
+				filesContent={null}
+				selectedPath={null}
+				onSelectFile={() => {}}
+				onSelectLayer={() => {}}
+				onToggleDone={() => {}}
+				layerAction={null}
+				actionError={null}
+				externallyDisabled={false}
+				onRegenerate={() => {}}
+				onRetry={() => {}}
+				importanceProgress={{ value: 3, total: 6, threshold: 1.5 }}
+			/>,
+		),
+	);
+	const trigger = container.querySelector<HTMLElement>(
+		'[data-slot="tooltip-trigger"]',
+	);
+	if (!trigger) throw new Error("Missing importance tooltip trigger");
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		trigger.focus();
+		await Bun.sleep(0);
+	});
+
+	const tooltip = document.body.querySelector('[data-slot="tooltip-content"]');
+	expect(trigger.tabIndex).toBe(0);
+	expect(tooltip).not.toBeNull();
+	expect(tooltip?.textContent).toContain("Current target: 25%");
+	expect(tooltip?.textContent).toContain(
+		"More importance changes are worth more",
+	);
+});
 
 function parseMarkup(markup: string): HTMLDivElement {
 	const container = document.createElement("div");

@@ -76,7 +76,11 @@ import { createDraftEditQueue } from "./draft-edit-queue";
 import { loadFeatureFlags, useConfirmedFeatureFlag } from "./feature-flags";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
-import { fileImportanceMap } from "./importance";
+import {
+	fileImportanceMap,
+	importanceReviewFileTotals,
+	importanceReviewProgressForViewedFiles,
+} from "./importance";
 import {
 	consumeLayerStream,
 	type LayerAction,
@@ -484,6 +488,23 @@ function ReviewApp() {
 				? fileImportanceMap(importance.files)
 				: undefined,
 		[importanceEnabled, importance.status, importance.files],
+	);
+	const importanceFileTotals = useMemo(
+		() =>
+			importanceEnabled && importance.status === "ready" && data?.diff
+				? importanceReviewFileTotals(data.diff, importance.files)
+				: undefined,
+		[importanceEnabled, importance.status, importance.files, data?.diff],
+	);
+	const importanceProgress = useMemo(
+		() =>
+			importanceFileTotals && data?.viewedFiles
+				? importanceReviewProgressForViewedFiles(
+						importanceFileTotals,
+						data.viewedFiles,
+					)
+				: undefined,
+		[importanceFileTotals, data?.viewedFiles],
 	);
 	const selectedImportance = useMemo(
 		() =>
@@ -2340,6 +2361,7 @@ function ReviewApp() {
 						state={data}
 						files={files}
 						importanceByPath={importanceByPath}
+						importanceProgress={importanceProgress}
 						filesContent={
 							<ChangedFiles
 								files={data.diff}

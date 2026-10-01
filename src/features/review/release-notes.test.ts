@@ -74,6 +74,7 @@ describe("parseReleaseCatalog", () => {
 			),
 		);
 		expect(catalog.map(({ version }) => version)).toEqual([
+			"0.12.0",
 			"0.11.0",
 			"0.10.1",
 			"0.10.0",
