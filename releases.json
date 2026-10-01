@@ -1,5 +1,20 @@
 [
 	{
+		"version": "0.12.0",
+		"description": "Adds layer-importance scoring to code reviews and improves review navigation and GitLab discussion handling.",
+		"features": [
+			"Score changed line spans for reviewer importance and show each score with a concise reason."
+		],
+		"improvements": [
+			"Show importance progress and per-file importance indicators during code review.",
+			"Show importance reasons on changed-file indicators."
+		],
+		"fixes": [
+			"Preserve multiline layer descriptions and independent concurrent review drafts.",
+			"Anchor ranged GitLab discussions to the selected-side range endpoint and accept explicit-null single-line ranges."
+		]
+	},
+	{
 		"version": "0.11.0",
 		"description": "Adds release-note update notifications and full-path changed-file filtering, with review sync and navigation improvements.",
 		"features": [

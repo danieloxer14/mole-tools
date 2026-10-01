@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FeatureFlagStore, featureFlagsPath } from "./store";
 
-const DEFAULTS = { "layer-importance": false } as const;
+const DEFAULTS = {
+	"layer-importance": false,
+	"one-pager": false,
+} as const;
 
 async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
 	const dir = await mkdtemp(join(tmpdir(), "feature-flags-test-"));
@@ -86,6 +89,7 @@ describe("FeatureFlagStore", () => {
 				await new FeatureFlagStore(path).set("layer-importance", true),
 			).toEqual({
 				"layer-importance": true,
+				"one-pager": false,
 			});
 			expect(await readFile(path, "utf8")).toBe(
 				'{\n\t"layer-importance": true\n}\n',

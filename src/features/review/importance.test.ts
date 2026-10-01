@@ -123,6 +123,7 @@ function makeState(worktreePath: string): ReviewState {
 		chatSessionId: null,
 		chats: [],
 		activeChatId: null,
+		activeOnePagerChatId: null,
 		drafts: [],
 	};
 }

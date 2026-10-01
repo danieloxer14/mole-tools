@@ -27,18 +27,28 @@ function fencedMarkdown(text: string): string {
 }
 
 function tagLabel(tag: ChatEntry["tags"][number]): string {
-	if ("kind" in tag && tag.kind === "description") {
-		return tag.startLine === undefined || tag.endLine === undefined
-			? "MR description (whole)"
-			: `MR description lines ${rangeLabel(tag.startLine, tag.endLine)} (Markdown)`;
+	if (!("kind" in tag)) {
+		return `\`${tag.path}\` ${tag.side} ${rangeLabel(tag.startLine, tag.endLine)}`;
 	}
-	if ("kind" in tag && tag.kind === "file") {
-		return `\`${tag.path}\` (whole file)`;
+
+	switch (tag.kind) {
+		case "description":
+			return tag.startLine === undefined || tag.endLine === undefined
+				? "MR description (whole)"
+				: `MR description lines ${rangeLabel(tag.startLine, tag.endLine)} (Markdown)`;
+		case "file":
+			return `\`${tag.path}\` (whole file)`;
+		case "markdown":
+			return `\`${tag.path}\` lines ${rangeLabel(tag.startLine, tag.endLine)} (Markdown)`;
+		case "one-pager":
+			return tag.startLine === undefined || tag.endLine === undefined
+				? "One-pager (whole)"
+				: `One-pager lines ${rangeLabel(tag.startLine, tag.endLine)} (Markdown)`;
+		default: {
+			const exhaustiveCheck: never = tag;
+			return exhaustiveCheck;
+		}
 	}
-	if ("kind" in tag && tag.kind === "markdown") {
-		return `\`${tag.path}\` lines ${rangeLabel(tag.startLine, tag.endLine)} (Markdown)`;
-	}
-	return `\`${tag.path}\` ${tag.side} ${rangeLabel(tag.startLine, tag.endLine)}`;
 }
 
 function roleLabel(role: string): string {

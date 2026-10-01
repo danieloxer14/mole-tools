@@ -54,44 +54,60 @@ export const FileChatTagSchema = z
 	.strict();
 export type FileChatTag = z.infer<typeof FileChatTagSchema>;
 
+/** Build a validated tag for a non-file markdown context. */
+function markdownContextChatTagSchema<
+	TKind extends "description" | "one-pager",
+>(kind: TKind) {
+	return z
+		.object({
+			kind: z.literal(kind),
+			startLine: z.number().int().positive().optional(),
+			endLine: z.number().int().positive().optional(),
+			quote: z.string().min(1),
+		})
+		.strict()
+		.refine(
+			(tag) => (tag.startLine === undefined) === (tag.endLine === undefined),
+			{
+				message: "startLine and endLine must both be present or both absent",
+				path: ["endLine"],
+			},
+		)
+		.refine(
+			(tag) =>
+				tag.startLine === undefined ||
+				tag.endLine === undefined ||
+				tag.endLine >= tag.startLine,
+			{
+				message: "endLine must be greater than or equal to startLine",
+				path: ["endLine"],
+			},
+		);
+}
+
 /** Chat tag anchored to the merge request description, never a file. */
-export const DescriptionChatTagSchema = z
-	.object({
-		kind: z.literal("description"),
-		startLine: z.number().int().positive().optional(),
-		endLine: z.number().int().positive().optional(),
-		quote: z.string().min(1),
-	})
-	.strict()
-	.refine(
-		(tag) => (tag.startLine === undefined) === (tag.endLine === undefined),
-		{
-			message: "startLine and endLine must both be present or both absent",
-			path: ["endLine"],
-		},
-	)
-	.refine(
-		(tag) =>
-			tag.startLine === undefined ||
-			tag.endLine === undefined ||
-			tag.endLine >= tag.startLine,
-		{
-			message: "endLine must be greater than or equal to startLine",
-			path: ["endLine"],
-		},
-	);
+export const DescriptionChatTagSchema =
+	markdownContextChatTagSchema("description");
 export type DescriptionChatTag = z.infer<typeof DescriptionChatTagSchema>;
+/** Chat tag anchored to the one-pager document, never a file. */
+export const OnePagerChatTagSchema = markdownContextChatTagSchema("one-pager");
+export type OnePagerChatTag = z.infer<typeof OnePagerChatTagSchema>;
 
 export const ChatTagSchema = z.union([
 	DiffChatTagSchema,
 	MarkdownChatTagSchema,
 	FileChatTagSchema,
 	DescriptionChatTagSchema,
+	OnePagerChatTagSchema,
 ]);
 export type ChatTag = z.infer<typeof ChatTagSchema>;
 
 export function isDescriptionChatTag(tag: ChatTag): tag is DescriptionChatTag {
 	return "kind" in tag && tag.kind === "description";
+}
+
+export function isOnePagerChatTag(tag: ChatTag): tag is OnePagerChatTag {
+	return "kind" in tag && tag.kind === "one-pager";
 }
 
 export function isMarkdownChatTag(tag: ChatTag): tag is MarkdownChatTag {
@@ -103,10 +119,18 @@ export function isFileChatTag(tag: ChatTag): tag is FileChatTag {
 }
 
 /**
- * Structural equality across all four chat tag variants, for dedup/removal.
+ * Structural equality across all five chat tag variants, for dedup/removal.
  * Path is shared by the file, markdown and diff variants.
  */
 export function chatTagsEqual(a: ChatTag, b: ChatTag): boolean {
+	if (isOnePagerChatTag(a) || isOnePagerChatTag(b)) {
+		return (
+			isOnePagerChatTag(a) &&
+			isOnePagerChatTag(b) &&
+			a.startLine === b.startLine &&
+			a.endLine === b.endLine
+		);
+	}
 	if (isDescriptionChatTag(a) || isDescriptionChatTag(b)) {
 		return (
 			isDescriptionChatTag(a) &&

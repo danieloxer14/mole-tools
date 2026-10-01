@@ -332,12 +332,12 @@ function withMergeRequestMetadata(
 			webUrl: mr.webUrl,
 			title: mr.title,
 			description: mr.description ?? base.mr.description ?? "",
+			state: mr.state ?? null,
 			sourceBranch: mr.sourceBranch,
 			targetBranch: mr.targetBranch,
 		},
 	});
 }
-
 function sameMergeRequestMetadata(
 	left: ReviewState["mr"],
 	right: ReviewState["mr"],
@@ -350,7 +350,8 @@ function sameMergeRequestMetadata(
 		left.title === right.title &&
 		left.description === right.description &&
 		left.sourceBranch === right.sourceBranch &&
-		left.targetBranch === right.targetBranch
+		left.targetBranch === right.targetBranch &&
+		left.state === right.state
 	);
 }
 
@@ -549,6 +550,7 @@ export async function setupReview(
 			webUrl: input.mr.webUrl,
 			title: input.mr.title,
 			description: input.mr.description ?? "",
+			state: input.mr.state ?? null,
 			sourceBranch: input.mr.sourceBranch,
 			targetBranch: input.mr.targetBranch,
 		},
@@ -568,6 +570,7 @@ export async function setupReview(
 		chatSessionId: null,
 		chats,
 		activeChatId: previous ? previous.activeChatId : (chats[0]?.id ?? null),
+		activeOnePagerChatId: previous?.activeOnePagerChatId ?? null,
 		drafts: previous?.drafts ?? [],
 	});
 

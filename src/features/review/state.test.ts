@@ -114,6 +114,13 @@ test("defaults missing MR description to empty string", () => {
 
 	expect(ReviewStateSchema.parse(legacy).mr.description).toBe("");
 });
+test("defaults missing MR lifecycle state to null", () => {
+	const current = state();
+	const legacy = { ...current, mr: { ...current.mr } };
+	delete (legacy.mr as Partial<ReviewState["mr"]>).state;
+
+	expect(ReviewStateSchema.parse(legacy).mr.state).toBeNull();
+});
 
 test("rejects non-string MR description", () => {
 	const current = state();
@@ -212,6 +219,78 @@ describe("ReviewState", () => {
 		expect(ensureChats(parsed).activeChatId).toBe("first");
 	});
 
+	test("moves active review pointer away from one-pager chat", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [
+				{ id: "pager", kind: "one-pager", createdAt: "2026-08-15" },
+				{ id: "first", kind: "review", createdAt: "2026-08-15" },
+				{ id: "second", kind: "review", createdAt: "2026-08-15" },
+			],
+			activeChatId: "pager",
+		});
+
+		expect(ensureChats(parsed).activeChatId).toBe("first");
+	});
+
+	test("repairs invalid one-pager pointer to the last one-pager chat", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [
+				{ id: "review", kind: "review", createdAt: "2026-08-15" },
+				{ id: "pager-first", kind: "one-pager", createdAt: "2026-08-15" },
+				{ id: "pager-last", kind: "one-pager", createdAt: "2026-08-15" },
+			],
+			activeChatId: "review",
+			activeOnePagerChatId: "missing",
+		});
+
+		expect(ensureChats(parsed).activeOnePagerChatId).toBe("pager-last");
+	});
+
+	test("clears an invalid one-pager pointer when no one-pager chats exist", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [{ id: "review", kind: "review", createdAt: "2026-08-15" }],
+			activeChatId: "review",
+			activeOnePagerChatId: "missing",
+		});
+
+		expect(ensureChats(parsed).activeOnePagerChatId).toBeNull();
+	});
+
+	test("prepends legacy review chat when only one-pager chats exist", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [{ id: "pager", kind: "one-pager", createdAt: "2026-08-15" }],
+			activeChatId: "pager",
+			activeOnePagerChatId: "pager",
+		});
+
+		const ensured = ensureChats(parsed);
+
+		expect(ensured.chats.map((chat) => [chat.id, chat.kind])).toEqual([
+			[LEGACY_CHAT_ID, "review"],
+			["pager", "one-pager"],
+		]);
+		expect(ensured.activeChatId).toBe(LEGACY_CHAT_ID);
+		expect(ensured.activeOnePagerChatId).toBe("pager");
+	});
+
+	test("returns the original state when chat pointers already match", () => {
+		const parsed = ReviewStateSchema.parse({
+			...state(),
+			chats: [
+				{ id: "review", kind: "review", createdAt: "2026-08-15" },
+				{ id: "pager", kind: "one-pager", createdAt: "2026-08-15" },
+			],
+			activeChatId: "review",
+			activeOnePagerChatId: "pager",
+		});
+
+		expect(ensureChats(parsed)).toBe(parsed);
+	});
+
 	test("derives bounded titles from normalized messages", () => {
 		expect(deriveChatTitle("  first\n\tsecond   third  ")).toBe(
 			"first second third",
@@ -228,6 +307,30 @@ describe("ReviewState", () => {
 		}
 	});
 
+	test("parses legacy chat state with review kind and null one-pager pointer", () => {
+		const legacy = { ...state() } as Record<string, unknown>;
+		delete legacy.activeOnePagerChatId;
+		legacy.chats = [
+			{
+				id: "legacy",
+				title: "",
+				sessionId: null,
+				createdAt: "2026-08-15T00:00:00.000Z",
+			},
+			{
+				id: "legacy-2",
+				title: "",
+				sessionId: null,
+				createdAt: "2026-08-15T00:01:00.000Z",
+			},
+		];
+
+		const parsed = ReviewStateSchema.parse(legacy);
+
+		expect(parsed.chats.map((chat) => chat.kind)).toEqual(["review", "review"]);
+		expect(parsed.activeOnePagerChatId).toBeNull();
+	});
+
 	test("parses fixtures without multi-chat fields", () => {
 		const parsed = ReviewStateSchema.parse({
 			...state(),
@@ -237,6 +340,7 @@ describe("ReviewState", () => {
 
 		expect(parsed.chats).toEqual([]);
 		expect(parsed.activeChatId).toBeNull();
+		expect(parsed.activeOnePagerChatId).toBeNull();
 	});
 
 	test("parses chat meta without binding as null", () => {
@@ -261,6 +365,7 @@ describe("ReviewState", () => {
 				agent: null,
 				model: null,
 				effort: null,
+				kind: "review",
 			},
 		]);
 	});

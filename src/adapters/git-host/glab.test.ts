@@ -953,14 +953,28 @@ describe("GlabAdapter", () => {
 					},
 				},
 				{
-					old_path: "src/context.ts",
-					new_path: "src/context.ts",
-					old_line: 6,
+					old_path: "src/old.ts",
+					new_path: "src/new.ts",
+					old_line: null,
 					new_line: 8,
+					line_range: null,
 					expected: {
-						newPath: "src/context.ts",
-						oldPath: "src/context.ts",
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
 						newLine: 8,
+						oldLine: null,
+					},
+				},
+				{
+					old_path: "src/old.ts",
+					new_path: "src/new.ts",
+					old_line: 6,
+					new_line: null,
+					line_range: null,
+					expected: {
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
+						newLine: null,
 						oldLine: 6,
 					},
 				},
@@ -1060,6 +1074,68 @@ describe("GlabAdapter", () => {
 			startSha: "start-sha",
 			headSha: "head-sha",
 		};
+		test("posts one-line positions and accepts explicit-null response ranges", async () => {
+			for (const selection of [
+				{
+					path: "src/app.ts",
+					side: "new" as const,
+					startLine: 2,
+					endLine: 2,
+					expected: { newLine: 2, oldLine: null },
+				},
+				{
+					path: "src/app.ts",
+					side: "old" as const,
+					startLine: 1,
+					endLine: 1,
+					expected: { newLine: null, oldLine: 1 },
+				},
+			]) {
+				const position = buildPosition(selection, parsedDiff, refs);
+				const calls: { args: string[]; input?: string }[] = [];
+				const response = JSON.stringify({
+					id: "single-line-discussion",
+					resolved: false,
+					notes: [
+						{
+							id: 1,
+							author: { username: "alice" },
+							body: "Review this",
+							created_at: "2026-08-16T00:00:00Z",
+							system: false,
+							position: { ...position, line_range: null },
+						},
+					],
+				});
+				const exec: GlabExec = async (args, input) => {
+					calls.push({ args, input });
+					return ok(response);
+				};
+
+				const discussion = await new GlabAdapter(exec).createDiscussion({
+					ref,
+					body: "Review this",
+					position,
+					parsedDiff,
+					diffRefs: refs,
+				});
+
+				expect(discussion.id).toBe("single-line-discussion");
+				expect(discussion.position).toEqual({
+					newPath: "src/app.ts",
+					oldPath: "src/app.ts",
+					...selection.expected,
+				});
+				expect(calls).toHaveLength(1);
+				const request = JSON.parse(calls[0]?.input ?? "") as {
+					body: string;
+					position: Record<string, unknown>;
+				};
+				expect(request.body).toBe("Review this");
+				expect(request.position).toEqual(position);
+				expect(request.position).not.toHaveProperty("line_range");
+			}
+		});
 
 		test("posts body and validated position as JSON stdin", async () => {
 			const position = buildPosition(

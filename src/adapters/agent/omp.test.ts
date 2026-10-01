@@ -189,7 +189,7 @@ describe("OmpAgentAdapter", () => {
 		]);
 	});
 
-	test("passes continuation and layer arguments while keeping worktree tools read-only", async () => {
+	test("preserves generic output-directory writes", async () => {
 		const calls: Call[] = [];
 		const adapter = new OmpAgentAdapter(
 			replay([`{"type":"session","id":"other"}`], calls),
@@ -225,6 +225,45 @@ describe("OmpAgentAdapter", () => {
 				"resume-session",
 				"--add-dir",
 				"/tmp/review-output",
+				"--",
+				turn.message,
+			],
+			cwd: turn.cwd,
+		});
+	});
+	test("keeps scoped-write requests read-only without shell or file writes", async () => {
+		const calls: Call[] = [];
+		const adapter = new OmpAgentAdapter(
+			replay([`{"type":"session","id":"other"}`], calls),
+		);
+		const writeDir = "/tmp/review-output";
+		const scopedTurn: AgentTurn = {
+			...turn,
+			sessionId: "resume-session",
+			writeDir,
+			writeScope: "directory",
+		};
+
+		expect(await collect(adapter.run(scopedTurn))).toEqual([
+			{ kind: "session", sessionId: "resume-session" },
+			{ kind: "turn_end" },
+		]);
+		expect(adapter.supportsScopedWrites).toBe(false);
+		expect(calls[0]).toEqual({
+			binary: "omp",
+			args: [
+				"-p",
+				"--no-extensions",
+				"--mode",
+				"json",
+				"--cwd",
+				turn.cwd,
+				"--append-system-prompt",
+				turn.systemPromptFile,
+				"--tools",
+				"read,grep,glob",
+				"-r",
+				"resume-session",
 				"--",
 				turn.message,
 			],

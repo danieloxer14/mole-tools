@@ -154,15 +154,41 @@ code excerpt (up to 80 lines), and full system prompt. GitHub issues are public;
 redact confidential code, paths, and names before posting.
 Keyboard focus returns to the originating diff-gutter strip after Escape,
 Cancel, or closing the report.
+### One pager
+An agent-written, reviewer-facing one-page Markdown summary of a merge
+request, stored per MR at
+`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/one-pager/document/one-pager.md`.
+The **One pager** feature adds an Overview tab for creating and regenerating
+the summary. The host persists Markdown returned by the agent: Claude and
+Codex write only within the temporary run directory, while OMP returns text
+without file-write tools.
+Codex one-pager generation and chat scoped-write turns deliberately pass
+`--ignore-user-config --strict-config`, so user `config.toml` settings,
+including provider and default model, are not loaded. The prompt version can
+select Codex agent/model/effort, but not provider; users relying on a
+non-default provider or other user-config settings must ensure scoped turns can
+run without user config.
+Generation input is bounded to 64 KiB of serialized metadata/diff and a 96 KiB
+combined system prompt plus message. Description, file rows and hunks can be
+truncated; markers identify omitted data so the agent must not infer it.
+
+
+### One pager chat
+A chat kind bound to the `review-one-pager-chat` prompt slot. It answers
+questions about the one pager. Claude and Codex may edit only the one pager
+document in place; OMP stays read-only because it lacks enforced directory-scoped
+writes. Supported-provider edits trigger a debounced document reload.
 
 **Importance review progress** appears as one shared bar directly beneath the
-Layers/Files tabs when the flag is on and scoring is ready. It shows the weighted
-share of added and deleted lines in viewed files against all scored changed lines
-(levels 1–5 weigh 0.5, 0.75, 1, 1.25, and 1.5; context and unscored lines don't
-count). The target is the greater of the weighted total for level 3–5 lines and
-50% of all scored changed lines. A marker shows the target; fill blends through
-importance colours toward level 5 and stays level 5 at the target. A subtle
-flame animates once reached, static with reduced motion.
+Layers/Files tabs when the flag is on and scoring is ready. It shows viewed
+added and deleted lines as fixed shares of all scored changed lines: levels 1–5
+contribute 1/18, 2/18, 3/18, 5/18, and 8/18 respectively; context and unscored
+lines don't count. Its fixed target is 13/18 for High+Critical review, not a
+promise that every High and Critical line is complete. The prescribed shares
+sum to 19/18, so visible fill, percentage, flame width, and accessibility value
+intentionally saturate at 18/18 (100%). A marker shows the target; fill blends
+through importance colours toward level 5 and stays level 5 at the target. A
+subtle flame animates once reached, static with reduced motion.
 
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

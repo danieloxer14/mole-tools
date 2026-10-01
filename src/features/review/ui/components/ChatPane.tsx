@@ -33,6 +33,7 @@ import {
 	isDescriptionChatTag,
 	isFileChatTag,
 	isMarkdownChatTag,
+	isOnePagerChatTag,
 } from "../../chat-tags";
 import type { ChatEntryWithOptimistic } from "../../store";
 import { composerEnterAction } from "./composer-keydown";
@@ -100,6 +101,10 @@ function tagLabel(tag: ChatTag): string {
 		return tag.startLine === undefined
 			? "MR description (whole)"
 			: `MR description:${tag.startLine}-${tag.endLine}`;
+	if (isOnePagerChatTag(tag))
+		return tag.startLine === undefined
+			? "One pager (whole)"
+			: `One pager:${tag.startLine}-${tag.endLine}`;
 	if (isFileChatTag(tag)) return `${tag.path} (whole file)`;
 	return isMarkdownChatTag(tag)
 		? `${tag.path}:${tag.startLine}-${tag.endLine}`
@@ -111,6 +116,10 @@ function tagKey(tag: ChatTag): string {
 		return tag.startLine === undefined
 			? "description-whole"
 			: `description-${tag.startLine}-${tag.endLine}`;
+	if (isOnePagerChatTag(tag))
+		return tag.startLine === undefined
+			? "one-pager-whole"
+			: `one-pager-${tag.startLine}-${tag.endLine}`;
 	if (isFileChatTag(tag)) return `${tag.path}-file`;
 	return isMarkdownChatTag(tag)
 		? `${tag.path}-markdown-${tag.startLine}-${tag.endLine}`
@@ -696,7 +705,7 @@ export function ChatPane({
 									variant="secondary"
 									className="h-auto max-w-full min-w-0 shrink justify-start gap-1 overflow-visible text-left whitespace-normal break-words font-mono text-[11px] leading-normal animate-in zoom-in-95 fade-in duration-150 ease-out [overflow-wrap:anywhere]"
 									title={
-										isDescriptionChatTag(tag)
+										isDescriptionChatTag(tag) || isOnePagerChatTag(tag)
 											? tag.quote
 											: isFileChatTag(tag)
 												? "Whole file"

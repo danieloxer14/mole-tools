@@ -472,12 +472,21 @@ function ChangedFileRow({
 				</span>
 			</span>
 			{rating !== undefined && (
-				<span
-					role="img"
-					aria-label={`Importance ${rating.score} of 5`}
-					title={importanceTitle(rating.score)}
-					className={`size-2.5 shrink-0 rounded-full ${IMPORTANCE_BG_CLASS[rating.score]}`}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<button
+								type="button"
+								aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
+								className={`size-2.5 shrink-0 appearance-none rounded-full border-0 bg-transparent p-0 ${IMPORTANCE_BG_CLASS[rating.score]}`}
+							/>
+						}
+					/>
+					<TooltipContent className="flex-col items-start gap-0.5">
+						<span className="font-medium">{importanceTitle(rating.score)}</span>
+						<span>{rating.reason}</span>
+					</TooltipContent>
+				</Tooltip>
 			)}
 			<Tooltip>
 				<TooltipTrigger

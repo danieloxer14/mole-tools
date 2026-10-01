@@ -48,6 +48,7 @@ const base: MrHeaderProps = {
 		iid: 42,
 		title: "Add review header",
 		webUrl: "https://gitlab.example.test/group/project/-/merge_requests/42",
+		state: "opened",
 	},
 	view: "code",
 	onViewChange: () => {},
@@ -272,7 +273,7 @@ test("keeps review controls when an update is available", () => {
 	const header = container.querySelector("header");
 	const viewToggle = header?.querySelector('[aria-label="Review view"]');
 	const title = header?.querySelector("h1");
-	const actionGroup = container.querySelector<HTMLElement>(
+	const actionGroup = container.querySelector<HTMLDivElement>(
 		"[data-header-actions]",
 	);
 	const updateButton = container.querySelector<HTMLButtonElement>(
@@ -388,6 +389,95 @@ test("hides approval pill while loading or unavailable", () => {
 	}).querySelector('[data-approval="not-approved"]');
 
 	expect(notApproved?.textContent).toBe("Not approved");
+});
+test("renders only merged status and keeps other header controls", () => {
+	const mergedApprovals = [
+		{ approval, approvalLoading: false },
+		{ approval: { ...approval, approved: false }, approvalLoading: false },
+		{ approval: null, approvalLoading: false },
+		{ approval, approvalLoading: true },
+	] satisfies Array<Pick<MrHeaderProps, "approval" | "approvalLoading">>;
+
+	for (const approvalProps of mergedApprovals) {
+		const container = render({
+			...approvalProps,
+			mr: { ...base.mr, state: "merged" },
+		});
+
+		expect(
+			container.querySelectorAll('[data-lifecycle="merged"]'),
+		).toHaveLength(1);
+		expect(
+			container.querySelector('[data-lifecycle="merged"]')?.textContent,
+		).toBe("Merged");
+		expect(container.querySelector("[data-approval]")).toBeNull();
+		expect(container.querySelector("#approve-tooltip")).toBeNull();
+		expect(
+			container.querySelector('[aria-describedby="approve-tooltip"]'),
+		).toBeNull();
+		expect(container.querySelector('button[aria-label="Approve"]')).toBeNull();
+		expect(
+			container.querySelector('button[aria-label="Unapprove"]'),
+		).toBeNull();
+		expect(container.textContent).not.toMatch(/approved|unapprove|approve/i);
+		expect(container.querySelector("[data-diff-stats]")).not.toBeNull();
+		expect(
+			container.querySelector('button[aria-label="Refresh review and layers"]'),
+		).not.toBeNull();
+		expect(
+			container.querySelector('a[aria-label="Open in GitLab"]'),
+		).not.toBeNull();
+		expect(
+			container.querySelector('button[aria-label="Settings"]'),
+		).not.toBeNull();
+	}
+});
+
+test("preserves approval status and disabled controls for nonmerged lifecycle", () => {
+	for (const state of ["opened", "closed", "unknown", null]) {
+		const container = render({
+			mr: { ...base.mr, state },
+			approval: { ...approval, approved: false },
+		});
+
+		expect(
+			container.querySelector('[data-approval="not-approved"]')?.textContent,
+		).toBe("Not approved");
+		expect(container.querySelector('[data-lifecycle="merged"]')).toBeNull();
+		const approve = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Approve"]',
+		);
+		expect(approve).not.toBeNull();
+		expect(approve?.disabled).toBe(false);
+		expect(approve?.getAttribute("aria-describedby")).toBe("approve-tooltip");
+	}
+	const unavailable = render({
+		mr: { ...base.mr, state: "closed" },
+		approval: null,
+	}).querySelector<HTMLButtonElement>('button[aria-label="Approve"]');
+	expect(unavailable?.disabled).toBe(true);
+});
+
+test("removes approval control immediately when refreshed MR becomes merged", () => {
+	const interactive = renderInteractive();
+	expect(
+		interactive.container.querySelector('button[aria-label="Unapprove"]'),
+	).not.toBeNull();
+
+	act(() => {
+		interactive.root.render(
+			<MrHeader {...base} mr={{ ...base.mr, state: "merged" }} />,
+		);
+	});
+
+	expect(
+		interactive.container.querySelector('button[aria-label="Unapprove"]'),
+	).toBeNull();
+	expect(interactive.container.querySelector("#approve-tooltip")).toBeNull();
+	expect(
+		interactive.container.querySelector('[data-lifecycle="merged"]')
+			?.textContent,
+	).toBe("Merged");
 });
 
 test("renders one combined refresh control and stale warning", () => {

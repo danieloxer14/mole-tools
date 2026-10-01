@@ -19,6 +19,10 @@ export const CHAT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /** Id given to the conversation adopted from a pre-multi-chat review. */
 export const LEGACY_CHAT_ID = "legacy";
 
+export const CHAT_KINDS = ["review", "one-pager"] as const;
+export const ChatKindSchema = z.enum(CHAT_KINDS);
+export type ChatKind = z.infer<typeof ChatKindSchema>;
+
 export const ChatMetaSchema = z.object({
 	id: z.string().regex(CHAT_ID_PATTERN),
 	title: z.string().default(""),
@@ -27,6 +31,7 @@ export const ChatMetaSchema = z.object({
 	agent: z.enum(PROMPT_AGENT_NAMES).nullable().default(null),
 	model: z.string().min(1).nullable().default(null),
 	effort: AgentEffortSchema.nullable().default(null),
+	kind: ChatKindSchema.default("review"),
 });
 export type ChatMeta = z.infer<typeof ChatMetaSchema>;
 
@@ -105,6 +110,7 @@ export const ReviewStateSchema = z.object({
 		host: z.string(),
 		projectPath: z.string(),
 		iid: z.number().int().positive(),
+		state: z.string().nullable().default(null),
 		webUrl: z.string(),
 		title: z.string(),
 		description: z.string().default(""),
@@ -142,6 +148,7 @@ export const ReviewStateSchema = z.object({
 	chatSessionId: LegacyChatSessionSchema,
 	chats: z.array(ChatMetaSchema).default([]),
 	activeChatId: z.string().nullable().default(null),
+	activeOnePagerChatId: z.string().nullable().default(null),
 	drafts: z.array(DraftSchema).default([]),
 });
 
@@ -158,6 +165,7 @@ export function createChatMeta(
 		model: string | null;
 		effort: AgentEffort | null;
 	} = { agent: null, model: null, effort: null },
+	kind: ChatKind = "review",
 ): ChatMeta {
 	return {
 		id: crypto.randomUUID(),
@@ -167,6 +175,7 @@ export function createChatMeta(
 		agent: binding.agent,
 		model: binding.model,
 		effort: binding.effort,
+		kind,
 	};
 }
 
@@ -174,35 +183,49 @@ export function createChatMeta(
  * Normalize the multi-chat fields of a v1 state document.
  *
  * Deterministic and idempotent — it never mints a random id, so it is safe to
- * run on every read without persisting. Guarantees `chats` holds at least one
- * entry and `activeChatId` names one of them, so every other caller may assume
- * both. A legacy session id supplied by the file-boundary migration is assigned
- * to the adopted chat.
+ * run on every read without persisting. Guarantees at least one review chat
+ * and valid active-chat pointers. A legacy session id supplied by the
+ * file-boundary migration is assigned to the adopted chat.
  */
 export function ensureChats(
 	state: ReviewState,
 	legacySessionId: string | null = null,
 ): ReviewState {
-	const chats: ChatMeta[] =
-		state.chats.length > 0
-			? state.chats
-			: [
-					{
-						id: LEGACY_CHAT_ID,
-						title: "",
-						sessionId: legacySessionId,
-						createdAt: state.revision.syncedAt,
-						agent: null,
-						model: null,
-						effort: null,
-					},
-				];
-	const activeChatId = chats.some((chat) => chat.id === state.activeChatId)
+	let chats = state.chats;
+	let reviewChats = chats.filter((chat) => chat.kind === "review");
+	if (reviewChats.length === 0) {
+		const legacyChat: ChatMeta = {
+			id: LEGACY_CHAT_ID,
+			title: "",
+			sessionId: legacySessionId,
+			createdAt: state.revision.syncedAt,
+			agent: null,
+			model: null,
+			effort: null,
+			kind: "review",
+		};
+		chats = [legacyChat, ...chats];
+		reviewChats = [legacyChat];
+	}
+
+	const activeChatId = reviewChats.some(
+		(chat) => chat.id === state.activeChatId,
+	)
 		? state.activeChatId
-		: (chats[0]?.id ?? null);
-	if (chats === state.chats && activeChatId === state.activeChatId) {
+		: (reviewChats[0]?.id ?? null);
+	const onePagerChats = chats.filter((chat) => chat.kind === "one-pager");
+	const activeOnePagerChatId = onePagerChats.some(
+		(chat) => chat.id === state.activeOnePagerChatId,
+	)
+		? state.activeOnePagerChatId
+		: (onePagerChats.at(-1)?.id ?? null);
+	if (
+		chats === state.chats &&
+		activeChatId === state.activeChatId &&
+		activeOnePagerChatId === state.activeOnePagerChatId
+	) {
 		return state;
 	}
-	return { ...state, chats, activeChatId };
+	return { ...state, chats, activeChatId, activeOnePagerChatId };
 }
 export type ReviewState = z.infer<typeof ReviewStateSchema>;

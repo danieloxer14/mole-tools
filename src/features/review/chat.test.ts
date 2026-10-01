@@ -14,6 +14,8 @@ import {
 	type ChatTurnOptions,
 	type ChatTurnResult,
 	compactChatDiscussions,
+	onePagerEditContext,
+	onePagerReadOnlyContext,
 	runChatTurn,
 } from "./chat";
 import { type ReviewState, ReviewStateSchema } from "./state";
@@ -157,6 +159,7 @@ class RecordingAgent implements ReviewAgent {
 	constructor(
 		failAfterText = false,
 		sessionIds: readonly string[] = ["session-1"],
+		readonly supportsScopedWrites = false,
 	) {
 		this.failAfterText = failAfterText;
 		this.sessionIds = sessionIds;
@@ -259,6 +262,55 @@ describe("chat prompt construction", () => {
 		expect(first).toContain("bash");
 	});
 
+	test("uses one-pager edit policy and includes its document path after changed files", () => {
+		const worktreePath = "/tmp/review-worktree";
+		const documentPath = "/tmp/review-one-pager/document/one-pager.md";
+		const prompt = buildChatPrompt({
+			firstTurn: true,
+			basePrompt: "One pager base",
+			mr: { ...state().mr },
+			guide: [],
+			changedFiles: ["src/api.ts"],
+			message: "Explain this summary",
+			tags: [
+				{
+					kind: "one-pager",
+					startLine: 1,
+					endLine: 2,
+					quote: "Summary",
+				},
+			],
+			worktreePath,
+			onePagerPath: documentPath,
+			onePagerWritable: true,
+		});
+
+		expect(prompt).toContain(onePagerEditContext(worktreePath, documentPath));
+		expect(prompt.indexOf("src/api.ts")).toBeLessThan(
+			prompt.lastIndexOf(documentPath),
+		);
+	});
+	test("keeps one-pager prompt read-only unless scoped writes are available", () => {
+		const worktreePath = "/tmp/review-worktree";
+		const documentPath = "/tmp/review-one-pager/document/one-pager.md";
+		const prompt = buildChatPrompt({
+			firstTurn: true,
+			basePrompt: "One pager base",
+			mr: { ...state().mr },
+			guide: [],
+			changedFiles: [],
+			message: "Edit this summary",
+			worktreePath,
+			onePagerPath: documentPath,
+		});
+
+		expect(prompt).toContain(
+			onePagerReadOnlyContext(worktreePath, documentPath),
+		);
+		expect(prompt).not.toContain(
+			onePagerEditContext(worktreePath, documentPath),
+		);
+	});
 	test("rejects malformed line tags", () => {
 		expect(() =>
 			buildChatPrompt({
@@ -278,7 +330,7 @@ describe("chat prompt construction", () => {
 		).toThrow("Invalid chat tag");
 	});
 
-	test("serializes file tags with tag semantics in first and later turns", () => {
+	test("serializes file tags in first and later turns", () => {
 		const fileTag = { kind: "file" as const, path: "src/whole.ts" };
 		const first = buildChatPrompt({
 			firstTurn: true,
@@ -301,8 +353,6 @@ describe("chat prompt construction", () => {
 		for (const prompt of [first, later]) {
 			expect(prompt).toContain('"kind": "file"');
 			expect(prompt).toContain('"path": "src/whole.ts"');
-			expect(prompt).toContain("inspect the entire file");
-			expect(prompt).toContain("agent-chat context only, never host comments");
 		}
 	});
 
@@ -317,7 +367,7 @@ describe("chat prompt construction", () => {
 		).toThrow("Invalid chat tag");
 	});
 
-	test("labels the user message context tags and explains file tag semantics", () => {
+	test("labels user message with serialized context tags", () => {
 		const fileTag = { kind: "file" as const, path: "src/whole.ts" };
 		const message = buildChatMessage({
 			message: "Inspect this whole file",
@@ -327,11 +377,10 @@ describe("chat prompt construction", () => {
 		expect(message).toContain("New context tags:");
 		expect(message).toContain('"kind": "file"');
 		expect(message).toContain('"path": "src/whole.ts"');
-		expect(message).toContain("inspect the entire file");
 		expect(message).toContain("(none)");
 	});
 
-	test("includes description tags and their semantics in the user message", () => {
+	test("includes description tag data in the user message", () => {
 		const descriptionTag = {
 			kind: "description" as const,
 			startLine: 3,
@@ -344,9 +393,7 @@ describe("chat prompt construction", () => {
 		});
 
 		expect(message).toContain('"kind": "description"');
-		expect(message).toContain(
-			'A tag with kind "description" refers to the merge request description',
-		);
+		expect(message).toContain('"quote": "Body"');
 	});
 
 	test("includes the current review discussions in the first turn", () => {
@@ -523,6 +570,97 @@ describe("persistent chat turns", () => {
 			).text();
 			expect(defaultPrompt).toContain("DEFAULT CHAT PROMPT");
 			expect(defaultPrompt).not.toContain("TERSE CHAT PROMPT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("loads one-pager prompt and limits edits to its document directory", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-one-pager-chat-"));
+		try {
+			const promptSourceDir = join(dir, "prompts");
+			const promptMarker = "ONE PAGER CHAT PROMPT";
+			await mkdir(join(promptSourceDir, "review-one-pager-chat", "default"), {
+				recursive: true,
+			});
+			await Bun.write(
+				join(promptSourceDir, "review-one-pager-chat", "default", "001.md"),
+				promptMarker,
+			);
+
+			const documentDir = join(dir, "one-pager", "document");
+			const documentPath = join(documentDir, "one-pager.md");
+			const agent = new RecordingAgent(false, ["session-1"], true);
+			await runChatTurn(
+				options(dir, agent, {
+					turnId: "one-pager",
+					promptSourceDir,
+					promptText: undefined,
+					onePager: { documentPath, documentDir },
+					tags: [{ kind: "one-pager", quote: "Summary" }],
+					message: "Explain this summary",
+				}),
+			);
+			const turn = agent.turns[0];
+			const prompt = await Bun.file(turn?.systemPromptFile ?? "").text();
+			expect(prompt).toContain(promptMarker);
+			expect(prompt).toContain(
+				onePagerEditContext(state().worktreePath, documentPath),
+			);
+			expect(turn?.writeDir).toBe(documentDir);
+			expect(turn?.writeScope).toBe("directory");
+			expect(turn?.message).toContain('"kind": "one-pager"');
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("shows and persists the read-only one-pager notice", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-read-only-"));
+		try {
+			const documentDir = join(dir, "one-pager", "document");
+			const documentPath = join(documentDir, "one-pager.md");
+			const agent = new RecordingAgent();
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			const observedEvents: AgentEvent[] = [];
+			const result = await runChatTurn(
+				options(dir, agent, {
+					store,
+					onePager: { documentPath, documentDir },
+					message: "Edit this one pager",
+					onEvent: (event) => {
+						observedEvents.push(event);
+					},
+				}),
+			);
+
+			const fullNotice =
+				"One-pager editing is unavailable with this provider. " +
+				"This chat is read-only; Markdown suggestions must be applied manually.\n\n";
+			expect(
+				observedEvents.find(
+					(event) => event.kind === "text" && event.delta === fullNotice,
+				),
+			).toBeDefined();
+			expect(result.assistantText).toBe(`${fullNotice}partial answer`);
+			const entries = await store.readChat("legacy");
+			expect(
+				entries
+					.filter((entry) => entry.role === "assistant")
+					.map((entry) => entry.text)
+					.join(""),
+			).toBe(`${fullNotice}partial answer`);
+			expect(agent.turns[0]?.writeScope).toBe("directory");
+			expect(agent.turns[0]?.writeDir).toBeUndefined();
+			const prompt = await Bun.file(
+				agent.turns[0]?.systemPromptFile ?? "",
+			).text();
+			expect(prompt).toContain(
+				onePagerReadOnlyContext(state().worktreePath, documentPath),
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

@@ -90,13 +90,28 @@ export function indexedDiffLineImportance<
 	return oldRating.score > newRating.score ? oldRating : newRating;
 }
 
-const IMPORTANCE_WEIGHTS: Record<ImportanceScore, number> = {
-	1: 0.5,
-	2: 0.75,
-	3: 1,
-	4: 1.25,
-	5: 1.5,
+const IMPORTANCE_PROGRESS_WEIGHTS: Record<ImportanceScore, number> = {
+	1: 1,
+	2: 2,
+	3: 3,
+	4: 5,
+	5: 8,
 };
+
+type ImportanceScoreCounts = Record<ImportanceScore, number>;
+
+function emptyImportanceScoreCounts(): ImportanceScoreCounts {
+	return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+}
+
+function countImportanceScores(
+	target: ImportanceScoreCounts,
+	source: ImportanceScoreCounts,
+): void {
+	for (const score of [1, 2, 3, 4, 5] as const) {
+		target[score] += source[score];
+	}
+}
 
 export interface ImportanceReviewProgress {
 	value: number;
@@ -105,9 +120,8 @@ export interface ImportanceReviewProgress {
 }
 
 export interface ImportanceReviewFileTotals {
-	byPath: ReadonlyMap<string, { total: number; threshold: number }>;
-	total: number;
-	threshold: number;
+	byPath: ReadonlyMap<string, ImportanceScoreCounts>;
+	byScore: ImportanceScoreCounts;
 }
 
 export function importanceReviewFileTotals(
@@ -121,10 +135,9 @@ export function importanceReviewFileTotals(
 		else spansByPath.set(file.path, [...file.spans]);
 	}
 
-	const byPath = new Map<string, { total: number; threshold: number }>();
+	const byPath = new Map<string, ImportanceScoreCounts>();
+	const byScore = emptyImportanceScoreCounts();
 	const seen = new Set<string>();
-	let total = 0;
-	let threshold = 0;
 
 	for (const file of diff) {
 		const key = file.newPath ?? file.oldPath;
@@ -134,25 +147,21 @@ export function importanceReviewFileTotals(
 		const spans = spansByPath.get(key);
 		if (!spans) continue;
 		const ratings = lineImportanceMap(spans, file.hunks);
-		let fileTotal = 0;
-		let fileThreshold = 0;
+		const fileCounts = emptyImportanceScoreCounts();
 		for (const hunk of file.hunks) {
 			for (const line of hunk.lines) {
 				if (line.kind !== "add" && line.kind !== "del") continue;
 				const rating = indexedDiffLineImportance(ratings, line);
 				if (rating === null) continue;
-				const weight = IMPORTANCE_WEIGHTS[rating.score];
-				fileTotal += weight;
-				if (rating.score >= 3) fileThreshold += weight;
+				fileCounts[rating.score] += 1;
 			}
 		}
 
-		byPath.set(key, { total: fileTotal, threshold: fileThreshold });
-		total += fileTotal;
-		threshold += fileThreshold;
+		byPath.set(key, fileCounts);
+		countImportanceScores(byScore, fileCounts);
 	}
 
-	return { byPath, total, threshold: Math.max(threshold, total / 2) };
+	return { byPath, byScore };
 }
 
 export function importanceReviewProgressForViewedFiles(
@@ -160,11 +169,26 @@ export function importanceReviewProgressForViewedFiles(
 	viewedFiles: readonly string[],
 ): ImportanceReviewProgress {
 	const viewed = new Set(viewedFiles);
-	let value = 0;
-	for (const [path, totals] of fileTotals.byPath) {
-		if (viewed.has(path)) value += totals.total;
+	const viewedByScore = emptyImportanceScoreCounts();
+	for (const [path, counts] of fileTotals.byPath) {
+		if (viewed.has(path)) countImportanceScores(viewedByScore, counts);
 	}
-	return { value, total: fileTotals.total, threshold: fileTotals.threshold };
+
+	let scoredLines = 0;
+	let value = 0;
+	for (const score of [1, 2, 3, 4, 5] as const) {
+		const totalAtScore = fileTotals.byScore[score];
+		scoredLines += totalAtScore;
+		if (totalAtScore > 0) {
+			value +=
+				IMPORTANCE_PROGRESS_WEIGHTS[score] *
+				(viewedByScore[score] / totalAtScore);
+		}
+	}
+
+	return scoredLines === 0
+		? { value: 0, total: 0, threshold: 0 }
+		: { value, total: 18, threshold: 13 };
 }
 
 export function importanceReviewProgress(

@@ -1,6 +1,6 @@
 {
 	"name": "mole-tools",
-	"version": "0.11.0",
+	"version": "0.12.0",
 	"module": "src/index.tsx",
 	"type": "module",
 	"private": true,

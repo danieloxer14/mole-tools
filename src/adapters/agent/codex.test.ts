@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PortError } from "../../core/errors";
 import type { AgentEvent, AgentTurn } from "../../ports/review-agent";
 import { CodexAgentAdapter } from "./codex";
@@ -145,6 +145,105 @@ describe("CodexAgentAdapter", () => {
 				"--",
 				baseTurn.message,
 			]);
+		});
+	});
+
+	test("enforces directory-scoped writes with a read-only-inheriting profile", async () => {
+		const calls: Call[] = [];
+		await withPrompt("System prompt", async (systemPromptFile) => {
+			const writeDir = `${baseTurn.cwd}/../codex-scoped-write-dir`;
+			const resolvedWriteDir = resolve(writeDir);
+			const adapter = new CodexAgentAdapter(replay([], calls));
+			await collect(
+				adapter.run(
+					makeTurn(systemPromptFile, {
+						writeDir,
+						writeScope: "directory",
+					}),
+				),
+			);
+
+			expect(adapter.supportsScopedWrites).toBe(true);
+			const filesystemPermission =
+				`permissions.one_pager_write.filesystem={${JSON.stringify(resolve(baseTurn.cwd))}="read",` +
+				`${JSON.stringify(resolvedWriteDir)}="write"}`;
+			expect(calls[0]).toEqual({
+				binary: "codex",
+				args: [
+					"exec",
+					"--json",
+					"--skip-git-repo-check",
+					"--ignore-user-config",
+					"--strict-config",
+					"-C",
+					resolvedWriteDir,
+					"-c",
+					'default_permissions="one_pager_write"',
+					"-c",
+					'permissions.one_pager_write.extends=":read-only"',
+					"-c",
+					filesystemPermission,
+					"-c",
+					'developer_instructions="System prompt"',
+					"--",
+					baseTurn.message,
+				],
+				cwd: resolvedWriteDir,
+			});
+		});
+	});
+
+	test("fails closed for invalid directory-scoped paths in both dimensions", async () => {
+		const calls: Call[] = [];
+		await withPrompt("System prompt", async (systemPromptFile) => {
+			const adapter = new CodexAgentAdapter(replay([], calls));
+			const invalidTurns = [
+				{ cwd: baseTurn.cwd, writeDir: undefined },
+				{ cwd: baseTurn.cwd, writeDir: "" },
+				{ cwd: baseTurn.cwd, writeDir: `${baseTurn.cwd}/review-output ` },
+				{ cwd: baseTurn.cwd, writeDir: `${baseTurn.cwd}/review-\0output` },
+				{ cwd: baseTurn.cwd, writeDir: baseTurn.cwd },
+				{ cwd: baseTurn.cwd, writeDir: join(baseTurn.cwd, "review-output") },
+				{ cwd: baseTurn.cwd, writeDir: join(baseTurn.cwd, ".git") },
+				{ cwd: baseTurn.cwd, writeDir: join(baseTurn.cwd, ".git", "config") },
+				{ cwd: baseTurn.cwd, writeDir: join(baseTurn.cwd, "..") },
+				{
+					cwd: "",
+					writeDir: `${baseTurn.cwd}/review-output`,
+				},
+				{
+					cwd: "relative-cwd",
+					writeDir: `${baseTurn.cwd}/review-output`,
+				},
+				{
+					cwd: `${baseTurn.cwd} `,
+					writeDir: `${baseTurn.cwd}/review-output`,
+				},
+				{
+					cwd: `${baseTurn.cwd}\0`,
+					writeDir: `${baseTurn.cwd}/review-output`,
+				},
+			];
+			for (const paths of invalidTurns) {
+				expect(
+					await collect(
+						adapter.run(
+							makeTurn(systemPromptFile, {
+								...paths,
+								writeScope: "directory",
+							}),
+						),
+					),
+				).toEqual([
+					{
+						kind: "error",
+						message:
+							"Directory-scoped writes require an absolute writeDir outside the worktree and not its parent",
+					},
+					{ kind: "turn_end" },
+				]);
+			}
+			expect(calls).toEqual([]);
 		});
 	});
 

@@ -5,6 +5,7 @@ import {
 	isDescriptionChatTag,
 	isFileChatTag,
 	isMarkdownChatTag,
+	isOnePagerChatTag,
 } from "./chat-tags";
 
 const diffTag = {
@@ -121,6 +122,39 @@ describe("ChatTagSchema", () => {
 			ChatTagSchema.parse({ ...descriptionTag, path: "README.md" }),
 		).toThrow();
 	});
+
+	test("accepts whole and ranged one-pager tags", () => {
+		const wholeTag = ChatTagSchema.parse({
+			kind: "one-pager",
+			quote: "Summary",
+		});
+		const rangedTag = ChatTagSchema.parse({
+			kind: "one-pager",
+			startLine: 2,
+			endLine: 4,
+			quote: "Details",
+		});
+		expect(isOnePagerChatTag(wholeTag)).toBe(true);
+		expect(isOnePagerChatTag(rangedTag)).toBe(true);
+	});
+
+	test("rejects incomplete or reversed one-pager ranges", () => {
+		expect(() =>
+			ChatTagSchema.parse({
+				kind: "one-pager",
+				startLine: 2,
+				quote: "Details",
+			}),
+		).toThrow();
+		expect(() =>
+			ChatTagSchema.parse({
+				kind: "one-pager",
+				startLine: 4,
+				endLine: 2,
+				quote: "Details",
+			}),
+		).toThrow();
+	});
 });
 
 describe("chatTagsEqual", () => {
@@ -178,5 +212,29 @@ describe("chatTagsEqual", () => {
 		expect(chatTagsEqual(wholeTag, fileTag)).toBe(false);
 		expect(chatTagsEqual(blockTag, markdownTag)).toBe(false);
 		expect(chatTagsEqual(blockTag, diffTag)).toBe(false);
+	});
+
+	test("compares one-pager tags by range, ignores quote, and separates descriptions", () => {
+		const onePagerTag = {
+			kind: "one-pager" as const,
+			startLine: 3,
+			endLine: 5,
+			quote: "Summary",
+		};
+		expect(chatTagsEqual(onePagerTag, { ...onePagerTag })).toBe(true);
+		expect(
+			chatTagsEqual(onePagerTag, { ...onePagerTag, quote: "Changed summary" }),
+		).toBe(true);
+		expect(chatTagsEqual(onePagerTag, { ...onePagerTag, endLine: 6 })).toBe(
+			false,
+		);
+		expect(
+			chatTagsEqual(onePagerTag, {
+				kind: "description",
+				startLine: 3,
+				endLine: 5,
+				quote: "Summary",
+			}),
+		).toBe(false);
 	});
 });

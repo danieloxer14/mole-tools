@@ -117,7 +117,7 @@ CLI alias. OMP effort is sent as `--thinking <level>`, Claude effort as
 Unset effort sends no effort option; Codex's `-c` option is not an OMP effort
 flag.
 
-The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > File important** is on, it also shows `review-importance`. Each prompt version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to rebuild cached layers.
+The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > File important** is on, it also shows `review-importance`; when **Settings > Features > One pager** is on, it also shows `review-one-pager` and `review-one-pager-chat`. Each prompt version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to apply updated prompts to cached layers.
 
 The OMP model dropdown comes from `models --json` run by the selected OMP
 executable. Effort choices are limited to values advertised as supported for
@@ -135,7 +135,10 @@ Effort is optional. OMP accepts `off`, `minimal`, `low`, `medium`, `high`, `xhig
 
 Each prompt field overrides its corresponding General default independently when Agent is **Default**. An explicit prompt agent uses only that version's model and effort; blank values send no corresponding option except Claude's model, which defaults to `--model opus` (the latest Opus CLI alias). Explicit model values are forwarded unchanged, without borrowing another agent's global defaults. New chats, including Explain chats, persist the effective agent/model/effort at creation; later settings or prompt edits do not rebind them. Older prompt versions and bound chats without effort remain unset and continue without an effort option. An unbound legacy chat with existing transcript binds current global defaults at its next turn. Commit and merge-request prompts continue to use `models.*` routes and ignore review prompt metadata.
 
-OMP and Claude chat turns use read-only inspection tools (`read`, `grep`, `glob`, `bash`); Bash is limited by prompt policy to read-only commands. Codex chat turns run in its `read-only` sandbox, with the review working directory marked `untrusted` to prevent project-local Codex configuration from granting reviewed code access to local MCP commands or broader workspace/network permissions. Codex layer and comment-from-chat turns run in `workspace-write` with the review output directory added via `--add-dir`; the review worktree is writable to Codex in those turns, so prompt policy is the guard, as for OMP's `bash` tool. This write access is an intentional exception to the read-only review boundary, limited to those turns.
+Review chat turns use read-only inspection tools (`read`, `grep`, `glob`, `bash`) for OMP and Claude; Bash is limited by prompt policy to read-only commands. Codex review chats run in its `read-only` sandbox, with the review working directory marked `untrusted` to prevent project-local Codex configuration from granting reviewed code access to local MCP commands or broader workspace/network permissions. Codex layer and comment-from-chat turns run in `workspace-write` with the review output directory added via `--add-dir`; the review worktree is writable to Codex in those turns, so prompt policy is the guard, as for OMP's `bash` tool. This write access is an intentional exception to the read-only review boundary, limited to those turns.
+One-pager generation persists Markdown returned by the agent through the host app: Claude and Codex write only within the temporary run directory, while OMP returns Markdown without file-write tools. For one-pager chat, Claude receives Read/Grep/Glob and Write/Edit scoped to the document directory; Codex uses a read-only profile with writes scoped to the document directory; OMP receives read/grep/glob without write tools and stays read-only. Codex one-pager generation and chat scoped-write turns deliberately use `--ignore-user-config --strict-config`: user `config.toml` settings, including provider and default model, are not loaded. The one-pager prompt version can select Codex agent/model/effort, but cannot configure provider. If you rely on a non-default Codex provider or other user-config settings, ensure scoped turns can run without user config.
+
+Generation sends bounded MR metadata and parsed diff hunks (64 KiB input, 64 KiB message, 96 KiB combined prompt). Explicit truncation markers identify omitted descriptions, file metadata, or diff content; the agent must not infer omitted changes.
 
 Prompt versions can select an agent and model independently. A version whose agent is **Default** inherits the global Review agent/model above; a version with an explicit agent uses that agent and its version model, or Claude's latest Opus CLI alias (`--model opus`) when Claude's model is blank. Explicit Claude models are forwarded unchanged. Chats keep the agent/model they were bound to when created, even after the global setting or prompt version changes. For a non-default agent kind, mole-tools uses the `omp`, `claude`, or `codex` binary from `PATH`; `review.binary` applies only when the selected agent is the configured default.
 
@@ -233,14 +236,18 @@ The prompt slots are `commit-system`, `mr-code`, `mr-plan`,
 `review-layers-code`, `review-layers-plan`, `review-chat`,
 `review-explain-comment`, `review-comment-from-chat`, and
 `review-importance` (visible in **Settings > Prompts** only when **Settings >
-Features > File important** is on). Each slot can have multiple named
+Features > File important** is on), plus `review-one-pager` and
+`review-one-pager-chat` (visible only when **Settings > Features > One pager**
+is on). Each slot can have multiple named
 presets. The active text is the highest-numbered version of the active preset.
 The shipped default seeds `default/001.md` on first access, and
 `config.prompts` records the active preset per slot (a missing entry means
 `default`).
 
 The five standard review prompt slots are managed from **Settings > Prompts**;
-`review-importance` appears there only when **File important** is on.
+`review-importance` appears there only when **File important** is on, and
+`review-one-pager` and `review-one-pager-chat` appear only when **One pager**
+is on.
 General review defaults are in **General**. Saving a prompt creates a new
 version, **Roll back** copies an older version forward as a new latest version,
 and **Reset** writes the shipped default as a new version. This history is
@@ -310,6 +317,8 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
 | `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
 | `review-importance` | Importance scoring (Features > File important) | Scores each changed line span 1–5 for reviewer attention and adds a concise reason. |
+| `review-one-pager` | One pager generation (Features > One pager) | Writes a reviewer-facing one-page Markdown summary of the MR. |
+| `review-one-pager-chat` | One pager chat (Features > One pager) | Answers questions about the summary; Claude and Codex can edit it in place, while OMP remains read-only. |
 
 Review layers are cached per MR. After changing either layer prompt, use
 **Regenerate** in the review UI to apply it to existing cached layers. A chat
@@ -357,7 +366,9 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 `commit-system` prompt preset supplies the system prompt; set it in the
 `prompts` map. Settings **Prompts** manages the five standard review prompt
 slots and additionally `review-importance` only when **Settings > Features >
-File important** is on; it does not change commit prompt configuration.
+File important** is on, and `review-one-pager` plus `review-one-pager-chat`
+only when **Settings > Features > One pager** is on; it does not change commit
+prompt configuration.
 
 
 ---
@@ -399,6 +410,11 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
+Positioned comments support both single-line and multiline selections. If a
+failed draft follows sending, GitLab may already have created the discussion
+before its response could be processed. Check GitLab for an existing discussion
+before using **Retry** to avoid posting a duplicate.
+
 Review layers have one completion circle on the right of the title, sized like
 the chevron: Open is neutral, Done is green with a check, and hovering or
 focusing the circle previews the action (check to complete, cross to reopen).
@@ -418,12 +434,13 @@ changes**. That toggle applies immediately to the current review, not review
 defaults. The **Prompts** tab manages the five standard review prompt slots
 (`review-layers-code`, `review-layers-plan`, `review-chat`,
 `review-explain-comment`, `review-comment-from-chat`), plus `review-importance`
-only while **File important** is on, and their preset versions, each with
-Agent, Model, and Effort dropdowns. OMP models come from the selected
-executable's `models --json` catalog; Claude uses the Anthropic Models API with
-a server `ANTHROPIC_API_KEY`, or CLI aliases only without it. API-key
-entitlement does not establish Claude CLI access, and aliases are not a full
-CLI catalog. Optional effort choices are model-compatible; OMP sends
+only while **File important** is on and `review-one-pager` plus
+`review-one-pager-chat` only while **One pager** is on, and their preset
+versions, each with Agent, Model, and Effort dropdowns. OMP models come from
+the selected executable's `models --json` catalog; Claude uses the Anthropic
+Models API with a server `ANTHROPIC_API_KEY`, or CLI aliases only without it.
+API-key entitlement does not establish Claude CLI access, and aliases are not
+a full CLI catalog. Optional effort choices are model-compatible; OMP sends
 `--thinking`, Claude sends `--effort`, and Codex sends its model reasoning
 effort setting.
 
@@ -476,9 +493,11 @@ choice applies immediately and is saved as `appearance.colorTheme`
 
 The **Features** tab has one checkbox per review feature flag. Values are
 stored in `~/.config/mole-tools/features.json`, a JSON object keyed by flag ID,
-for example `{ "layer-importance": true }`. Missing files or keys default to
-off; invalid files also use defaults and are not rewritten until a toggle.
+for example `{ "layer-importance": true, "one-pager": false }`. Missing files or
+keys default to off; invalid files also use defaults and are not rewritten
+until a toggle.
 Unknown keys are preserved when a flag is changed.
+
 
 #### Layer importance
 
@@ -489,9 +508,9 @@ Layer **Regenerate** and **Retry** do not rerun importance. The
 1 (skip), 2 (low), 3 (moderate), 4 (high), 5 (critical), and writes one concise
 reason sentence of at most 144 characters for every span. Pastel blue-to-red
 colours mark diff gutters, changed-file rows (using each file's highest span
-score), and layer file pills. Diff gutters and layer pills show each span's
-score label and reason in custom tooltips. The Changed files header shows
-**Scoring…** while running or **Importance failed** with an error
+score), and layer file pills. Rated changed-file pips and diff gutters and layer
+pills show each score label and selected reason in custom tooltips. The Changed
+files header shows **Scoring…** while running or **Importance failed** with an error
 tooltip and **Retry** on failure. Results persist at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
 The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
@@ -513,15 +532,30 @@ Keyboard focus returns to opening diff-gutter strip after Escape, Cancel, or
 closing the report.
 
 
+#### One pager
+
+The `one-pager` flag enables **MR Description** and **One pager** tabs in
+Overview. **Create** generates an agent-written, reviewer-facing Markdown
+summary of the merge request; **Regenerate** replaces it with a newly generated
+summary. The summary is saved at
+`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/one-pager/document/one-pager.md`.
+The separate **One pager chat** uses its own prompt and model to answer
+follow-up questions. Claude and Codex can edit the summary in place; OMP remains
+read-only because its tools do not enforce directory-scoped writes. After
+supported-provider edits, the rendered document reloads after a 500 ms debounce.
+
+
 With the feature flag on and scoring ready, a shared importance review progress
-bar appears directly beneath the Layers/Files tabs. It shows the weighted share
-of added and deleted lines in viewed files against all scored changed lines.
-Importance levels 1–5 weigh 0.5, 0.75, 1, 1.25, and 1.5; context and unscored
-lines don't count. The target is the greater of the weighted total of level 3–5
-lines or 50% of all scored changed lines. A marker shows the target. Fill colour
-blends through importance colours toward level 5 as progress approaches the
-target and stays level 5 once reached; a subtle flame animates at that point,
-but stays static with reduced motion.
+bar appears directly beneath the Layers/Files tabs. It shows viewed added and
+deleted lines as fixed shares of all scored changed lines: level 1 contributes
+1/18, level 2 2/18, level 3 3/18, level 4 5/18, and level 5 8/18. Context and
+unscored lines don't count. The fixed target is 13/18 for High+Critical review;
+it is a progress target, not a promise that every High and Critical line is
+complete. Since the prescribed shares sum to 19/18, visible fill, percentage,
+flame width, and accessibility value intentionally saturate at 18/18 (100%).
+A marker shows the target. Fill colour blends through importance colours toward
+level 5 as progress approaches the target and stays level 5 once reached; a
+subtle flame animates at that point, but stays static with reduced motion.
 
 
 

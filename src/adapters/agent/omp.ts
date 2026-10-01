@@ -23,6 +23,7 @@ export interface OmpAgentOptions {
 	exec?: AgentExec;
 }
 
+const DIRECTORY_READ_ONLY_TOOLS = ["read", "grep", "glob"] as const;
 const READ_ONLY_TOOLS = ["read", "grep", "glob", "bash"] as const;
 const IGNORED_EVENTS: Record<string, true> = {
 	agent_start: true,
@@ -109,6 +110,8 @@ export class OmpAgentAdapter implements ReviewAgent {
 	private readonly binary: string;
 	private readonly model?: string;
 	private readonly effort?: OmpEffort;
+
+	readonly supportsScopedWrites = false;
 	private readonly execFn: AgentExec;
 
 	constructor(
@@ -130,11 +133,15 @@ export class OmpAgentAdapter implements ReviewAgent {
 	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
 		if (turn.signal?.aborted) return;
 
-		const tools = turn.writeDir
-			? [...READ_ONLY_TOOLS, "write"].join(",")
-			: READ_ONLY_TOOLS.join(",");
+		const directoryWrite = turn.writeScope === "directory";
+		const tools = directoryWrite
+			? DIRECTORY_READ_ONLY_TOOLS.join(",")
+			: turn.writeDir
+				? [...READ_ONLY_TOOLS, "write"].join(",")
+				: READ_ONLY_TOOLS.join(",");
 		const args = [
 			"-p",
+			...(directoryWrite ? ["--no-extensions"] : []),
 			"--mode",
 			"json",
 			"--cwd",
@@ -147,7 +154,7 @@ export class OmpAgentAdapter implements ReviewAgent {
 		if (this.model) args.push("--model", this.model);
 		if (this.effort) args.push("--thinking", this.effort);
 		if (turn.sessionId) args.push("-r", turn.sessionId);
-		if (turn.writeDir) args.push("--add-dir", turn.writeDir);
+		if (turn.writeDir && !directoryWrite) args.push("--add-dir", turn.writeDir);
 		args.push("--", turn.message);
 
 		let sessionEmitted = false;

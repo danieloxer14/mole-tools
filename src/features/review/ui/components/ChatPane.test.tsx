@@ -46,6 +46,7 @@ test("does not render a general discussions trigger", () => {
 			transcript={[]}
 			tools={[]}
 			tags={[]}
+			tools={[]}
 			chats={[
 				{
 					id: "chat-1",
@@ -198,6 +199,7 @@ test("renders parent-owned composer draft", () => {
 			draft="unsent question"
 			onDraftChange={() => {}}
 			streamingSegments={[]}
+			tools={[]}
 			error={null}
 			sending={false}
 			stopping={false}
@@ -543,6 +545,33 @@ test("renders description context tags with labels and quoted titles", () => {
 	expect(wholeChip?.getAttribute("title")).toBe("Whole body");
 	expect(blockChip?.textContent).toContain("MR description:3-5");
 	expect(blockChip?.getAttribute("title")).toBe("Block");
+});
+
+test("renders one-pager context tags with labels and quoted titles", () => {
+	const container = parseMarkup(
+		renderComposer({
+			tags: [
+				{ kind: "one-pager", quote: "Whole summary" },
+				{
+					kind: "one-pager",
+					startLine: 2,
+					endLine: 4,
+					quote: "Summary section",
+				},
+			],
+		}),
+	);
+	const wholeChip = container.querySelector<HTMLElement>(
+		'[title="Whole summary"]',
+	);
+	const rangedChip = container.querySelector<HTMLElement>(
+		'[title="Summary section"]',
+	);
+
+	expect(wholeChip?.textContent).toContain("One pager (whole)");
+	expect(wholeChip?.getAttribute("title")).toBe("Whole summary");
+	expect(rangedChip?.textContent).toContain("One pager:2-4");
+	expect(rangedChip?.getAttribute("title")).toBe("Summary section");
 });
 
 interface InteractiveRender {
