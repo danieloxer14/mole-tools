@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 export type ApprovalAction = "approve" | "unapprove";
 export type ReviewView = "code" | "overview";
 export interface MrHeaderProps {
-	mr: { iid: number; title: string; webUrl: string };
+	mr: { iid: number; title: string; webUrl: string; state: string | null };
 	view: ReviewView;
 	onViewChange: (view: ReviewView) => void;
 	headSha: string;
@@ -36,6 +36,7 @@ export interface MrHeaderProps {
 		autoOpen: boolean;
 	} | null;
 	onUpdateAutoOpened: (version: string) => void;
+	onOpenSettings: () => void;
 }
 
 export function headerTitle(title: string, iid: number): string {
@@ -113,7 +114,10 @@ export function MrHeader({
 }: MrHeaderProps) {
 	const [copied, setCopied] = useState(false);
 	const copyTimer = useRef<Timer | undefined>(undefined);
-	const approvalLabel = approvalPillLabel(approval, approvalLoading);
+	const merged = mr.state === "merged";
+	const approvalLabel = merged
+		? null
+		: approvalPillLabel(approval, approvalLoading);
 	const approveReason = approveDisabledReason(
 		approval,
 		approvalLoading,
@@ -223,7 +227,15 @@ export function MrHeader({
 						Out of sync
 					</Badge>
 				) : null}
-				{approvalLabel !== null ? (
+				{merged ? (
+					<Badge
+						variant="secondary"
+						className="inline-flex items-center leading-none"
+						data-lifecycle="merged"
+					>
+						Merged
+					</Badge>
+				) : approvalLabel !== null ? (
 					<Badge
 						variant="secondary"
 						className={
@@ -272,17 +284,23 @@ export function MrHeader({
 				<IconButton href={mr.webUrl} label="Open in GitLab">
 					<ExternalLink aria-hidden />
 				</IconButton>
-				<Tooltip>
-					<TooltipTrigger
-						render={<span className="inline-flex items-center leading-none" />}
-					>
-						{approvalButton}
-					</TooltipTrigger>
-					<TooltipContent>{approvalButtonTooltip}</TooltipContent>
-				</Tooltip>
-				<span id="approve-tooltip" className="sr-only">
-					{approvalButtonTooltip}
-				</span>
+				{merged ? null : (
+					<>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<span className="inline-flex items-center leading-none" />
+								}
+							>
+								{approvalButton}
+							</TooltipTrigger>
+							<TooltipContent>{approvalButtonTooltip}</TooltipContent>
+						</Tooltip>
+						<span id="approve-tooltip" className="sr-only">
+							{approvalButtonTooltip}
+						</span>
+					</>
+				)}
 				{update ? (
 					<UpdateAvailable
 						latest={update.latest}

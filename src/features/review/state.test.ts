@@ -114,6 +114,13 @@ test("defaults missing MR description to empty string", () => {
 
 	expect(ReviewStateSchema.parse(legacy).mr.description).toBe("");
 });
+test("defaults missing MR lifecycle state to null", () => {
+	const current = state();
+	const legacy = { ...current, mr: { ...current.mr } };
+	delete (legacy.mr as Partial<ReviewState["mr"]>).state;
+
+	expect(ReviewStateSchema.parse(legacy).mr.state).toBeNull();
+});
 
 test("rejects non-string MR description", () => {
 	const current = state();

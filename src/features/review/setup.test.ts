@@ -119,55 +119,57 @@ function rawDiff(path: string, patchText: string) {
 }
 
 describe("setupReview chat state", () => {
-	test("persists MR description on first setup", async () => {
+	test("persists MR description and lifecycle state on first setup", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-setup-description-"));
 		try {
 			const paths = pathsFor(dir);
 			const result = await runSetup(paths, {
-				mr: { ...mergeRequest(), description: "Body" },
+				mr: { ...mergeRequest(), description: "Body", state: "merged" },
 			});
 
 			expect(result.state.mr.description).toBe("Body");
-			expect((await new ReviewStore(paths).read())?.mr.description).toBe(
-				"Body",
-			);
+			expect(result.state.mr.state).toBe("merged");
+			expect((await new ReviewStore(paths).read())?.mr.state).toBe("merged");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	test("refreshes MR description on rerun and clears omitted input", async () => {
+	test("refreshes MR description and lifecycle state on rerun", async () => {
 		const dir = await mkdtemp(
 			join(tmpdir(), "mole-review-setup-description-rerun-"),
 		);
 		try {
 			const paths = pathsFor(dir);
 			await runSetup(paths, {
-				mr: { ...mergeRequest(), description: "Original" },
+				mr: { ...mergeRequest(), description: "Original", state: "opened" },
 			});
 
 			const updated = await runSetup(paths, {
-				mr: { ...mergeRequest(), description: "Updated" },
+				mr: { ...mergeRequest(), description: "Updated", state: "merged" },
 			});
 			expect(updated.state.mr.description).toBe("Updated");
+			expect(updated.state.mr.state).toBe("merged");
 
 			const cleared = await runSetup(paths);
 			expect(cleared.state.mr.description).toBe("");
-			expect((await new ReviewStore(paths).read())?.mr.description).toBe("");
+			expect(cleared.state.mr.state).toBeNull();
+			expect((await new ReviewStore(paths).read())?.mr.state).toBeNull();
 
 			const refreshed = await runSetup(paths, {
-				mr: { ...mergeRequest(), description: "Refreshed" },
+				mr: { ...mergeRequest(), description: "Refreshed", state: "closed" },
 				refresh: true,
 			});
 			expect(refreshed.state.mr.description).toBe("Refreshed");
+			expect(refreshed.state.mr.state).toBe("closed");
 
 			const refreshCleared = await runSetup(paths, { refresh: true });
 			expect(refreshCleared.state.mr.description).toBe("");
+			expect(refreshCleared.state.mr.state).toBeNull();
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
-
 	test("replaces missing legacy description on setup re-run", async () => {
 		const dir = await mkdtemp(
 			join(tmpdir(), "mole-review-setup-legacy-description-"),
@@ -397,6 +399,7 @@ describe("setupReview chat state", () => {
 						"https://gitlab-new.example.com/group/new-api/-/merge_requests/42",
 					title: "Current title",
 					description: "",
+					state: "merged",
 					sourceBranch: "current-source",
 					targetBranch: "current-target",
 				};
@@ -420,6 +423,7 @@ describe("setupReview chat state", () => {
 					webUrl: mr.webUrl,
 					title: mr.title,
 					description: "",
+					state: "merged",
 					sourceBranch: mr.sourceBranch,
 					targetBranch: mr.targetBranch,
 				});
@@ -439,25 +443,30 @@ describe("setupReview chat state", () => {
 		}
 	});
 
-	test("does not write unchanged same-mode metadata", async () => {
+	test("writes changed lifecycle metadata but not unchanged metadata", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-metadata-noop-"));
 		try {
 			const paths = pathsFor(dir);
 			const store = new CountingReviewStore(paths);
 			await store.write(stateFor(paths));
 			store.writeCount = 0;
-			await setupReview({
+			const input = {
 				vcs: new FakeVcs({
 					repoRoot: paths.repoPath,
 					worktrees: [],
 					diffRange: [],
 				}),
 				ref,
-				mr: mergeRequest(),
+				mr: { ...mergeRequest(), state: "merged" },
 				paths,
 				store,
-			});
-			expect(store.writeCount).toBe(0);
+			};
+			const updated = await setupReview(input);
+			expect(updated.state.mr.state).toBe("merged");
+			expect(store.writeCount).toBe(1);
+
+			await setupReview(input);
+			expect(store.writeCount).toBe(1);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -678,18 +687,20 @@ describe("syncReview MR description", () => {
 
 			const updated = await syncReview({
 				...syncInput,
-				mr: { ...syncInput.mr, description: "Updated" },
+				mr: { ...syncInput.mr, description: "Updated", state: "merged" },
 				state: existing,
 			});
 			expect(updated.state.mr.description).toBe("Updated");
-			expect((await store.read())?.mr.description).toBe("Updated");
+			expect(updated.state.mr.state).toBe("merged");
+			expect((await store.read())?.mr.state).toBe("merged");
 
-			const retained = await syncReview({
+			const cleared = await syncReview({
 				...syncInput,
 				state: updated.state,
 			});
-			expect(retained.state.mr.description).toBe("Updated");
-			expect((await store.read())?.mr.description).toBe("Updated");
+			expect(cleared.state.mr.description).toBe("Updated");
+			expect(cleared.state.mr.state).toBeNull();
+			expect((await store.read())?.mr.state).toBeNull();
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -737,6 +748,7 @@ describe("syncReviewMetadata", () => {
 					"https://gitlab-new.example.com/group/new-api/-/merge_requests/42",
 				title: "New title",
 				description: "",
+				state: "closed",
 				sourceBranch: "new-source",
 				targetBranch: "new-target",
 			});
@@ -746,7 +758,6 @@ describe("syncReviewMetadata", () => {
 			const reread = await store.read();
 			expect(reread).toEqual(updated);
 			expect(reread?.mr).not.toHaveProperty("author");
-			expect(reread?.mr).not.toHaveProperty("state");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
