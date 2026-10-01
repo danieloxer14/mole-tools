@@ -399,6 +399,11 @@ and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
+Positioned comments support both single-line and multiline selections. If a
+failed draft follows sending, GitLab may already have created the discussion
+before its response could be processed. Check GitLab for an existing discussion
+before using **Retry** to avoid posting a duplicate.
+
 Review layers have one completion circle on the right of the title, sized like
 the chevron: Open is neutral, Done is green with a check, and hovering or
 focusing the circle previews the action (check to complete, cross to reopen).

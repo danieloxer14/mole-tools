@@ -131,6 +131,7 @@ export const GitLabPositionSchema = z
 				end: GitLabDiscussionLineRangeEntrySchema,
 			})
 			.passthrough()
+			.nullable()
 			.optional(),
 	})
 	.passthrough();
