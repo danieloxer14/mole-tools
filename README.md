@@ -552,12 +552,13 @@ bar appears directly beneath the Layers/Files tabs. It shows viewed added and
 deleted lines as fixed shares of all scored changed lines: level 1 contributes
 1/18, level 2 2/18, level 3 3/18, level 4 5/18, and level 5 8/18. Context and
 unscored lines don't count. The fixed target is 13/18 for High+Critical review;
-it is a progress target, not a promise that every High and Critical line is
-complete. Since the prescribed shares sum to 19/18, visible fill, percentage,
-flame width, and accessibility value intentionally saturate at 18/18 (100%).
-A marker shows the target. Fill colour blends through importance colours toward
-level 5 as progress approaches the target and stays level 5 once reached; a
-subtle flame animates at that point, but stays static with reduced motion.
+the tooltip states the target percentage and explains that more important files
+fill the bar faster. Since the prescribed shares sum to 19/18, visible fill,
+percentage, flame width, and accessibility value intentionally saturate at
+18/18 (100%). A marker shows the target. Fill colour blends through importance
+colours toward level 5 as progress approaches the target and stays level 5 once
+reached; a subtle flame animates at that point, but stays static with reduced
+motion.
 
 
 

@@ -46,7 +46,6 @@ test("does not render a general discussions trigger", () => {
 			transcript={[]}
 			tools={[]}
 			tags={[]}
-			tools={[]}
 			chats={[
 				{
 					id: "chat-1",
@@ -199,7 +198,6 @@ test("renders parent-owned composer draft", () => {
 			draft="unsent question"
 			onDraftChange={() => {}}
 			streamingSegments={[]}
-			tools={[]}
 			error={null}
 			sending={false}
 			stopping={false}

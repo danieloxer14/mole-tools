@@ -183,12 +183,13 @@ writes. Supported-provider edits trigger a debounced document reload.
 Layers/Files tabs when the flag is on and scoring is ready. It shows viewed
 added and deleted lines as fixed shares of all scored changed lines: levels 1–5
 contribute 1/18, 2/18, 3/18, 5/18, and 8/18 respectively; context and unscored
-lines don't count. Its fixed target is 13/18 for High+Critical review, not a
-promise that every High and Critical line is complete. The prescribed shares
-sum to 19/18, so visible fill, percentage, flame width, and accessibility value
-intentionally saturate at 18/18 (100%). A marker shows the target; fill blends
-through importance colours toward level 5 and stays level 5 at the target. A
-subtle flame animates once reached, static with reduced motion.
+lines don't count. Its fixed target is 13/18 for High+Critical review. The
+tooltip states the target percentage and explains that more important files
+fill the bar faster. The prescribed shares sum to 19/18, so visible fill,
+percentage, flame width, and accessibility value intentionally saturate at
+18/18 (100%). A marker shows the target; fill blends through importance colours
+toward level 5 and stays level 5 at the target. A subtle flame animates once
+reached, static with reduced motion.
 
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

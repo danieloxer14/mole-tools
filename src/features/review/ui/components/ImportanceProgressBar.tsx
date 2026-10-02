@@ -91,11 +91,8 @@ export function ImportanceProgressBar({
 			</TooltipTrigger>
 			<TooltipContent className="flex-col items-start gap-0.5">
 				<span>
-					Fixed contributions: level 1 1/18, 2 2/18, 3 3/18, 4 5/18, 5 8/18
-				</span>
-				<span>
-					Fixed target: 13/18 for High+Critical review, not a completeness
-					guarantee
+					{threshold > 0 && `Reach ${targetPct}% to meet the review target. `}
+					More important files fill the bar faster.
 				</span>
 			</TooltipContent>
 		</Tooltip>

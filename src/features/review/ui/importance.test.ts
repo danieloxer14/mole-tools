@@ -218,6 +218,18 @@ test("sparse score buckets contribute fixed shares", () => {
 		),
 	).toEqual({ value: 6, total: 18, threshold: 13 });
 });
+test("higher-importance files advance progress faster for equal added lines", () => {
+	const low = scoredAddedFile("src/low.ts", 1, 2);
+	const high = scoredAddedFile("src/high.ts", 5, 2);
+	const diff = [low.diff, high.diff];
+	const files = [low.file, high.file];
+	const lowProgress = importanceReviewProgress(diff, files, [low.file.path]);
+	const highProgress = importanceReviewProgress(diff, files, [high.file.path]);
+
+	expect(lowProgress).toEqual({ value: 1, total: 18, threshold: 13 });
+	expect(highProgress).toEqual({ value: 8, total: 18, threshold: 13 });
+	expect(highProgress.value).toBeGreaterThan(lowProgress.value);
+});
 
 test("full view across five levels preserves raw value of 19", () => {
 	const levels = ([1, 2, 3, 4, 5] as const).map((score) =>
