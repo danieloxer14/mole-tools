@@ -176,18 +176,18 @@ export function MrHeader({
 				}}
 			>
 				<SegmentedToggleGroupItem
-					value="code"
-					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
-					aria-pressed={view === "code"}
-				>
-					Code
-				</SegmentedToggleGroupItem>
-				<SegmentedToggleGroupItem
 					value="overview"
 					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
 					aria-pressed={view === "overview"}
 				>
 					Overview
+				</SegmentedToggleGroupItem>
+				<SegmentedToggleGroupItem
+					value="code"
+					className="!flex-none !h-9 !min-w-fit !px-4 !text-sm"
+					aria-pressed={view === "code"}
+				>
+					Code
 				</SegmentedToggleGroupItem>
 			</SegmentedToggleGroup>
 			<h1

@@ -532,7 +532,7 @@ function ReviewApp() {
 		if (!importanceEnabled || importance.status !== "ready")
 			setContestTarget(null);
 	}, [importanceEnabled, importance.status]);
-	const [reviewView, setReviewView] = useState<ReviewView>("code");
+	const [reviewView, setReviewView] = useState<ReviewView>("overview");
 	const [overviewTab, setOverviewTab] = useState<OverviewTab>("description");
 	const effectiveOverviewTab = onePagerEnabled ? overviewTab : "description";
 	const chatScope: ChatKind =
