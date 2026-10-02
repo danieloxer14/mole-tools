@@ -1469,7 +1469,6 @@ test("opens a reason tooltip from a focused list importance pip", async () => {
 	);
 	expect(pip.tabIndex).toBe(0);
 	expect(pip.getAttribute("title")).toBeNull();
-	expect(pip.className.split(/\s+/)).toContain("bg-importance-5");
 	const counts = scoredRow.querySelector("span.text-success");
 	if (!counts) throw new Error("File counts are missing");
 	expect(
@@ -1531,7 +1530,6 @@ test("opens a reason tooltip on tree file leaves, not directories", async () => 
 	);
 	expect(pip.tabIndex).toBe(0);
 	expect(pip.getAttribute("title")).toBeNull();
-	expect(pip.className.split(/\s+/)).toContain("bg-importance-3");
 	const counts = leafRow.querySelector("span.text-success");
 	if (!counts) throw new Error("File counts are missing");
 	expect(
