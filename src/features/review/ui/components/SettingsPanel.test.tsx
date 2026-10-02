@@ -6,12 +6,9 @@ import { withMockFetch } from "../../../../../test/fakes/mockFetch";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import { APP_VERSION } from "../../../../shared/app-version";
 import { applyColorTheme } from "../color-theme";
+import { loadFeatureFlags, resetFeatureFlagsForTests } from "../feature-flags";
 import {
-	loadFeatureFlags,
-	resetFeatureFlagsForTests,
-	setFeatureFlag,
-} from "../feature-flags";
-import {
+	FEATURE_SLOTS,
 	isSaveDisabled,
 	type PromptEditorValue,
 	type PromptSnapshot,
@@ -88,20 +85,14 @@ async function flushReact(): Promise<void> {
 	await Bun.sleep(0);
 	await Bun.sleep(0);
 }
-test("importance slot stays hidden while Layer importance is off", () => {
-	resetFeatureFlagsForTests();
-	const markup = render();
-	const visibleLabels = VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]);
-	const nav = markup.match(
-		/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/,
-	)?.[1];
-	expect(nav).toBeDefined();
-	expect(nav?.match(/<button\b/g)?.length).toBe(VISIBLE_SLOTS.length);
-	const indexes = visibleLabels.map((label) => nav?.indexOf(label) ?? -1);
-	expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
-	expect(nav).not.toContain("Review importance");
-	resetFeatureFlagsForTests();
+test("keeps only one-pager prompt slots feature-conditional", () => {
+	expect(PROMPT_NAMES).not.toContain("review-importance" as never);
+	expect(FEATURE_SLOTS).toEqual([
+		{ slot: "review-one-pager", flag: "one-pager" },
+		{ slot: "review-one-pager-chat", flag: "one-pager" },
+	]);
 });
+
 test("one-pager prompt slots are shown only when the confirmed flag is enabled", async () => {
 	resetFeatureFlagsForTests();
 	const originalFetch = globalThis.fetch;
@@ -148,148 +139,6 @@ test("one-pager prompt slots are shown only when the confirmed flag is enabled",
 		expect(disabledNav).not.toContain("One pager");
 		expect(disabledNav).not.toContain("One pager chat");
 	} finally {
-		globalThis.fetch = originalFetch;
-		resetFeatureFlagsForTests();
-	}
-});
-
-test("importance slot appears after existing slots when Layer importance is on", async () => {
-	resetFeatureFlagsForTests();
-	const originalFetch = globalThis.fetch;
-	globalThis.fetch = withMockFetch(async () =>
-		jsonResponse({
-			flags: [
-				{
-					id: "layer-importance",
-					label: "File important",
-					description: "test",
-					enabled: true,
-				},
-			],
-		}),
-	);
-	try {
-		await loadFeatureFlags("settings-test-token");
-		const markup = render();
-		const nav = markup.match(
-			/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/,
-		)?.[1];
-		expect(nav).toBeDefined();
-		const slotLabels = [
-			...VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]),
-			"Review importance",
-		];
-		const indexes = slotLabels.map((label) => nav?.indexOf(label) ?? -1);
-		expect(nav?.match(/<button\b/g)?.length).toBe(slotLabels.length);
-		expect(indexes.every((index) => index >= 0)).toBe(true);
-		expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
-	} finally {
-		globalThis.fetch = originalFetch;
-		resetFeatureFlagsForTests();
-	}
-});
-
-test("importance slot selection falls back when Layer importance turns off", async () => {
-	resetFeatureFlagsForTests();
-	const originalFetch = globalThis.fetch;
-	let enabled = true;
-	let finishPost!: (value: Response) => void;
-	globalThis.fetch = (async (input: string, init?: RequestInit) => {
-		const url = String(input);
-		if (url.includes("/api/features")) {
-			if (init?.method === "POST") {
-				return new Promise<Response>((resolve) => {
-					finishPost = resolve;
-				});
-			}
-			return jsonResponse({
-				flags: [
-					{
-						id: "layer-importance",
-						label: "File important",
-						description: "test",
-						enabled,
-					},
-				],
-			});
-		}
-		if (url.includes("/api/settings/models?")) {
-			return jsonResponse({ models: [], source: "omp" });
-		}
-		if (url.includes("/api/prompts/")) return jsonResponse(initialPrompt);
-		return jsonResponse(initialSettings);
-	}) as typeof fetch;
-	const container = document.createElement("div");
-	const root = createRoot(container);
-	document.body.append(container);
-	try {
-		await act(async () => {
-			await loadFeatureFlags("settings-test-token");
-		});
-		act(() =>
-			root.render(
-				createElement(SettingsPanel, {
-					token: "settings-test-token",
-					onClose: () => {},
-					initialSettings,
-				}),
-			),
-		);
-		await act(async () => {
-			await flushReact();
-		});
-		const importanceButton = Array.from(
-			container.querySelectorAll<HTMLButtonElement>(
-				"nav[aria-label='Prompt slots'] button",
-			),
-		).find((button) => button.textContent?.includes("Review importance"));
-		expect(importanceButton).toBeDefined();
-		await act(async () => {
-			importanceButton?.click();
-			await flushReact();
-		});
-		expect(importanceButton?.getAttribute("aria-current")).toBe("true");
-		let toggle!: Promise<void>;
-		act(() => {
-			toggle = setFeatureFlag("settings-test-token", "layer-importance", false);
-		});
-		await act(async () => {
-			await flushReact();
-		});
-		expect(importanceButton?.getAttribute("aria-current")).toBe("true");
-		expect(
-			container.querySelector("nav[aria-label='Prompt slots']")?.textContent,
-		).toContain("Review importance");
-		await act(async () => {
-			enabled = false;
-			finishPost(
-				jsonResponse({
-					flags: [
-						{
-							id: "layer-importance",
-							label: "File important",
-							description: "test",
-							enabled,
-						},
-					],
-				}),
-			);
-			await toggle;
-			await flushReact();
-		});
-		const selected = container.querySelector(
-			"nav[aria-label='Prompt slots'] button[aria-current='true']",
-		);
-		const visibleSlot = VISIBLE_SLOTS[0];
-		if (visibleSlot === undefined)
-			throw new Error("Expected visible prompt slot");
-		expect(selected?.textContent).toContain(SLOT_LABELS[visibleSlot]);
-		expect(
-			container.querySelector("nav[aria-label='Prompt slots']")?.textContent,
-		).not.toContain("Review importance");
-	} finally {
-		act(() => root.unmount());
-		container.remove();
 		globalThis.fetch = originalFetch;
 		resetFeatureFlagsForTests();
 	}

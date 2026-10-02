@@ -12,7 +12,6 @@ import { createRoot } from "react-dom/client";
 import type { HostDiscussion, MrApprovalState } from "../../../ports/git-host";
 import { splitSourceLines } from "../../../shared/diff-context";
 import type { ParsedFileDiff } from "../../../shared/diff-parse";
-import { importanceRevisionKey } from "../../../shared/importance-revision-key";
 import {
 	type ChatTag,
 	chatTagsEqual,
@@ -49,7 +48,6 @@ import {
 	isMarkdownPath,
 	type MarkdownBlockSelection,
 } from "./components/DiffView";
-import { ImportanceContestDialog } from "./components/ImportanceContestDialog";
 import { LayerPane } from "./components/LayerPane";
 import {
 	type ApprovalAction,
@@ -78,12 +76,6 @@ import { loadFeatureFlags, useConfirmedFeatureFlag } from "./feature-flags";
 import { type DraftGeneration, fromChatAvailability } from "./from-chat";
 import { generalDiscussions } from "./general-discussions";
 import {
-	type ContestableImportanceSpan,
-	fileImportanceMap,
-	importanceReviewFileTotals,
-	importanceReviewProgressForViewedFiles,
-} from "./importance";
-import {
 	consumeLayerStream,
 	type LayerAction,
 	type LayerStreamFrame,
@@ -96,7 +88,6 @@ import {
 	runReviewRefresh,
 } from "./review-refresh";
 import { createReviewStateRequestSequence } from "./review-state-request-sequence";
-import { useImportance } from "./use-importance";
 import { useOnePager } from "./use-one-pager";
 import { useSkills } from "./use-skills";
 import { useSplitterResize } from "./use-splitter-resize";
@@ -478,60 +469,6 @@ function ReviewApp() {
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const onePagerEnabled = useConfirmedFeatureFlag("one-pager");
 	const onePager = useOnePager(token, onePagerEnabled);
-	const importanceEnabled = useConfirmedFeatureFlag("layer-importance");
-	const importance = useImportance(
-		token,
-		importanceEnabled,
-		data ? importanceRevisionKey(data.revision) : "",
-	);
-	const importanceByPath = useMemo(
-		() =>
-			importanceEnabled && importance.status === "ready"
-				? fileImportanceMap(importance.files)
-				: undefined,
-		[importanceEnabled, importance.status, importance.files],
-	);
-	const importanceFileTotals = useMemo(
-		() =>
-			importanceEnabled && importance.status === "ready" && data?.diff
-				? importanceReviewFileTotals(data.diff, importance.files)
-				: undefined,
-		[importanceEnabled, importance.status, importance.files, data?.diff],
-	);
-	const importanceProgress = useMemo(
-		() =>
-			importanceFileTotals && data?.viewedFiles
-				? importanceReviewProgressForViewedFiles(
-						importanceFileTotals,
-						data.viewedFiles,
-					)
-				: undefined,
-		[importanceFileTotals, data?.viewedFiles],
-	);
-	const selectedImportance = useMemo(
-		() =>
-			importanceEnabled && importance.status === "ready"
-				? importance.files.flatMap((file, fileIndex) =>
-						file.path === selectedPath
-							? file.spans.map((span, spanIndex) => ({
-									...span,
-									fileIndex,
-									spanIndex,
-								}))
-							: [],
-					)
-				: undefined,
-		[importanceEnabled, importance.status, importance.files, selectedPath],
-	);
-	const [contestTarget, setContestTarget] = useState<{
-		path: string;
-		span: ContestableImportanceSpan;
-	} | null>(null);
-	const contestFocusRef = useRef<HTMLButtonElement | null>(null);
-	useEffect(() => {
-		if (!importanceEnabled || importance.status !== "ready")
-			setContestTarget(null);
-	}, [importanceEnabled, importance.status]);
 	const [reviewView, setReviewView] = useState<ReviewView>("code");
 	const [overviewTab, setOverviewTab] = useState<OverviewTab>("description");
 	const effectiveOverviewTab = onePagerEnabled ? overviewTab : "description";
@@ -2380,8 +2317,6 @@ function ReviewApp() {
 					<LayerPane
 						state={data}
 						files={files}
-						importanceByPath={importanceByPath}
-						importanceProgress={importanceProgress}
 						filesContent={
 							<ChangedFiles
 								files={data.diff}
@@ -2393,17 +2328,6 @@ function ReviewApp() {
 										viewedFiles: { paths, viewed },
 									});
 								}}
-								importanceByPath={importanceByPath}
-								importance={
-									importanceEnabled
-										? {
-												status: importance.status,
-												error: importance.error,
-												canRetry: importance.canRetry,
-												onRetry: importance.retry,
-											}
-										: undefined
-								}
 							/>
 						}
 						selectedPath={selectedPath}
@@ -2453,15 +2377,6 @@ function ReviewApp() {
 						explainDisabled={creatingChat}
 						drafts={data.drafts}
 						onModeChange={setDiffMode}
-						importance={selectedImportance}
-						onContestImportance={
-							selectedImportance && selectedPath
-								? (span, restoreFocusTarget) => {
-										contestFocusRef.current = restoreFocusTarget;
-										setContestTarget({ path: selectedPath, span });
-									}
-								: undefined
-						}
 						wholeFile={selectedWholeFile}
 						onWholeFileChange={changeWholeFile}
 						onViewModeChange={changeViewMode}
@@ -2641,40 +2556,6 @@ function ReviewApp() {
 					/>
 				</DialogContent>
 			</Dialog>
-			<ImportanceContestDialog
-				target={contestTarget}
-				onClose={() => setContestTarget(null)}
-				finalFocusTarget={() =>
-					contestFocusRef.current?.isConnected ? contestFocusRef.current : null
-				}
-				onSubmit={(score, reason) => {
-					if (!contestTarget)
-						return Promise.reject(new Error("No span selected"));
-					const {
-						side,
-						startLine,
-						endLine,
-						score: currentScore,
-						reason: currentReason,
-						fileIndex,
-						spanIndex,
-					} = contestTarget.span;
-					return importance.contest({
-						path: contestTarget.path,
-						fileIndex,
-						spanIndex,
-						expected: {
-							side,
-							startLine,
-							endLine,
-							score: currentScore,
-							reason: currentReason,
-						},
-						score,
-						reason,
-					});
-				}}
-			/>
 		</main>
 	);
 }

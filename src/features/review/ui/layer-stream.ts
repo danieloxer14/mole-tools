@@ -72,7 +72,7 @@ export async function readSseFrames(
 export async function postSseStream(
 	token: string,
 	path: string,
-	streamName: "Layer" | "Importance" | "One pager",
+	streamName: "Layer" | "One pager",
 	action: LayerStreamErrorAction,
 	onFrame: (frame: LayerStreamFrame) => void,
 	signal?: AbortSignal,

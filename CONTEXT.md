@@ -131,29 +131,13 @@ server expands tokens to active version text; transcript renders tags and use
 updates most-recently-used order.
 
 ### Review feature flag
-A registered review flag, distinct from CLI feature terminology. Registry lives
-in `src/shared/feature-flags.ts`; values live in
-`~/.config/mole-tools/features.json` and are managed in Settings > Features
-through `GET/POST /api/features`.
+A single registered review flag enables the one-pager feature. Registry lives
+in `src/shared/feature-flags.ts`; its value lives in
+`~/.config/mole-tools/features.json` and is managed in Settings > Features
+through `GET/POST /api/features`. The one-pager prompt slots appear in Settings
+> Prompts only while the flag is enabled; all standard review prompts remain
+available independently.
 
-### Layer importance
-The `layer-importance` review flag enables whole-change-set scoring of changed
-line spans from 1 (skip) to 5 (critical). It runs after initial load and
-revision-changing sync, not layer Regenerate; results are persisted per MR
-with head and merge-base SHA stamps at
-`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
-Running status exists in memory only.
-
-**Importance ledger** is the append-only `ledger.ndjson` beside
-`importance.json`, with `run` and `contest` entries.
-**Importance contest** starts from the diff-gutter tooltip's **Contest** button.
-Its two-stage dialog accepts a new level and reason; override persists until
-next revision re-score. It provides a Markdown report for a GitHub issue with
-app version, revision SHAs, run/prompt/agent details, file and lines, scores,
-code excerpt (up to 80 lines), and full system prompt. GitHub issues are public;
-redact confidential code, paths, and names before posting.
-Keyboard focus returns to the originating diff-gutter strip after Escape,
-Cancel, or closing the report.
 ### One pager
 An agent-written, reviewer-facing one-page Markdown summary of a merge
 request, stored per MR at
@@ -179,16 +163,6 @@ questions about the one pager. Claude and Codex may edit only the one pager
 document in place; OMP stays read-only because it lacks enforced directory-scoped
 writes. Supported-provider edits trigger a debounced document reload.
 
-**Importance review progress** appears as one shared bar directly beneath the
-Layers/Files tabs when the flag is on and scoring is ready. It shows viewed
-added and deleted lines as fixed shares of all scored changed lines: levels 1–5
-contribute 1/18, 2/18, 3/18, 5/18, and 8/18 respectively; context and unscored
-lines don't count. Its fixed target is 13/18 for High+Critical review, not a
-promise that every High and Critical line is complete. The prescribed shares
-sum to 19/18, so visible fill, percentage, flame width, and accessibility value
-intentionally saturate at 18/18 (100%). A marker shows the target; fill blends
-through importance colours toward level 5 and stays level 5 at the target. A
-subtle flame animates once reached, static with reduced motion.
 
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

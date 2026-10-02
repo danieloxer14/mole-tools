@@ -1,10 +1,7 @@
 import { List, ListTree, Search } from "lucide-react";
-import type { ImportanceStatus } from "../../importance";
 
 import { ProgressBar } from "./ProgressBar";
-import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Spinner } from "./ui/spinner";
 import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
@@ -20,12 +17,6 @@ export interface ChangedFilesHeaderProps {
 	onModeChange: (mode: ChangedFilesMode) => void;
 	filterQuery: string;
 	onFilterQueryChange: (query: string) => void;
-	importance?: {
-		status: ImportanceStatus | null;
-		error: string | null;
-		canRetry: boolean;
-		onRetry: () => void;
-	};
 }
 
 export function viewedFileCount(
@@ -58,7 +49,6 @@ export function ChangedFilesHeader({
 	onModeChange,
 	filterQuery,
 	onFilterQueryChange,
-	importance,
 }: ChangedFilesHeaderProps) {
 	return (
 		<div
@@ -118,39 +108,6 @@ export function ChangedFilesHeader({
 				<span className="shrink-0 whitespace-nowrap tabular-nums">
 					{viewedCount}/{total} files
 				</span>
-				{importance?.status && importance.status !== "ready" && (
-					<div className="flex min-w-0 items-center gap-2">
-						{importance.status === "pending" ||
-						importance.status === "running" ? (
-							<span className="flex items-center gap-1.5 text-muted-foreground">
-								<Spinner className="size-3" />
-								Scoring…
-							</span>
-						) : (
-							<>
-								<Tooltip>
-									<TooltipTrigger
-										render={
-											<button type="button" className="text-destructive">
-												Importance failed
-											</button>
-										}
-									/>
-									<TooltipContent>{importance.error}</TooltipContent>
-								</Tooltip>
-								{importance.canRetry && (
-									<Button
-										size="xs"
-										variant="outline"
-										onClick={importance.onRetry}
-									>
-										Retry
-									</Button>
-								)}
-							</>
-						)}
-					</div>
-				)}
 			</div>
 			<div className="flex min-w-0 items-center rounded-3xl border border-border bg-input/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30">
 				<div className="relative min-w-0 flex-1">

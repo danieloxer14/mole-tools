@@ -350,10 +350,9 @@ describe("prompt store", () => {
 		).rejects.toThrow(PortError);
 	});
 
-	test("seeds prompts when missing", async () => {
+	test("seeds remaining review prompts when missing", async () => {
 		const dir = await promptsDir();
 		await loadPrompt("review-explain-comment", { dir });
-		await loadPrompt("review-importance", { dir });
 		expect(await loadPrompt("review-one-pager", { dir })).toBe(
 			DEFAULT_PROMPTS["review-one-pager"].trim(),
 		);
@@ -362,7 +361,6 @@ describe("prompt store", () => {
 		);
 		for (const slot of [
 			"review-explain-comment",
-			"review-importance",
 			"review-one-pager",
 			"review-one-pager-chat",
 		]) {
@@ -380,7 +378,6 @@ describe("prompt store", () => {
 			"review-chat",
 			"review-comment-from-chat",
 			"review-explain-comment",
-			"review-importance",
 			"review-layers-code",
 			"review-layers-plan",
 			"review-one-pager",

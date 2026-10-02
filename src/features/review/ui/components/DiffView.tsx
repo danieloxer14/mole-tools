@@ -51,14 +51,6 @@ import type {
 } from "../../../../shared/diff-parse";
 import { type Draft, isMarkdownSelection } from "../../state";
 import type { FromChatContext } from "../from-chat";
-import {
-	type ContestableImportanceSpan,
-	IMPORTANCE_BG_CLASS,
-	type ImportanceLineMap,
-	importanceTitle,
-	indexedDiffLineImportance,
-	lineImportanceMap,
-} from "../importance";
 import { CommentDraft, type CommentDraftProps } from "./CommentDraft";
 import { CommentMarkdown } from "./CommentMarkdown";
 import {
@@ -96,12 +88,7 @@ import {
 	SegmentedToggleGroup,
 	SegmentedToggleGroupItem,
 } from "./ui/toggle-group";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "./ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { useDiffDrag } from "./use-diff-drag";
 export type DiffMode = "inline" | "side-by-side";
 export type FileViewMode = "rendered" | "diff";
@@ -136,11 +123,6 @@ export interface MarkdownBlockSelection {
 	quote: string;
 }
 
-type ContestImportanceHandler = (
-	span: ContestableImportanceSpan,
-	restoreFocusTarget: HTMLButtonElement,
-) => void;
-
 interface DiffViewProps {
 	file: ParsedFileDiff | null;
 	mode: DiffMode;
@@ -150,8 +132,6 @@ interface DiffViewProps {
 	fileContentsError: string | null;
 	discussions?: readonly HostDiscussion[];
 	drafts?: readonly Draft[];
-	importance?: readonly ContestableImportanceSpan[];
-	onContestImportance?: ContestImportanceHandler;
 	onExplainDiscussion?: (discussionId: string) => void;
 	explainDisabled?: boolean;
 	onModeChange: (mode: DiffMode) => void;
@@ -827,136 +807,7 @@ function LineActions({
 		</span>
 	);
 }
-function focusNextTabbableAfter(element: HTMLElement): void {
-	const tabbables = Array.from(
-		document.querySelectorAll<HTMLElement>(
-			'a[href], area[href], button, input, select, textarea, iframe, object, embed, summary, audio[controls], video[controls], [contenteditable="true"], [tabindex]',
-		),
-	).filter(
-		(candidate) =>
-			candidate.tabIndex >= 0 &&
-			!candidate.matches(":disabled") &&
-			!candidate.closest("[hidden], [inert], [aria-hidden='true']"),
-	);
-	const index = tabbables.indexOf(element);
-	tabbables[index + 1]?.focus();
-}
 
-function ImportanceStrip({
-	rating,
-	onContest,
-}: {
-	rating: ContestableImportanceSpan;
-	onContest?: ContestImportanceHandler;
-}) {
-	const triggerRef = useRef<HTMLButtonElement>(null);
-	const contestButtonRef = useRef<HTMLButtonElement>(null);
-	const [tooltipOpen, setTooltipOpen] = useState(false);
-	const closeOnFocusLeave = (nextTarget: EventTarget | null) => {
-		if (
-			nextTarget !== triggerRef.current &&
-			nextTarget !== contestButtonRef.current
-		) {
-			setTooltipOpen(false);
-		}
-	};
-	const openContest = () => {
-		const restoreFocusTarget = triggerRef.current;
-		if (restoreFocusTarget) onContest?.(rating, restoreFocusTarget);
-	};
-
-	return (
-		<TooltipProvider delay={0}>
-			<Tooltip
-				open={tooltipOpen}
-				onOpenChange={(open) => {
-					setTooltipOpen(open);
-					if (!open && document.activeElement === contestButtonRef.current)
-						triggerRef.current?.focus();
-				}}
-			>
-				<TooltipTrigger
-					render={
-						<button
-							ref={triggerRef}
-							type="button"
-							aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
-							className={`importance-strip ${IMPORTANCE_BG_CLASS[rating.score]} focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring`}
-							onKeyDown={(event) => {
-								if (
-									event.key !== "Tab" ||
-									event.shiftKey ||
-									!onContest ||
-									contestButtonRef.current === null
-								) {
-									return;
-								}
-								event.preventDefault();
-								contestButtonRef.current.focus();
-							}}
-							onBlur={(event) => closeOnFocusLeave(event.relatedTarget)}
-						/>
-					}
-				/>
-				<TooltipContent
-					sideOffset={0}
-					className="flex-col items-stretch gap-0.5"
-				>
-					<div className="flex items-start justify-between gap-2">
-						<span className="font-medium">{importanceTitle(rating.score)}</span>
-						{onContest ? (
-							<Button
-								type="button"
-								size="xs"
-								variant="secondary"
-								className="-mr-1 shrink-0"
-								ref={contestButtonRef}
-								onClick={(event) => {
-									event.stopPropagation();
-									openContest();
-								}}
-								onKeyDown={(event) => {
-									if (event.key === "Escape") {
-										event.preventDefault();
-										event.stopPropagation();
-										triggerRef.current?.focus();
-										return;
-									}
-									event.stopPropagation();
-									if (event.key === "Enter") {
-										event.preventDefault();
-										openContest();
-									} else if (event.key === " ") {
-										event.preventDefault();
-									} else if (event.key === "Tab") {
-										event.preventDefault();
-										if (event.shiftKey) {
-											triggerRef.current?.focus();
-										} else {
-											setTooltipOpen(false);
-											if (triggerRef.current)
-												focusNextTabbableAfter(triggerRef.current);
-										}
-									}
-								}}
-								onBlur={(event) => closeOnFocusLeave(event.relatedTarget)}
-								onKeyUp={(event) => {
-									if (event.key !== " ") return;
-									event.preventDefault();
-									event.stopPropagation();
-									openContest();
-								}}
-							>
-								Contest
-							</Button>
-						) : null}
-					</div>
-					<span>{rating.reason}</span>
-				</TooltipContent>
-			</Tooltip>
-		</TooltipProvider>
-	);
-}
 function DiffLineRow({
 	line,
 	mode,
@@ -971,8 +822,6 @@ function DiffLineRow({
 	selected = false,
 	drag,
 	onDragStart,
-	importance,
-	onContestImportance,
 }: {
 	line: DiffLine;
 	mode: DiffMode;
@@ -987,8 +836,6 @@ function DiffLineRow({
 	selected?: boolean;
 	drag?: { hunkIndex: number; side: "new" | "old"; line: number };
 	onDragStart?: (action: DragAction, event: MouseEvent<HTMLElement>) => void;
-	importance?: ImportanceLineMap<ContestableImportanceSpan>;
-	onContestImportance?: ContestImportanceHandler;
 }) {
 	const isMatch = lineTextMatches(line.text, find.query);
 	const isCurrent = find.currentId === findId;
@@ -1057,11 +904,6 @@ function DiffLineRow({
 	);
 	const oldHighlight = lineHighlight(highlightedCode, "old", line.oldLine);
 	const newHighlight = lineHighlight(highlightedCode, "new", line.newLine);
-	const lineRating = importance
-		? indexedDiffLineImportance(importance, line)
-		: null;
-	const oldRating = line.kind !== "add" ? lineRating : null;
-	const newRating = line.kind !== "del" ? lineRating : null;
 	return mode === "inline" ? (
 		<tr
 			ref={setRef}
@@ -1069,19 +911,7 @@ function DiffLineRow({
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
 			{...trProps}
 		>
-			<td
-				className={
-					lineRating === null ? "line-number" : "line-number importance-cell"
-				}
-			>
-				{lineRating === null ? null : (
-					<ImportanceStrip
-						rating={lineRating}
-						onContest={onContestImportance}
-					/>
-				)}
-				{line.oldLine ?? ""}
-			</td>
+			<td className="line-number">{line.oldLine ?? ""}</td>
 			<td className="line-number">{line.newLine ?? ""}</td>
 			<td className="line-text">
 				<span className="line-prefix">
@@ -1106,16 +936,7 @@ function DiffLineRow({
 			key={`${lineLabel(line)}-${line.kind}-${line.text}`}
 			{...trProps}
 		>
-			<td
-				className={
-					oldRating === null ? "line-number" : "line-number importance-cell"
-				}
-			>
-				{oldRating === null ? null : (
-					<ImportanceStrip rating={oldRating} onContest={onContestImportance} />
-				)}
-				{line.oldLine ?? ""}
-			</td>
+			<td className="line-number">{line.oldLine ?? ""}</td>
 			<td className={`side-line ${line.kind === "del" ? "removed" : ""}`}>
 				{line.kind === "add" ? (
 					""
@@ -1136,16 +957,7 @@ function DiffLineRow({
 					</>
 				)}
 			</td>
-			<td
-				className={
-					newRating === null ? "line-number" : "line-number importance-cell"
-				}
-			>
-				{newRating === null ? null : (
-					<ImportanceStrip rating={newRating} onContest={onContestImportance} />
-				)}
-				{line.newLine ?? ""}
-			</td>
+			<td className="line-number">{line.newLine ?? ""}</td>
 			<td className={`side-line ${line.kind === "add" ? "added" : ""}`}>
 				{line.kind === "del" ? (
 					""
@@ -1326,8 +1138,6 @@ function HunkRows({
 	dragSelected,
 	collapsedDiscussionIds,
 	onToggleDiscussionCollapse,
-	importance,
-	onContestImportance,
 }: {
 	file: ParsedFileDiff;
 	hunk: DiffHunk;
@@ -1362,8 +1172,6 @@ function HunkRows({
 	dragSelected?: (row: DiffDragRow) => boolean;
 	collapsedDiscussionIds: ReadonlySet<string>;
 	onToggleDiscussionCollapse: (discussionId: string) => void;
-	importance?: ImportanceLineMap<ContestableImportanceSpan>;
-	onContestImportance?: ContestImportanceHandler;
 }) {
 	const selectedRange =
 		rangeSelection?.hunk === hunk.header ? rangeSelection : null;
@@ -1429,8 +1237,6 @@ function HunkRows({
 									? (event) => onLineClick(line, hunk.header, event)
 									: undefined
 							}
-							importance={importance}
-							onContestImportance={onContestImportance}
 						/>
 						<InlineCommentRows
 							file={file}
@@ -1490,8 +1296,6 @@ function DiffTable({
 	onCommentSelection,
 	collapsedDiscussionIds,
 	onToggleDiscussionCollapse,
-	importance,
-	onContestImportance,
 }: {
 	file: ParsedFileDiff;
 	mode: DiffMode;
@@ -1508,16 +1312,8 @@ function DiffTable({
 	onCommentSelection?: (selection: DiffLineSelection) => void;
 	collapsedDiscussionIds: ReadonlySet<string>;
 	onToggleDiscussionCollapse: (discussionId: string) => void;
-	importance?: readonly ContestableImportanceSpan[];
-	onContestImportance?: ContestImportanceHandler;
 }) {
 	const path = file.newPath ?? file.oldPath ?? "";
-	const importanceIndex:
-		| ImportanceLineMap<ContestableImportanceSpan>
-		| undefined = useMemo(
-		() => (importance ? lineImportanceMap(importance, file.hunks) : undefined),
-		[file.hunks, importance],
-	);
 	const language = path.split(".").pop() ?? "text";
 	const defaultSide = file.status === "deleted" ? "old" : "new";
 	const highlightedCode = useCodeHighlights(file, fileContents, language);
@@ -1715,8 +1511,6 @@ function DiffTable({
 								}
 								collapsedDiscussionIds={collapsedDiscussionIds}
 								onToggleDiscussionCollapse={onToggleDiscussionCollapse}
-								importance={importanceIndex}
-								onContestImportance={onContestImportance}
 							/>
 						</Fragment>
 					);
@@ -1760,8 +1554,6 @@ export function DiffView({
 	onSendDraft,
 	onRetryDraft,
 	fromChat,
-	importance,
-	onContestImportance,
 	collapsedDiscussionIds: savedCollapsedDiscussionIds = [],
 	onCollapsedDiscussionIdsChange,
 	findQuery: findQueryProp,
@@ -2283,8 +2075,6 @@ export function DiffView({
 							find={find}
 							collapsedDiscussionIds={collapsedDiscussionIds}
 							onToggleDiscussionCollapse={toggleDiscussionCollapse}
-							importance={importance}
-							onContestImportance={onContestImportance}
 						/>
 					) : null}
 					{!file.binary && collapsed && expanded ? (

@@ -3,15 +3,8 @@ import { Check, ChevronDown, Loader2, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdownHtml } from "../../../../shared/markdown";
 import type { ReviewState } from "../../state";
-import {
-	IMPORTANCE_BG_CLASS,
-	type ImportanceRating,
-	type ImportanceReviewProgress,
-	importanceTitle,
-} from "../importance";
 import { changedFileCount, viewedFileCount } from "./ChangedFilesHeader";
 import { IconButton } from "./IconButton";
-import { ImportanceProgressBar } from "./ImportanceProgressBar";
 import { ProgressBar } from "./ProgressBar";
 import { Alert } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -39,8 +32,6 @@ interface LayerPaneProps {
 	externallyDisabled: boolean;
 	onRegenerate: () => void;
 	onRetry: () => void;
-	importanceByPath?: ReadonlyMap<string, ImportanceRating>;
-	importanceProgress?: ImportanceReviewProgress;
 }
 
 export function layersStatusMessage(
@@ -178,8 +169,6 @@ export function LayerPane({
 	externallyDisabled,
 	onRegenerate,
 	onRetry,
-	importanceByPath,
-	importanceProgress,
 }: LayerPaneProps) {
 	const [collapsedLayerIds, setCollapsedLayerIds] = useState<Set<string>>(
 		() =>
@@ -303,12 +292,6 @@ export function LayerPane({
 							</span>
 						</TabsTrigger>
 					</TabsList>
-					{importanceProgress ? (
-						<ImportanceProgressBar
-							className="mt-3"
-							progress={importanceProgress}
-						/>
-					) : null}
 				</div>
 				<TabsContent
 					value="layers"
@@ -505,7 +488,6 @@ export function LayerPane({
 													{layerFiles.map((path) => {
 														const active = path === selectedPath;
 														const isViewed = viewed.has(path);
-														const rating = importanceByPath?.get(path);
 														const pill = (
 															<Badge
 																className={cn(
@@ -515,8 +497,6 @@ export function LayerPane({
 																		: isViewed
 																			? "bg-success/15 text-success hover:bg-success/20 hover:text-success"
 																			: "hover:bg-muted hover:text-foreground",
-																	rating !== undefined &&
-																		"overflow-hidden pl-0",
 																)}
 																key={path}
 																variant="secondary"
@@ -530,16 +510,6 @@ export function LayerPane({
 																	/>
 																}
 															>
-																{rating !== undefined ? (
-																	<span
-																		aria-hidden="true"
-																		className={cn(
-																			"-my-0.5 mr-0.5 w-4 self-stretch",
-																			IMPORTANCE_BG_CLASS[rating.score],
-																		)}
-																	/>
-																) : null}
-
 																{shortFilePath(path, changedFilePaths)}
 															</Badge>
 														);
@@ -552,24 +522,7 @@ export function LayerPane({
 																>
 																	{pill}
 																</TooltipTrigger>
-																<TooltipContent
-																	className={
-																		rating === undefined
-																			? undefined
-																			: "flex-col items-start gap-0.5"
-																	}
-																>
-																	{rating === undefined ? (
-																		path
-																	) : (
-																		<>
-																			<span className="font-medium">
-																				{importanceTitle(rating.score)}
-																			</span>
-																			<span>{rating.reason}</span>
-																		</>
-																	)}
-																</TooltipContent>
+																<TooltipContent>{path}</TooltipContent>
 															</Tooltip>
 														);
 													})}

@@ -2,13 +2,6 @@ import { z } from "zod";
 
 export const FEATURE_FLAGS = [
 	{
-		id: "layer-importance",
-		label: "File important",
-		description:
-			"Score each changed line span 1–5 with a concise reason and colour diff gutters, layer file pills, and changed files from cool blue (skip) to red (critical).",
-		defaultEnabled: false,
-	},
-	{
 		id: "one-pager",
 		label: "One pager",
 		description:
