@@ -1,12 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+	ImportanceContestResponse,
 	ImportanceFile,
+	ImportanceScore,
 	ImportanceSnapshot,
+	ImportanceSpan,
 	ImportanceStatus,
 } from "../importance";
-import { errorMessage, requestJson } from "./api-json";
+import { errorMessage, postJson, requestJson } from "./api-json";
 import { consumeImportanceStream } from "./importance-stream";
 import type { LayerStreamFrame } from "./layer-stream";
+
+export interface ImportanceContestInput {
+	path: string;
+	fileIndex: number;
+	spanIndex: number;
+	expected: ImportanceSpan;
+	score: ImportanceScore;
+	reason: string;
+}
 
 export interface UseImportanceResult {
 	status: ImportanceStatus | null;
@@ -14,9 +26,13 @@ export interface UseImportanceResult {
 	files: ImportanceFile[];
 	canRetry: boolean;
 	retry: () => void;
+	contest: (input: ImportanceContestInput) => Promise<string>;
 }
 
-type ImportanceState = Omit<UseImportanceResult, "canRetry" | "retry"> & {
+type ImportanceState = Omit<
+	UseImportanceResult,
+	"canRetry" | "retry" | "contest"
+> & {
 	revisionMismatch: boolean;
 };
 type ImportanceAction = "observe" | "retry";
@@ -155,6 +171,7 @@ export function useImportance(
 	const [state, setState] = useState<ImportanceState>(INITIAL_STATE);
 	const stateRef = useRef(state);
 	const operationRef = useRef(0);
+	const contestGenerationRef = useRef(0);
 	const controllerRef = useRef<AbortController | null>(null);
 
 	const commit = useCallback((next: ImportanceState) => {
@@ -213,7 +230,12 @@ export function useImportance(
 						update,
 					);
 				} else {
-					update({ ...snapshot, revisionMismatch: false });
+					update({
+						status: snapshot.status,
+						error: snapshot.error,
+						files: snapshot.files,
+						revisionMismatch: false,
+					});
 				}
 			} catch (error) {
 				update({
@@ -264,9 +286,75 @@ export function useImportance(
 		})();
 	}, [beginOperation, enabled, revisionKey, token]);
 
+	const contest = useCallback(
+		async (input: ImportanceContestInput): Promise<string> => {
+			if (
+				!enabled ||
+				revisionKey === "" ||
+				stateRef.current.status !== "ready"
+			) {
+				throw new Error("Importance is not ready");
+			}
+
+			const operation = operationRef.current;
+			const contestGeneration = ++contestGenerationRef.current;
+			let response: ImportanceContestResponse;
+			try {
+				response = await postJson<ImportanceContestResponse>(
+					token,
+					"/api/importance/contest",
+					{ revisionKey, ...input },
+				);
+			} catch (error) {
+				if (
+					contestGenerationRef.current === contestGeneration &&
+					operationRef.current === operation &&
+					stateRef.current.status === "ready"
+				) {
+					try {
+						const snapshot = await requestJson<ImportanceSnapshot>(
+							token,
+							"/api/importance",
+							{ signal: controllerRef.current?.signal },
+						);
+						if (
+							contestGenerationRef.current === contestGeneration &&
+							operationRef.current === operation &&
+							stateRef.current.status === "ready" &&
+							snapshot.revisionKey === revisionKey &&
+							snapshot.status === "ready"
+						) {
+							commit({
+								...stateRef.current,
+								files: snapshot.files,
+							});
+						}
+					} catch {
+						// Preserve contest failure when authoritative refresh also fails.
+					}
+				}
+				throw error;
+			}
+			if (
+				contestGenerationRef.current === contestGeneration &&
+				operationRef.current === operation &&
+				stateRef.current.status === "ready" &&
+				response.snapshot.revisionKey === revisionKey
+			) {
+				commit({
+					...stateRef.current,
+					files: response.snapshot.files,
+				});
+			}
+			return response.report;
+		},
+		[enabled, revisionKey, token, commit],
+	);
+
 	return {
 		...state,
 		canRetry: state.status === "failed" && !state.revisionMismatch,
 		retry,
+		contest,
 	};
 }

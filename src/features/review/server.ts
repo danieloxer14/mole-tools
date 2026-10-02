@@ -52,7 +52,10 @@ export class ReviewServer {
 
 	get port(): number {
 		if (!this.server) throw new Error("Review server is not started");
-		return this.server.port;
+		const port = this.server.port;
+		if (port === undefined)
+			throw new Error("Review server port is unavailable");
+		return port;
 	}
 
 	get url(): string {

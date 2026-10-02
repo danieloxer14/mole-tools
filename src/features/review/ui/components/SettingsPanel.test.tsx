@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { act, createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { withMockFetch } from "../../../../../test/fakes/mockFetch";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import { APP_VERSION } from "../../../../shared/app-version";
 import { applyColorTheme } from "../color-theme";
@@ -155,7 +156,7 @@ test("one-pager prompt slots are shown only when the confirmed flag is enabled",
 test("importance slot appears after existing slots when Layer importance is on", async () => {
 	resetFeatureFlagsForTests();
 	const originalFetch = globalThis.fetch;
-	globalThis.fetch = (async () =>
+	globalThis.fetch = withMockFetch(async () =>
 		jsonResponse({
 			flags: [
 				{
@@ -165,7 +166,8 @@ test("importance slot appears after existing slots when Layer importance is on",
 					enabled: true,
 				},
 			],
-		})) as typeof fetch;
+		}),
+	);
 	try {
 		await loadFeatureFlags("settings-test-token");
 		const markup = render();
@@ -278,7 +280,10 @@ test("importance slot selection falls back when Layer importance turns off", asy
 		const selected = container.querySelector(
 			"nav[aria-label='Prompt slots'] button[aria-current='true']",
 		);
-		expect(selected?.textContent).toContain(SLOT_LABELS[VISIBLE_SLOTS[0]]);
+		const visibleSlot = VISIBLE_SLOTS[0];
+		if (visibleSlot === undefined)
+			throw new Error("Expected visible prompt slot");
+		expect(selected?.textContent).toContain(SLOT_LABELS[visibleSlot]);
 		expect(
 			container.querySelector("nav[aria-label='Prompt slots']")?.textContent,
 		).not.toContain("Review importance");
@@ -688,8 +693,9 @@ test("General hosts the whitespace toggle independent of settings load", async (
 	expect(omitted).not.toContain("Show whitespace changes");
 
 	const originalFetch = globalThis.fetch;
-	globalThis.fetch = (async () =>
-		jsonResponse({ error: "Settings unavailable" }, 503)) as typeof fetch;
+	globalThis.fetch = withMockFetch(async () =>
+		jsonResponse({ error: "Settings unavailable" }, 503),
+	);
 	const container = document.createElement("div");
 	const root = createRoot(container);
 	document.body.append(container);

@@ -235,15 +235,17 @@ function draftAnchorResolves(
 	diff: ParsedFileDiff[],
 	diffRefs: ReviewDiffRefs,
 ): boolean {
-	if (draft.filePath !== draft.selection.path) return false;
+	const selection = draft.selection;
+	if (draft.filePath !== selection.path) return false;
+	if (!("side" in selection)) return false;
 	const file = diff.find((candidate) => {
 		const path =
-			draft.selection.side === "new" ? candidate.newPath : candidate.oldPath;
+			selection.side === "new" ? candidate.newPath : candidate.oldPath;
 		return path === draft.filePath;
 	});
 	if (!file) return false;
 	try {
-		buildPosition(draft.selection, file, diffRefs);
+		buildPosition(selection, file, diffRefs);
 		return true;
 	} catch {
 		return false;

@@ -136,7 +136,7 @@ test("shows D4 name errors while typing and disables Create for every invalid na
 			["abc", "Name must be more than 3 characters"],
 			["x".repeat(65), "Name must be 64 characters or fewer"],
 			["Review-IT", "A skill with this name already exists"],
-		]) {
+		] as const) {
 			await interact(() => setTextValue(nameInput, name));
 			expect(
 				document.body.querySelector("#new-skill-name-error")?.textContent,

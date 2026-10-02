@@ -101,6 +101,7 @@ describe("comment drafts", () => {
 			const store = new ReviewStore({
 				statePath: join(dir, "review.json"),
 				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
 			});
 			await store.write(state());
 			const routes = createReviewRoutes({ token, store });
@@ -161,6 +162,7 @@ describe("comment drafts", () => {
 			const store = new ReviewStore({
 				statePath: join(dir, "review.json"),
 				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
 			});
 			await store.write(state([baseDraft]));
 			let created = 0;
@@ -198,6 +200,7 @@ describe("comment drafts", () => {
 			const failingStore = new ReviewStore({
 				statePath: join(dir, "failed-review.json"),
 				chatPath: join(dir, "failed-chat.ndjson"),
+				chatsDir: join(dir, "failed-chats"),
 			});
 			await failingStore.write(state([baseDraft]));
 			const failingRoutes = createReviewRoutes({
@@ -239,6 +242,7 @@ describe("comment drafts", () => {
 			const store = new ReviewStore({
 				statePath: join(dir, "review.json"),
 				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
 			});
 			await store.write(state());
 			const routes = createReviewRoutes({ token, store });

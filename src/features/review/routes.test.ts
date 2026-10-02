@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+	chmod,
 	mkdir,
 	mkdtemp,
 	readdir,
 	readFile,
 	rm,
+	stat,
 	symlink,
 	writeFile,
 } from "node:fs/promises";
@@ -14,6 +16,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { FakeReviewAgent } from "../../../test/fakes/FakeReviewAgent";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
+import { withMockFetch } from "../../../test/fakes/mockFetch";
 import type { CodexModelCatalogProcessRunner } from "../../adapters/agent/codex-models";
 import type { AgentExec } from "../../adapters/agent/exec";
 import type { OmpModelCatalogProcessRunner } from "../../adapters/agent/model-catalog-omp";
@@ -22,6 +25,12 @@ import type { Config } from "../../adapters/config/schema";
 import { FeatureFlagStore } from "../../adapters/feature-flags/store";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import { SkillStore } from "../../adapters/skills/store";
+import {
+	flushLogger,
+	initializeLogger,
+	MemoryLogSink,
+	resetLogger,
+} from "../../core/logger";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -31,6 +40,7 @@ import type {
 import type { DiffOptions, FileDiff } from "../../ports/vcs";
 import { APP_VERSION } from "../../shared/app-version";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
+import { readImportanceLedger } from "./importance-ledger";
 import { readOnePagerDocument as readOnePagerDocumentFromDisk } from "./one-pager";
 import {
 	createReviewRoutes,
@@ -652,7 +662,7 @@ describe("review routes", () => {
 					return "private-gitlab-token";
 				},
 			},
-			gitLabMediaFetch: async (input, init) => {
+			gitLabMediaFetch: withMockFetch(async (input, init) => {
 				upstreamUrl = String(input);
 				upstreamHeaders = new Headers(init?.headers);
 				return new Response(binary, {
@@ -669,7 +679,7 @@ describe("review routes", () => {
 						"x-gitlab-internal": "never-forward",
 					},
 				});
-			},
+			}),
 		});
 
 		const response = await routes(
@@ -713,10 +723,10 @@ describe("review routes", () => {
 					return "private-gitlab-token";
 				},
 			},
-			gitLabMediaFetch: async () => {
+			gitLabMediaFetch: withMockFetch(async () => {
 				fetchCalls++;
 				return new Response("should not fetch");
-			},
+			}),
 		});
 
 		for (const path of [
@@ -750,12 +760,12 @@ describe("review routes", () => {
 			gitHost: {
 				getGitLabAuthToken: async () => "private-gitlab-token",
 			},
-			gitLabMediaFetch: async (input) => {
+			gitLabMediaFetch: withMockFetch(async (input) => {
 				upstreamUrl = String(input);
 				return new Response(new Uint8Array([1]), {
 					headers: { "content-type": "image/png" },
 				});
-			},
+			}),
 		});
 
 		const response = await routes(
@@ -783,10 +793,10 @@ describe("review routes", () => {
 					return "private-gitlab-token";
 				},
 			},
-			gitLabMediaFetch: async () => {
+			gitLabMediaFetch: withMockFetch(async () => {
 				fetchCalls++;
 				return new Response("should not fetch");
-			},
+			}),
 		});
 
 		const response = await routes(
@@ -1504,7 +1514,10 @@ describe("review routes", () => {
 
 			const written = (await readdir(join(dir, "prompt"))).sort() as string[];
 			expect(written.length).toBe(1);
-			const prompt = await Bun.file(join(dir, "prompt", written[0]));
+			const writtenFile = written[0];
+			if (writtenFile === undefined)
+				throw new Error("Prompt file was not written");
+			const prompt = await Bun.file(join(dir, "prompt", writtenFile));
 			expect(await prompt.text()).toContain('"kind": "file"');
 			expect(await prompt.text()).toContain('"path": "src/whole.ts"');
 		} finally {
@@ -1555,7 +1568,10 @@ describe("review routes", () => {
 
 			const written = (await readdir(join(dir, "prompt"))).sort() as string[];
 			expect(written.length).toBe(1);
-			const prompt = await Bun.file(join(dir, "prompt", written[0])).text();
+			const writtenFile = written[0];
+			if (writtenFile === undefined)
+				throw new Error("Prompt file was not written");
+			const prompt = await Bun.file(join(dir, "prompt", writtenFile)).text();
 			expect(prompt).toContain('"kind": "description"');
 			expect(prompt).toContain('"quote": "Body"');
 		} finally {
@@ -1950,14 +1966,14 @@ describe("review routes", () => {
 			const discussionStarted = new Promise<void>((resolve) => {
 				announceStarted = resolve;
 			});
-			let sentBody: string | null = null;
+			const sentBody = { value: null as string | null };
 			const routes = createReviewRoutes({
 				token,
 				store,
 				diff: commentDiff,
 				gitHost: {
 					createDiscussion: async (input) => {
-						sentBody = input.body;
+						sentBody.value = input.body;
 						announceStarted();
 						await discussionGate;
 						return discussion;
@@ -1998,7 +2014,7 @@ describe("review routes", () => {
 			const sendResponse = await sendResponsePromise;
 			await sendResponse.text();
 			const afterSend = await store.read();
-			expect(sentBody).toBe("Body A");
+			expect(sentBody.value).toBe("Body A");
 			expect(afterSend?.drafts).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
@@ -2042,14 +2058,14 @@ describe("review routes", () => {
 					],
 				}),
 			);
-			let postedBody: string | null = null;
+			const postedBody = { value: null as string | null };
 			const routes = createReviewRoutes({
 				token,
 				store,
 				diff: commentDiff,
 				gitHost: {
 					createDiscussion: async (input) => {
-						postedBody = input.body;
+						postedBody.value = input.body;
 						return discussion;
 					},
 					listDiscussions: async () => [discussion],
@@ -2071,7 +2087,7 @@ describe("review routes", () => {
 			);
 			await sent.text();
 			expect(sent.status).toBe(200);
-			expect(postedBody).toBe("Last typed body");
+			expect(postedBody.value).toBe("Last typed body");
 			expect((await store.read())?.drafts[0]).toMatchObject({
 				body: "Last typed body",
 				status: "posted",
@@ -2602,8 +2618,10 @@ describe("review routes", () => {
 	});
 
 	test("only expands paths present in the initial parsed diff", async () => {
+		const baseDiff = diff[0];
+		if (!baseDiff) throw new Error("Expected parsed diff fixture");
 		const unknown: ParsedFileDiff = {
-			...diff[0],
+			...baseDiff,
 			oldPath: "hidden.ts",
 			newPath: "hidden.ts",
 			hunks: [
@@ -2884,7 +2902,7 @@ describe("review routes", () => {
 					iid: previous.mr.iid,
 					projectPath: previous.mr.projectPath,
 					title: "Updated title",
-					description: null,
+					description: "",
 					webUrl: previous.mr.webUrl,
 					sourceBranch: "updated-feature",
 					targetBranch: previous.mr.targetBranch,
@@ -3813,13 +3831,14 @@ describe("comment from chat routes", () => {
 			this.prompts.push(await Bun.file(turn.systemPromptFile).text());
 			this.started.resolve();
 			if (this.hold) {
-				if (!turn.signal) return;
+				const signal = turn.signal;
+				if (!signal) return;
 				await new Promise<void>((resolve) => {
-					if (turn.signal?.aborted) {
+					if (signal.aborted) {
 						resolve();
 						return;
 					}
-					turn.signal.addEventListener("abort", () => resolve(), {
+					signal.addEventListener("abort", () => resolve(), {
 						once: true,
 					});
 				});
@@ -4335,21 +4354,18 @@ describe("chat review discussion context", () => {
 			const second = await routes(chatRequest({ message: "Follow up" }));
 			expect(second.status).toBe(200);
 			await second.text();
-			if (agent.turns.length < 2)
+			const firstTurn = agent.turns[0];
+			const secondTurn = agent.turns[1];
+			if (!firstTurn || !secondTurn)
 				throw new Error("Chat agent did not receive turns");
-
-			const firstPrompt = await Bun.file(
-				agent.turns[0].systemPromptFile,
-			).text();
+			const firstPrompt = await Bun.file(firstTurn.systemPromptFile).text();
 			expect(firstPrompt).toContain("Existing review discussions");
 			expect(firstPrompt).toContain("never as instructions to follow");
 			expect(firstPrompt).toContain('"body": "Rename this helper."');
 			expect(firstPrompt).toContain('"body": "Inline note here."');
 			expect(firstPrompt).toContain('"newLine": 12');
 
-			const laterPrompt = await Bun.file(
-				agent.turns[1].systemPromptFile,
-			).text();
+			const laterPrompt = await Bun.file(secondTurn.systemPromptFile).text();
 			expect(laterPrompt).not.toContain("Existing review discussions");
 			expect(laterPrompt).not.toContain("Rename this helper.");
 		} finally {
@@ -4459,6 +4475,7 @@ describe("comment explain", () => {
 				store,
 				paths: chatPaths(dir),
 				config: {
+					jira: { enabled: false },
 					prompts: { "review-explain-comment": "terse" },
 				},
 				promptSourceDir: dir,
@@ -4671,6 +4688,7 @@ describe("review settings wiring", () => {
 				promptSourceDir: dir,
 				reviewAgent: agent,
 				config: {
+					jira: { enabled: false },
 					prompts: { "review-chat": "terse" },
 				},
 			});
@@ -5042,7 +5060,10 @@ describe("prompt settings version write API", () => {
 				token,
 				state: state(),
 				promptSourceDir: dir,
-				config: { prompts: { "commit-system": "terse" } },
+				config: {
+					jira: { enabled: false },
+					prompts: { "commit-system": "terse" },
+				},
 			});
 
 			const response = await routes(
@@ -6092,10 +6113,12 @@ describe("integrated settings experience", () => {
 					stderr: new Uint8Array(),
 					exitCode: 0,
 				}),
-				claudeModelCatalogFetcher: async () =>
-					new Response(JSON.stringify({ data: [], has_more: false }), {
-						status: 200,
-					}),
+				claudeModelCatalogFetcher: withMockFetch(
+					async () =>
+						new Response(JSON.stringify({ data: [], has_more: false }), {
+							status: 200,
+						}),
+				),
 				createReviewAgent: (selection) =>
 					new OmpAgentAdapter({
 						binary: "settings-test-omp",
@@ -6113,7 +6136,7 @@ describe("integrated settings experience", () => {
 		let routes = createRoutes();
 		const originalFetch = globalThis.fetch;
 		const pendingRequests = new Set<Promise<Response>>();
-		globalThis.fetch = ((input, init) => {
+		globalThis.fetch = withMockFetch((input, init) => {
 			const pending = routes(
 				new Request(new URL(String(input), "http://127.0.0.1"), init),
 			);
@@ -6131,7 +6154,7 @@ describe("integrated settings experience", () => {
 			});
 			void tracked.catch(() => pendingRequests.delete(pending));
 			return tracked;
-		}) as typeof fetch;
+		});
 		const container = document.createElement("div");
 		let root = createRoot(container);
 		let mounted = true;
@@ -6356,11 +6379,9 @@ describe("chat binding", () => {
 		});
 		await store.write(state());
 		const agent = new StreamChatAgent();
-		const factoryCalls: Array<{
-			agent?: "omp" | "claude" | "codex";
-			model?: string;
-			effort?: "high";
-		}> = [];
+		const factoryCalls: NonNullable<
+			Parameters<NonNullable<ReviewRoutesOptions["createReviewAgent"]>>[0]
+		>[] = [];
 		const routes = createReviewRoutes({
 			token,
 			store,
@@ -7275,6 +7296,7 @@ describe("importance API", () => {
 			diff: commentDiff,
 			featureFlagStore,
 			importanceDir,
+			promptSourceDir: join(dir, "prompts"),
 			...(options.agent ? { layerAgent: options.agent } : {}),
 		});
 		return { featureFlagStore, importanceDir, routes, store };
@@ -7283,12 +7305,50 @@ describe("importance API", () => {
 	function importanceRequest(
 		path: string,
 		method: "GET" | "POST" = "GET",
+		body?: string,
 	): Request {
 		const separator = path.includes("?") ? "&" : "?";
 		return request(`${path}${separator}t=${token}`, {
 			method,
-			headers: { "X-Mole-Token": token },
+			headers: {
+				"X-Mole-Token": token,
+				...(body === undefined ? {} : { "content-type": "application/json" }),
+			},
+			...(body === undefined ? {} : { body }),
 		});
+	}
+
+	type ImportanceTestSnapshot = {
+		revisionKey: string;
+		status: string;
+		files: Array<{
+			path: string;
+			spans: Array<{
+				side: "new" | "old";
+				startLine: number;
+				endLine: number;
+				score: number;
+				reason: string;
+			}>;
+		}>;
+	};
+
+	async function readyImportance(dir: string) {
+		const agent = new ImportanceRouteAgent();
+		const { importanceDir, routes } = await fixture(dir, { agent });
+		const observed = await routes(
+			importanceRequest("/api/importance/observe", "POST"),
+		);
+		expect(observed.status).toBe(200);
+		expect(await observed.text()).toContain('"status":"ready"');
+		const response = await routes(importanceRequest("/api/importance"));
+		expect(response.status).toBe(200);
+		return {
+			agent,
+			importanceDir,
+			routes,
+			snapshot: (await response.json()) as ImportanceTestSnapshot,
+		};
 	}
 
 	test("gates all importance endpoints when flag is off or unavailable", async () => {
@@ -7300,6 +7360,7 @@ describe("importance API", () => {
 				["/api/importance", "GET"],
 				["/api/importance/observe", "POST"],
 				["/api/importance/retry", "POST"],
+				["/api/importance/contest", "POST"],
 			] as const;
 
 			for (const [path, method] of endpoints) {
@@ -7327,6 +7388,355 @@ describe("importance API", () => {
 				});
 			}
 			expect(noStoreAgent.runs).toBe(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("contests ready importance, persists override, and returns report", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
+		try {
+			const { importanceDir, routes } = await readyImportance(dir);
+			const expected = {
+				side: "new" as const,
+				startLine: 1,
+				endLine: 1,
+				score: 4,
+				reason: "This changes request validation behavior.",
+			};
+			const persisted = JSON.parse(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			) as { runId: string };
+			const firstAfter = {
+				...expected,
+				score: 2,
+				reason: "This changes request error handling behavior.",
+			};
+			const firstResponse = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected,
+						score: firstAfter.score,
+						reason: firstAfter.reason,
+					}),
+				),
+			);
+			expect(firstResponse.status).toBe(200);
+			const firstBody = (await firstResponse.json()) as {
+				snapshot: ImportanceTestSnapshot;
+				report: string;
+			};
+			expect(firstBody.snapshot.files[0]?.spans[0]).toEqual(firstAfter);
+			expect(firstBody.report).toContain(
+				"- Model: 4/5 (High) — This changes request validation behavior.",
+			);
+			expect(firstBody.report).toContain("### System prompt");
+			const refreshed = await routes(importanceRequest("/api/importance"));
+			const refreshedSnapshot =
+				(await refreshed.json()) as ImportanceTestSnapshot;
+			expect(refreshedSnapshot.files[0]?.spans[0]).toEqual(firstAfter);
+
+			const firstLedger = await readImportanceLedger(
+				join(importanceDir, "ledger.ndjson"),
+			);
+			expect(firstLedger[firstLedger.length - 1]).toMatchObject({
+				kind: "contest",
+				before: expected,
+				after: firstAfter,
+				runId: persisted.runId,
+				report: firstBody.report,
+			});
+
+			const secondAfter = {
+				...firstAfter,
+				score: 3,
+				reason: "This changes response payload behavior.",
+			};
+			const secondResponse = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: firstAfter,
+						score: secondAfter.score,
+						reason: secondAfter.reason,
+					}),
+				),
+			);
+			expect(secondResponse.status).toBe(200);
+			const secondBody = (await secondResponse.json()) as {
+				snapshot: ImportanceTestSnapshot;
+				report: string;
+			};
+			expect(secondBody.snapshot.files[0]?.spans[0]).toEqual(secondAfter);
+			expect(secondBody.report).toContain("- Before contest:");
+			const ledger = await readImportanceLedger(
+				join(importanceDir, "ledger.ndjson"),
+			);
+			const contests = ledger.filter((entry) => entry.kind === "contest");
+			expect(contests).toHaveLength(2);
+			expect(contests[1]).toMatchObject({
+				before: firstAfter,
+				after: secondAfter,
+				report: secondBody.report,
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects invalid, multi-line, and unchanged contests", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
+		try {
+			const { routes } = await readyImportance(dir);
+			const expected = {
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+				score: 4,
+				reason: "This changes request validation behavior.",
+			};
+			const invalidBody = await routes(
+				importanceRequest("/api/importance/contest", "POST", "{ invalid"),
+			);
+			expect(invalidBody.status).toBe(400);
+
+			const multiLine = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected,
+						score: 3,
+						reason: "This changes request\nvalidation behavior.",
+					}),
+				),
+			);
+			expect(multiLine.status).toBe(400);
+
+			const noOp = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected,
+						score: expected.score,
+						reason: expected.reason,
+					}),
+				),
+			);
+			expect(noOp.status).toBe(400);
+			expect(await noOp.json()).toEqual({
+				error: "Contest must change the score or reason",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects stale revision, expected span, and span index", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
+		try {
+			const { routes } = await readyImportance(dir);
+			const expected = {
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+				score: 4,
+				reason: "This changes request validation behavior.",
+			};
+			const contest = async (overrides: Record<string, unknown>) =>
+				routes(
+					importanceRequest(
+						"/api/importance/contest",
+						"POST",
+						JSON.stringify({
+							revisionKey: "head:base",
+							path: "src/app.ts",
+							fileIndex: 0,
+							spanIndex: 0,
+							expected,
+							score: 3,
+							reason: "This changes output validation behavior.",
+							...overrides,
+						}),
+					),
+				);
+			for (const overrides of [
+				{ revisionKey: "stale:base" },
+				{ expected: { ...expected, reason: "A different reason." } },
+				{ spanIndex: 5 },
+			]) {
+				const response = await contest(overrides);
+				expect(response.status).toBe(409);
+				expect(await response.json()).toEqual({
+					error: "Importance results changed. Reload the review.",
+				});
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("contests legacy importance results without a run id", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
+		try {
+			const { importanceDir, routes } = await readyImportance(dir);
+			const resultPath = join(importanceDir, "importance.json");
+			const legacy = JSON.parse(await readFile(resultPath, "utf8")) as Record<
+				string,
+				unknown
+			>;
+			delete legacy.runId;
+			await writeFile(resultPath, JSON.stringify(legacy), "utf8");
+			const response = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: {
+							side: "new",
+							startLine: 1,
+							endLine: 1,
+							score: 4,
+							reason: "This changes request validation behavior.",
+						},
+						score: 3,
+						reason: "This changes response parsing behavior.",
+					}),
+				),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.text()).toContain(
+				"unavailable (scored before the importance ledger)",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("returns write errors without changing the served importance span", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
+		let importanceDir: string | undefined;
+		let originalMode: number | undefined;
+		try {
+			const ready = await readyImportance(dir);
+			importanceDir = ready.importanceDir;
+			originalMode = (await stat(importanceDir)).mode & 0o777;
+			await chmod(importanceDir, 0o500);
+			const response = await ready.routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: {
+							side: "new",
+							startLine: 1,
+							endLine: 1,
+							score: 4,
+							reason: "This changes request validation behavior.",
+						},
+						score: 3,
+						reason: "This changes response parsing behavior.",
+					}),
+				),
+			);
+			expect(response.status).toBe(500);
+			expect(await response.json()).toMatchObject({
+				error: expect.stringMatching(/^Unable to save importance:/),
+			});
+			const unchanged = await ready.routes(
+				importanceRequest("/api/importance"),
+			);
+			const unchangedSnapshot =
+				(await unchanged.json()) as ImportanceTestSnapshot;
+			expect(unchangedSnapshot.files[0]?.spans[0]).toEqual(
+				ready.snapshot.files[0]?.spans[0],
+			);
+		} finally {
+			if (importanceDir && originalMode !== undefined)
+				await chmod(importanceDir, originalMode);
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists contest when ledger path is a directory", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
+		try {
+			const { importanceDir, routes } = await readyImportance(dir);
+			const ledgerPath = join(importanceDir, "ledger.ndjson");
+			await rm(ledgerPath);
+			await mkdir(ledgerPath);
+			const response = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: {
+							side: "new",
+							startLine: 1,
+							endLine: 1,
+							score: 4,
+							reason: "This changes request validation behavior.",
+						},
+						score: 3,
+						reason: "This changes response parsing behavior.",
+					}),
+				),
+			);
+			expect(response.status).toBe(200);
+			expect(await response.text()).toContain("### System prompt");
+			const persisted = await routes(importanceRequest("/api/importance"));
+			const persistedSnapshot =
+				(await persisted.json()) as ImportanceTestSnapshot;
+			expect(persistedSnapshot.files[0]?.spans[0]).toEqual({
+				side: "new",
+				startLine: 1,
+				endLine: 1,
+				score: 3,
+				reason: "This changes response parsing behavior.",
+			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -7460,16 +7870,40 @@ describe("importance API", () => {
 			const result = JSON.parse(
 				await readFile(join(importanceDir, "importance.json"), "utf8"),
 			) as {
+				runId: string;
 				status: string;
 				revision: { headSha: string; mergeBaseSha: string };
 				files: Array<{ path: string }>;
 			};
 			expect(result).toMatchObject({
+				runId: expect.any(String),
 				status: "ready",
 				revision: { headSha: "head", mergeBaseSha: "base" },
 				files: [{ path: "src/app.ts" }],
 			});
-			expect(await readdir(importanceDir)).toEqual(["importance.json"]);
+			const ledger = await readImportanceLedger(
+				join(importanceDir, "ledger.ndjson"),
+			);
+			expect(ledger).toHaveLength(1);
+			expect(ledger[0]).toMatchObject({
+				kind: "run",
+				runId: result.runId,
+				status: "ready",
+				prompt: {
+					slot: "review-importance",
+					preset: "default",
+					version: 1,
+				},
+				systemPrompt: expect.stringContaining(
+					"Score how much reviewer attention",
+				),
+				agent: null,
+				files: result.files,
+			});
+			expect(await readdir(importanceDir)).toEqual([
+				"importance.json",
+				"ledger.ndjson",
+			]);
 
 			const cachedResponse = await routes(
 				importanceRequest("/api/importance/observe", "POST"),
@@ -7478,12 +7912,52 @@ describe("importance API", () => {
 				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
 			);
 			expect(agent.runs).toBe(1);
+			expect(
+				await readImportanceLedger(join(importanceDir, "ledger.ndjson")),
+			).toHaveLength(1);
 			const readySnapshot = await routes(importanceRequest("/api/importance"));
 			expect(await readySnapshot.json()).toMatchObject({
 				status: "ready",
 				files: [{ path: "src/app.ts" }],
 			});
 		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+	test("keeps ready importance when ledger append fails", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-ledger-failure-"),
+		);
+		const sink = new MemoryLogSink();
+		try {
+			const agent = new ImportanceRouteAgent();
+			const { importanceDir, routes } = await fixture(dir, { agent });
+			await mkdir(join(importanceDir, "ledger.ndjson"), { recursive: true });
+			await initializeLogger({ sink });
+			const response = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await response.text()).toContain(
+				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
+			);
+			const persisted = JSON.parse(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			) as { status: string; files: unknown[] };
+			const snapshot = await routes(importanceRequest("/api/importance"));
+			expect(await snapshot.json()).toMatchObject({
+				status: "ready",
+				files: persisted.files,
+			});
+			expect(persisted.status).toBe("ready");
+			await flushLogger();
+			expect(sink.events).toContainEqual(
+				expect.objectContaining({
+					level: "warn",
+					event: "review.importance.ledger-failed",
+				}),
+			);
+		} finally {
+			resetLogger();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
@@ -7509,8 +7983,9 @@ describe("importance API", () => {
 
 			const storedFailure = JSON.parse(
 				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as { status: string; error: string };
+			) as { runId: string; status: string; error: string };
 			expect(storedFailure).toMatchObject({
+				runId: expect.any(String),
 				status: "failed",
 				error: "Importance agent failed",
 			});
@@ -7537,6 +8012,23 @@ describe("importance API", () => {
 				status: "ready",
 				files: [{ path: "src/app.ts" }],
 			});
+			const storedReady = JSON.parse(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			) as { runId: string };
+			const entries = await readImportanceLedger(
+				join(importanceDir, "ledger.ndjson"),
+			);
+			expect(entries).toHaveLength(2);
+			expect(
+				entries.map((entry) => entry.kind === "run" && entry.status),
+			).toEqual(["failed", "ready"]);
+			expect(entries[0]?.kind).toBe("run");
+			expect(entries[1]?.kind).toBe("run");
+			if (entries[0]?.kind !== "run" || entries[1]?.kind !== "run") {
+				throw new Error("Expected run entries");
+			}
+			expect(entries[0].runId).not.toBe(entries[1].runId);
+			expect(storedReady.runId).toBe(entries[1].runId);
 
 			const duplicateRetry = await routes(
 				importanceRequest(

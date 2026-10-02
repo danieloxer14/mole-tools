@@ -3,6 +3,7 @@ import mermaid, { type RenderResult } from "mermaid";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { withMockFetch } from "../../../../../test/fakes/mockFetch";
 import type { HostDiscussion } from "../../../../ports/git-host";
 import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { Draft } from "../../state";
@@ -37,7 +38,7 @@ const file = {
 			],
 		},
 	],
-} as const;
+} satisfies ParsedFileDiff;
 const multiHunkFile = {
 	oldPath: "src/app.ts",
 	newPath: "src/app.ts",
@@ -83,7 +84,7 @@ const multiHunkFile = {
 			],
 		},
 	],
-} as const;
+} satisfies ParsedFileDiff;
 
 const multiHunkSource = [
 	"first change",
@@ -251,7 +252,7 @@ const renamedFile = {
 			],
 		},
 	],
-} as const;
+} satisfies ParsedFileDiff;
 
 test("hides Tag whole file when no file tag handler is supplied", () => {
 	const markup = renderDiff();
@@ -462,6 +463,8 @@ const importanceSpans = [
 		endLine: 10,
 		score: 2,
 		reason: "This removed check allowed unauthorized requests.",
+		fileIndex: 2,
+		spanIndex: 3,
 	},
 	{
 		side: "new",
@@ -469,6 +472,8 @@ const importanceSpans = [
 		endLine: 12,
 		score: 4,
 		reason: "This adds request validation before persistence.",
+		fileIndex: 2,
+		spanIndex: 4,
 	},
 ] as const;
 
@@ -485,7 +490,8 @@ test("colours inline diff gutter by changed line importance", () => {
 	expect(oldLine?.classList.contains("importance-cell")).toBe(true);
 	expect(oldStrip?.classList.contains(IMPORTANCE_BG_CLASS[2])).toBe(true);
 	expect(oldStrip?.getAttribute("title")).toBeNull();
-	expect(oldStrip?.getAttribute("role")).toBe("img");
+	expect(oldStrip?.tagName).toBe("BUTTON");
+	expect(oldStrip?.getAttribute("role")).toBeNull();
 	expect(oldStrip?.getAttribute("aria-label")).toBe(
 		"Importance 2/5 (Low): This removed check allowed unauthorized requests.",
 	);
@@ -536,6 +542,212 @@ test("diff gutter tooltips show matching score and reason in both layouts", asyn
 			act(() => root.unmount());
 			container.remove();
 		}
+	}
+});
+test("supports keyboard navigation and activation of the diff-gutter contest action", async () => {
+	const contested: unknown[] = [];
+	const focusTargets: HTMLElement[] = [];
+	const selections: unknown[] = [];
+	const { container, root } = mountDiff({
+		file: importanceDiff,
+		importance: importanceSpans,
+		onContestImportance: (span, focusTarget) => {
+			contested.push(span);
+			focusTargets.push(focusTarget);
+		},
+		onLineSelection: (selection) => selections.push(selection),
+		onCommentSelection: (selection) => selections.push(selection),
+	});
+	try {
+		const oldStrip = container.querySelector<HTMLElement>(
+			`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
+		);
+		if (!oldStrip) throw new Error("Old-line importance indicator is missing");
+		expect(oldStrip.tagName).toBe("BUTTON");
+		expect(oldStrip.tabIndex).toBe(0);
+		await act(async () => {
+			oldStrip.focus();
+			await Bun.sleep(0);
+		});
+		const tooltip = document.body.querySelector<HTMLElement>(
+			'[data-slot="tooltip-content"]',
+		);
+		const contestButton =
+			tooltip?.querySelector<HTMLButtonElement>("button") ?? null;
+		expect(tooltip).not.toBeNull();
+		expect(tooltip?.textContent).toContain("Importance 2/5 (Low)");
+		expect(tooltip?.textContent).toContain(
+			"This removed check allowed unauthorized requests.",
+		);
+		expect(contestButton?.textContent).toBe("Contest");
+		if (!contestButton) throw new Error("Contest button is missing");
+
+		const tab = new window.KeyboardEvent("keydown", {
+			key: "Tab",
+			bubbles: true,
+			cancelable: true,
+		});
+		await act(async () => {
+			oldStrip.dispatchEvent(tab);
+			await Bun.sleep(0);
+		});
+		expect(tab.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(contestButton);
+
+		const shiftTab = new window.KeyboardEvent("keydown", {
+			key: "Tab",
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		act(() => contestButton.dispatchEvent(shiftTab));
+		expect(shiftTab.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(oldStrip);
+		await act(async () => {
+			oldStrip.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Tab",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await Bun.sleep(0);
+		});
+		expect(document.activeElement).toBe(contestButton);
+
+		const enter = new window.KeyboardEvent("keydown", {
+			key: "Enter",
+			bubbles: true,
+			cancelable: true,
+		});
+		act(() => contestButton.dispatchEvent(enter));
+		expect(enter.defaultPrevented).toBe(true);
+		expect(contested).toHaveLength(1);
+		const spaceDown = new window.KeyboardEvent("keydown", {
+			key: " ",
+			bubbles: true,
+			cancelable: true,
+		});
+		const spaceUp = new window.KeyboardEvent("keyup", {
+			key: " ",
+			bubbles: true,
+			cancelable: true,
+		});
+		act(() => {
+			contestButton.dispatchEvent(spaceDown);
+			contestButton.dispatchEvent(spaceUp);
+		});
+		expect(spaceDown.defaultPrevented).toBe(true);
+		expect(spaceUp.defaultPrevented).toBe(true);
+		expect(contested).toHaveLength(2);
+		act(() => contestButton.click());
+		expect(contested).toHaveLength(3);
+		expect(focusTargets).toEqual([oldStrip, oldStrip, oldStrip]);
+		expect(contested[0]).toMatchObject({
+			score: 2,
+			side: "old",
+			fileIndex: 2,
+			spanIndex: 3,
+		});
+		expect(selections).toEqual([]);
+
+		await act(async () => {
+			contestButton.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Escape",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await Bun.sleep(0);
+		});
+		expect(document.activeElement).toBe(oldStrip);
+		await act(async () => {
+			oldStrip.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Tab",
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			await Bun.sleep(0);
+		});
+		expect(document.activeElement).toBe(contestButton);
+		const forwardTab = new window.KeyboardEvent("keydown", {
+			key: "Tab",
+			bubbles: true,
+			cancelable: true,
+		});
+		await act(async () => {
+			contestButton.dispatchEvent(forwardTab);
+			await Bun.sleep(0);
+		});
+		const nextControl = container.querySelector<HTMLButtonElement>(
+			".line-actions button",
+		);
+		expect(forwardTab.defaultPrevented).toBe(true);
+		expect(nextControl?.textContent?.trim()).toBe("Tag line");
+		expect(document.activeElement).toBe(nextControl);
+		expect(
+			document.body.querySelector('[data-slot="tooltip-content"]'),
+		).toBeNull();
+		expect(selections).toEqual([]);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("opens the diff-gutter importance tooltip on pointer hover", async () => {
+	const { container, root } = mountDiff({
+		file: importanceDiff,
+		importance: importanceSpans,
+	});
+	try {
+		const strip = container.querySelector<HTMLElement>(
+			`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
+		);
+		if (!strip) throw new Error("Old-line importance indicator is missing");
+		await act(async () => {
+			strip.dispatchEvent(
+				new window.MouseEvent("mouseenter", { bubbles: false }),
+			);
+			await Bun.sleep(0);
+		});
+		expect(
+			document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
+		).toContain("Importance 2/5 (Low)");
+	} finally {
+		act(() => root.unmount());
+		container.remove();
+	}
+});
+
+test("does not show contest action without callback", async () => {
+	const { container, root } = mountDiff({
+		file: importanceDiff,
+		importance: importanceSpans,
+	});
+	try {
+		const oldStrip = container.querySelector<HTMLElement>(
+			`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
+		);
+		if (!oldStrip) throw new Error("Old-line importance indicator is missing");
+		await act(async () => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+			);
+			oldStrip.focus();
+			await Bun.sleep(0);
+		});
+		const tooltip = document.body.querySelector<HTMLElement>(
+			'[data-slot="tooltip-content"]',
+		);
+		expect(tooltip).not.toBeNull();
+		expect(tooltip?.querySelector("button")).toBeNull();
+	} finally {
+		act(() => root.unmount());
+		container.remove();
 	}
 });
 
@@ -591,6 +803,8 @@ test("importance absent or uncovered adds no importance strips", () => {
 					endLine: 20,
 					score: 3,
 					reason: "This spans a line outside the rendered diff.",
+					fileIndex: 0,
+					spanIndex: 0,
 				},
 			],
 		}),
@@ -1764,88 +1978,91 @@ test("keeps collapsed discussion summaries as plain text", () => {
 	expect(preview).not.toContain("<strong>");
 });
 
-test("highlights multiline source comments with shared grammar state", {
-	timeout: 30_000,
-}, async () => {
-	const multilineCommentFile = {
-		oldPath: "src/example.ts",
-		newPath: "src/example.ts",
-		status: "added",
-		binary: false,
-		insertions: 4,
-		deletions: 0,
-		hunks: [
-			{
-				header: "@@ -0,0 +1,4 @@",
-				oldStart: 0,
-				oldLines: 0,
-				newStart: 1,
-				newLines: 4,
-				lines: [
-					{ kind: "add", oldLine: null, newLine: 1, text: "/**" },
-					{
-						kind: "add",
-						oldLine: null,
-						newLine: 2,
-						text: " * multiline comment",
-					},
-					{ kind: "add", oldLine: null, newLine: 3, text: " */" },
-					{
-						kind: "add",
-						oldLine: null,
-						newLine: 4,
-						text: "const value = 1;",
-					},
-				],
-			},
-		],
-	} as const;
-	const container = document.createElement("div");
-	document.body.append(container);
-	const root = createRoot(container);
+test(
+	"highlights multiline source comments with shared grammar state",
+	async () => {
+		const multilineCommentFile = {
+			oldPath: "src/example.ts",
+			newPath: "src/example.ts",
+			status: "added",
+			binary: false,
+			insertions: 4,
+			deletions: 0,
+			hunks: [
+				{
+					header: "@@ -0,0 +1,4 @@",
+					oldStart: 0,
+					oldLines: 0,
+					newStart: 1,
+					newLines: 4,
+					lines: [
+						{ kind: "add", oldLine: null, newLine: 1, text: "/**" },
+						{
+							kind: "add",
+							oldLine: null,
+							newLine: 2,
+							text: " * multiline comment",
+						},
+						{ kind: "add", oldLine: null, newLine: 3, text: " */" },
+						{
+							kind: "add",
+							oldLine: null,
+							newLine: 4,
+							text: "const value = 1;",
+						},
+					],
+				},
+			],
+		} satisfies ParsedFileDiff;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
 
-	try {
-		act(() => {
-			root.render(
-				<DiffView
-					file={multilineCommentFile}
-					mode="inline"
-					largeFileLineThreshold={800}
-					fileContents={null}
-					fileContentsError={null}
-					onModeChange={() => {}}
-					onLineSelection={() => {}}
-					onCommentSelection={() => {}}
-				/>,
-			);
-		});
-		for (let attempt = 0; attempt < 500; attempt++) {
-			const commentToken = container
-				.querySelectorAll<HTMLElement>(".diff-line")[1]
-				?.querySelector<HTMLElement>(".line-text > span:nth-child(2) > span");
-			if (commentToken?.style.color === "rgb(106, 115, 125)") break;
-			await act(async () => {
-				const { promise, resolve } = Promise.withResolvers<void>();
-				setTimeout(resolve, 10);
-				await promise;
+		try {
+			act(() => {
+				root.render(
+					<DiffView
+						file={multilineCommentFile}
+						mode="inline"
+						largeFileLineThreshold={800}
+						fileContents={null}
+						fileContentsError={null}
+						onModeChange={() => {}}
+						onLineSelection={() => {}}
+						onCommentSelection={() => {}}
+					/>,
+				);
 			});
-		}
+			for (let attempt = 0; attempt < 500; attempt++) {
+				const commentToken = container
+					.querySelectorAll<HTMLElement>(".diff-line")[1]
+					?.querySelector<HTMLElement>(".line-text > span:nth-child(2) > span");
+				if (commentToken?.style.color === "rgb(106, 115, 125)") break;
+				await act(async () => {
+					const { promise, resolve } = Promise.withResolvers<void>();
+					setTimeout(resolve, 10);
+					await promise;
+				});
+			}
 
-		const rows = container.querySelectorAll(".diff-line");
-		const commentToken = rows[1]?.querySelector<HTMLElement>(
-			".line-text > span:nth-child(2) > span",
-		);
-		expect(["#6A737D", "rgb(106, 115, 125)"]).toContain(
-			commentToken?.style.color,
-		);
-		expect(commentToken?.style.color).not.toBe("rgb(249, 117, 131)");
-	} finally {
-		act(() => {
-			root.unmount();
-		});
-		container.remove();
-	}
-});
+			const rows = container.querySelectorAll(".diff-line");
+			const commentToken = rows[1]?.querySelector<HTMLElement>(
+				".line-text > span:nth-child(2) > span",
+			);
+			const commentColor = commentToken?.style.color;
+			if (commentColor === undefined)
+				throw new Error("Expected tokenized comment color");
+			expect(["#6A737D", "rgb(106, 115, 125)"]).toContain(commentColor);
+			expect(commentColor).not.toBe("rgb(249, 117, 131)");
+		} finally {
+			act(() => {
+				root.unmount();
+			});
+			container.remove();
+		}
+	},
+	{ timeout: 30_000 },
+);
 test(
 	"keeps github-dark inline colours and exposes github-light variables",
 	async () => {
@@ -2197,7 +2414,7 @@ test("bounds long inline discussion content and keeps code and table regions int
 		discussions: [
 			{
 				...positionedDiscussion,
-				notes: [{ ...positionedDiscussion.notes[0], body }],
+				notes: [{ ...note, body }],
 			},
 		],
 	});
@@ -2813,7 +3030,7 @@ test("from-chat draft targeting preserves mounted drafts through failure, Stop, 
 	};
 	const generations: PendingGeneration[] = [];
 	let persisted = drafts.map((draft) => ({ ...draft }));
-	globalThis.fetch = async (input, init) => {
+	globalThis.fetch = withMockFetch(async (input, init) => {
 		const url = new URL(
 			input instanceof Request ? input.url : String(input),
 			"http://localhost",
@@ -2888,7 +3105,7 @@ test("from-chat draft targeting preserves mounted drafts through failure, Stop, 
 			);
 		}
 		return Response.json({});
-	};
+	});
 
 	const flush = async () => {
 		const { promise, resolve } = Promise.withResolvers<void>();

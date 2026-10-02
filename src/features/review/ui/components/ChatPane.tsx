@@ -318,9 +318,10 @@ function ChatMessageBody({
 		const target = event.target as HTMLElement;
 		const link = target.closest<HTMLAnchorElement>("a");
 		if (!link) return;
+		const dataPath = link.getAttribute("data-file-path");
 		const href = link.getAttribute("href");
 		const path =
-			link.getAttribute("data-file-path") ??
+			dataPath ??
 			(href
 				? resolveMarkdownFileHref(href, worktreePath, window.location.href)
 				: null);

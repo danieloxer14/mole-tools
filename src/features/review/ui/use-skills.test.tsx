@@ -102,8 +102,11 @@ test("ignores a response superseded by a refresh", async () => {
 	const secondRequest = Promise.withResolvers<Response>();
 	const requests = [firstRequest, secondRequest];
 	let fetchCount = 0;
-	globalThis.fetch = (() =>
-		requests[fetchCount++].promise) as unknown as typeof fetch;
+	globalThis.fetch = (() => {
+		const request = requests[fetchCount++];
+		if (!request) throw new Error("Unexpected skills fetch");
+		return request.promise;
+	}) as unknown as typeof fetch;
 
 	const mounted = mountHook("secret", 0);
 	expect(fetchCount).toBe(1);
