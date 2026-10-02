@@ -1773,6 +1773,7 @@ export function DiffView({
 	const [expansionError, setExpansionError] = useState<string | null>(null);
 	const [internalFindQuery, setInternalFindQuery] = useState("");
 	const [findIndex, setFindIndex] = useState(0);
+	const [findScrollRequest, setFindScrollRequest] = useState(0);
 	const [collapsedDiscussionIds, setCollapsedDiscussionIds] = useState(
 		() => new Set(savedCollapsedDiscussionIds),
 	);
@@ -1793,16 +1794,24 @@ export function DiffView({
 			: [];
 	const currentId = matches[findIndex]?.id ?? null;
 	const findCount = findCountText(findQuery, findIndex, matches.length);
+	const navigateFind = (direction: 1 | -1) => {
+		if (matches.length === 0) return;
+		setFindIndex((current) =>
+			stepMatchIndex(current, matches.length, direction),
+		);
+		setFindScrollRequest((request) => request + 1);
+	};
 	const registerRow = useCallback((id: string, el: HTMLElement | null) => {
 		const rows = findRowsRef.current;
 		if (el) rows.set(id, el);
 		else rows.delete(id);
 	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation requests intentionally retrigger scrolling for unchanged matches.
 	useEffect(() => {
 		if (!findActive || !currentId) return;
 		const row = findRowsRef.current.get(currentId);
 		row?.scrollIntoView({ block: "center", behavior: "smooth" });
-	}, [findActive, currentId]);
+	}, [findActive, currentId, findScrollRequest]);
 	const find: FindRender = {
 		query: findQuery,
 		currentId,
@@ -2023,14 +2032,10 @@ export function DiffView({
 									onKeyDown={(event) => {
 										if (event.key === "Enter" && event.shiftKey) {
 											event.preventDefault();
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, -1),
-											);
+											navigateFind(-1);
 										} else if (event.key === "Enter") {
 											event.preventDefault();
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, 1),
-											);
+											navigateFind(1);
 										} else if (event.key === "Escape") {
 											event.preventDefault();
 											applyFindQuery("");
@@ -2058,11 +2063,7 @@ export function DiffView({
 										size="icon-xs"
 										tooltip="Previous match (Shift+Enter)"
 										disabled={matches.length === 0}
-										onClick={() =>
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, -1),
-											)
-										}
+										onClick={() => navigateFind(-1)}
 									>
 										<ChevronUp aria-hidden />
 									</IconButton>
@@ -2071,11 +2072,7 @@ export function DiffView({
 										size="icon-xs"
 										tooltip="Next match (Enter)"
 										disabled={matches.length === 0}
-										onClick={() =>
-											setFindIndex((current) =>
-												stepMatchIndex(current, matches.length, 1),
-											)
-										}
+										onClick={() => navigateFind(1)}
 									>
 										<ChevronDown aria-hidden />
 									</IconButton>
