@@ -66,7 +66,6 @@ export const ImportanceLedgerEntrySchema = z.discriminatedUnion("kind", [
 export type ImportanceLedgerEntry = z.infer<typeof ImportanceLedgerEntrySchema>;
 
 export const IMPORTANCE_LEDGER_FILE = "ledger.ndjson";
-
 const appendQueues = new Map<string, Promise<void>>();
 
 export async function appendImportanceLedgerEntry(
@@ -105,11 +104,9 @@ export async function readImportanceLedger(
 ): Promise<ImportanceLedgerEntry[]> {
 	const file = Bun.file(path);
 	if (!(await file.exists())) return [];
-
 	const entries: ImportanceLedgerEntry[] = [];
 	for (const line of (await file.text()).split("\n")) {
 		if (line.trim().length === 0) continue;
-
 		try {
 			const parsed = ImportanceLedgerEntrySchema.safeParse(JSON.parse(line));
 			if (parsed.success) entries.push(parsed.data);
@@ -146,7 +143,6 @@ export function importanceSpanExcerpt(
 ): { lines: string[]; truncated: boolean } {
 	const matching: string[] = [];
 	if (!file) return { lines: matching, truncated: false };
-
 	for (const hunk of file.hunks) {
 		for (const line of hunk.lines) {
 			const lineNumber = span.side === "new" ? line.newLine : line.oldLine;
@@ -162,7 +158,6 @@ export function importanceSpanExcerpt(
 			);
 		}
 	}
-
 	return {
 		lines: matching.slice(0, 80),
 		truncated: matching.length > 80,
@@ -171,12 +166,6 @@ export function importanceSpanExcerpt(
 
 function importanceScoreText(score: ImportanceSpan["score"]): string {
 	return `${score}/5 (${IMPORTANCE_LABELS[score]})`;
-}
-
-function importanceLinesText(span: ImportanceSpan): string {
-	return span.startLine === span.endLine
-		? `${span.side} line ${span.startLine}`
-		: `${span.side} lines ${span.startLine}–${span.endLine}`;
 }
 
 export function buildImportanceContestReport(input: {
@@ -217,7 +206,11 @@ export function buildImportanceContestReport(input: {
 			? "unavailable (scored before the importance ledger)"
 			: "unavailable (run metadata unavailable)";
 	const promptLine = run
-		? `\`review-importance\` preset \`${run.prompt.preset}\` ${run.prompt.version === null ? "unknown version" : `v${run.prompt.version}`}`
+		? `\`review-importance\` preset \`${run.prompt.preset}\` ${
+				run.prompt.version === null
+					? "unknown version"
+					: `v${run.prompt.version}`
+			}`
 		: "unavailable";
 	const agentLine = run
 		? run.agent
@@ -269,7 +262,6 @@ export function buildImportanceContestReport(input: {
 			: []),
 		`- Contested: ${importanceScoreText(after.score)} — ${after.reason}`,
 	];
-
 	return [
 		"## Importance contest",
 		"",
@@ -279,7 +271,11 @@ export function buildImportanceContestReport(input: {
 		`- Prompt: ${promptLine}`,
 		`- Agent: ${agentLine}`,
 		`- File: \`${path}\``,
-		`- Lines: ${importanceLinesText(before)}`,
+		`- Lines: ${
+			before.startLine === before.endLine
+				? `${before.side} line ${before.startLine}`
+				: `${before.side} lines ${before.startLine}–${before.endLine}`
+		}`,
 		"",
 		"### Scores",
 		"",

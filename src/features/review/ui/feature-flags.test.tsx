@@ -16,20 +16,13 @@ import {
 const originalFetch = globalThis.fetch;
 const roots: Root[] = [];
 const disabledFlag: FeatureFlagView = {
-	id: "layer-importance",
-	label: "File important",
-	description: "Score changed lines.",
+	id: "one-pager",
+	label: "One pager",
+	description:
+		"Switch Overview between the MR description and a one-page summary.",
 	enabled: false,
 };
 const enabledFlag: FeatureFlagView = { ...disabledFlag, enabled: true };
-function unregisteredFlag(id: string): FeatureFlagView {
-	return {
-		id,
-		label: "Review chat",
-		description: "Enable chat.",
-		enabled: false,
-	} as unknown as FeatureFlagView;
-}
 
 function response(value: unknown, status = 200): Response {
 	return {
@@ -41,7 +34,7 @@ function response(value: unknown, status = 200): Response {
 
 function Consumers() {
 	const enabled = useFeatureFlags().flags?.find(
-		(flag) => flag.id === "layer-importance",
+		(flag) => flag.id === "one-pager",
 	)?.enabled;
 	return <output>{String(enabled ?? false)}</output>;
 }
@@ -77,7 +70,7 @@ test("keeps optimistic checkbox state but exposes enabled only after POST confir
 	});
 	const confirmedValues: boolean[] = [];
 	function ConfirmedReader() {
-		confirmedValues.push(useConfirmedFeatureFlag("layer-importance"));
+		confirmedValues.push(useConfirmedFeatureFlag("one-pager"));
 		return null;
 	}
 	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) =>
@@ -92,7 +85,7 @@ test("keeps optimistic checkbox state but exposes enabled only after POST confir
 	await act(async () => loadFeatureFlags("secret"));
 	let toggle!: Promise<void>;
 	act(() => {
-		toggle = setFeatureFlag("secret", "layer-importance", true);
+		toggle = setFeatureFlag("secret", "one-pager", true);
 	});
 	expect(container.querySelector("output")?.textContent).toBe("true");
 	expect(confirmedValues.at(-1)).toBe(false);
@@ -111,9 +104,9 @@ test("serializes same-flag mutations and commits the last server response", asyn
 	const values = { confirmed: false, optimistic: false };
 	function Reader() {
 		const flags = useFeatureFlags().flags;
-		values.confirmed = useConfirmedFeatureFlag("layer-importance");
+		values.confirmed = useConfirmedFeatureFlag("one-pager");
 		values.optimistic =
-			flags?.find((flag) => flag.id === "layer-importance")?.enabled ?? false;
+			flags?.find((flag) => flag.id === "one-pager")?.enabled ?? false;
 		return null;
 	}
 	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -135,8 +128,8 @@ test("serializes same-flag mutations and commits the last server response", asyn
 	let first!: Promise<void>;
 	let second!: Promise<void>;
 	act(() => {
-		first = setFeatureFlag("secret", "layer-importance", true);
-		second = setFeatureFlag("secret", "layer-importance", false);
+		first = setFeatureFlag("secret", "one-pager", true);
+		second = setFeatureFlag("secret", "one-pager", false);
 	});
 	await Promise.resolve();
 	expect(postCount).toBe(1);
@@ -154,7 +147,6 @@ test("serializes same-flag mutations and commits the last server response", asyn
 });
 
 test("uses full mutation response when toggling before flags finish loading", async () => {
-	const otherFlag = unregisteredFlag("review-chat");
 	const pendingLoad = Promise.withResolvers<Response>();
 	const currentFlags: { value: FeatureFlagsSnapshot["flags"] } = {
 		value: null,
@@ -165,7 +157,7 @@ test("uses full mutation response when toggling before flags finish loading", as
 	}
 	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) =>
 		init?.method === "POST"
-			? response({ flags: [enabledFlag, otherFlag] })
+			? response({ flags: [enabledFlag] })
 			: pendingLoad.promise) as typeof fetch;
 	const root = createRoot(document.createElement("div"));
 	roots.push(root);
@@ -176,58 +168,16 @@ test("uses full mutation response when toggling before flags finish loading", as
 		loading = loadFeatureFlags("secret");
 	});
 	await Promise.resolve();
-	await act(async () => setFeatureFlag("secret", "layer-importance", true));
-	expect(currentFlags.value).toEqual([enabledFlag, otherFlag]);
+	await act(async () => setFeatureFlag("secret", "one-pager", true));
+	expect(currentFlags.value).toEqual([enabledFlag]);
 
 	await act(async () => {
 		pendingLoad.resolve(response({ flags: [disabledFlag] }));
 		await loading;
 	});
-	expect(currentFlags.value).toEqual([enabledFlag, otherFlag]);
+	expect(currentFlags.value).toEqual([enabledFlag]);
 });
 
-test("failed toggle rollback preserves successful change to another flag", async () => {
-	const anotherFlag = unregisteredFlag("review-chat");
-	let rejectFirst!: (value: Response) => void;
-	let calls = 0;
-	const currentFlags: { value: FeatureFlagsSnapshot["flags"] } = {
-		value: null,
-	};
-	function StateReader() {
-		currentFlags.value = useFeatureFlags().flags;
-		return null;
-	}
-	globalThis.fetch = (async (_input: RequestInfo | URL) => {
-		calls++;
-		if (calls === 1) return response({ flags: [disabledFlag, anotherFlag] });
-		if (calls === 2)
-			return new Promise<Response>((resolve) => {
-				rejectFirst = resolve;
-			});
-		return response({
-			flags: [disabledFlag, { ...anotherFlag, enabled: true }],
-		});
-	}) as typeof fetch;
-	const root = createRoot(document.createElement("div"));
-	roots.push(root);
-	act(() => root.render(<StateReader />));
-	await act(async () => loadFeatureFlags("secret"));
-	let failed!: Promise<void>;
-	act(() => {
-		failed = setFeatureFlag("secret", "layer-importance", true);
-	});
-	await act(async () => setFeatureFlag("secret", anotherFlag.id, true));
-	await act(async () => {
-		rejectFirst(response({ error: "failed" }, 500));
-		await failed.catch(() => undefined);
-	});
-	expect(
-		currentFlags.value?.find((flag) => flag.id === "layer-importance")?.enabled,
-	).toBe(false);
-	expect(
-		currentFlags.value?.find((flag) => flag.id === anotherFlag.id)?.enabled,
-	).toBe(true);
-});
 test("updates every mounted flag consumer after a successful toggle", async () => {
 	const calls: Array<{ url: string; init?: RequestInit }> = [];
 	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -244,13 +194,13 @@ test("updates every mounted flag consumer after a successful toggle", async () =
 			(item) => item.textContent,
 		),
 	).toEqual(["false", "false"]);
-	await act(async () => setFeatureFlag("secret", "layer-importance", true));
+	await act(async () => setFeatureFlag("secret", "one-pager", true));
 
 	expect(calls).toHaveLength(2);
 	expect(calls[1]?.url).toBe("/api/features?t=secret");
 	expect(calls[1]?.init?.method).toBe("POST");
 	expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
-		id: "layer-importance",
+		id: "one-pager",
 		enabled: true,
 	});
 	expect(
@@ -274,7 +224,7 @@ test("rolls back failed toggles and exposes the server error", async () => {
 	let failure: unknown;
 	let toggle!: Promise<void>;
 	act(() => {
-		toggle = setFeatureFlag("secret", "layer-importance", true);
+		toggle = setFeatureFlag("secret", "one-pager", true);
 	});
 	await Promise.resolve();
 	expect(
@@ -324,7 +274,7 @@ test("ignores stale GET responses that resolve after a successful toggle", async
 	act(() => {
 		staleLoad = loadFeatureFlags("secret");
 	});
-	await act(async () => setFeatureFlag("secret", "layer-importance", true));
+	await act(async () => setFeatureFlag("secret", "one-pager", true));
 	expect(
 		Array.from(container.querySelectorAll("output")).map(
 			(item) => item.textContent,

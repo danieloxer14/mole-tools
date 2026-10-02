@@ -137,7 +137,6 @@ Give different parts of the same file or hunk different scores when they differ 
 For every scored span, provide exactly one concise sentence explaining its score and the hunk, no more than 144 characters and with no line breaks.`,
 	"review-one-pager": `Write a one-page Markdown summary that helps a reviewer understand this merge request as quickly as possible.
 
-
 Use this template:
 
 ## Summary

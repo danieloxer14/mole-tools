@@ -13,7 +13,6 @@ import {
 import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { ImportanceRating } from "../importance";
 import { IMPORTANCE_BG_CLASS, importanceTitle } from "../importance";
-import type { ChangedFilesHeaderProps } from "./ChangedFilesHeader";
 import {
 	ChangedFilesHeader,
 	type ChangedFilesMode,
@@ -478,7 +477,7 @@ function ChangedFileRow({
 							<button
 								type="button"
 								aria-label={`${importanceTitle(rating.score)}: ${rating.reason}`}
-								className={`size-2.5 shrink-0 appearance-none rounded-full border-0 p-0 ${IMPORTANCE_BG_CLASS[rating.score]}`}
+								className={`size-2.5 shrink-0 appearance-none rounded-full border-0 bg-transparent p-0 ${IMPORTANCE_BG_CLASS[rating.score]}`}
 							/>
 						}
 					/>

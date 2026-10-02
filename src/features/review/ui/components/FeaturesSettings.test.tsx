@@ -9,9 +9,10 @@ import { FeaturesSettings } from "./FeaturesSettings";
 const originalFetch = globalThis.fetch;
 const roots: Root[] = [];
 const flag: FeatureFlagView = {
-	id: "layer-importance",
-	label: "File important",
-	description: "Score each changed line span 1–5.",
+	id: "one-pager",
+	label: "One pager",
+	description:
+		"Switch Overview between the MR description and a one-page summary.",
 	enabled: false,
 };
 
@@ -57,7 +58,7 @@ test("lists feature metadata and posts checkbox state", async () => {
 
 	const checkbox =
 		container.querySelector<HTMLButtonElement>('[role="checkbox"]');
-	expect(container.textContent).toContain("File important");
+	expect(container.textContent).toContain("One pager");
 	expect(container.textContent).toContain(flag.description);
 	expect(checkbox?.getAttribute("aria-checked")).toBe("false");
 	await act(async () => checkbox?.click());

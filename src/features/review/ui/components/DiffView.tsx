@@ -135,7 +135,6 @@ export interface MarkdownBlockSelection {
 	endLine: number;
 	quote: string;
 }
-
 type ContestImportanceHandler = (
 	span: ContestableImportanceSpan,
 	restoreFocusTarget: HTMLButtonElement,
@@ -827,6 +826,7 @@ function LineActions({
 		</span>
 	);
 }
+
 function focusNextTabbableAfter(element: HTMLElement): void {
 	const tabbables = Array.from(
 		document.querySelectorAll<HTMLElement>(
@@ -957,6 +957,7 @@ function ImportanceStrip({
 		</TooltipProvider>
 	);
 }
+
 function DiffLineRow({
 	line,
 	mode,
@@ -1741,6 +1742,8 @@ export function DiffView({
 	fileContentsError,
 	discussions = [],
 	drafts = [],
+	importance,
+	onContestImportance,
 	onExplainDiscussion,
 	explainDisabled,
 	onModeChange,
@@ -1760,8 +1763,6 @@ export function DiffView({
 	onSendDraft,
 	onRetryDraft,
 	fromChat,
-	importance,
-	onContestImportance,
 	collapsedDiscussionIds: savedCollapsedDiscussionIds = [],
 	onCollapsedDiscussionIdsChange,
 	findQuery: findQueryProp,

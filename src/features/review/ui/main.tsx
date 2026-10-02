@@ -478,25 +478,23 @@ function ReviewApp() {
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const onePagerEnabled = useConfirmedFeatureFlag("one-pager");
 	const onePager = useOnePager(token, onePagerEnabled);
-	const importanceEnabled = useConfirmedFeatureFlag("layer-importance");
 	const importance = useImportance(
 		token,
-		importanceEnabled,
 		data ? importanceRevisionKey(data.revision) : "",
 	);
 	const importanceByPath = useMemo(
 		() =>
-			importanceEnabled && importance.status === "ready"
+			importance.status === "ready"
 				? fileImportanceMap(importance.files)
 				: undefined,
-		[importanceEnabled, importance.status, importance.files],
+		[importance.status, importance.files],
 	);
 	const importanceFileTotals = useMemo(
 		() =>
-			importanceEnabled && importance.status === "ready" && data?.diff
+			importance.status === "ready" && data?.diff
 				? importanceReviewFileTotals(data.diff, importance.files)
 				: undefined,
-		[importanceEnabled, importance.status, importance.files, data?.diff],
+		[importance.status, importance.files, data?.diff],
 	);
 	const importanceProgress = useMemo(
 		() =>
@@ -510,7 +508,7 @@ function ReviewApp() {
 	);
 	const selectedImportance = useMemo(
 		() =>
-			importanceEnabled && importance.status === "ready"
+			importance.status === "ready"
 				? importance.files.flatMap((file, fileIndex) =>
 						file.path === selectedPath
 							? file.spans.map((span, spanIndex) => ({
@@ -521,7 +519,7 @@ function ReviewApp() {
 							: [],
 					)
 				: undefined,
-		[importanceEnabled, importance.status, importance.files, selectedPath],
+		[importance.status, importance.files, selectedPath],
 	);
 	const [contestTarget, setContestTarget] = useState<{
 		path: string;
@@ -529,9 +527,8 @@ function ReviewApp() {
 	} | null>(null);
 	const contestFocusRef = useRef<HTMLButtonElement | null>(null);
 	useEffect(() => {
-		if (!importanceEnabled || importance.status !== "ready")
-			setContestTarget(null);
-	}, [importanceEnabled, importance.status]);
+		if (importance.status !== "ready") setContestTarget(null);
+	}, [importance.status]);
 	const [reviewView, setReviewView] = useState<ReviewView>("overview");
 	const [overviewTab, setOverviewTab] = useState<OverviewTab>("description");
 	const effectiveOverviewTab = onePagerEnabled ? overviewTab : "description";
@@ -2394,16 +2391,12 @@ function ReviewApp() {
 									});
 								}}
 								importanceByPath={importanceByPath}
-								importance={
-									importanceEnabled
-										? {
-												status: importance.status,
-												error: importance.error,
-												canRetry: importance.canRetry,
-												onRetry: importance.retry,
-											}
-										: undefined
-								}
+								importance={{
+									status: importance.status,
+									error: importance.error,
+									canRetry: importance.canRetry,
+									onRetry: importance.retry,
+								}}
 							/>
 						}
 						selectedPath={selectedPath}

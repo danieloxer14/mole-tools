@@ -6,12 +6,9 @@ import { withMockFetch } from "../../../../../test/fakes/mockFetch";
 import { PROMPT_NAMES } from "../../../../adapters/prompts/defaults";
 import { APP_VERSION } from "../../../../shared/app-version";
 import { applyColorTheme } from "../color-theme";
+import { loadFeatureFlags, resetFeatureFlagsForTests } from "../feature-flags";
 import {
-	loadFeatureFlags,
-	resetFeatureFlagsForTests,
-	setFeatureFlag,
-} from "../feature-flags";
-import {
+	FEATURE_SLOTS,
 	isSaveDisabled,
 	type PromptEditorValue,
 	type PromptSnapshot,
@@ -88,20 +85,17 @@ async function flushReact(): Promise<void> {
 	await Bun.sleep(0);
 	await Bun.sleep(0);
 }
-test("importance slot stays hidden while Layer importance is off", () => {
-	resetFeatureFlagsForTests();
-	const markup = render();
-	const visibleLabels = VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]);
-	const nav = markup.match(
-		/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/,
-	)?.[1];
-	expect(nav).toBeDefined();
-	expect(nav?.match(/<button\b/g)?.length).toBe(VISIBLE_SLOTS.length);
-	const indexes = visibleLabels.map((label) => nav?.indexOf(label) ?? -1);
-	expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
-	expect(nav).not.toContain("Review importance");
-	resetFeatureFlagsForTests();
+test("keeps importance always visible and one-pager prompt slots feature-conditional", () => {
+	expect(PROMPT_NAMES).toContain("review-importance");
+	expect(VISIBLE_SLOTS).toContain("review-importance");
+	expect(FEATURE_SLOTS).toEqual([
+		{ slot: "review-one-pager", flag: "one-pager" },
+		{ slot: "review-one-pager-chat", flag: "one-pager" },
+	]);
+	expect(SLOT_LABELS["review-importance"]).toBe("Review importance");
+	expect(SLOT_DESCRIPTIONS["review-importance"]).not.toContain("Features");
 });
+
 test("one-pager prompt slots are shown only when the confirmed flag is enabled", async () => {
 	resetFeatureFlagsForTests();
 	const originalFetch = globalThis.fetch;
@@ -116,7 +110,7 @@ test("one-pager prompt slots are shown only when the confirmed flag is enabled",
 					enabled,
 				},
 			],
-		})) as typeof fetch;
+		})) as unknown as typeof fetch;
 	const renderPrompts = () =>
 		renderToStaticMarkup(
 			createElement(SettingsPanel, {
@@ -153,143 +147,58 @@ test("one-pager prompt slots are shown only when the confirmed flag is enabled",
 	}
 });
 
-test("importance slot appears after existing slots when Layer importance is on", async () => {
+test("importance prompt stays visible regardless of legacy flag values", async () => {
 	resetFeatureFlagsForTests();
 	const originalFetch = globalThis.fetch;
-	globalThis.fetch = withMockFetch(async () =>
+	let legacyEnabled = false;
+	let onePagerEnabled = false;
+	globalThis.fetch = (async () =>
 		jsonResponse({
 			flags: [
 				{
-					id: "layer-importance",
-					label: "File important",
+					id: "one-pager",
+					label: "One pager",
 					description: "test",
-					enabled: true,
+					enabled: onePagerEnabled,
+				},
+				{
+					id: "layer-importance",
+					label: "legacy",
+					description: "legacy",
+					enabled: legacyEnabled,
 				},
 			],
-		}),
-	);
+		})) as unknown as typeof fetch;
+	const promptNav = () =>
+		renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialSettings,
+				initialPrompt,
+				initialTab: "prompts",
+			}),
+		).match(/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ??
+		"";
 	try {
 		await loadFeatureFlags("settings-test-token");
-		const markup = render();
-		const nav = markup.match(
-			/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/,
-		)?.[1];
-		expect(nav).toBeDefined();
-		const slotLabels = [
-			...VISIBLE_SLOTS.map((slot) => SLOT_LABELS[slot]),
-			"Review importance",
-		];
-		const indexes = slotLabels.map((label) => nav?.indexOf(label) ?? -1);
-		expect(nav?.match(/<button\b/g)?.length).toBe(slotLabels.length);
-		expect(indexes.every((index) => index >= 0)).toBe(true);
-		expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
-	} finally {
-		globalThis.fetch = originalFetch;
-		resetFeatureFlagsForTests();
-	}
-});
+		expect(promptNav()).toContain("Review importance");
+		expect(promptNav()).not.toContain("One pager</span>");
 
-test("importance slot selection falls back when Layer importance turns off", async () => {
-	resetFeatureFlagsForTests();
-	const originalFetch = globalThis.fetch;
-	let enabled = true;
-	let finishPost!: (value: Response) => void;
-	globalThis.fetch = (async (input: string, init?: RequestInit) => {
-		const url = String(input);
-		if (url.includes("/api/features")) {
-			if (init?.method === "POST") {
-				return new Promise<Response>((resolve) => {
-					finishPost = resolve;
-				});
-			}
-			return jsonResponse({
-				flags: [
-					{
-						id: "layer-importance",
-						label: "File important",
-						description: "test",
-						enabled,
-					},
-				],
-			});
-		}
-		if (url.includes("/api/settings/models?")) {
-			return jsonResponse({ models: [], source: "omp" });
-		}
-		if (url.includes("/api/prompts/")) return jsonResponse(initialPrompt);
-		return jsonResponse(initialSettings);
-	}) as typeof fetch;
-	const container = document.createElement("div");
-	const root = createRoot(container);
-	document.body.append(container);
-	try {
-		await act(async () => {
-			await loadFeatureFlags("settings-test-token");
-		});
-		act(() =>
-			root.render(
-				createElement(SettingsPanel, {
-					token: "settings-test-token",
-					onClose: () => {},
-					initialSettings,
-				}),
-			),
-		);
-		await act(async () => {
-			await flushReact();
-		});
-		const importanceButton = Array.from(
-			container.querySelectorAll<HTMLButtonElement>(
-				"nav[aria-label='Prompt slots'] button",
-			),
-		).find((button) => button.textContent?.includes("Review importance"));
-		expect(importanceButton).toBeDefined();
-		await act(async () => {
-			importanceButton?.click();
-			await flushReact();
-		});
-		expect(importanceButton?.getAttribute("aria-current")).toBe("true");
-		let toggle!: Promise<void>;
-		act(() => {
-			toggle = setFeatureFlag("settings-test-token", "layer-importance", false);
-		});
-		await act(async () => {
-			await flushReact();
-		});
-		expect(importanceButton?.getAttribute("aria-current")).toBe("true");
-		expect(
-			container.querySelector("nav[aria-label='Prompt slots']")?.textContent,
-		).toContain("Review importance");
-		await act(async () => {
-			enabled = false;
-			finishPost(
-				jsonResponse({
-					flags: [
-						{
-							id: "layer-importance",
-							label: "File important",
-							description: "test",
-							enabled,
-						},
-					],
-				}),
-			);
-			await toggle;
-			await flushReact();
-		});
-		const selected = container.querySelector(
-			"nav[aria-label='Prompt slots'] button[aria-current='true']",
-		);
-		const visibleSlot = VISIBLE_SLOTS[0];
-		if (visibleSlot === undefined)
-			throw new Error("Expected visible prompt slot");
-		expect(selected?.textContent).toContain(SLOT_LABELS[visibleSlot]);
-		expect(
-			container.querySelector("nav[aria-label='Prompt slots']")?.textContent,
-		).not.toContain("Review importance");
+		resetFeatureFlagsForTests();
+		legacyEnabled = true;
+		await loadFeatureFlags("settings-test-token");
+		expect(promptNav()).toContain("Review importance");
+		expect(promptNav()).not.toContain("One pager</span>");
+
+		resetFeatureFlagsForTests();
+		legacyEnabled = false;
+		onePagerEnabled = true;
+		await loadFeatureFlags("settings-test-token");
+		expect(promptNav()).toContain("Review importance");
+		expect(promptNav()).toContain("One pager</span>");
+		expect(promptNav()).toContain("One pager chat</span>");
 	} finally {
-		act(() => root.unmount());
-		container.remove();
 		globalThis.fetch = originalFetch;
 		resetFeatureFlagsForTests();
 	}
@@ -303,6 +212,7 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-chat",
 		"review-explain-comment",
 		"review-comment-from-chat",
+		"review-importance",
 	]);
 	const markup = render();
 	expect(markup).toContain('class="text-2xl font-semibold">Settings</h2>');

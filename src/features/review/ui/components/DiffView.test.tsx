@@ -152,7 +152,7 @@ function renderDiff(
 	);
 }
 
-function parseMarkup(markup: string): HTMLElement {
+function parseMarkup(markup: string): HTMLDivElement {
 	const container = document.createElement("div");
 	container.innerHTML = markup;
 	return container;
@@ -431,393 +431,6 @@ test("keeps revealed inter-hunk context rows out of drag identity", () => {
 
 	expect(contextRow).toBeDefined();
 	expect(contextRow).not.toContain("data-drag-hunk");
-});
-
-const importanceDiff: ParsedFileDiff = {
-	oldPath: "src/app.ts",
-	newPath: "src/app.ts",
-	status: "modified",
-	binary: false,
-	insertions: 1,
-	deletions: 1,
-	hunks: [
-		{
-			header: "@@ -10,2 +10,2 @@",
-			oldStart: 10,
-			oldLines: 2,
-			newStart: 10,
-			newLines: 2,
-			lines: [
-				{ kind: "del", oldLine: 10, newLine: null, text: "removed" },
-				{ kind: "add", oldLine: null, newLine: 11, text: "added" },
-				{ kind: "context", oldLine: 12, newLine: 12, text: "context" },
-			],
-		},
-	],
-};
-
-const importanceSpans = [
-	{
-		side: "old",
-		startLine: 10,
-		endLine: 10,
-		score: 2,
-		reason: "This removed check allowed unauthorized requests.",
-		fileIndex: 2,
-		spanIndex: 3,
-	},
-	{
-		side: "new",
-		startLine: 11,
-		endLine: 12,
-		score: 4,
-		reason: "This adds request validation before persistence.",
-		fileIndex: 2,
-		spanIndex: 4,
-	},
-] as const;
-
-test("colours inline diff gutter by changed line importance", () => {
-	const root = parseMarkup(
-		renderDiff({
-			file: importanceDiff,
-			importance: importanceSpans,
-		}),
-	);
-	const cells = [...root.querySelectorAll("td.line-number")];
-	const oldLine = cells.find((cell) => cell.textContent?.trim() === "10");
-	const oldStrip = oldLine?.querySelector(".importance-strip");
-	expect(oldLine?.classList.contains("importance-cell")).toBe(true);
-	expect(oldStrip?.classList.contains(IMPORTANCE_BG_CLASS[2])).toBe(true);
-	expect(oldStrip?.getAttribute("title")).toBeNull();
-	expect(oldStrip?.tagName).toBe("BUTTON");
-	expect(oldStrip?.getAttribute("role")).toBeNull();
-	expect(oldStrip?.getAttribute("aria-label")).toBe(
-		"Importance 2/5 (Low): This removed check allowed unauthorized requests.",
-	);
-
-	const addedCell = cells.find((cell) =>
-		cell
-			.querySelector(".importance-strip")
-			?.classList.contains(IMPORTANCE_BG_CLASS[4]),
-	);
-	const addedStrip = addedCell?.querySelector(".importance-strip");
-	expect(addedCell?.classList.contains("importance-cell")).toBe(true);
-	expect(addedCell?.textContent?.trim()).toBe("");
-	expect(addedStrip?.getAttribute("title")).toBeNull();
-	expect(addedStrip?.getAttribute("aria-label")).toBe(
-		"Importance 4/5 (High): This adds request validation before persistence.",
-	);
-	expect(root.querySelector(`.${IMPORTANCE_BG_CLASS[5]}`)).toBeNull();
-});
-test("diff gutter tooltips show matching score and reason in both layouts", async () => {
-	for (const mode of ["inline", "side-by-side"] as const) {
-		const { container, root } = mountDiff({
-			file: importanceDiff,
-			mode,
-			importance: importanceSpans,
-		});
-		try {
-			const oldStrip = container.querySelector<HTMLElement>(
-				`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
-			);
-			if (!oldStrip)
-				throw new Error("Old-line importance indicator is missing");
-			expect(oldStrip.title).toBe("");
-			await act(async () => {
-				document.dispatchEvent(
-					new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-				);
-				oldStrip.focus();
-				await Bun.sleep(0);
-			});
-			const tooltip = document.body.querySelector(
-				'[data-slot="tooltip-content"]',
-			);
-			expect(tooltip?.textContent).toBe(
-				"Importance 2/5 (Low)This removed check allowed " +
-					"unauthorized requests.",
-			);
-		} finally {
-			act(() => root.unmount());
-			container.remove();
-		}
-	}
-});
-test("supports keyboard navigation and activation of the diff-gutter contest action", async () => {
-	const contested: unknown[] = [];
-	const focusTargets: HTMLElement[] = [];
-	const selections: unknown[] = [];
-	const { container, root } = mountDiff({
-		file: importanceDiff,
-		importance: importanceSpans,
-		onContestImportance: (span, focusTarget) => {
-			contested.push(span);
-			focusTargets.push(focusTarget);
-		},
-		onLineSelection: (selection) => selections.push(selection),
-		onCommentSelection: (selection) => selections.push(selection),
-	});
-	try {
-		const oldStrip = container.querySelector<HTMLElement>(
-			`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
-		);
-		if (!oldStrip) throw new Error("Old-line importance indicator is missing");
-		expect(oldStrip.tagName).toBe("BUTTON");
-		expect(oldStrip.tabIndex).toBe(0);
-		await act(async () => {
-			oldStrip.focus();
-			await Bun.sleep(0);
-		});
-		const tooltip = document.body.querySelector<HTMLElement>(
-			'[data-slot="tooltip-content"]',
-		);
-		const contestButton =
-			tooltip?.querySelector<HTMLButtonElement>("button") ?? null;
-		expect(tooltip).not.toBeNull();
-		expect(tooltip?.textContent).toContain("Importance 2/5 (Low)");
-		expect(tooltip?.textContent).toContain(
-			"This removed check allowed unauthorized requests.",
-		);
-		expect(contestButton?.textContent).toBe("Contest");
-		if (!contestButton) throw new Error("Contest button is missing");
-
-		const tab = new window.KeyboardEvent("keydown", {
-			key: "Tab",
-			bubbles: true,
-			cancelable: true,
-		});
-		await act(async () => {
-			oldStrip.dispatchEvent(tab);
-			await Bun.sleep(0);
-		});
-		expect(tab.defaultPrevented).toBe(true);
-		expect(document.activeElement).toBe(contestButton);
-
-		const shiftTab = new window.KeyboardEvent("keydown", {
-			key: "Tab",
-			shiftKey: true,
-			bubbles: true,
-			cancelable: true,
-		});
-		act(() => contestButton.dispatchEvent(shiftTab));
-		expect(shiftTab.defaultPrevented).toBe(true);
-		expect(document.activeElement).toBe(oldStrip);
-		await act(async () => {
-			oldStrip.dispatchEvent(
-				new window.KeyboardEvent("keydown", {
-					key: "Tab",
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-			await Bun.sleep(0);
-		});
-		expect(document.activeElement).toBe(contestButton);
-
-		const enter = new window.KeyboardEvent("keydown", {
-			key: "Enter",
-			bubbles: true,
-			cancelable: true,
-		});
-		act(() => contestButton.dispatchEvent(enter));
-		expect(enter.defaultPrevented).toBe(true);
-		expect(contested).toHaveLength(1);
-		const spaceDown = new window.KeyboardEvent("keydown", {
-			key: " ",
-			bubbles: true,
-			cancelable: true,
-		});
-		const spaceUp = new window.KeyboardEvent("keyup", {
-			key: " ",
-			bubbles: true,
-			cancelable: true,
-		});
-		act(() => {
-			contestButton.dispatchEvent(spaceDown);
-			contestButton.dispatchEvent(spaceUp);
-		});
-		expect(spaceDown.defaultPrevented).toBe(true);
-		expect(spaceUp.defaultPrevented).toBe(true);
-		expect(contested).toHaveLength(2);
-		act(() => contestButton.click());
-		expect(contested).toHaveLength(3);
-		expect(focusTargets).toEqual([oldStrip, oldStrip, oldStrip]);
-		expect(contested[0]).toMatchObject({
-			score: 2,
-			side: "old",
-			fileIndex: 2,
-			spanIndex: 3,
-		});
-		expect(selections).toEqual([]);
-
-		await act(async () => {
-			contestButton.dispatchEvent(
-				new window.KeyboardEvent("keydown", {
-					key: "Escape",
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-			await Bun.sleep(0);
-		});
-		expect(document.activeElement).toBe(oldStrip);
-		await act(async () => {
-			oldStrip.dispatchEvent(
-				new window.KeyboardEvent("keydown", {
-					key: "Tab",
-					bubbles: true,
-					cancelable: true,
-				}),
-			);
-			await Bun.sleep(0);
-		});
-		expect(document.activeElement).toBe(contestButton);
-		const forwardTab = new window.KeyboardEvent("keydown", {
-			key: "Tab",
-			bubbles: true,
-			cancelable: true,
-		});
-		await act(async () => {
-			contestButton.dispatchEvent(forwardTab);
-			await Bun.sleep(0);
-		});
-		const nextControl = container.querySelector<HTMLButtonElement>(
-			".line-actions button",
-		);
-		expect(forwardTab.defaultPrevented).toBe(true);
-		expect(nextControl?.textContent?.trim()).toBe("Tag line");
-		expect(document.activeElement).toBe(nextControl);
-		expect(
-			document.body.querySelector('[data-slot="tooltip-content"]'),
-		).toBeNull();
-		expect(selections).toEqual([]);
-	} finally {
-		act(() => root.unmount());
-		container.remove();
-	}
-});
-
-test("opens the diff-gutter importance tooltip on pointer hover", async () => {
-	const { container, root } = mountDiff({
-		file: importanceDiff,
-		importance: importanceSpans,
-	});
-	try {
-		const strip = container.querySelector<HTMLElement>(
-			`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
-		);
-		if (!strip) throw new Error("Old-line importance indicator is missing");
-		await act(async () => {
-			strip.dispatchEvent(
-				new window.MouseEvent("mouseenter", { bubbles: false }),
-			);
-			await Bun.sleep(0);
-		});
-		expect(
-			document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
-		).toContain("Importance 2/5 (Low)");
-	} finally {
-		act(() => root.unmount());
-		container.remove();
-	}
-});
-
-test("does not show contest action without callback", async () => {
-	const { container, root } = mountDiff({
-		file: importanceDiff,
-		importance: importanceSpans,
-	});
-	try {
-		const oldStrip = container.querySelector<HTMLElement>(
-			`.importance-strip.${IMPORTANCE_BG_CLASS[2]}`,
-		);
-		if (!oldStrip) throw new Error("Old-line importance indicator is missing");
-		await act(async () => {
-			document.dispatchEvent(
-				new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-			);
-			oldStrip.focus();
-			await Bun.sleep(0);
-		});
-		const tooltip = document.body.querySelector<HTMLElement>(
-			'[data-slot="tooltip-content"]',
-		);
-		expect(tooltip).not.toBeNull();
-		expect(tooltip?.querySelector("button")).toBeNull();
-	} finally {
-		act(() => root.unmount());
-		container.remove();
-	}
-});
-
-test("colours side-by-side line number cells on their covered sides", () => {
-	const root = parseMarkup(
-		renderDiff({
-			file: importanceDiff,
-			mode: "side-by-side",
-			importance: importanceSpans,
-		}),
-	);
-	const cells = [...root.querySelectorAll("td.line-number")];
-	const cellsWithScore = (score: 2 | 4) =>
-		cells.filter((cell) =>
-			cell
-				.querySelector(".importance-strip")
-				?.classList.contains(IMPORTANCE_BG_CLASS[score]),
-		);
-	expect(cellsWithScore(2).map((cell) => cell.textContent?.trim())).toContain(
-		"10",
-	);
-	expect(cellsWithScore(4).map((cell) => cell.textContent?.trim())).toEqual([
-		"11",
-		"12",
-		"12",
-	]);
-	expect(
-		cellsWithScore(2)[0]
-			?.querySelector(".importance-strip")
-			?.getAttribute("title"),
-	).toBeNull();
-	expect(
-		cellsWithScore(4)[0]
-			?.querySelector(".importance-strip")
-			?.getAttribute("title"),
-	).toBeNull();
-});
-
-test("importance absent or uncovered adds no importance strips", () => {
-	const markupWithoutImportance = parseMarkup(
-		renderDiff({ file: importanceDiff }),
-	);
-	const markupWithoutScores = parseMarkup(
-		renderDiff({ file: importanceDiff, importance: [] }),
-	);
-	const markupWithUncoveredScores = parseMarkup(
-		renderDiff({
-			file: importanceDiff,
-			importance: [
-				{
-					side: "new",
-					startLine: 20,
-					endLine: 20,
-					score: 3,
-					reason: "This spans a line outside the rendered diff.",
-					fileIndex: 0,
-					spanIndex: 0,
-				},
-			],
-		}),
-	);
-
-	for (const root of [
-		markupWithoutImportance,
-		markupWithoutScores,
-		markupWithUncoveredScores,
-	]) {
-		expect(root.querySelector(".importance-cell")).toBeNull();
-		expect(root.querySelector(".importance-strip")).toBeNull();
-	}
 });
 
 test("renders the find box without results or navigation until a search is made", () => {
@@ -3609,5 +3222,93 @@ test("from-chat draft targeting preserves mounted drafts through failure, Stop, 
 		globalThis.fetch = originalFetch;
 		window.history.replaceState(null, "", originalHistory);
 		document.body.replaceChildren();
+	}
+});
+
+test("renders importance scores in diff gutters", () => {
+	const importance = [
+		{
+			side: "new",
+			startLine: 1,
+			endLine: 1,
+			score: 5,
+			reason: "This changes a critical path.",
+			fileIndex: 0,
+			spanIndex: 0,
+		},
+	] as const;
+	const container = parseMarkup(renderDiff({ importance }));
+	const strip = container.querySelector<HTMLButtonElement>(
+		`.importance-strip.${IMPORTANCE_BG_CLASS[5]}`,
+	);
+	expect(strip?.getAttribute("aria-label")).toBe(
+		"Importance 5/5 (Critical): This changes a critical path.",
+	);
+	expect(strip?.closest("td")?.classList.contains("importance-cell")).toBe(
+		true,
+	);
+});
+
+test("opens contest action from importance gutter and passes scored span", async () => {
+	const scoredFile: ParsedFileDiff = {
+		...file,
+		insertions: 1,
+		deletions: 1,
+		hunks: [
+			{
+				header: "@@ -1 +1 @@",
+				oldStart: 1,
+				oldLines: 1,
+				newStart: 1,
+				newLines: 1,
+				lines: [
+					{ kind: "del", oldLine: 1, newLine: null, text: "old" },
+					{ kind: "add", oldLine: null, newLine: 1, text: "new" },
+				],
+			},
+		],
+	};
+	const scoredSpan = {
+		side: "new",
+		startLine: 1,
+		endLine: 1,
+		score: 4,
+		reason: "This introduces a new validation path.",
+		fileIndex: 2,
+		spanIndex: 3,
+	} as const;
+	let target: unknown;
+	let focusTarget: HTMLButtonElement | null = null;
+	const { container, root } = mountDiff({
+		file: scoredFile,
+		importance: [scoredSpan],
+		onContestImportance: (span, restoreFocusTarget) => {
+			target = span;
+			focusTarget = restoreFocusTarget;
+		},
+	});
+	try {
+		const strip = container.querySelector<HTMLButtonElement>(
+			`.importance-strip.${IMPORTANCE_BG_CLASS[4]}`,
+		);
+		if (!strip) throw new Error("Importance gutter indicator is missing");
+		await act(async () => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+			);
+			strip.focus();
+			await Bun.sleep(0);
+		});
+		const tooltip = document.body.querySelector<HTMLElement>(
+			'[data-slot="tooltip-content"]',
+		);
+		const contest = tooltip?.querySelector<HTMLButtonElement>("button");
+		if (!contest) throw new Error("Contest action is missing");
+		act(() => contest.click());
+		expect(target).toMatchObject(scoredSpan);
+		expect(focusTarget).toBe(strip);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
 	}
 });

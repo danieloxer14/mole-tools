@@ -350,10 +350,12 @@ describe("prompt store", () => {
 		).rejects.toThrow(PortError);
 	});
 
-	test("seeds prompts when missing", async () => {
+	test("seeds remaining review prompts when missing", async () => {
 		const dir = await promptsDir();
 		await loadPrompt("review-explain-comment", { dir });
-		await loadPrompt("review-importance", { dir });
+		expect(await loadPrompt("review-importance", { dir })).toBe(
+			DEFAULT_PROMPTS["review-importance"].trim(),
+		);
 		expect(await loadPrompt("review-one-pager", { dir })).toBe(
 			DEFAULT_PROMPTS["review-one-pager"].trim(),
 		);

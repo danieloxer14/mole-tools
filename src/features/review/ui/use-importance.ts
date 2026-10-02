@@ -32,9 +32,7 @@ export interface UseImportanceResult {
 type ImportanceState = Omit<
 	UseImportanceResult,
 	"canRetry" | "retry" | "contest"
-> & {
-	revisionMismatch: boolean;
-};
+> & { revisionMismatch: boolean };
 type ImportanceAction = "observe" | "retry";
 const REVISION_MISMATCH_ERROR =
 	"Importance results are for a different revision. Sync or reload the review.";
@@ -68,11 +66,9 @@ function applyStreamFrame(
 			revisionMismatch: false,
 		};
 	}
-
 	if (frame.event !== "status") return state;
 	const status = frame.data.status;
 	if (status !== "ready" && status !== "failed") return state;
-
 	return {
 		...state,
 		status,
@@ -165,7 +161,6 @@ async function streamAndRefetch(
 
 export function useImportance(
 	token: string,
-	enabled: boolean,
 	revisionKey: string,
 ): UseImportanceResult {
 	const [state, setState] = useState<ImportanceState>(INITIAL_STATE);
@@ -199,7 +194,7 @@ export function useImportance(
 			controllerRef.current?.abort();
 			controllerRef.current = null;
 		};
-		if (!enabled || revisionKey === "") return cleanup;
+		if (revisionKey === "") return cleanup;
 
 		void (async () => {
 			try {
@@ -246,15 +241,13 @@ export function useImportance(
 				});
 			}
 		})();
-
 		return cleanup;
-	}, [token, enabled, revisionKey, beginOperation]);
+	}, [token, revisionKey, beginOperation]);
 
 	const retry = useCallback(() => {
 		if (
 			stateRef.current.status !== "failed" ||
 			stateRef.current.revisionMismatch ||
-			!enabled ||
 			revisionKey === ""
 		)
 			return;
@@ -284,18 +277,13 @@ export function useImportance(
 				});
 			}
 		})();
-	}, [beginOperation, enabled, revisionKey, token]);
+	}, [beginOperation, revisionKey, token]);
 
 	const contest = useCallback(
 		async (input: ImportanceContestInput): Promise<string> => {
-			if (
-				!enabled ||
-				revisionKey === "" ||
-				stateRef.current.status !== "ready"
-			) {
+			if (revisionKey === "" || stateRef.current.status !== "ready") {
 				throw new Error("Importance is not ready");
 			}
-
 			const operation = operationRef.current;
 			const contestGeneration = ++contestGenerationRef.current;
 			let response: ImportanceContestResponse;
@@ -324,10 +312,7 @@ export function useImportance(
 							snapshot.revisionKey === revisionKey &&
 							snapshot.status === "ready"
 						) {
-							commit({
-								...stateRef.current,
-								files: snapshot.files,
-							});
+							commit({ ...stateRef.current, files: snapshot.files });
 						}
 					} catch {
 						// Preserve contest failure when authoritative refresh also fails.
@@ -341,14 +326,11 @@ export function useImportance(
 				stateRef.current.status === "ready" &&
 				response.snapshot.revisionKey === revisionKey
 			) {
-				commit({
-					...stateRef.current,
-					files: response.snapshot.files,
-				});
+				commit({ ...stateRef.current, files: response.snapshot.files });
 			}
 			return response.report;
 		},
-		[enabled, revisionKey, token, commit],
+		[revisionKey, token, commit],
 	);
 
 	return {
