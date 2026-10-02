@@ -148,30 +148,29 @@ test("omits importance progress when no progress is provided", () => {
 	expect(renderLayerPane()).not.toContain("Importance review progress");
 });
 
-test("explains importance progress in an accessible tooltip", async () => {
+test("explains importance progress with a changing target in an accessible tooltip", async () => {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
 	roots.push(root);
-	act(() =>
-		root.render(
-			<LayerPane
-				state={reviewState()}
-				files={[]}
-				filesContent={null}
-				selectedPath={null}
-				onSelectFile={() => {}}
-				onSelectLayer={() => {}}
-				onToggleDone={() => {}}
-				layerAction={null}
-				actionError={null}
-				externallyDisabled={false}
-				onRegenerate={() => {}}
-				onRetry={() => {}}
-				importanceProgress={{ value: 4, total: 18, threshold: 13 }}
-			/>,
-		),
+	const render = (threshold: number) => (
+		<LayerPane
+			state={reviewState()}
+			files={[]}
+			filesContent={null}
+			selectedPath={null}
+			onSelectFile={() => {}}
+			onSelectLayer={() => {}}
+			onToggleDone={() => {}}
+			layerAction={null}
+			actionError={null}
+			externallyDisabled={false}
+			onRegenerate={() => {}}
+			onRetry={() => {}}
+			importanceProgress={{ value: 4, total: 18, threshold }}
+		/>
 	);
+	act(() => root.render(render(13)));
 	const trigger = container.querySelector<HTMLElement>(
 		'[data-slot="tooltip-trigger"]',
 	);
@@ -185,15 +184,49 @@ test("explains importance progress in an accessible tooltip", async () => {
 		await Bun.sleep(0);
 	});
 
-	const tooltip = document.body.querySelector('[data-slot="tooltip-content"]');
+	const tooltip = () =>
+		document.body.querySelector('[data-slot="tooltip-content"]');
+	const progress = () =>
+		container.querySelector<HTMLElement>(
+			'[aria-label="Importance review progress"]',
+		);
+	const assertProgress = (target: number, targetPct: number) => {
+		const bar = progress();
+		expect(bar?.getAttribute("aria-valuetext")).toBe(
+			`22% reviewed, target ${targetPct}%`,
+		);
+		const marker = container.querySelector<HTMLElement>(
+			".importance-progress-marker",
+		);
+		expect(Number.parseFloat(marker?.style.left ?? "")).toBeCloseTo(
+			(target / 18) * 100,
+		);
+	};
+
 	expect(trigger.tabIndex).toBe(0);
-	expect(tooltip).not.toBeNull();
-	expect(tooltip?.textContent).toContain("Fixed contributions: level 1 1/18");
-	expect(tooltip?.textContent).toContain("5 8/18");
-	expect(tooltip?.textContent).toContain(
-		"Fixed target: 13/18 for High+Critical review",
+	expect(tooltip()?.textContent).toBe(
+		"Reach 72% to meet the review target. More important files fill the bar faster.",
 	);
-	expect(tooltip?.textContent).toContain("not a completeness guarantee");
+	expect(tooltip()?.textContent).not.toMatch(
+		/fixed contributions|13\/18|completeness/i,
+	);
+	assertProgress(13, 72);
+
+	act(() => root.render(render(9)));
+	expect(tooltip()?.textContent).toBe(
+		"Reach 50% to meet the review target. More important files fill the bar faster.",
+	);
+	assertProgress(9, 50);
+
+	act(() => root.render(render(0)));
+	expect(tooltip()?.textContent).toBe(
+		"More important files fill the bar faster.",
+	);
+	expect(tooltip()?.textContent).not.toMatch(
+		/target|\d+%|13\/18|completeness/i,
+	);
+	expect(progress()?.getAttribute("aria-valuetext")).toBe("22% reviewed");
+	expect(container.querySelector(".importance-progress-marker")).toBeNull();
 });
 
 function parseMarkup(markup: string): HTMLDivElement {
