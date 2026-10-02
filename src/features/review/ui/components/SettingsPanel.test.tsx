@@ -85,12 +85,15 @@ async function flushReact(): Promise<void> {
 	await Bun.sleep(0);
 	await Bun.sleep(0);
 }
-test("keeps only one-pager prompt slots feature-conditional", () => {
-	expect(PROMPT_NAMES).not.toContain("review-importance" as never);
+test("keeps importance always visible and one-pager prompt slots feature-conditional", () => {
+	expect(PROMPT_NAMES).toContain("review-importance");
+	expect(VISIBLE_SLOTS).toContain("review-importance");
 	expect(FEATURE_SLOTS).toEqual([
 		{ slot: "review-one-pager", flag: "one-pager" },
 		{ slot: "review-one-pager-chat", flag: "one-pager" },
 	]);
+	expect(SLOT_LABELS["review-importance"]).toBe("Review importance");
+	expect(SLOT_DESCRIPTIONS["review-importance"]).not.toContain("Features");
 });
 
 test("one-pager prompt slots are shown only when the confirmed flag is enabled", async () => {
@@ -107,7 +110,7 @@ test("one-pager prompt slots are shown only when the confirmed flag is enabled",
 					enabled,
 				},
 			],
-		})) as typeof fetch;
+		})) as unknown as typeof fetch;
 	const renderPrompts = () =>
 		renderToStaticMarkup(
 			createElement(SettingsPanel, {
@@ -144,6 +147,63 @@ test("one-pager prompt slots are shown only when the confirmed flag is enabled",
 	}
 });
 
+test("importance prompt stays visible regardless of legacy flag values", async () => {
+	resetFeatureFlagsForTests();
+	const originalFetch = globalThis.fetch;
+	let legacyEnabled = false;
+	let onePagerEnabled = false;
+	globalThis.fetch = (async () =>
+		jsonResponse({
+			flags: [
+				{
+					id: "one-pager",
+					label: "One pager",
+					description: "test",
+					enabled: onePagerEnabled,
+				},
+				{
+					id: "layer-importance",
+					label: "legacy",
+					description: "legacy",
+					enabled: legacyEnabled,
+				},
+			],
+		})) as unknown as typeof fetch;
+	const promptNav = () =>
+		renderToStaticMarkup(
+			createElement(SettingsPanel, {
+				token: "settings-test-token",
+				onClose: () => {},
+				initialSettings,
+				initialPrompt,
+				initialTab: "prompts",
+			}),
+		).match(/<nav[^>]*aria-label="Prompt slots"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ??
+		"";
+	try {
+		await loadFeatureFlags("settings-test-token");
+		expect(promptNav()).toContain("Review importance");
+		expect(promptNav()).not.toContain("One pager</span>");
+
+		resetFeatureFlagsForTests();
+		legacyEnabled = true;
+		await loadFeatureFlags("settings-test-token");
+		expect(promptNav()).toContain("Review importance");
+		expect(promptNav()).not.toContain("One pager</span>");
+
+		resetFeatureFlagsForTests();
+		legacyEnabled = false;
+		onePagerEnabled = true;
+		await loadFeatureFlags("settings-test-token");
+		expect(promptNav()).toContain("Review importance");
+		expect(promptNav()).toContain("One pager</span>");
+		expect(promptNav()).toContain("One pager chat</span>");
+	} finally {
+		globalThis.fetch = originalFetch;
+		resetFeatureFlagsForTests();
+	}
+});
+
 test("keeps visible slot labels in order and shows active preset and latest version", () => {
 	expect(Object.keys(SLOT_LABELS)).toEqual([...PROMPT_NAMES]);
 	expect(VISIBLE_SLOTS).toEqual([
@@ -152,6 +212,7 @@ test("keeps visible slot labels in order and shows active preset and latest vers
 		"review-chat",
 		"review-explain-comment",
 		"review-comment-from-chat",
+		"review-importance",
 	]);
 	const markup = render();
 	expect(markup).toContain('class="text-2xl font-semibold">Settings</h2>');

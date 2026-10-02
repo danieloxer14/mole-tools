@@ -174,3 +174,44 @@ test("shows a custom tooltip on focus instead of a native title", async () => {
 	expect(tooltips).toHaveLength(1);
 	expect(tooltips[0]?.textContent).toBe("List view");
 });
+
+test("shows importance status and invokes the available retry control", () => {
+	expect(
+		markup({
+			importance: {
+				status: "running",
+				error: null,
+				canRetry: false,
+				onRetry: () => {},
+			},
+		}),
+	).toContain("Scoring…");
+
+	let retries = 0;
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	act(() =>
+		root.render(
+			<ChangedFilesHeader
+				{...defaultProps}
+				importance={{
+					status: "failed",
+					error: "Importance service unavailable",
+					canRetry: true,
+					onRetry: () => {
+						retries += 1;
+					},
+				}}
+			/>,
+		),
+	);
+	expect(container.textContent).toContain("Importance failed");
+	const retry = [
+		...container.querySelectorAll<HTMLButtonElement>("button"),
+	].find((button) => button.textContent?.trim() === "Retry");
+	expect(retry).not.toBeNull();
+	act(() => retry?.click());
+	expect(retries).toBe(1);
+});

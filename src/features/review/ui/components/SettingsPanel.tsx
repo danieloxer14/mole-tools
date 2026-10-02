@@ -40,8 +40,8 @@ export const VISIBLE_SLOTS: readonly PromptName[] = [
 	"review-chat",
 	"review-explain-comment",
 	"review-comment-from-chat",
+	"review-importance",
 ];
-
 export const SLOT_LABELS: Record<PromptName, string> = {
 	"commit-system": "Commit message",
 	"mr-code": "Merge request (code)",
@@ -51,6 +51,7 @@ export const SLOT_LABELS: Record<PromptName, string> = {
 	"review-chat": "Review chat",
 	"review-explain-comment": "Explain review comment",
 	"review-comment-from-chat": "Comment from chat",
+	"review-importance": "Review importance",
 	"review-one-pager": "One pager",
 	"review-one-pager-chat": "One pager chat",
 };
@@ -71,6 +72,8 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 		"Prompt used by the review UI to explain a GitLab discussion in a new chat.",
 	"review-comment-from-chat":
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
+	"review-importance":
+		"System prompt the importance agent uses to score changed line spans 1–5 and provide a concise reason for each.",
 	"review-one-pager":
 		"System prompt the one pager agent uses to write a one-page Markdown summary of the MR (Features → One pager must be on).",
 	"review-one-pager-chat":

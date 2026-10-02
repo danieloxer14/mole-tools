@@ -9,6 +9,7 @@ import type { ParsedFileDiff } from "../../../../shared/diff-parse";
 import type { Draft } from "../../state";
 import { applyColorTheme } from "../color-theme";
 import { createDraftEditQueue } from "../draft-edit-queue";
+import { IMPORTANCE_BG_CLASS } from "../importance";
 import { DiffView } from "./DiffView";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -149,6 +150,12 @@ function renderDiff(
 			{...props}
 		/>,
 	);
+}
+
+function parseMarkup(markup: string): HTMLDivElement {
+	const container = document.createElement("div");
+	container.innerHTML = markup;
+	return container;
 }
 
 function mountDiff(props: Partial<Parameters<typeof DiffView>[0]> = {}): {
@@ -560,12 +567,237 @@ test("shows the current match and total for multiple matches", () => {
 	expect(markup).toContain("1/2");
 });
 
-test("navigates find matches with mouse controls and wraps around", () => {
-	const { container, root } = mountDiff();
+for (const mode of ["inline", "side-by-side"] as const) {
+	test(`re-scrolls the sole find match on every navigation action (${mode})`, () => {
+		const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+		const scrolledRows: HTMLElement[] = [];
+		HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+			scrolledRows.push(this);
+		};
+		let container: HTMLDivElement | null = null;
+		let root: Root | null = null;
+		try {
+			const mounted = mountDiff({ file, mode });
+			container = mounted.container;
+			root = mounted.root;
 
-	const originalScrollIntoView = Element.prototype.scrollIntoView;
-	Element.prototype.scrollIntoView = () => {};
+			const input = container.querySelector<HTMLInputElement>(
+				'input[aria-label="Find in file"]',
+			);
+			expect(input).not.toBeNull();
+			if (!input) throw new Error("find input missing");
+
+			act(() => setInputValue(input, "value"));
+			const targetRow = container.querySelector<HTMLElement>(
+				"tr.find-match-current",
+			);
+			expect(targetRow).not.toBeNull();
+			if (!targetRow) throw new Error("current find row missing");
+			expect(scrolledRows.includes(targetRow)).toBe(true);
+			scrolledRows.length = 0;
+
+			const previous = container.querySelector<HTMLButtonElement>(
+				'button[aria-label="Previous match"]',
+			);
+			const next = container.querySelector<HTMLButtonElement>(
+				'button[aria-label="Next match"]',
+			);
+			expect(previous).not.toBeNull();
+			expect(next).not.toBeNull();
+			if (!previous || !next) throw new Error("find navigation missing");
+
+			const pressEnter = (shiftKey = false) => {
+				input.dispatchEvent(
+					new window.KeyboardEvent("keydown", {
+						key: "Enter",
+						shiftKey,
+						bubbles: true,
+						cancelable: true,
+					}),
+				);
+			};
+			const actions = [
+				() => next.click(),
+				() => next.click(),
+				() => previous.click(),
+				() => previous.click(),
+				() => pressEnter(),
+				() => pressEnter(),
+				() => pressEnter(true),
+				() => pressEnter(true),
+			];
+			for (const action of actions) {
+				scrolledRows.length = 0;
+				act(action);
+				expect(scrolledRows.includes(targetRow)).toBe(true);
+				expect(
+					container.querySelector<HTMLElement>("[data-find-count]")
+						?.textContent,
+				).toBe("1/1");
+				expect(
+					container.querySelector<HTMLElement>(".find-match-current"),
+				).toBe(targetRow);
+			}
+		} finally {
+			HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+			if (root) {
+				const mountedRoot = root;
+				act(() => mountedRoot.unmount());
+			}
+			container?.remove();
+		}
+	});
+}
+
+test("re-scrolls controlled find query without changing its owner", () => {
+	const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+	const scrolledRows: HTMLElement[] = [];
+	HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+		scrolledRows.push(this);
+	};
+	let container: HTMLDivElement | null = null;
+	let root: Root | null = null;
+	const changedQueries: string[] = [];
 	try {
+		const mounted = mountDiff({
+			file,
+			findQuery: "value",
+			onFindQueryChange: (query) => changedQueries.push(query),
+		});
+		container = mounted.container;
+		root = mounted.root;
+
+		const input = container.querySelector<HTMLInputElement>(
+			'input[aria-label="Find in file"]',
+		);
+		const next = container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Next match"]',
+		);
+		const targetRow = container.querySelector<HTMLElement>(
+			"tr.find-match-current",
+		);
+		expect(input).not.toBeNull();
+		expect(next).not.toBeNull();
+		expect(targetRow).not.toBeNull();
+		if (!input || !next || !targetRow) {
+			throw new Error("controlled find elements missing");
+		}
+		expect(scrolledRows.includes(targetRow)).toBe(true);
+		scrolledRows.length = 0;
+
+		act(() => next.click());
+		expect(scrolledRows.includes(targetRow)).toBe(true);
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("1/1");
+		expect(container.querySelector(".find-match-current")).toBe(targetRow);
+		scrolledRows.length = 0;
+
+		act(() => {
+			input.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Enter",
+					shiftKey: true,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		});
+		expect(scrolledRows.includes(targetRow)).toBe(true);
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("1/1");
+		expect(container.querySelector(".find-match-current")).toBe(targetRow);
+		expect(input.value).toBe("value");
+		expect(changedQueries).toEqual([]);
+	} finally {
+		HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+		if (root) {
+			const mountedRoot = root;
+			act(() => mountedRoot.unmount());
+		}
+		container?.remove();
+	}
+});
+
+test("does not scroll when keyboard navigating empty or unmatched find", () => {
+	const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+	const scrolledRows: HTMLElement[] = [];
+	HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+		scrolledRows.push(this);
+	};
+	let container: HTMLDivElement | null = null;
+	let root: Root | null = null;
+	try {
+		const mounted = mountDiff({ file });
+		container = mounted.container;
+		root = mounted.root;
+
+		const input = container.querySelector<HTMLInputElement>(
+			'input[aria-label="Find in file"]',
+		);
+		expect(input).not.toBeNull();
+		if (!input) throw new Error("find input missing");
+		const pressEnter = (shiftKey = false) => {
+			input.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: "Enter",
+					shiftKey,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		};
+
+		act(() => {
+			pressEnter();
+			pressEnter(true);
+		});
+		expect(scrolledRows).toHaveLength(0);
+
+		act(() => setInputValue(input, "no-such-token"));
+		expect(
+			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
+		).toBe("0/0");
+		expect(
+			container.querySelector<HTMLButtonElement>(
+				'button[aria-label="Previous match"]',
+			)?.disabled,
+		).toBe(true);
+		expect(
+			container.querySelector<HTMLButtonElement>(
+				'button[aria-label="Next match"]',
+			)?.disabled,
+		).toBe(true);
+		scrolledRows.length = 0;
+		act(() => {
+			pressEnter();
+			pressEnter(true);
+		});
+		expect(scrolledRows).toHaveLength(0);
+	} finally {
+		HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+		if (root) {
+			const mountedRoot = root;
+			act(() => mountedRoot.unmount());
+		}
+		container?.remove();
+	}
+});
+
+test("navigates find matches with mouse controls and wraps around", () => {
+	const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+	const scrolledRows: HTMLElement[] = [];
+	HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+		scrolledRows.push(this);
+	};
+	let container: HTMLDivElement | null = null;
+	let root: Root | null = null;
+	try {
+		const mounted = mountDiff();
+		container = mounted.container;
+		root = mounted.root;
+
 		const input = container.querySelector<HTMLInputElement>(
 			'input[aria-label="Find in file"]',
 		);
@@ -576,6 +808,16 @@ test("navigates find matches with mouse controls and wraps around", () => {
 		expect(
 			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
 		).toBe("1/2");
+		const firstRow = container.querySelector<HTMLElement>(
+			"tr.find-match-current",
+		);
+		const secondRow = [
+			...container.querySelectorAll<HTMLElement>("tr.find-match"),
+		].find((row) => row !== firstRow);
+		expect(firstRow).not.toBeNull();
+		expect(secondRow).toBeDefined();
+		if (!firstRow || !secondRow) throw new Error("find rows missing");
+		expect(scrolledRows.includes(firstRow)).toBe(true);
 
 		const previous = container.querySelector<HTMLButtonElement>(
 			'button[aria-label="Previous match"]',
@@ -587,22 +829,36 @@ test("navigates find matches with mouse controls and wraps around", () => {
 		expect(next).not.toBeNull();
 		if (!previous || !next) throw new Error("find navigation missing");
 
+		scrolledRows.length = 0;
 		act(() => next.click());
+		expect(scrolledRows.includes(secondRow)).toBe(true);
 		expect(
 			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
 		).toBe("2/2");
+		expect(container.querySelector(".find-match-current")).toBe(secondRow);
+
+		scrolledRows.length = 0;
 		act(() => next.click());
+		expect(scrolledRows.includes(firstRow)).toBe(true);
 		expect(
 			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
 		).toBe("1/2");
+		expect(container.querySelector(".find-match-current")).toBe(firstRow);
+
+		scrolledRows.length = 0;
 		act(() => previous.click());
+		expect(scrolledRows.includes(secondRow)).toBe(true);
 		expect(
 			container.querySelector<HTMLElement>("[data-find-count]")?.textContent,
 		).toBe("2/2");
+		expect(container.querySelector(".find-match-current")).toBe(secondRow);
 	} finally {
-		act(() => root.unmount());
-		container.remove();
-		Element.prototype.scrollIntoView = originalScrollIntoView;
+		HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+		if (root) {
+			const mountedRoot = root;
+			act(() => mountedRoot.unmount());
+		}
+		container?.remove();
 	}
 });
 
@@ -2966,5 +3222,93 @@ test("from-chat draft targeting preserves mounted drafts through failure, Stop, 
 		globalThis.fetch = originalFetch;
 		window.history.replaceState(null, "", originalHistory);
 		document.body.replaceChildren();
+	}
+});
+
+test("renders importance scores in diff gutters", () => {
+	const importance = [
+		{
+			side: "new",
+			startLine: 1,
+			endLine: 1,
+			score: 5,
+			reason: "This changes a critical path.",
+			fileIndex: 0,
+			spanIndex: 0,
+		},
+	] as const;
+	const container = parseMarkup(renderDiff({ importance }));
+	const strip = container.querySelector<HTMLButtonElement>(
+		`.importance-strip.${IMPORTANCE_BG_CLASS[5]}`,
+	);
+	expect(strip?.getAttribute("aria-label")).toBe(
+		"Importance 5/5 (Critical): This changes a critical path.",
+	);
+	expect(strip?.closest("td")?.classList.contains("importance-cell")).toBe(
+		true,
+	);
+});
+
+test("opens contest action from importance gutter and passes scored span", async () => {
+	const scoredFile: ParsedFileDiff = {
+		...file,
+		insertions: 1,
+		deletions: 1,
+		hunks: [
+			{
+				header: "@@ -1 +1 @@",
+				oldStart: 1,
+				oldLines: 1,
+				newStart: 1,
+				newLines: 1,
+				lines: [
+					{ kind: "del", oldLine: 1, newLine: null, text: "old" },
+					{ kind: "add", oldLine: null, newLine: 1, text: "new" },
+				],
+			},
+		],
+	};
+	const scoredSpan = {
+		side: "new",
+		startLine: 1,
+		endLine: 1,
+		score: 4,
+		reason: "This introduces a new validation path.",
+		fileIndex: 2,
+		spanIndex: 3,
+	} as const;
+	let target: unknown;
+	let focusTarget: HTMLButtonElement | null = null;
+	const { container, root } = mountDiff({
+		file: scoredFile,
+		importance: [scoredSpan],
+		onContestImportance: (span, restoreFocusTarget) => {
+			target = span;
+			focusTarget = restoreFocusTarget;
+		},
+	});
+	try {
+		const strip = container.querySelector<HTMLButtonElement>(
+			`.importance-strip.${IMPORTANCE_BG_CLASS[4]}`,
+		);
+		if (!strip) throw new Error("Importance gutter indicator is missing");
+		await act(async () => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+			);
+			strip.focus();
+			await Bun.sleep(0);
+		});
+		const tooltip = document.body.querySelector<HTMLElement>(
+			'[data-slot="tooltip-content"]',
+		);
+		const contest = tooltip?.querySelector<HTMLButtonElement>("button");
+		if (!contest) throw new Error("Contest action is missing");
+		act(() => contest.click());
+		expect(target).toMatchObject(scoredSpan);
+		expect(focusTarget).toBe(strip);
+	} finally {
+		act(() => root.unmount());
+		container.remove();
 	}
 });

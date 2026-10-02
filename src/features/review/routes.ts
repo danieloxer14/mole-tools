@@ -68,6 +68,7 @@ import {
 	featureFlagViews,
 } from "../../shared/feature-flags";
 import { buildPosition } from "../../shared/gitlab-position";
+import { importanceRevisionKey } from "../../shared/importance-revision-key";
 import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
 import {
 	expandSkillTokens,
@@ -89,6 +90,24 @@ import {
 	runCommentFromChat,
 } from "./comment-from-chat";
 import { buildExplainMessage, explainChatTitle } from "./explain";
+import {
+	generateImportance,
+	ImportanceContestRequestSchema,
+	type ImportanceContestResponse,
+	ImportanceReasonSchema,
+	type ImportanceResult,
+	type ImportanceSnapshot,
+	importanceFilePath,
+	readImportanceResult,
+	writeImportanceResult,
+} from "./importance";
+import {
+	appendImportanceLedgerEntry,
+	buildImportanceContestReport,
+	findImportanceRunEntry,
+	IMPORTANCE_LEDGER_FILE,
+	type ImportanceLedgerRunEntry,
+} from "./importance-ledger";
 import {
 	generateLayers,
 	type LayerGenerationResult,
@@ -145,6 +164,7 @@ export interface ReviewRoutesOptions {
 	store?: ReviewStore;
 	skillStore?: SkillStore;
 	featureFlagStore?: FeatureFlagStore;
+	importanceDir?: string;
 	onePagerDir?: string;
 	readOnePagerDocument?: typeof readOnePagerDocument;
 	paths?: Pick<
@@ -1527,6 +1547,448 @@ export function createReviewRoutes(
 		fallbackState = recoverOrphanedLayerRun(fallbackState);
 		return fallbackState;
 	}
+	function importanceDirFor(state: ReviewState): string {
+		return (
+			options.importanceDir ??
+			join(dirname(state.worktreePath), "review-importance")
+		);
+	}
+
+	function importanceResultPathFor(state: ReviewState): string {
+		return join(importanceDirFor(state), "importance.json");
+	}
+
+	function importanceLedgerPathFor(state: ReviewState): string {
+		return join(importanceDirFor(state), IMPORTANCE_LEDGER_FILE);
+	}
+
+	let importanceRun: {
+		key: string;
+		controller: AbortController;
+		promise: Promise<ImportanceSnapshot>;
+	} | null = null;
+	let importanceStartGate: Promise<unknown> = Promise.resolve();
+	let importanceWriteGate: Promise<unknown> = Promise.resolve();
+
+	function serializeImportanceWrite<T>(run: () => Promise<T>): Promise<T> {
+		const next = importanceWriteGate.then(run, run);
+		importanceWriteGate = next.catch(() => undefined);
+		return next;
+	}
+
+	async function importanceSnapshot(
+		state?: ReviewState,
+	): Promise<ImportanceSnapshot> {
+		const snapshotState = state ?? (await currentState());
+		const revisionKey = importanceRevisionKey(snapshotState.revision);
+		if (importanceRun?.key === revisionKey) {
+			return { revisionKey, status: "running", error: null, files: [] };
+		}
+
+		const result = await readImportanceResult(
+			importanceResultPathFor(snapshotState),
+		);
+		if (result && importanceRevisionKey(result.revision) === revisionKey) {
+			return {
+				revisionKey,
+				status: result.status,
+				error: result.error,
+				files: result.files,
+			};
+		}
+		return { revisionKey, status: "pending", error: null, files: [] };
+	}
+
+	async function contestImportance(request: Request): Promise<Response> {
+		const parsed = ImportanceContestRequestSchema.safeParse(
+			await parseBody(request),
+		);
+		if (!parsed.success) {
+			return jsonResponse({ error: parsed.error.message }, 400);
+		}
+		const { revisionKey, path, fileIndex, spanIndex, expected, score, reason } =
+			parsed.data;
+		const reasonTrimmed = reason.trim();
+		const parsedReason = ImportanceReasonSchema.safeParse(reasonTrimmed);
+		if (!parsedReason.success) {
+			return jsonResponse({ error: parsedReason.error.message }, 400);
+		}
+		if (score === expected.score && reasonTrimmed === expected.reason) {
+			return jsonResponse(
+				{ error: "Contest must change the score or reason" },
+				400,
+			);
+		}
+
+		return serializeImportanceWrite(async () => {
+			const { state, parsedDiff } = await serializeDisplayMutation(
+				async () => ({ state: await currentState(), parsedDiff: currentDiff }),
+			);
+			const key = importanceRevisionKey(state.revision);
+			if (key !== revisionKey || importanceRun?.key === key) {
+				return jsonResponse(
+					{ error: "Importance results changed. Reload the review." },
+					409,
+				);
+			}
+
+			const result = await readImportanceResult(importanceResultPathFor(state));
+			if (
+				result?.status !== "ready" ||
+				importanceRevisionKey(result.revision) !== key
+			) {
+				return jsonResponse(
+					{ error: "Importance results changed. Reload the review." },
+					409,
+				);
+			}
+
+			const file = result.files[fileIndex];
+			const before = file?.spans[spanIndex];
+			if (
+				!file ||
+				file.path !== path ||
+				!before ||
+				before.side !== expected.side ||
+				before.startLine !== expected.startLine ||
+				before.endLine !== expected.endLine ||
+				before.score !== expected.score ||
+				before.reason !== expected.reason
+			) {
+				return jsonResponse(
+					{ error: "Importance results changed. Reload the review." },
+					409,
+				);
+			}
+
+			const after = { ...before, score, reason: reasonTrimmed };
+			let run: ImportanceLedgerRunEntry | null = null;
+			if (result.runId) {
+				const candidate = await findImportanceRunEntry(
+					importanceLedgerPathFor(state),
+					result.runId,
+				).catch(() => null);
+				if (candidate && importanceRevisionKey(candidate.revision) === key) {
+					run = candidate;
+				}
+			}
+			const parsedFile = parsedDiff.find(
+				(candidate) => importanceFilePath(candidate) === path,
+			);
+			const report = buildImportanceContestReport({
+				appVersion: APP_VERSION,
+				revision: state.revision,
+				path,
+				before,
+				after,
+				run,
+				runId: result.runId ?? null,
+				fileIndex,
+				spanIndex,
+				file: parsedFile,
+			});
+			const files = result.files.map((resultFile, resultFileIndex) =>
+				resultFileIndex === fileIndex
+					? {
+							...resultFile,
+							spans: resultFile.spans.map((span, resultSpanIndex) =>
+								resultSpanIndex === spanIndex ? after : span,
+							),
+						}
+					: resultFile,
+			);
+			try {
+				await writeImportanceResult(importanceResultPathFor(state), {
+					...result,
+					files,
+				});
+			} catch (error) {
+				return jsonResponse(
+					{ error: `Unable to save importance: ${errorMessage(error)}` },
+					500,
+				);
+			}
+
+			try {
+				await appendImportanceLedgerEntry(importanceLedgerPathFor(state), {
+					version: 1,
+					kind: "contest",
+					contestId: crypto.randomUUID(),
+					recordedAt: new Date().toISOString(),
+					runId: result.runId ?? null,
+					revision: {
+						headSha: state.revision.headSha,
+						mergeBaseSha: state.revision.mergeBaseSha,
+					},
+					path,
+					fileIndex,
+					spanIndex,
+					before,
+					after,
+					report,
+				});
+			} catch (error) {
+				logger.warn("review.importance.ledger-failed", {
+					error: errorMessage(error),
+				});
+			}
+
+			const response: ImportanceContestResponse = {
+				snapshot: { revisionKey: key, status: "ready", error: null, files },
+				report,
+			};
+			return jsonResponse(response);
+		});
+	}
+
+	async function runImportance(
+		state: ReviewState,
+		key: string,
+		parsedDiff: ParsedFileDiff[],
+		controller: AbortController,
+	): Promise<ImportanceSnapshot> {
+		const runId = crypto.randomUUID();
+		const prompt = {
+			slot: "review-importance" as const,
+			preset: presetFor("review-importance"),
+			version: null as number | null,
+		};
+		let agentMeta: {
+			agent: string;
+			model: string | null;
+			effort: string | null;
+		} | null = null;
+		let result: Omit<ImportanceSnapshot, "revisionKey"> = {
+			status: "failed",
+			error: null,
+			files: [],
+		};
+		let attempts = 0;
+		let systemPrompt: string | null = null;
+		let input: string | null = null;
+		let messages: string[] = [];
+		try {
+			const promptVersion = await readPrompt("review-importance", {
+				preset: prompt.preset,
+				dir: promptDirOption(),
+			});
+			prompt.version = promptVersion.version;
+			let agent: ReviewAgent | undefined;
+			if (options.createReviewAgent) {
+				const selection = await effectivePromptSelection(promptVersion);
+				agentMeta = {
+					agent: selection.agent,
+					model: selection.model,
+					effort: selection.effort,
+				};
+				agent = agentForSelection(selection);
+			} else {
+				agent = layerAgent;
+			}
+			if (!agent) {
+				result = {
+					status: "failed",
+					error: "Importance agent is unavailable",
+					files: [],
+				};
+			} else {
+				const generated = await generateImportance({
+					agent,
+					state,
+					parsedDiff,
+					dir: importanceDirFor(state),
+					promptText: promptVersion.text.trim(),
+					runId,
+					config: options.config,
+					signal: controller.signal,
+				});
+				result = {
+					status: generated.status,
+					error: generated.error,
+					files: generated.files,
+				};
+				attempts = generated.attempts;
+				systemPrompt = generated.systemPrompt;
+				input = generated.input;
+				messages = generated.messages;
+			}
+		} catch (error) {
+			result = {
+				status: "failed",
+				error: errorMessage(error),
+				files: [],
+			};
+		}
+
+		if (controller.signal.aborted) {
+			return { revisionKey: key, status: "pending", error: null, files: [] };
+		}
+		try {
+			return await serializeImportanceWrite(async () => {
+				if (controller.signal.aborted) {
+					return {
+						revisionKey: key,
+						status: "pending",
+						error: null,
+						files: [],
+					};
+				}
+				const latest = await currentState();
+				const latestKey = importanceRevisionKey(latest.revision);
+				if (latestKey !== key) {
+					return {
+						revisionKey: latestKey,
+						status: "pending",
+						error: null,
+						files: [],
+					};
+				}
+
+				const persisted: ImportanceResult = {
+					version: 1,
+					revision: {
+						headSha: state.revision.headSha,
+						mergeBaseSha: state.revision.mergeBaseSha,
+					},
+					status: result.status === "ready" ? "ready" : "failed",
+					error: result.error,
+					files: result.files,
+					generatedAt: new Date().toISOString(),
+					runId,
+				};
+				try {
+					await writeImportanceResult(
+						importanceResultPathFor(state),
+						persisted,
+					);
+				} catch (error) {
+					return {
+						revisionKey: key,
+						status: "failed",
+						error: `Unable to save importance: ${errorMessage(error)}`,
+						files: [],
+					};
+				}
+				await appendImportanceLedgerEntry(importanceLedgerPathFor(state), {
+					version: 1,
+					kind: "run",
+					runId,
+					recordedAt: new Date().toISOString(),
+					revision: persisted.revision,
+					status: persisted.status,
+					error: persisted.error,
+					attempts,
+					prompt,
+					agent: agentMeta,
+					systemPrompt,
+					input,
+					messages,
+					files: persisted.files,
+				}).catch((error) =>
+					logger.warn("review.importance.ledger-failed", {
+						error: errorMessage(error),
+					}),
+				);
+				return { revisionKey: key, ...result };
+			});
+		} catch (error) {
+			return {
+				revisionKey: key,
+				status: "failed",
+				error: errorMessage(error),
+				files: [],
+			};
+		}
+	}
+
+	function startImportance(
+		force: boolean,
+		expectedRevisionKey?: string,
+	): Promise<ImportanceSnapshot> {
+		const decision = importanceStartGate.then(async () => {
+			const { state, parsedDiff } = await serializeDisplayMutation(
+				async () => ({ state: await currentState(), parsedDiff: currentDiff }),
+			);
+			const key = importanceRevisionKey(state.revision);
+			if (force && expectedRevisionKey !== key) {
+				return { promise: Promise.resolve(await importanceSnapshot()) };
+			}
+			if (importanceRun?.key === key) {
+				return { promise: importanceRun.promise };
+			}
+			importanceRun?.controller.abort();
+			const snapshot = await importanceSnapshot(state);
+			if (
+				snapshot.status === "ready" ||
+				(!force && snapshot.status === "failed")
+			) {
+				return { promise: Promise.resolve(snapshot) };
+			}
+
+			const controller = new AbortController();
+			const promise = runImportance(state, key, parsedDiff, controller);
+			const tracked = { key, controller, promise };
+			importanceRun = tracked;
+			void promise.finally(() => {
+				if (importanceRun === tracked) importanceRun = null;
+			});
+			return { promise };
+		});
+		importanceStartGate = decision.then(
+			() => undefined,
+			() => undefined,
+		);
+		return decision.then(({ promise }) => promise);
+	}
+
+	async function importanceStream(
+		force: boolean,
+		expectedRevisionKey?: string,
+	): Promise<Response> {
+		async function* frames(): AsyncIterable<SseFrame> {
+			const state = await currentState();
+			const revisionKey = importanceRevisionKey(state.revision);
+			if (!options.createReviewAgent && !layerAgent) {
+				yield {
+					event: "status",
+					data: { status: "unavailable", revisionKey },
+				};
+				yield {
+					event: "error",
+					data: { message: "Importance agent is unavailable", revisionKey },
+				};
+				yield { event: "done", data: { status: "failed", revisionKey } };
+				return;
+			}
+
+			yield { event: "status", data: { status: "running", revisionKey } };
+			try {
+				const result = await startImportance(force, expectedRevisionKey);
+				yield { event: "status", data: result };
+				if (result.status === "failed") {
+					yield {
+						event: "error",
+						data: {
+							message: result.error ?? "Importance generation failed",
+							revisionKey: result.revisionKey,
+						},
+					};
+				}
+				yield {
+					event: "done",
+					data: { status: result.status, revisionKey: result.revisionKey },
+				};
+			} catch (error) {
+				yield {
+					event: "error",
+					data: { message: errorMessage(error), revisionKey },
+				};
+				yield { event: "done", data: { status: "failed", revisionKey } };
+			}
+		}
+		return sseResponse(frames());
+	}
+
 	function onePagerDirFor(state: ReviewState): string {
 		return (
 			options.onePagerDir ??
@@ -3313,6 +3775,30 @@ export function createReviewRoutes(
 				} catch (error) {
 					return jsonResponse({ error: errorMessage(error) }, 500);
 				}
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/importance/contest"
+			) {
+				return contestImportance(request);
+			}
+			if (request.method === "GET" && url.pathname === "/api/importance") {
+				return jsonResponse(await importanceSnapshot());
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/importance/observe"
+			) {
+				return importanceStream(false);
+			}
+			if (
+				request.method === "POST" &&
+				url.pathname === "/api/importance/retry"
+			) {
+				const expectedRevisionKey = url.searchParams.get("revisionKey");
+				if (!expectedRevisionKey)
+					return jsonResponse({ error: "Missing revisionKey" }, 400);
+				return importanceStream(true, expectedRevisionKey);
 			}
 			if (request.method === "GET" && url.pathname === "/api/one-pager") {
 				if (!(await featureFlags())["one-pager"]) {

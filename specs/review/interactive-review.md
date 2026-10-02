@@ -305,8 +305,11 @@ threshold, and `Diff only` returns the nearest visible hunk to the viewport.
 The diff header renders its controls as compact icon buttons with tooltips:
 segmented `Inline`/`Side by side` and `Whole file`/`Diff only` groups, a
 `Rendered`/`Diff` group for markdown files, and a `Tag whole file` button.
-The find box shows its result count
-and previous/next arrows only after a search is made.
+The find box shows its result count and previous/next arrows only after a search
+is made. Selecting a result scrolls it into view; every Previous/Next and
+Enter/Shift+Enter navigation scrolls again, including when only one result
+matches. With zero results, navigation does not scroll and the arrows remain
+disabled.
 The header also offers a `Viewed` checkbox for the selected file, mirroring the
 `Changed files` row checkbox and persisting through the same progress save.
 

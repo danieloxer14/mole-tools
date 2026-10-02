@@ -168,6 +168,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			mr: result.mr,
 			paths: result.paths,
 			versionStatus,
+			importanceDir: join(result.paths.reviewDir, "importance"),
 			onePagerDir: join(result.paths.reviewDir, "one-pager"),
 		});
 		const address = server.start();

@@ -18,7 +18,8 @@ const roots: Root[] = [];
 const disabledFlag: FeatureFlagView = {
 	id: "one-pager",
 	label: "One pager",
-	description: "Summarize the merge request.",
+	description:
+		"Switch Overview between the MR description and a one-page summary.",
 	enabled: false,
 };
 const enabledFlag: FeatureFlagView = { ...disabledFlag, enabled: true };

@@ -117,7 +117,9 @@ CLI alias. OMP effort is sent as `--thinking <level>`, Claude effort as
 Unset effort sends no effort option; Codex's `-c` option is not an OMP effort
 flag.
 
-The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > One pager** is on, it also shows `review-one-pager` and `review-one-pager-chat`. Each prompt version has Agent, Model, and Effort settings.
+The **Prompts** tab manages the six standard review prompts (`review-layers-code`,
+`review-layers-plan`, `review-chat`, `review-explain-comment`,
+`review-comment-from-chat`, and `review-importance`); when **Settings > Features > One pager** is on, it also shows `review-one-pager` and `review-one-pager-chat`. Each prompt version has Agent, Model, and Effort settings.
 
 The OMP model dropdown comes from `models --json` run by the selected OMP
 executable. Effort choices are limited to values advertised as supported for
@@ -234,15 +236,15 @@ Prompt presets and their version history live beside `config.json`:
 
 The prompt slots are `commit-system`, `mr-code`, `mr-plan`,
 `review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`, `review-one-pager`, and
-`review-one-pager-chat`. The one-pager slots appear in **Settings > Prompts**
-only when **Settings > Features > One pager** is on. Each slot can have multiple
-presets. The active text is the highest-numbered version of the active preset.
-The shipped default seeds `default/001.md` on first access, and
-`config.prompts` records the active preset per slot (a missing entry means
-`default`).
+`review-explain-comment`, `review-comment-from-chat`, `review-importance`,
+`review-one-pager`, and `review-one-pager-chat`. The one-pager slots appear in
+**Settings > Prompts** only when **Settings > Features > One pager** is on.
+Each slot can have multiple presets. The active text is the highest-numbered
+version of the active preset. The shipped default seeds `default/001.md` on
+first access, and `config.prompts` records the active preset per slot (a
+missing entry means `default`).
 
-The five standard review prompt slots are managed from **Settings > Prompts**;
+The six standard review prompt slots are managed from **Settings > Prompts**;
 the one-pager prompt slots appear there only when **One pager** is on.
 General review defaults are in **General**. Saving a prompt creates a new
 version, **Roll back** copies an older version forward as a new latest version,
@@ -358,7 +360,7 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 
 **Configuration.** Uses the `commit` model route from `config.json`. The active
 `commit-system` prompt preset supplies the system prompt; set it in the
-`prompts` map. Settings **Prompts** manages the five standard review prompt
+`prompts` map. Settings **Prompts** manages the six standard review prompt
 slots and `review-one-pager` plus `review-one-pager-chat` only when **Settings >
 Features > One pager** is on; it does not change commit prompt configuration.
 
@@ -393,8 +395,10 @@ three review columns. The left sidebar offers **Layers** and **Files** tabs:
 Layers tracks generated review layers and coverage, while Files provides
 changed-file navigation. The centre column is reserved for the selected diff;
 it does not contain a second files browser. The right column provides persistent,
-read-only agent chat. Comments stay local drafts until you explicitly send each
-one as a positioned GitLab discussion. Each published
+read-only agent chat. Overview opens first with the merge-request description;
+use the header to switch to Code for layers, files, and diffs, or back to
+Overview. Comments stay local drafts until you explicitly send each one as a
+positioned GitLab discussion. Each published
 discussion has an **Explain** button that opens a new chat pre-loaded with the
 surrounding diff: the chat is titled `Explain: …` after the comment, and its
 first turn uses the active `review-explain-comment` prompt preset, the comment's notes,
@@ -423,11 +427,11 @@ The **Settings** dialog has five tabs: **General**, **Prompts**, **Skills**,
 **Appearance**, and **Features**; it opens on **Prompts**. **General** contains
 **Default Agent**, **Default model**, **Default effort**, and **Show whitespace
 changes**. That toggle applies immediately to the current review, not review
-defaults. The **Prompts** tab manages the five standard review prompt slots
+defaults. The **Prompts** tab manages the six standard review prompt slots
 (`review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`), plus `review-one-pager`
-and `review-one-pager-chat` only while **One pager** is on, and their preset
-versions, each with Agent, Model, and Effort dropdowns.
+`review-explain-comment`, `review-comment-from-chat`, `review-importance`),
+plus `review-one-pager` and `review-one-pager-chat` only while **One pager**
+is on, and their preset versions, each with Agent, Model, and Effort dropdowns.
 OMP models come from the selected executable's `models --json` catalog; Claude
 uses the Anthropic Models API with a server `ANTHROPIC_API_KEY`, or CLI aliases
 only without it. API-key entitlement does not establish Claude CLI access, and
@@ -486,7 +490,8 @@ The **Features** tab manages the one review feature flag, **One pager**.
 Its value is stored in `~/.config/mole-tools/features.json` as a JSON object
 keyed by flag ID, for example `{ "one-pager": false }`. Missing files or keys
 default to off; invalid files also use defaults and are not rewritten until a
-toggle. Unknown keys are preserved when a flag is changed.
+toggle. Unknown keys are preserved when a flag is changed. Review importance
+scoring is available in every review and is not a feature flag.
 
 #### One pager
 
@@ -499,6 +504,22 @@ The separate **One pager chat** uses its own prompt and model to answer
 follow-up questions. Claude and Codex can edit the summary in place; OMP remains
 read-only because its tools do not enforce directory-scoped writes. After
 supported-provider edits, the rendered document reloads after a 500 ms debounce.
+
+Review importance scores changed spans from 1–5 with a concise reason and
+highlights their significance in the review. It is always available; its
+`review-importance` prompt is managed with the standard prompts.
+
+
+When scoring is ready, a shared importance review progress bar appears directly
+beneath the Layers/Files tabs. It shows viewed added and deleted lines as fixed
+shares of all scored changed lines: levels 1–5 contribute 1/19, 2/19, 3/19,
+5/19, and 8/19 respectively; context and unscored lines don't count. The target
+is 13/19 for High+Critical review. The tooltip states the target percentage and
+explains that more important files fill the bar faster. Fill and accessibility
+value use the 19-point scale and saturate at 100%. A marker shows the target.
+Fill colour blends through importance colours toward level 5 as progress
+approaches the target and stays level 5 once reached; a subtle flame animates
+at that point, but stays static with reduced motion.
 
 
 ```bash

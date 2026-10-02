@@ -119,6 +119,115 @@ function renderLayerPane(
 		/>,
 	);
 }
+test("renders one shared importance progress bar directly below the tab list", () => {
+	const container = parseMarkup(
+		renderLayerPane({
+			importanceProgress: { value: 4, total: 18, threshold: 13 },
+		}),
+	);
+	const tabList = container.querySelector('[role="tablist"]');
+	const progress = container.querySelector(
+		'[aria-label="Importance review progress"]',
+	);
+	const tooltipTrigger = container.querySelector(
+		'[data-slot="tooltip-trigger"]',
+	);
+
+	expect(
+		container.querySelectorAll('[aria-label="Importance review progress"]'),
+	).toHaveLength(1);
+	expect(tabList?.parentElement?.lastElementChild).toBe(tooltipTrigger);
+	expect(progress?.closest("header")).toBeNull();
+	expect(progress?.getAttribute("aria-valuenow")).toBe("4");
+	expect(progress?.getAttribute("aria-valuemax")).toBe("18");
+	expect(container.innerHTML).not.toContain('title="Target:');
+	expect(container.innerHTML).not.toContain(">Importance</span>");
+});
+
+test("omits importance progress when no progress is provided", () => {
+	expect(renderLayerPane()).not.toContain("Importance review progress");
+});
+
+test("explains importance progress with a changing target in an accessible tooltip", async () => {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	roots.push(root);
+	const render = (threshold: number) => (
+		<LayerPane
+			state={reviewState()}
+			files={[]}
+			filesContent={null}
+			selectedPath={null}
+			onSelectFile={() => {}}
+			onSelectLayer={() => {}}
+			onToggleDone={() => {}}
+			layerAction={null}
+			actionError={null}
+			externallyDisabled={false}
+			onRegenerate={() => {}}
+			onRetry={() => {}}
+			importanceProgress={{ value: 4, total: 18, threshold }}
+		/>
+	);
+	act(() => root.render(render(13)));
+	const trigger = container.querySelector<HTMLElement>(
+		'[data-slot="tooltip-trigger"]',
+	);
+	if (!trigger) throw new Error("Missing importance tooltip trigger");
+
+	await act(async () => {
+		document.dispatchEvent(
+			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+		);
+		trigger.focus();
+		await Bun.sleep(0);
+	});
+
+	const tooltip = () =>
+		document.body.querySelector('[data-slot="tooltip-content"]');
+	const progress = () =>
+		container.querySelector<HTMLElement>(
+			'[aria-label="Importance review progress"]',
+		);
+	const assertProgress = (target: number, targetPct: number) => {
+		const bar = progress();
+		expect(bar?.getAttribute("aria-valuetext")).toBe(
+			`22% reviewed, target ${targetPct}%`,
+		);
+		const marker = container.querySelector<HTMLElement>(
+			".importance-progress-marker",
+		);
+		expect(Number.parseFloat(marker?.style.left ?? "")).toBeCloseTo(
+			(target / 18) * 100,
+		);
+	};
+
+	expect(trigger.tabIndex).toBe(0);
+	expect(tooltip()?.textContent).toBe(
+		"Reach 72% to meet the review target. More important files fill the bar faster.",
+	);
+	expect(tooltip()?.textContent).not.toMatch(
+		/fixed contributions|13\/18|completeness/i,
+	);
+	assertProgress(13, 72);
+
+	act(() => root.render(render(9)));
+	expect(tooltip()?.textContent).toBe(
+		"Reach 50% to meet the review target. More important files fill the bar faster.",
+	);
+	assertProgress(9, 50);
+
+	act(() => root.render(render(0)));
+	expect(tooltip()?.textContent).toBe(
+		"More important files fill the bar faster.",
+	);
+	expect(tooltip()?.textContent).not.toMatch(
+		/target|\d+%|13\/18|completeness/i,
+	);
+	expect(progress()?.getAttribute("aria-valuetext")).toBe("22% reviewed");
+	expect(container.querySelector(".importance-progress-marker")).toBeNull();
+});
 
 function parseMarkup(markup: string): HTMLDivElement {
 	const container = document.createElement("div");
@@ -1116,4 +1225,25 @@ test("completion button toggles callback once and collapses only after saved sta
 	]);
 	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
 	expect(uncheck?.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("renders importance progress and score indicators from results", () => {
+	const markup = renderLayerPane({
+		importanceByPath: new Map([
+			[
+				"src/routes/route.ts",
+				{ score: 5 as const, reason: "Critical authorization change." },
+			],
+		]),
+		importanceProgress: { value: 13, total: 18, threshold: 13 },
+	});
+	const container = parseMarkup(markup);
+	expect(
+		container.querySelector('[aria-label="Importance review progress"]'),
+	).not.toBeNull();
+	expect(
+		container.querySelector(
+			'button[aria-label="src/routes/route.ts"] .bg-importance-5',
+		),
+	).not.toBeNull();
 });
