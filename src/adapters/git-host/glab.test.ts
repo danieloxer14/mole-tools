@@ -852,6 +852,21 @@ describe("GlabAdapter", () => {
 				{ id: "global-note", individualNote: true, resolved: false },
 			]);
 		});
+		test("includes the failing field path for invalid discussion data", async () => {
+			const ref: MrRef = {
+				host: "gitlab.example.com",
+				projectPath: "group/sub/project",
+				iid: 42,
+			};
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(JSON.stringify([{ id: null, notes: [] }])),
+			});
+
+			await expect(glab.listDiscussions(ref)).rejects.toThrow(
+				"Invalid GitLab discussion response: 0.id: Invalid input",
+			);
+		});
 	});
 	describe("incoming discussion positions", () => {
 		const ref: MrRef = {
@@ -932,6 +947,17 @@ describe("GlabAdapter", () => {
 					old_path: "src/old.ts",
 					new_path: "src/new.ts",
 					old_line: null,
+					new_line: 8,
+					expected: {
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
+						newLine: 8,
+						oldLine: null,
+					},
+				},
+				{
+					old_path: "src/old.ts",
+					new_path: "src/new.ts",
 					new_line: 8,
 					expected: {
 						newPath: "src/new.ts",

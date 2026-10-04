@@ -23,6 +23,7 @@ import type { ReviewApiState, ReviewProgressResponse } from "../routes";
 import type { ChatKind, Draft, LineSelection } from "../state";
 import type { ChatEntry, ChatEntryWithOptimistic } from "../store";
 import type { VersionStatus } from "../version-check";
+import { responseErrorMessage } from "./api-json";
 import { createRequestSequence } from "./chat-request-sequence";
 import { bootColorTheme } from "./color-theme";
 import {
@@ -1965,8 +1966,14 @@ function ReviewApp() {
 				method: "POST",
 				headers: { "X-Mole-Token": token },
 			});
-			if (!response.ok)
-				throw new Error(`Sync request failed (${response.status})`);
+			if (!response.ok) {
+				throw new Error(
+					await responseErrorMessage(
+						response,
+						`Sync request failed (${response.status})`,
+					),
+				);
+			}
 			return (await response.json()) as ReviewStateResponse;
 		} finally {
 			reviewStateRequests.current.finishMutation(mutation);

@@ -1467,6 +1467,8 @@ test("opens a reason tooltip from a focused list importance pip", async () => {
 	expect(pip.getAttribute("aria-label")).toBe(
 		`Importance 5/5 (Critical): ${reason}`,
 	);
+	expect(pip.className.split(/\s+/)).toContain("bg-importance-5");
+	expect(pip.className.split(/\s+/)).not.toContain("bg-transparent");
 	expect(pip.tabIndex).toBe(0);
 	expect(pip.getAttribute("title")).toBeNull();
 	const counts = scoredRow.querySelector("span.text-success");
@@ -1528,6 +1530,8 @@ test("opens a reason tooltip on tree file leaves, not directories", async () => 
 	expect(pip.getAttribute("aria-label")).toBe(
 		`Importance 3/5 (Moderate): ${reason}`,
 	);
+	expect(pip.className.split(/\s+/)).toContain("bg-importance-3");
+	expect(pip.className.split(/\s+/)).not.toContain("bg-transparent");
 	expect(pip.tabIndex).toBe(0);
 	expect(pip.getAttribute("title")).toBeNull();
 	const counts = leafRow.querySelector("span.text-success");

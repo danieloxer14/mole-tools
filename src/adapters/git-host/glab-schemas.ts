@@ -123,8 +123,20 @@ export const GitLabPositionSchema = z
 	.object({
 		old_path: z.string().nullable(),
 		new_path: z.string().nullable(),
-		old_line: z.number().int().nonnegative().nullable(),
-		new_line: z.number().int().nonnegative().nullable(),
+		old_line: z
+			.number()
+			.int()
+			.nonnegative()
+			.nullable()
+			.optional()
+			.default(null),
+		new_line: z
+			.number()
+			.int()
+			.nonnegative()
+			.nullable()
+			.optional()
+			.default(null),
 		line_range: z
 			.object({
 				start: GitLabDiscussionLineRangeEntrySchema,
