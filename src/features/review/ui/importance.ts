@@ -169,15 +169,20 @@ export function importanceReviewProgressForViewedFiles(
 	}
 	let scoredLines = 0;
 	let value = 0;
+	let pendingWeight = 0;
+	let highestRepresentedFraction = 0;
 	for (const score of [1, 2, 3, 4, 5] as const) {
 		const totalAtScore = fileTotals.byScore[score];
 		scoredLines += totalAtScore;
+		pendingWeight += IMPORTANCE_PROGRESS_WEIGHTS[score];
 		if (totalAtScore > 0) {
-			value +=
-				IMPORTANCE_PROGRESS_WEIGHTS[score] *
-				(viewedByScore[score] / totalAtScore);
+			const fraction = viewedByScore[score] / totalAtScore;
+			value += pendingWeight * fraction;
+			pendingWeight = 0;
+			highestRepresentedFraction = fraction;
 		}
 	}
+	value += pendingWeight * highestRepresentedFraction;
 	return scoredLines === 0
 		? { value: 0, total: 0, threshold: 0 }
 		: { value, total: IMPORTANCE_PROGRESS_TOTAL, threshold: 13 };

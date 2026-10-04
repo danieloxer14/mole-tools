@@ -172,8 +172,10 @@ test("score-5 progress keeps denominator and threshold fixed as viewed paths cha
 		total: 19,
 		threshold: 13,
 	});
-	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
-		value: 4,
+	expect(
+		importanceReviewProgress(diff, files, ["src/a.ts", "stale.ts"]),
+	).toEqual({
+		value: 9.5,
 		total: 19,
 		threshold: 13,
 	});
@@ -188,7 +190,7 @@ test("score-3 progress aggregates files and view state changes numerator only", 
 
 	expect(totals.byScore).toEqual({ 1: 0, 2: 0, 3: 200, 4: 0, 5: 0 });
 	expect(importanceReviewProgressForViewedFiles(totals, ["src/a.ts"])).toEqual({
-		value: 0.75,
+		value: 4.75,
 		total: 19,
 		threshold: 13,
 	});
@@ -197,8 +199,9 @@ test("score-3 progress aggregates files and view state changes numerator only", 
 			"src/a.ts",
 			"src/a.ts",
 			"src/b.ts",
+			"stale.ts",
 		]),
-	).toEqual({ value: 3, total: 19, threshold: 13 });
+	).toEqual({ value: 19, total: 19, threshold: 13 });
 	expect(importanceReviewProgressForViewedFiles(totals, [])).toEqual({
 		value: 0,
 		total: 19,
@@ -206,18 +209,6 @@ test("score-3 progress aggregates files and view state changes numerator only", 
 	});
 });
 
-test("sparse score buckets contribute fixed shares", () => {
-	const low = scoredAddedFile("src/low.ts", 1, 2);
-	const high = scoredAddedFile("src/high.ts", 4, 4);
-
-	expect(
-		importanceReviewProgress(
-			[low.diff, high.diff],
-			[low.file, high.file],
-			["src/low.ts", "src/high.ts"],
-		),
-	).toEqual({ value: 6, total: 19, threshold: 13 });
-});
 test("higher-importance files advance progress faster for equal added lines", () => {
 	const low = scoredAddedFile("src/low.ts", 1, 2);
 	const high = scoredAddedFile("src/high.ts", 5, 2);
@@ -227,7 +218,7 @@ test("higher-importance files advance progress faster for equal added lines", ()
 	const highProgress = importanceReviewProgress(diff, files, [high.file.path]);
 
 	expect(lowProgress).toEqual({ value: 1, total: 19, threshold: 13 });
-	expect(highProgress).toEqual({ value: 8, total: 19, threshold: 13 });
+	expect(highProgress).toEqual({ value: 18, total: 19, threshold: 13 });
 	expect(highProgress.value).toBeGreaterThan(lowProgress.value);
 });
 
@@ -242,6 +233,191 @@ test("full view across five levels preserves raw value of 19", () => {
 			levels.map(({ file }) => file),
 			levels.map(({ file }) => file.path),
 		),
+	).toEqual({ value: 19, total: 19, threshold: 13 });
+});
+
+test("represented score subsets redistribute literal base-weight allocations", () => {
+	const cases: readonly [
+		readonly ImportanceSpan["score"][],
+		readonly number[],
+	][] = [
+		[[1], [19]],
+		[[2], [19]],
+		[[3], [19]],
+		[[4], [19]],
+		[[5], [19]],
+		[
+			[1, 2],
+			[1, 18],
+		],
+		[
+			[1, 3],
+			[1, 18],
+		],
+		[
+			[1, 4],
+			[1, 18],
+		],
+		[
+			[1, 5],
+			[1, 18],
+		],
+		[
+			[2, 3],
+			[3, 16],
+		],
+		[
+			[2, 4],
+			[3, 16],
+		],
+		[
+			[2, 5],
+			[3, 16],
+		],
+		[
+			[3, 4],
+			[6, 13],
+		],
+		[
+			[3, 5],
+			[6, 13],
+		],
+		[
+			[4, 5],
+			[11, 8],
+		],
+		[
+			[1, 2, 3],
+			[1, 2, 16],
+		],
+		[
+			[1, 2, 4],
+			[1, 2, 16],
+		],
+		[
+			[1, 2, 5],
+			[1, 2, 16],
+		],
+		[
+			[1, 3, 4],
+			[1, 5, 13],
+		],
+		[
+			[1, 3, 5],
+			[1, 5, 13],
+		],
+		[
+			[1, 4, 5],
+			[1, 10, 8],
+		],
+		[
+			[2, 3, 4],
+			[3, 3, 13],
+		],
+		[
+			[2, 3, 5],
+			[3, 3, 13],
+		],
+		[
+			[2, 4, 5],
+			[3, 8, 8],
+		],
+		[
+			[3, 4, 5],
+			[6, 5, 8],
+		],
+		[
+			[1, 2, 3, 4],
+			[1, 2, 3, 13],
+		],
+		[
+			[1, 2, 3, 5],
+			[1, 2, 3, 13],
+		],
+		[
+			[1, 2, 4, 5],
+			[1, 2, 8, 8],
+		],
+		[
+			[1, 3, 4, 5],
+			[1, 5, 5, 8],
+		],
+		[
+			[2, 3, 4, 5],
+			[3, 3, 5, 8],
+		],
+		[
+			[1, 2, 3, 4, 5],
+			[1, 2, 3, 5, 8],
+		],
+	];
+
+	for (const [scores, allocations] of cases) {
+		const levels = scores.map((score) =>
+			scoredAddedFile(`src/${score}.ts`, score, 1),
+		);
+		const diff = levels.map(({ diff }) => diff);
+		const files = levels.map(({ file }) => file);
+		const totals = importanceReviewFileTotals(diff, files);
+		for (const [index, { file }] of levels.entries()) {
+			expect(
+				importanceReviewProgressForViewedFiles(totals, [file.path]).value,
+			).toBe(allocations[index]);
+		}
+		expect(importanceReviewProgressForViewedFiles(totals, [])).toEqual({
+			value: 0,
+			total: 19,
+			threshold: 13,
+		});
+		expect(
+			importanceReviewProgressForViewedFiles(
+				totals,
+				levels.map(({ file }) => file.path),
+			),
+		).toEqual({ value: 19, total: 19, threshold: 13 });
+	}
+});
+
+test("donated score-5 weight scales with its viewed scored-line fraction", () => {
+	const shortHigh = scoredAddedFile("src/high-short.ts", 5, 1);
+	const longHigh = scoredAddedFile("src/high-long.ts", 5, 3);
+	const middle = scoredAddedFile("src/middle.ts", 3, 1);
+	const low = scoredAddedFile("src/low.ts", 1, 1);
+	const diff = [shortHigh, longHigh, middle, low].map(({ diff }) => diff);
+	const files = [shortHigh, longHigh, middle, low].map(({ file }) => file);
+	const totals = importanceReviewFileTotals(diff, files);
+
+	expect(
+		importanceReviewProgressForViewedFiles(totals, [shortHigh.file.path]),
+	).toEqual({ value: 3.25, total: 19, threshold: 13 });
+	expect(
+		importanceReviewProgressForViewedFiles(totals, [
+			shortHigh.file.path,
+			longHigh.file.path,
+		]),
+	).toEqual({ value: 13, total: 19, threshold: 13 });
+});
+
+test("only counted changed lines establish represented score levels", () => {
+	const represented = scoredAddedFile("src/score-3.ts", 3, 1);
+	const context = diffFile("src/context.ts", "src/context.ts", [
+		diffLine("context", 1, 1),
+	]);
+	const unmatched = diffFile("src/unmatched-diff.ts", "src/unmatched-diff.ts", [
+		diffLine("add", null, 1),
+	]);
+	const totals = importanceReviewFileTotals(
+		[represented.diff, context, unmatched],
+		[
+			represented.file,
+			{ path: "src/context.ts", spans: [span("new", 1, 1, 5)] },
+			{ path: "src/unmatched.ts", spans: [span("new", 1, 1, 4)] },
+		],
+	);
+
+	expect(totals.byScore).toEqual({ 1: 0, 2: 0, 3: 1, 4: 0, 5: 0 });
+	expect(
+		importanceReviewProgressForViewedFiles(totals, ["src/score-3.ts"]),
 	).toEqual({ value: 19, total: 19, threshold: 13 });
 });
 
@@ -266,12 +442,11 @@ test("importance progress counts highest-overlap added and deleted lines once", 
 		},
 	];
 
+	const totals = importanceReviewFileTotals([changed, changed], files);
+	expect(totals.byScore).toEqual({ 1: 0, 2: 0, 3: 1, 4: 0, 5: 1 });
 	expect(
-		importanceReviewProgress([changed, changed], files, [
-			"src/a.ts",
-			"src/a.ts",
-		]),
-	).toEqual({ value: 11, total: 19, threshold: 13 });
+		importanceReviewProgressForViewedFiles(totals, ["src/a.ts", "src/a.ts"]),
+	).toEqual({ value: 19, total: 19, threshold: 13 });
 });
 
 test("deleted paths, merged importance spans, and unmatched data retain handling", () => {
@@ -282,13 +457,15 @@ test("deleted paths, merged importance spans, and unmatched data retain handling
 		{ path: "gone.ts", spans: [span("old", 1, 1, 5)] },
 	];
 
+	const totals = importanceReviewFileTotals([deleted, duplicate], files);
+	expect(totals.byScore).toEqual({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 1 });
 	expect(
-		importanceReviewProgress([deleted, duplicate], files, [
+		importanceReviewProgressForViewedFiles(totals, [
 			"gone.ts",
 			"gone.ts",
 			"absent.ts",
 		]),
-	).toEqual({ value: 8, total: 19, threshold: 13 });
+	).toEqual({ value: 19, total: 19, threshold: 13 });
 });
 
 test("importance progress ignores unmatched files and empty score data", () => {

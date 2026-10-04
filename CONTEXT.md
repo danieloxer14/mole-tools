@@ -165,15 +165,18 @@ document in place; OMP stays read-only because it lacks enforced directory-scope
 writes. Supported-provider edits trigger a debounced document reload.
 
 **Importance review progress** appears as one shared bar directly beneath the
-Layers/Files tabs when scoring is ready. It shows viewed added and deleted
-lines as fixed shares of all scored changed lines: levels 1–5 contribute 1/19,
-2/19, 3/19, 5/19, and 8/19 respectively; context and unscored lines don't count.
-Its target is 13/19 for High+Critical review. The tooltip states the target
-percentage and explains that more important files fill the bar faster. Fill and
-accessibility value use the 19-point scale and saturate at 100%. A marker shows
-the target; fill blends through importance colours toward level 5 and stays
-level 5 at the target. A subtle flame animates once reached, static with reduced
-motion.
+Layers/Files tabs when scoring is ready. Its base weights for levels 1–5 are
+1, 2, 3, 5, and 8 points (19 total). Each absent level donates its weight to
+the nearest represented higher level, or to the nearest represented lower level
+when no higher level is represented. Viewed scored changed lines earn their
+represented level's full allocated share proportionally; context and unscored
+lines don't count. Viewing all scored lines in any nonempty scored diff reaches
+19/19. The target remains fixed at 13/19 (68% rounded), regardless of which
+levels are present. The tooltip states the target percentage and explains that
+more important files fill the bar faster. Fill and accessibility value use the
+19-point scale and saturate at 100%. A marker shows the target; fill blends
+through importance colours toward level 5 and stays level 5 at the target. A
+subtle flame animates once reached, static with reduced motion.
 
 ### Plain stdout help
 Deterministic text printed directly to stdout, without mounting Ink and without loading config. Used for `mole-tools help` and `mole-tools help <command>`.

@@ -510,16 +510,20 @@ highlights their significance in the review. It is always available; its
 `review-importance` prompt is managed with the standard prompts.
 
 
-When scoring is ready, a shared importance review progress bar appears directly
-beneath the Layers/Files tabs. It shows viewed added and deleted lines as fixed
-shares of all scored changed lines: levels 1–5 contribute 1/19, 2/19, 3/19,
-5/19, and 8/19 respectively; context and unscored lines don't count. The target
-is 13/19 for High+Critical review. The tooltip states the target percentage and
-explains that more important files fill the bar faster. Fill and accessibility
-value use the 19-point scale and saturate at 100%. A marker shows the target.
-Fill colour blends through importance colours toward level 5 as progress
-approaches the target and stays level 5 once reached; a subtle flame animates
-at that point, but stays static with reduced motion.
+When scoring is ready, one shared importance review progress bar appears directly
+beneath the Layers/Files tabs. Base weights for levels 1–5 are 1, 2, 3, 5, and
+8 points (19 total). Each absent level donates its weight to the nearest
+represented higher level; if no higher level is represented, the nearest
+represented lower level receives it. Viewed scored changed lines earn their
+represented level's full allocated share proportionally; context and unscored
+lines don't count. Viewing all scored lines in any nonempty scored diff reaches
+19/19. The target stays fixed at 13/19 (68% rounded), independent of which
+levels are present. The tooltip states the target percentage and explains that
+more important files fill the bar faster. Fill and accessibility value use the
+19-point scale and saturate at 100%. A marker shows the target. Fill colour
+blends through importance colours toward level 5 as progress approaches the
+target and stays level 5 once reached; a subtle flame animates at that point,
+but stays static with reduced motion.
 
 
 ```bash
