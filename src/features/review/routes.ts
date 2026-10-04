@@ -1547,18 +1547,10 @@ export function createReviewRoutes(
 		fallbackState = recoverOrphanedLayerRun(fallbackState);
 		return fallbackState;
 	}
-
 	function importanceDirFor(state: ReviewState): string {
 		return (
 			options.importanceDir ??
 			join(dirname(state.worktreePath), "review-importance")
-		);
-	}
-
-	function onePagerDirFor(state: ReviewState): string {
-		return (
-			options.onePagerDir ??
-			join(dirname(state.worktreePath), "review-one-pager")
 		);
 	}
 
@@ -1606,11 +1598,8 @@ export function createReviewRoutes(
 		}
 		return { revisionKey, status: "pending", error: null, files: [] };
 	}
-	async function contestImportance(request: Request): Promise<Response> {
-		if (!(await featureFlags())["layer-importance"]) {
-			return jsonResponse({ error: "Feature disabled" }, 404);
-		}
 
+	async function contestImportance(request: Request): Promise<Response> {
 		const parsed = ImportanceContestRequestSchema.safeParse(
 			await parseBody(request),
 		);
@@ -1966,10 +1955,7 @@ export function createReviewRoutes(
 				};
 				yield {
 					event: "error",
-					data: {
-						message: "Importance agent is unavailable",
-						revisionKey,
-					},
+					data: { message: "Importance agent is unavailable", revisionKey },
 				};
 				yield { event: "done", data: { status: "failed", revisionKey } };
 				return;
@@ -2001,6 +1987,13 @@ export function createReviewRoutes(
 			}
 		}
 		return sseResponse(frames());
+	}
+
+	function onePagerDirFor(state: ReviewState): string {
+		return (
+			options.onePagerDir ??
+			join(dirname(state.worktreePath), "review-one-pager")
+		);
 	}
 
 	let onePagerRun: {
@@ -3790,27 +3783,18 @@ export function createReviewRoutes(
 				return contestImportance(request);
 			}
 			if (request.method === "GET" && url.pathname === "/api/importance") {
-				if (!(await featureFlags())["layer-importance"]) {
-					return jsonResponse({ error: "Feature disabled" }, 404);
-				}
 				return jsonResponse(await importanceSnapshot());
 			}
 			if (
 				request.method === "POST" &&
 				url.pathname === "/api/importance/observe"
 			) {
-				if (!(await featureFlags())["layer-importance"]) {
-					return jsonResponse({ error: "Feature disabled" }, 404);
-				}
 				return importanceStream(false);
 			}
 			if (
 				request.method === "POST" &&
 				url.pathname === "/api/importance/retry"
 			) {
-				if (!(await featureFlags())["layer-importance"]) {
-					return jsonResponse({ error: "Feature disabled" }, 404);
-				}
 				const expectedRevisionKey = url.searchParams.get("revisionKey");
 				if (!expectedRevisionKey)
 					return jsonResponse({ error: "Missing revisionKey" }, 400);

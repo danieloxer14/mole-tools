@@ -7,7 +7,6 @@ import { logger } from "../../core/logger";
 import type { ReviewAgent } from "../../ports/review-agent";
 import type { ParsedFileDiff } from "../../shared/diff-parse";
 import {
-	type AgentFileAttempt,
 	agentAttemptTimeoutSeconds,
 	runAgentFileAttempt,
 } from "./agent-attempt";
@@ -94,10 +93,7 @@ function normalizeImportanceDocInput(value: unknown): unknown {
 		: isImportanceRecord(value.files)
 			? Object.entries(value.files).map(([path, file]) =>
 					Array.isArray(file)
-						? {
-								path,
-								spans: file.map(normalizeImportanceSpanInput),
-							}
+						? { path, spans: file.map(normalizeImportanceSpanInput) }
 						: normalizeImportanceFileInput(file, path),
 				)
 			: value.files;
@@ -143,7 +139,6 @@ export type ImportanceSpan = z.infer<typeof ImportanceSpanSchema>;
 export type ImportanceFile = z.infer<typeof ImportanceFileSchema>;
 export type ImportanceDoc = z.infer<typeof ImportanceDocSchema>;
 export type ImportanceResult = z.infer<typeof ImportanceResultSchema>;
-
 export type ImportanceStatus = "pending" | "running" | "ready" | "failed";
 
 export interface ImportanceSnapshot {
@@ -192,7 +187,7 @@ const IMPORTANCE_OUTPUT_RULES = [
 	'- Use `side: "new"` with new line numbers for added and context lines; use `side: "old"` with old line numbers for deleted lines.',
 	"- Every span's `reason` must be exactly one concise sentence explaining its score and hunk, with no line breaks and at most 144 characters. Never omit or invent this field.",
 	"- Do not omit `version`, `files`, `path`, `spans`, `side`, `startLine`, `endLine`, `score`, or `reason`, and do not rename these fields.",
-	"- Skip files marked `(no textual diff — do not score)`.",
+	"- Skip files marked `(no textual diff — do not score).",
 	"- The worktree is read-only; inspect it only with read-only tools. Write only the output file.",
 	"- Reply with only the output file path.",
 ].join("\n");
@@ -273,8 +268,6 @@ function cancelledImportanceResult(
 	};
 }
 
-type ImportanceAttempt = AgentFileAttempt<ImportanceDoc>;
-
 interface DiffCoordinates {
 	old: number[];
 	new: number[];
@@ -340,9 +333,8 @@ function importanceCoordinatesByPath(
 ): Map<string, DiffCoordinates | null> {
 	const coordinatesByPath = new Map<string, DiffCoordinates | null>();
 	for (const file of parsedDiff) {
-		const path = importanceFilePath(file);
 		coordinatesByPath.set(
-			path,
+			importanceFilePath(file),
 			!file.binary && file.hunks.length > 0 ? diffCoordinates(file) : null,
 		);
 	}
@@ -352,7 +344,7 @@ function importanceCoordinatesByPath(
 export async function generateImportance(
 	options: ImportanceGenerationOptions,
 ): Promise<ImportanceGenerationResult> {
-	const runId = options.runId ?? crypto.randomUUID();
+	const runId = options.runId ?? randomUUID();
 	const runDir = join(options.dir, runId);
 	let attempts = 0;
 	let systemPrompt: string | null = null;
@@ -361,7 +353,7 @@ export async function generateImportance(
 	try {
 		await mkdir(runDir, { recursive: true });
 		await options.agent.preflight();
-		if (options.signal?.aborted)
+		if (options.signal?.aborted) {
 			return cancelledImportanceResult(
 				runId,
 				attempts,
@@ -369,6 +361,7 @@ export async function generateImportance(
 				input,
 				messages,
 			);
+		}
 
 		const promptText =
 			options.promptText ??
@@ -401,14 +394,13 @@ export async function generateImportance(
 			label: "Importance",
 			schema: ImportanceDocSchema,
 		};
-		let attempt: ImportanceAttempt;
 		attempts++;
 		messages.push(firstMessage);
-		attempt = await runAgentFileAttempt({
+		let attempt = await runAgentFileAttempt({
 			...attemptOptions,
 			message: firstMessage,
 		});
-		if (options.signal?.aborted)
+		if (options.signal?.aborted) {
 			return cancelledImportanceResult(
 				runId,
 				attempts,
@@ -416,6 +408,7 @@ export async function generateImportance(
 				input,
 				messages,
 			);
+		}
 
 		if (!attempt.ok && attempt.kind === "output") {
 			const retryMessage = `${firstMessage}\n\nPrevious output validation failed. Write a complete replacement JSON file following the required schema exactly: include version 1, a files array, and side, startLine, endLine, score, and reason on every span. Do not return prose or rename fields. Fix every listed validation error:\n${attempt.error}`;
@@ -425,7 +418,7 @@ export async function generateImportance(
 				...attemptOptions,
 				message: retryMessage,
 			});
-			if (options.signal?.aborted)
+			if (options.signal?.aborted) {
 				return cancelledImportanceResult(
 					runId,
 					attempts,
@@ -433,7 +426,9 @@ export async function generateImportance(
 					input,
 					messages,
 				);
+			}
 		}
+
 		if (!attempt.ok) {
 			return {
 				status: "failed",

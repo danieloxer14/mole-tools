@@ -23,24 +23,10 @@ export interface ImportanceSpanRef {
 }
 
 export type ContestableImportanceSpan = ImportanceSpan & ImportanceSpanRef;
-
-export function lineImportanceMap<S extends ImportanceSpan = ImportanceSpan>(
-	spans: readonly S[],
-	hunks: readonly DiffHunk[],
-): ImportanceLineMap<S> {
-	const ratings: ImportanceLineMap<S> = new Map();
-	for (const hunk of hunks) {
-		for (const line of hunk.lines) {
-			const oldRating =
-				line.oldLine === null ? null : ratingAt(spans, "old", line.oldLine);
-			const newRating =
-				line.newLine === null ? null : ratingAt(spans, "new", line.newLine);
-			if (oldRating !== null) ratings.set(`old:${line.oldLine}`, oldRating);
-			if (newRating !== null) ratings.set(`new:${line.newLine}`, newRating);
-		}
-	}
-	return ratings;
-}
+export type ImportanceLineMap<S extends ImportanceSpan = ImportanceSpan> = Map<
+	string,
+	S
+>;
 
 function ratingAt<S extends ImportanceSpan>(
 	spans: readonly S[],
@@ -61,10 +47,23 @@ function ratingAt<S extends ImportanceSpan>(
 	return rating;
 }
 
-export type ImportanceLineMap<S extends ImportanceSpan = ImportanceSpan> = Map<
-	string,
-	S
->;
+export function lineImportanceMap<S extends ImportanceSpan = ImportanceSpan>(
+	spans: readonly S[],
+	hunks: readonly DiffHunk[],
+): ImportanceLineMap<S> {
+	const ratings: ImportanceLineMap<S> = new Map();
+	for (const hunk of hunks) {
+		for (const line of hunk.lines) {
+			const oldRating =
+				line.oldLine === null ? null : ratingAt(spans, "old", line.oldLine);
+			const newRating =
+				line.newLine === null ? null : ratingAt(spans, "new", line.newLine);
+			if (oldRating !== null) ratings.set(`old:${line.oldLine}`, oldRating);
+			if (newRating !== null) ratings.set(`new:${line.newLine}`, newRating);
+		}
+	}
+	return ratings;
+}
 
 export function indexedLineImportance<
 	S extends ImportanceSpan = ImportanceSpan,
@@ -97,7 +96,9 @@ const IMPORTANCE_PROGRESS_WEIGHTS: Record<ImportanceScore, number> = {
 	4: 5,
 	5: 8,
 };
-
+const IMPORTANCE_PROGRESS_TOTAL = Object.values(
+	IMPORTANCE_PROGRESS_WEIGHTS,
+).reduce((total, weight) => total + weight, 0);
 type ImportanceScoreCounts = Record<ImportanceScore, number>;
 
 function emptyImportanceScoreCounts(): ImportanceScoreCounts {
@@ -108,9 +109,7 @@ function countImportanceScores(
 	target: ImportanceScoreCounts,
 	source: ImportanceScoreCounts,
 ): void {
-	for (const score of [1, 2, 3, 4, 5] as const) {
-		target[score] += source[score];
-	}
+	for (const score of [1, 2, 3, 4, 5] as const) target[score] += source[score];
 }
 
 export interface ImportanceReviewProgress {
@@ -138,12 +137,10 @@ export function importanceReviewFileTotals(
 	const byPath = new Map<string, ImportanceScoreCounts>();
 	const byScore = emptyImportanceScoreCounts();
 	const seen = new Set<string>();
-
 	for (const file of diff) {
 		const key = file.newPath ?? file.oldPath;
 		if (!key || seen.has(key)) continue;
 		seen.add(key);
-
 		const spans = spansByPath.get(key);
 		if (!spans) continue;
 		const ratings = lineImportanceMap(spans, file.hunks);
@@ -152,15 +149,12 @@ export function importanceReviewFileTotals(
 			for (const line of hunk.lines) {
 				if (line.kind !== "add" && line.kind !== "del") continue;
 				const rating = indexedDiffLineImportance(ratings, line);
-				if (rating === null) continue;
-				fileCounts[rating.score] += 1;
+				if (rating !== null) fileCounts[rating.score] += 1;
 			}
 		}
-
 		byPath.set(key, fileCounts);
 		countImportanceScores(byScore, fileCounts);
 	}
-
 	return { byPath, byScore };
 }
 
@@ -173,7 +167,6 @@ export function importanceReviewProgressForViewedFiles(
 	for (const [path, counts] of fileTotals.byPath) {
 		if (viewed.has(path)) countImportanceScores(viewedByScore, counts);
 	}
-
 	let scoredLines = 0;
 	let value = 0;
 	for (const score of [1, 2, 3, 4, 5] as const) {
@@ -185,10 +178,9 @@ export function importanceReviewProgressForViewedFiles(
 				(viewedByScore[score] / totalAtScore);
 		}
 	}
-
 	return scoredLines === 0
 		? { value: 0, total: 0, threshold: 0 }
-		: { value, total: 18, threshold: 13 };
+		: { value, total: IMPORTANCE_PROGRESS_TOTAL, threshold: 13 };
 }
 
 export function importanceReviewProgress(

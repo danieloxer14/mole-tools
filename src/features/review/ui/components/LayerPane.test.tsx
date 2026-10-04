@@ -873,10 +873,10 @@ test("renders layer file chips with shortened labels and full-path accessible la
 	expect(markup).toContain(">web/route.ts</button>");
 	expect(markup).not.toContain('title="web/route.ts"');
 });
-test("shows score reasons and full unscored paths in layer pill component tooltips", async () => {
-	const scoredPath = "src/routes/route.ts";
-	const unscoredPath = "web/route.ts";
-	const paths = [scoredPath, unscoredPath];
+test("shows full paths in tooltips for shortened layer file chips", async () => {
+	const firstPath = "src/routes/route.ts";
+	const secondPath = "web/route.ts";
+	const paths = [firstPath, secondPath];
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -898,53 +898,32 @@ test("shows score reasons and full unscored paths in layer pill component toolti
 				externallyDisabled={false}
 				onRegenerate={() => {}}
 				onRetry={() => {}}
-				importanceByPath={
-					new Map([
-						[
-							scoredPath,
-							{
-								score: 4 as const,
-								reason: "This changes how requests are authorized.",
-							},
-						],
-					])
-				}
 			/>,
 		),
 	);
-	const scoredChip = container.querySelector<HTMLButtonElement>(
-		`button[aria-label="${scoredPath}"]`,
+	const firstChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${firstPath}"]`,
 	);
-	const unscoredChip = container.querySelector<HTMLButtonElement>(
-		`button[aria-label="${unscoredPath}"]`,
+	const secondChip = container.querySelector<HTMLButtonElement>(
+		`button[aria-label="${secondPath}"]`,
 	);
-	if (!scoredChip || !unscoredChip) throw new Error("Missing layer file chip");
-	expect(scoredChip.title).toBe("");
-	expect(unscoredChip.title).toBe("");
+	if (!firstChip || !secondChip) throw new Error("Missing layer file chip");
 
-	await act(async () => {
-		document.dispatchEvent(
-			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-		);
-		scoredChip.focus();
-		await Bun.sleep(0);
-	});
-	expect(
-		document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
-	).toBe("Importance 4/5 (High)This changes how requests are authorized.");
-
-	await act(async () => {
-		document.dispatchEvent(
-			new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-		);
-		unscoredChip.focus();
-		await Bun.sleep(0);
-	});
-	expect(
-		Array.from(
-			document.body.querySelectorAll('[data-slot="tooltip-content"]'),
-		).at(-1)?.textContent,
-	).toBe(unscoredPath);
+	for (const [chip, path] of [
+		[firstChip, firstPath],
+		[secondChip, secondPath],
+	] as const) {
+		await act(async () => {
+			document.dispatchEvent(
+				new window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+			);
+			chip.focus();
+			await Bun.sleep(0);
+		});
+		expect(
+			document.body.querySelector('[data-slot="tooltip-content"]')?.textContent,
+		).toBe(path);
+	}
 });
 
 test("styles layer file chips by Viewed state with selection taking precedence", () => {
@@ -964,18 +943,6 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 		}),
 		files: paths,
 		selectedPath: selected,
-		importanceByPath: new Map(
-			paths.map(
-				(path) =>
-					[
-						path,
-						{
-							score: 4,
-							reason: "This file supports changed request behavior.",
-						},
-					] as const,
-			),
-		),
 	});
 	const container = parseMarkup(markup);
 	const selectedChip = container.querySelector<HTMLButtonElement>(
@@ -992,11 +959,6 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 	}
 
 	for (const chip of [selectedChip, viewedChip, unviewedChip]) {
-		const endCap = chip.firstElementChild;
-		expect(endCap?.tagName).toBe("SPAN");
-		expect(endCap?.classList).toContain("bg-importance-4");
-		expect(endCap?.classList).toContain("w-4");
-		expect(endCap?.getAttribute("title")).toBeNull();
 		expect(chip.getAttribute("title")).toBeNull();
 		expect(chip.querySelector("svg")).toBeNull();
 	}
@@ -1026,18 +988,6 @@ test("styles layer file chips by Viewed state with selection taking precedence",
 	expect(unviewedClasses).not.toContain("bg-success/15");
 	expect(unviewedClasses).not.toContain("text-success");
 	expect(unviewedChip.hasAttribute("aria-current")).toBe(false);
-});
-
-test("omits file icons and importance indicators without scores", () => {
-	const markup = renderLayerPane();
-	const container = parseMarkup(markup);
-	const chip = container.querySelector<HTMLButtonElement>(
-		'button[aria-label="src/routes/route.ts"]',
-	);
-	if (!chip) throw new Error("Missing layer file chip");
-
-	expect(chip.querySelector("svg")).toBeNull();
-	expect(chip.querySelector('[class*="bg-importance-"]')).toBeNull();
 });
 
 test("keeps long layer file labels readable and accessible", () => {
@@ -1275,4 +1225,25 @@ test("completion button toggles callback once and collapses only after saved sta
 	]);
 	expect(container.querySelector('[data-collapsed="false"]')).not.toBeNull();
 	expect(uncheck?.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("renders importance progress and score indicators from results", () => {
+	const markup = renderLayerPane({
+		importanceByPath: new Map([
+			[
+				"src/routes/route.ts",
+				{ score: 5 as const, reason: "Critical authorization change." },
+			],
+		]),
+		importanceProgress: { value: 13, total: 18, threshold: 13 },
+	});
+	const container = parseMarkup(markup);
+	expect(
+		container.querySelector('[aria-label="Importance review progress"]'),
+	).not.toBeNull();
+	expect(
+		container.querySelector(
+			'button[aria-label="src/routes/route.ts"] .bg-importance-5',
+		),
+	).not.toBeNull();
 });

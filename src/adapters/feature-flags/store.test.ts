@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { FeatureFlagStore, featureFlagsPath } from "./store";
 
 const DEFAULTS = {
-	"layer-importance": false,
 	"one-pager": false,
 } as const;
 
@@ -62,10 +61,24 @@ describe("FeatureFlagStore", () => {
 		});
 	});
 
-	test("defaults only non-boolean known values", async () => {
+	test("defaults non-boolean known values", async () => {
 		await withTempDir(async (dir) => {
 			const path = join(dir, "features.json");
-			await writeFile(path, JSON.stringify({ "layer-importance": "yes" }));
+			await writeFile(path, JSON.stringify({ "one-pager": "yes" }));
+			expect(await new FeatureFlagStore(path).read()).toEqual(DEFAULTS);
+		});
+	});
+
+	test.each([
+		true,
+		false,
+	])("keeps legacy layer-importance=%s inert when reading flags", async (legacyValue) => {
+		await withTempDir(async (dir) => {
+			const path = join(dir, "features.json");
+			await writeFile(
+				path,
+				JSON.stringify({ "layer-importance": legacyValue }),
+			);
 			expect(await new FeatureFlagStore(path).read()).toEqual(DEFAULTS);
 		});
 	});
@@ -74,26 +87,53 @@ describe("FeatureFlagStore", () => {
 		await withTempDir(async (dir) => {
 			const path = join(dir, "features.json");
 			await writeFile(path, JSON.stringify({ future: { enabled: true } }));
-			await new FeatureFlagStore(path).set("layer-importance", true);
+			await new FeatureFlagStore(path).set("one-pager", true);
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
 				future: { enabled: true },
-				"layer-importance": true,
+				"one-pager": true,
 			});
+		});
+	});
+
+	test.each([
+		true,
+		false,
+	])("preserves legacy layer-importance=%s when toggling one-pager", async (legacyValue) => {
+		await withTempDir(async (dir) => {
+			const path = join(dir, "features.json");
+			await writeFile(
+				path,
+				JSON.stringify({ "layer-importance": legacyValue }),
+			);
+			expect(await new FeatureFlagStore(path).set("one-pager", true)).toEqual({
+				"one-pager": true,
+			});
+			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+				"layer-importance": legacyValue,
+				"one-pager": true,
+			});
+		});
+	});
+
+	test("rejects removed flag IDs without changing file bytes", async () => {
+		await withTempDir(async (dir) => {
+			const path = join(dir, "features.json");
+			const bytes = '{"layer-importance":true}';
+			await writeFile(path, bytes);
+			await expect(
+				new FeatureFlagStore(path).set("layer-importance" as never, true),
+			).rejects.toThrow();
+			expect(await readFile(path, "utf8")).toBe(bytes);
 		});
 	});
 
 	test("creates missing directories and writes tab-indented JSON with newline", async () => {
 		await withTempDir(async (dir) => {
 			const path = join(dir, "missing", "features.json");
-			expect(
-				await new FeatureFlagStore(path).set("layer-importance", true),
-			).toEqual({
-				"layer-importance": true,
-				"one-pager": false,
+			expect(await new FeatureFlagStore(path).set("one-pager", true)).toEqual({
+				"one-pager": true,
 			});
-			expect(await readFile(path, "utf8")).toBe(
-				'{\n\t"layer-importance": true\n}\n',
-			);
+			expect(await readFile(path, "utf8")).toBe('{\n\t"one-pager": true\n}\n');
 		});
 	});
 
@@ -101,9 +141,9 @@ describe("FeatureFlagStore", () => {
 		await withTempDir(async (dir) => {
 			const path = join(dir, "features.json");
 			await writeFile(path, "broken");
-			await new FeatureFlagStore(path).set("layer-importance", true);
+			await new FeatureFlagStore(path).set("one-pager", true);
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-				"layer-importance": true,
+				"one-pager": true,
 			});
 		});
 	});
@@ -115,7 +155,7 @@ describe("FeatureFlagStore", () => {
 			await writeFile(join(path, "sentinel"), "keep unchanged");
 			const store = new FeatureFlagStore(path);
 
-			await expect(store.set("layer-importance", true)).rejects.toBeDefined();
+			await expect(store.set("one-pager", true)).rejects.toBeDefined();
 
 			expect(await readFile(join(path, "sentinel"), "utf8")).toBe(
 				"keep unchanged",
@@ -131,13 +171,13 @@ describe("FeatureFlagStore", () => {
 			const path = join(dir, "features.json");
 			const store = new FeatureFlagStore(path);
 			const [first, second] = await Promise.all([
-				store.set("layer-importance", true),
-				store.set("layer-importance", false),
+				store.set("one-pager", true),
+				store.set("one-pager", false),
 			]);
-			expect(first["layer-importance"]).toBe(true);
-			expect(second["layer-importance"]).toBe(false);
+			expect(first["one-pager"]).toBe(true);
+			expect(second["one-pager"]).toBe(false);
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-				"layer-importance": false,
+				"one-pager": false,
 			});
 			expect(
 				(await readdir(dir)).filter((entry) => entry.endsWith(".tmp")),

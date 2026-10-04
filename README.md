@@ -117,7 +117,9 @@ CLI alias. OMP effort is sent as `--thinking <level>`, Claude effort as
 Unset effort sends no effort option; Codex's `-c` option is not an OMP effort
 flag.
 
-The **Settings** dialog opens on **Prompts** and has five tabs: **General**, **Prompts**, **Skills**, **Appearance**, and **Features**. **General** has global **Default Agent**, **Default model**, and **Default effort** controls. **Show whitespace changes** also lives under **General** and applies immediately to the current review; it is not saved with review defaults. **Prompts** manages the five standard review prompts (`review-layers-code`, `review-layers-plan`, `review-chat`, `review-explain-comment`, and `review-comment-from-chat`); when **Settings > Features > File important** is on, it also shows `review-importance`; when **Settings > Features > One pager** is on, it also shows `review-one-pager` and `review-one-pager-chat`. Each prompt version has Agent, Model, and Effort dropdowns. Changes affect future layer runs and new chat bindings; use **Regenerate** to apply updated prompts to cached layers.
+The **Prompts** tab manages the six standard review prompts (`review-layers-code`,
+`review-layers-plan`, `review-chat`, `review-explain-comment`,
+`review-comment-from-chat`, and `review-importance`); when **Settings > Features > One pager** is on, it also shows `review-one-pager` and `review-one-pager-chat`. Each prompt version has Agent, Model, and Effort settings.
 
 The OMP model dropdown comes from `models --json` run by the selected OMP
 executable. Effort choices are limited to values advertised as supported for
@@ -234,20 +236,16 @@ Prompt presets and their version history live beside `config.json`:
 
 The prompt slots are `commit-system`, `mr-code`, `mr-plan`,
 `review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`, and
-`review-importance` (visible in **Settings > Prompts** only when **Settings >
-Features > File important** is on), plus `review-one-pager` and
-`review-one-pager-chat` (visible only when **Settings > Features > One pager**
-is on). Each slot can have multiple named
-presets. The active text is the highest-numbered version of the active preset.
-The shipped default seeds `default/001.md` on first access, and
-`config.prompts` records the active preset per slot (a missing entry means
-`default`).
+`review-explain-comment`, `review-comment-from-chat`, `review-importance`,
+`review-one-pager`, and `review-one-pager-chat`. The one-pager slots appear in
+**Settings > Prompts** only when **Settings > Features > One pager** is on.
+Each slot can have multiple presets. The active text is the highest-numbered
+version of the active preset. The shipped default seeds `default/001.md` on
+first access, and `config.prompts` records the active preset per slot (a
+missing entry means `default`).
 
-The five standard review prompt slots are managed from **Settings > Prompts**;
-`review-importance` appears there only when **File important** is on, and
-`review-one-pager` and `review-one-pager-chat` appear only when **One pager**
-is on.
+The six standard review prompt slots are managed from **Settings > Prompts**;
+the one-pager prompt slots appear there only when **One pager** is on.
 General review defaults are in **General**. Saving a prompt creates a new
 version, **Roll back** copies an older version forward as a new latest version,
 and **Reset** writes the shipped default as a new version. This history is
@@ -256,12 +254,11 @@ append-only: mole-tools never deletes prompt versions. The `commit-system`,
 their text edits still live under `~/.config/mole-tools/prompts/`.
 
 Shipped review-prompt guidance does not automatically replace existing prompt
-versions. To adopt updated guidance, open **Settings > Prompts** and **Reset**
-`review-layers-code`, `review-layers-plan`, and `review-importance`
-independently; each Reset saves the shipped guidance as a new version while
-preserving existing history. Use **Regenerate** to apply updated layer prompts
-to cached layers. After resetting `review-importance`, use **Retry** on a failed
-importance run.
+versions. To adopt updated layer guidance, open **Settings > Prompts** and
+**Reset** `review-layers-code` and `review-layers-plan`; each Reset saves the
+shipped guidance as a new version while preserving existing history. Use
+**Regenerate** to apply updated layer prompts to cached layers.
+
 
 Existing flat prompt files migrate lazily, once on first access of their slot:
 `prompts/<slot>.md` becomes `<slot>/default/001.md`. The former
@@ -316,7 +313,6 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
 | `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
 | `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
-| `review-importance` | Importance scoring (Features > File important) | Scores each changed line span 1–5 for reviewer attention and adds a concise reason. |
 | `review-one-pager` | One pager generation (Features > One pager) | Writes a reviewer-facing one-page Markdown summary of the MR. |
 | `review-one-pager-chat` | One pager chat (Features > One pager) | Answers questions about the summary; Claude and Codex can edit it in place, while OMP remains read-only. |
 
@@ -364,11 +360,9 @@ mole-tools commit --auto                    # non-interactive local commit, no p
 
 **Configuration.** Uses the `commit` model route from `config.json`. The active
 `commit-system` prompt preset supplies the system prompt; set it in the
-`prompts` map. Settings **Prompts** manages the five standard review prompt
-slots and additionally `review-importance` only when **Settings > Features >
-File important** is on, and `review-one-pager` plus `review-one-pager-chat`
-only when **Settings > Features > One pager** is on; it does not change commit
-prompt configuration.
+`prompts` map. Settings **Prompts** manages the six standard review prompt
+slots and `review-one-pager` plus `review-one-pager-chat` only when **Settings >
+Features > One pager** is on; it does not change commit prompt configuration.
 
 
 ---
@@ -433,18 +427,17 @@ The **Settings** dialog has five tabs: **General**, **Prompts**, **Skills**,
 **Appearance**, and **Features**; it opens on **Prompts**. **General** contains
 **Default Agent**, **Default model**, **Default effort**, and **Show whitespace
 changes**. That toggle applies immediately to the current review, not review
-defaults. The **Prompts** tab manages the five standard review prompt slots
+defaults. The **Prompts** tab manages the six standard review prompt slots
 (`review-layers-code`, `review-layers-plan`, `review-chat`,
-`review-explain-comment`, `review-comment-from-chat`), plus `review-importance`
-only while **File important** is on and `review-one-pager` plus
-`review-one-pager-chat` only while **One pager** is on, and their preset
-versions, each with Agent, Model, and Effort dropdowns. OMP models come from
-the selected executable's `models --json` catalog; Claude uses the Anthropic
-Models API with a server `ANTHROPIC_API_KEY`, or CLI aliases only without it.
-API-key entitlement does not establish Claude CLI access, and aliases are not
-a full CLI catalog. Optional effort choices are model-compatible; OMP sends
-`--thinking`, Claude sends `--effort`, and Codex sends its model reasoning
-effort setting.
+`review-explain-comment`, `review-comment-from-chat`, `review-importance`),
+plus `review-one-pager` and `review-one-pager-chat` only while **One pager**
+is on, and their preset versions, each with Agent, Model, and Effort dropdowns.
+OMP models come from the selected executable's `models --json` catalog; Claude
+uses the Anthropic Models API with a server `ANTHROPIC_API_KEY`, or CLI aliases
+only without it. API-key entitlement does not establish Claude CLI access, and
+aliases are not a full CLI catalog. Optional effort choices are model-compatible;
+OMP sends `--thinking`, Claude sends `--effort`, and Codex sends its model
+reasoning effort setting.
 
 With Agent **Default**, each unset prompt field inherits its matching General
 value. An inherited effort unsupported by an explicitly selected prompt model
@@ -493,48 +486,12 @@ choice applies immediately and is saved as `appearance.colorTheme`
 
 #### Features
 
-The **Features** tab has one checkbox per review feature flag. Values are
-stored in `~/.config/mole-tools/features.json`, a JSON object keyed by flag ID,
-for example `{ "layer-importance": true, "one-pager": false }`. Missing files or
-keys default to off; invalid files also use defaults and are not rewritten
-until a toggle.
-Unknown keys are preserved when a flag is changed.
-
-
-#### Layer importance
-
-When **File important** is on, an agent scores changed line spans after the
-initial diff loads and after a sync changes the head or merge-base revision.
-Layer **Regenerate** and **Retry** do not rerun importance. The
-`review-importance` prompt evaluates the whole change set on a 1–5 scale:
-1 (skip), 2 (low), 3 (moderate), 4 (high), 5 (critical), and writes one concise
-reason sentence of at most 144 characters for every span. Pastel blue-to-red
-colours mark diff gutters, changed-file rows (using each file's highest span
-score), and layer file pills. Rated changed-file rows in List and Tree views
-show a small circular score-coloured pip beside the +/- statistics, before
-the Viewed control. Pip, diff-gutter, and layer-pill tooltips continue to show
-each score's level and selected reason. The Changed
-files header shows **Scoring…** while running or **Importance failed** with an error
-tooltip and **Retry** on failure. Results persist at
-`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/importance.json`.
-The run timeout reuses `review.layerTimeoutSeconds`. Turning the flag off hides
-importance immediately without a reload, but does not cancel an in-flight run;
-that run can still finish and persist its result.
-Each persisted run also appends a `run` entry to the append-only ledger at
-`~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/importance/ledger.ndjson`.
-Run entries record the prompt preset/version, agent/model/effort, full system
-prompt, messages, rendered diff input, and scores. `contest` entries record the
-before/after span and report. When scoring is ready, the diff-gutter tooltip's
-**Contest** button opens a two-stage dialog: choose a new level and enter a
-one-sentence reason (≤144 characters), then review the Markdown report and copy
-it or open a mole-tools GitHub issue. The override persists in `importance.json`
-until the next revision re-score. The report includes the app version, revision
-SHAs, run ID, prompt, agent, file and lines, model and contested scores, a code
-excerpt of up to 80 lines, and the full system prompt. GitHub issues are public;
-remove confidential code, file paths, and names before posting.
-Keyboard focus returns to opening diff-gutter strip after Escape, Cancel, or
-closing the report.
-
+The **Features** tab manages the one review feature flag, **One pager**.
+Its value is stored in `~/.config/mole-tools/features.json` as a JSON object
+keyed by flag ID, for example `{ "one-pager": false }`. Missing files or keys
+default to off; invalid files also use defaults and are not rewritten until a
+toggle. Unknown keys are preserved when a flag is changed. Review importance
+scoring is available in every review and is not a feature flag.
 
 #### One pager
 
@@ -548,20 +505,21 @@ follow-up questions. Claude and Codex can edit the summary in place; OMP remains
 read-only because its tools do not enforce directory-scoped writes. After
 supported-provider edits, the rendered document reloads after a 500 ms debounce.
 
+Review importance scores changed spans from 1–5 with a concise reason and
+highlights their significance in the review. It is always available; its
+`review-importance` prompt is managed with the standard prompts.
 
-With the feature flag on and scoring ready, a shared importance review progress
-bar appears directly beneath the Layers/Files tabs. It shows viewed added and
-deleted lines as fixed shares of all scored changed lines: level 1 contributes
-1/18, level 2 2/18, level 3 3/18, level 4 5/18, and level 5 8/18. Context and
-unscored lines don't count. The fixed target is 13/18 for High+Critical review;
-the tooltip states the target percentage and explains that more important files
-fill the bar faster. Since the prescribed shares sum to 19/18, visible fill,
-percentage, flame width, and accessibility value intentionally saturate at
-18/18 (100%). A marker shows the target. Fill colour blends through importance
-colours toward level 5 as progress approaches the target and stays level 5 once
-reached; a subtle flame animates at that point, but stays static with reduced
-motion.
 
+When scoring is ready, a shared importance review progress bar appears directly
+beneath the Layers/Files tabs. It shows viewed added and deleted lines as fixed
+shares of all scored changed lines: levels 1–5 contribute 1/19, 2/19, 3/19,
+5/19, and 8/19 respectively; context and unscored lines don't count. The target
+is 13/19 for High+Critical review. The tooltip states the target percentage and
+explains that more important files fill the bar faster. Fill and accessibility
+value use the 19-point scale and saturate at 100%. A marker shows the target.
+Fill colour blends through importance colours toward level 5 as progress
+approaches the target and stays level 5 once reached; a subtle flame animates
+at that point, but stays static with reduced motion.
 
 
 ```bash

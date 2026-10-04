@@ -162,12 +162,12 @@
 	--diff-del-fg: oklch(0.85 0.1 25);
 	--diff-hunk-bg: oklch(0.55 0.15 250 / 12%);
 	--find-match: oklch(0.85 0.16 90 / 35%);
+	--find-match-current: oklch(0.8 0.18 60 / 60%);
 	--importance-1: oklch(0.72 0.1 245);
 	--importance-2: oklch(0.74 0.1 200);
 	--importance-3: oklch(0.8 0.12 105);
 	--importance-4: oklch(0.75 0.12 65);
 	--importance-5: oklch(0.7 0.14 25);
-	--find-match-current: oklch(0.8 0.18 60 / 60%);
 }
 
 @layer base {

@@ -539,7 +539,6 @@ export function LayerPane({
 																		)}
 																	/>
 																) : null}
-
 																{shortFilePath(path, changedFilePaths)}
 															</Badge>
 														);

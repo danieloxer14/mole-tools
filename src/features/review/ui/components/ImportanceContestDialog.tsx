@@ -69,9 +69,7 @@ export function ImportanceContestDialog({
 		setCopyState("idle");
 	}, [target]);
 
-	useEffect(() => {
-		return () => clearTimeout(copyTimer.current);
-	}, []);
+	useEffect(() => () => clearTimeout(copyTimer.current), []);
 
 	const clearCopyTimer = () => {
 		clearTimeout(copyTimer.current);
@@ -83,18 +81,17 @@ export function ImportanceContestDialog({
 		const submittedTarget = target;
 		const generation = ++submissionGeneration.current;
 		const trimmedReason = reason.trim();
-		const submittedScore = score;
-		setSubmittedScore(submittedScore);
+		const nextScore = score;
+		setSubmittedScore(nextScore);
 		setPending(true);
 		setError(null);
 		try {
-			const nextReport = await onSubmit(submittedScore, trimmedReason);
+			const nextReport = await onSubmit(nextScore, trimmedReason);
 			if (
 				generation !== submissionGeneration.current ||
 				activeTarget.current !== submittedTarget
-			) {
+			)
 				return;
-			}
 			setReport(nextReport);
 			setCopyState("idle");
 			setStage("report");
@@ -102,17 +99,15 @@ export function ImportanceContestDialog({
 			if (
 				generation !== submissionGeneration.current ||
 				activeTarget.current !== submittedTarget
-			) {
+			)
 				return;
-			}
 			setError(errorMessage(submitError));
 		} finally {
 			if (
 				generation === submissionGeneration.current &&
 				activeTarget.current === submittedTarget
-			) {
+			)
 				setPending(false);
-			}
 		}
 	};
 

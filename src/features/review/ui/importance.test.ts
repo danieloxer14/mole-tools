@@ -169,12 +169,12 @@ test("score-5 progress keeps denominator and threshold fixed as viewed paths cha
 
 	expect(importanceReviewProgress(diff, files, [])).toEqual({
 		value: 0,
-		total: 18,
+		total: 19,
 		threshold: 13,
 	});
 	expect(importanceReviewProgress(diff, files, ["src/a.ts"])).toEqual({
 		value: 4,
-		total: 18,
+		total: 19,
 		threshold: 13,
 	});
 });
@@ -189,7 +189,7 @@ test("score-3 progress aggregates files and view state changes numerator only", 
 	expect(totals.byScore).toEqual({ 1: 0, 2: 0, 3: 200, 4: 0, 5: 0 });
 	expect(importanceReviewProgressForViewedFiles(totals, ["src/a.ts"])).toEqual({
 		value: 0.75,
-		total: 18,
+		total: 19,
 		threshold: 13,
 	});
 	expect(
@@ -198,10 +198,10 @@ test("score-3 progress aggregates files and view state changes numerator only", 
 			"src/a.ts",
 			"src/b.ts",
 		]),
-	).toEqual({ value: 3, total: 18, threshold: 13 });
+	).toEqual({ value: 3, total: 19, threshold: 13 });
 	expect(importanceReviewProgressForViewedFiles(totals, [])).toEqual({
 		value: 0,
-		total: 18,
+		total: 19,
 		threshold: 13,
 	});
 });
@@ -216,7 +216,7 @@ test("sparse score buckets contribute fixed shares", () => {
 			[low.file, high.file],
 			["src/low.ts", "src/high.ts"],
 		),
-	).toEqual({ value: 6, total: 18, threshold: 13 });
+	).toEqual({ value: 6, total: 19, threshold: 13 });
 });
 test("higher-importance files advance progress faster for equal added lines", () => {
 	const low = scoredAddedFile("src/low.ts", 1, 2);
@@ -226,8 +226,8 @@ test("higher-importance files advance progress faster for equal added lines", ()
 	const lowProgress = importanceReviewProgress(diff, files, [low.file.path]);
 	const highProgress = importanceReviewProgress(diff, files, [high.file.path]);
 
-	expect(lowProgress).toEqual({ value: 1, total: 18, threshold: 13 });
-	expect(highProgress).toEqual({ value: 8, total: 18, threshold: 13 });
+	expect(lowProgress).toEqual({ value: 1, total: 19, threshold: 13 });
+	expect(highProgress).toEqual({ value: 8, total: 19, threshold: 13 });
 	expect(highProgress.value).toBeGreaterThan(lowProgress.value);
 });
 
@@ -242,7 +242,7 @@ test("full view across five levels preserves raw value of 19", () => {
 			levels.map(({ file }) => file),
 			levels.map(({ file }) => file.path),
 		),
-	).toEqual({ value: 19, total: 18, threshold: 13 });
+	).toEqual({ value: 19, total: 19, threshold: 13 });
 });
 
 test("importance progress counts highest-overlap added and deleted lines once", () => {
@@ -271,7 +271,7 @@ test("importance progress counts highest-overlap added and deleted lines once", 
 			"src/a.ts",
 			"src/a.ts",
 		]),
-	).toEqual({ value: 11, total: 18, threshold: 13 });
+	).toEqual({ value: 11, total: 19, threshold: 13 });
 });
 
 test("deleted paths, merged importance spans, and unmatched data retain handling", () => {
@@ -288,7 +288,7 @@ test("deleted paths, merged importance spans, and unmatched data retain handling
 			"gone.ts",
 			"absent.ts",
 		]),
-	).toEqual({ value: 8, total: 18, threshold: 13 });
+	).toEqual({ value: 8, total: 19, threshold: 13 });
 });
 
 test("importance progress ignores unmatched files and empty score data", () => {

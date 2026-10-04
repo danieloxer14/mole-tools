@@ -97,6 +97,26 @@ class ScriptedOnePagerAgent implements ReviewAgent {
 	}
 }
 
+class ScriptedLayerAgent implements ReviewAgent {
+	readonly supportsScopedWrites = true;
+
+	constructor(private readonly onePagerAgent: ScriptedOnePagerAgent) {}
+
+	async preflight(): Promise<void> {
+		await this.onePagerAgent.preflight();
+	}
+
+	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+		const outputPath = turn.message.match(/Output file: ([^\n]+)/)?.[1];
+		if (outputPath) {
+			await Bun.write(outputPath, JSON.stringify({ version: 1, files: [] }));
+			yield { kind: "turn_end" };
+			return;
+		}
+		yield* this.onePagerAgent.run(turn);
+	}
+}
+
 async function waitFor(
 	label: string,
 	condition: () => boolean | Promise<boolean>,
@@ -209,6 +229,7 @@ describe("one pager mounted review UI smoke", () => {
 				onePagerDir,
 				promptSourceDir,
 				reviewAgent: agent,
+				layerAgent: new ScriptedLayerAgent(agent),
 			});
 			const chatHistoryRequests: string[] = [];
 			let rejectNextOnePagerChatCreation = false;

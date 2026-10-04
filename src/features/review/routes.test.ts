@@ -25,12 +25,6 @@ import type { Config } from "../../adapters/config/schema";
 import { FeatureFlagStore } from "../../adapters/feature-flags/store";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
 import { SkillStore } from "../../adapters/skills/store";
-import {
-	flushLogger,
-	initializeLogger,
-	MemoryLogSink,
-	resetLogger,
-} from "../../core/logger";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -7057,35 +7051,55 @@ describe("feature flags API", () => {
 		});
 	}
 
-	test("returns registry flags with defaults when storage is absent", async () => {
-		const routes = createReviewRoutes({ token, state: state() });
-		const response = await routes(featureRequest("/api/features"));
+	async function expectOnlyOnePagerOff(response: Response): Promise<void> {
 		expect(response.status).toBe(200);
 		const payload = (await response.json()) as {
 			flags: Array<{
 				id: string;
 				label: string;
+				description: string;
 				enabled: boolean;
 			}>;
 		};
-		expect(payload.flags).toHaveLength(2);
-		expect(payload.flags[0]).toMatchObject({
-			id: "layer-importance",
-			label: "File important",
-			enabled: false,
-		});
-		expect(payload.flags[1]).toMatchObject({
-			id: "one-pager",
-			label: "One pager",
-			enabled: false,
-		});
-	});
+		expect(payload.flags).toEqual([
+			{
+				id: "one-pager",
+				label: "One pager",
+				description:
+					"Switch Overview between the MR description and an agent-written one-page summary of the MR, with a chat agent that answers questions and, with Claude or Codex, can edit the summary in place.",
+				enabled: false,
+			},
+		]);
+	}
 
-	test("updates a flag and preserves unknown keys", async () => {
+	test("returns registered flags with false defaults when storage is absent or invalid", async () => {
+		const absentRoutes = createReviewRoutes({ token, state: state() });
+		await expectOnlyOnePagerOff(
+			await absentRoutes(featureRequest("/api/features")),
+		);
+
 		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
 		try {
 			const path = join(dir, "features.json");
-			await writeFile(path, JSON.stringify({ future: true }));
+			await writeFile(path, "not json");
+			const invalidRoutes = createReviewRoutes({
+				token,
+				state: state(),
+				featureFlagStore: new FeatureFlagStore(path),
+			});
+			await expectOnlyOnePagerOff(
+				await invalidRoutes(featureRequest("/api/features")),
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("writes one-pager and preserves the enabled legacy key", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
+		try {
+			const path = join(dir, "features.json");
+			await writeFile(path, '{\n\t"layer-importance": true\n}\n');
 			const routes = createReviewRoutes({
 				token,
 				state: state(),
@@ -7098,14 +7112,13 @@ describe("feature flags API", () => {
 				),
 			);
 			expect(response.status).toBe(200);
-			expect(await response.json()).toMatchObject({
-				flags: [
-					{ id: "layer-importance", enabled: false },
-					{ id: "one-pager", enabled: true },
-				],
-			});
+			const payload = (await response.json()) as {
+				flags: Array<{ id: string; enabled: boolean }>;
+			};
+			expect(payload.flags.map(({ id }) => id)).toEqual(["one-pager"]);
+			expect(payload.flags[0]).toMatchObject({ enabled: true });
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-				future: true,
+				"layer-importance": true,
 				"one-pager": true,
 			});
 		} finally {
@@ -7113,7 +7126,7 @@ describe("feature flags API", () => {
 		}
 	});
 
-	test("creates features.json on the first POST", async () => {
+	test("creates features.json on the first one-pager POST", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
 		try {
 			const path = join(dir, "features.json");
@@ -7127,26 +7140,50 @@ describe("feature flags API", () => {
 			const response = await routes(
 				featureRequest(
 					"/api/features",
-					JSON.stringify({ id: "layer-importance", enabled: true }),
+					JSON.stringify({ id: "one-pager", enabled: true }),
 				),
 			);
-
 			expect(response.status).toBe(200);
-			expect(await response.json()).toMatchObject({
-				flags: [
-					{ id: "layer-importance", enabled: true },
-					{ id: "one-pager", enabled: false },
-				],
-			});
+			const payload = (await response.json()) as {
+				flags: Array<{ id: string; enabled: boolean }>;
+			};
+			expect(payload.flags.map(({ id }) => id)).toEqual(["one-pager"]);
+			expect(payload.flags[0]).toMatchObject({ enabled: true });
 			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-				"layer-importance": true,
+				"one-pager": true,
 			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	test("rejects unknown ids and malformed request bodies", async () => {
+	test("rejects the removed importance flag without changing existing bytes", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
+		try {
+			const path = join(dir, "features.json");
+			const original = '{\n  "layer-importance": true\n}\n';
+			await writeFile(path, original);
+			const routes = createReviewRoutes({
+				token,
+				state: state(),
+				featureFlagStore: new FeatureFlagStore(path),
+			});
+			const response = await routes(
+				featureRequest(
+					"/api/features",
+					JSON.stringify({ id: "layer-importance", enabled: false }),
+				),
+			);
+			expect(response.status).toBe(400);
+			expect(await readFile(path, "utf8")).toBe(original);
+			const listed = await routes(featureRequest("/api/features"));
+			await expectOnlyOnePagerOff(listed);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects unknown IDs and malformed request bodies", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "feature-flags-api-"));
 		try {
 			const path = join(dir, "features.json");
@@ -7157,8 +7194,8 @@ describe("feature flags API", () => {
 			});
 			for (const body of [
 				JSON.stringify({ id: "unknown", enabled: true }),
-				JSON.stringify({ id: "layer-importance" }),
-				JSON.stringify({ id: "layer-importance", enabled: true, extra: true }),
+				JSON.stringify({ id: "one-pager" }),
+				JSON.stringify({ id: "one-pager", enabled: true, extra: true }),
 				"not json",
 			]) {
 				const response = await routes(featureRequest("/api/features", body));
@@ -7178,10 +7215,7 @@ describe("feature flags API", () => {
 		const unavailable = await unavailableRoutes(
 			featureRequest(
 				"/api/features",
-				JSON.stringify({
-					id: "layer-importance",
-					enabled: true,
-				}),
+				JSON.stringify({ id: "one-pager", enabled: true }),
 			),
 		);
 		expect(unavailable.status).toBe(503);
@@ -7202,7 +7236,7 @@ describe("feature flags API", () => {
 			const failed = await routes(
 				featureRequest(
 					"/api/features",
-					JSON.stringify({ id: "layer-importance", enabled: true }),
+					JSON.stringify({ id: "one-pager", enabled: true }),
 				),
 			);
 			expect(failed.status).toBe(500);
@@ -7213,16 +7247,17 @@ describe("feature flags API", () => {
 		}
 	});
 });
+
 describe("importance API", () => {
 	class ImportanceRouteAgent implements ReviewAgent {
 		runs = 0;
 		readonly signals: AbortSignal[] = [];
 		readonly releaseFirst = Promise.withResolvers<void>();
-		private readonly startWaiters = new Map<number, () => void>();
+		private readonly started = new Map<number, () => void>();
 
 		constructor(
 			private readonly options: {
-				failRuns?: Set<number>;
+				failRuns?: ReadonlySet<number>;
 				blockFirst?: boolean;
 			} = {},
 		) {}
@@ -7230,7 +7265,7 @@ describe("importance API", () => {
 		waitForRun(run: number): Promise<void> {
 			if (this.runs >= run) return Promise.resolve();
 			const { promise, resolve } = Promise.withResolvers<void>();
-			this.startWaiters.set(run, resolve);
+			this.started.set(run, resolve);
 			return promise;
 		}
 
@@ -7238,17 +7273,20 @@ describe("importance API", () => {
 
 		async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
 			const run = ++this.runs;
-			this.startWaiters.get(run)?.();
+			this.started.get(run)?.();
 			if (turn.signal) this.signals.push(turn.signal);
 			if (this.options.blockFirst && run === 1) {
-				await this.releaseFirst.promise;
+				const aborted = Promise.withResolvers<void>();
+				turn.signal?.addEventListener("abort", () => aborted.resolve(), {
+					once: true,
+				});
+				await Promise.race([this.releaseFirst.promise, aborted.promise]);
 				if (turn.signal?.aborted) return;
 			}
 			if (this.options.failRuns?.has(run)) {
 				yield { kind: "error", message: "Importance agent failed" };
 				return;
 			}
-
 			const outputPath = turn.message.match(/Output file: ([^\n]+)/)?.[1];
 			if (!outputPath) throw new Error("missing importance output path");
 			await Bun.write(
@@ -7261,8 +7299,8 @@ describe("importance API", () => {
 							spans: [
 								{
 									side: "new",
-									startLine: 1,
-									endLine: 1,
+									startLine: 2,
+									endLine: 2,
 									score: 4,
 									reason: "This changes request validation behavior.",
 								},
@@ -7275,9 +7313,36 @@ describe("importance API", () => {
 		}
 	}
 
+	type ImportanceTestSnapshot = {
+		revisionKey: string;
+		status: string;
+		error: string | null;
+		files: Array<{
+			path: string;
+			spans: Array<{
+				side: "new" | "old";
+				startLine: number;
+				endLine: number;
+				score: number;
+				reason: string;
+			}>;
+		}>;
+	};
+
+	const readySpan = {
+		side: "new" as const,
+		startLine: 2,
+		endLine: 2,
+		score: 4,
+		reason: "This changes request validation behavior.",
+	};
+
 	async function fixture(
 		dir: string,
-		options: { agent?: ReviewAgent; enabled?: boolean } = {},
+		options: {
+			agent?: ImportanceRouteAgent;
+			featureFlagStore?: FeatureFlagStore;
+		} = {},
 	) {
 		const paths = {
 			statePath: join(dir, "review.json"),
@@ -7285,21 +7350,26 @@ describe("importance API", () => {
 			chatsDir: join(dir, "chats"),
 		};
 		const store = new ReviewStore(paths);
-		await store.write(state());
-		const featureFlagStore = new FeatureFlagStore(join(dir, "features.json"));
-		await featureFlagStore.set("layer-importance", options.enabled ?? true);
+		await store.write({
+			...state(),
+			worktreePath: join(dir, "worktree"),
+			repoRoot: dir,
+		});
 		const importanceDir = join(dir, "importance");
+		const agent = options.agent ?? new ImportanceRouteAgent();
 		const routes = createReviewRoutes({
 			token,
 			store,
 			paths: chatPaths(dir),
 			diff: commentDiff,
-			featureFlagStore,
 			importanceDir,
+			...(options.featureFlagStore
+				? { featureFlagStore: options.featureFlagStore }
+				: {}),
 			promptSourceDir: join(dir, "prompts"),
-			...(options.agent ? { layerAgent: options.agent } : {}),
+			layerAgent: agent,
 		});
-		return { featureFlagStore, importanceDir, routes, store };
+		return { agent, importanceDir, routes, store };
 	}
 
 	function importanceRequest(
@@ -7318,258 +7388,63 @@ describe("importance API", () => {
 		});
 	}
 
-	type ImportanceTestSnapshot = {
-		revisionKey: string;
-		status: string;
-		files: Array<{
-			path: string;
-			spans: Array<{
-				side: "new" | "old";
-				startLine: number;
-				endLine: number;
-				score: number;
-				reason: string;
-			}>;
-		}>;
-	};
-
-	async function readyImportance(dir: string) {
-		const agent = new ImportanceRouteAgent();
-		const { importanceDir, routes } = await fixture(dir, { agent });
-		const observed = await routes(
-			importanceRequest("/api/importance/observe", "POST"),
-		);
-		expect(observed.status).toBe(200);
-		expect(await observed.text()).toContain('"status":"ready"');
-		const response = await routes(importanceRequest("/api/importance"));
-		expect(response.status).toBe(200);
-		return {
-			agent,
-			importanceDir,
-			routes,
-			snapshot: (await response.json()) as ImportanceTestSnapshot,
-		};
-	}
-
-	test("gates all importance endpoints when flag is off or unavailable", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-off-"));
+	test("observes importance without feature configuration or legacy flag values", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-flags-"));
 		try {
-			const agent = new ImportanceRouteAgent();
-			const enabledStore = await fixture(dir, { agent, enabled: false });
-			const endpoints = [
-				["/api/importance", "GET"],
-				["/api/importance/observe", "POST"],
-				["/api/importance/retry", "POST"],
-				["/api/importance/contest", "POST"],
-			] as const;
-
-			for (const [path, method] of endpoints) {
-				const response = await enabledStore.routes(
-					importanceRequest(path, method),
+			for (const [name, configuration] of [
+				["no-store", null],
+				["missing", "missing"],
+				["invalid", "invalid"],
+				["legacy-false", "false"],
+				["legacy-true", "true"],
+			] as const) {
+				const caseDir = join(dir, name);
+				await mkdir(caseDir, { recursive: true });
+				const featurePath = join(caseDir, "features.json");
+				if (configuration === "invalid") {
+					await writeFile(featurePath, "not json");
+				} else if (configuration === "false" || configuration === "true") {
+					await writeFile(
+						featurePath,
+						JSON.stringify({ "layer-importance": configuration === "true" }),
+					);
+				}
+				const featureFlagStore =
+					configuration === null
+						? undefined
+						: new FeatureFlagStore(featurePath);
+				const { agent, importanceDir, routes } = await fixture(caseDir, {
+					...(featureFlagStore ? { featureFlagStore } : {}),
+				});
+				const pending = await routes(importanceRequest("/api/importance"));
+				expect(pending.status).toBe(200);
+				expect(await pending.json()).toMatchObject({ status: "pending" });
+				const observed = await routes(
+					importanceRequest("/api/importance/observe", "POST"),
 				);
-				expect(response.status).toBe(404);
-				expect(await response.json()).toEqual({
-					error: "Feature disabled",
+				expect(observed.status).toBe(200);
+				expect(await observed.text()).toContain('"status":"ready"');
+				const ready = await routes(importanceRequest("/api/importance"));
+				expect(await ready.json()).toMatchObject({
+					status: "ready",
+					files: [{ path: "src/app.ts", spans: [readySpan] }],
 				});
-			}
-			expect(agent.runs).toBe(0);
 
-			const noStoreAgent = new ImportanceRouteAgent();
-			const noStoreRoutes = createReviewRoutes({
-				token,
-				state: state(),
-				layerAgent: noStoreAgent,
-			});
-			for (const [path, method] of endpoints) {
-				const response = await noStoreRoutes(importanceRequest(path, method));
-				expect(response.status).toBe(404);
-				expect(await response.json()).toEqual({
-					error: "Feature disabled",
-				});
-			}
-			expect(noStoreAgent.runs).toBe(0);
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-	test("contests ready importance, persists override, and returns report", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-contest-"),
-		);
-		try {
-			const { importanceDir, routes } = await readyImportance(dir);
-			const expected = {
-				side: "new" as const,
-				startLine: 1,
-				endLine: 1,
-				score: 4,
-				reason: "This changes request validation behavior.",
-			};
-			const persisted = JSON.parse(
-				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as { runId: string };
-			const firstAfter = {
-				...expected,
-				score: 2,
-				reason: "This changes request error handling behavior.",
-			};
-			const firstResponse = await routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected,
-						score: firstAfter.score,
-						reason: firstAfter.reason,
-					}),
-				),
-			);
-			expect(firstResponse.status).toBe(200);
-			const firstBody = (await firstResponse.json()) as {
-				snapshot: ImportanceTestSnapshot;
-				report: string;
-			};
-			expect(firstBody.snapshot.files[0]?.spans[0]).toEqual(firstAfter);
-			expect(firstBody.report).toContain(
-				"- Model: 4/5 (High) — This changes request validation behavior.",
-			);
-			expect(firstBody.report).toContain("### System prompt");
-			const refreshed = await routes(importanceRequest("/api/importance"));
-			const refreshedSnapshot =
-				(await refreshed.json()) as ImportanceTestSnapshot;
-			expect(refreshedSnapshot.files[0]?.spans[0]).toEqual(firstAfter);
-
-			const firstLedger = await readImportanceLedger(
-				join(importanceDir, "ledger.ndjson"),
-			);
-			expect(firstLedger[firstLedger.length - 1]).toMatchObject({
-				kind: "contest",
-				before: expected,
-				after: firstAfter,
-				runId: persisted.runId,
-				report: firstBody.report,
-			});
-
-			const secondAfter = {
-				...firstAfter,
-				score: 3,
-				reason: "This changes response payload behavior.",
-			};
-			const secondResponse = await routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected: firstAfter,
-						score: secondAfter.score,
-						reason: secondAfter.reason,
-					}),
-				),
-			);
-			expect(secondResponse.status).toBe(200);
-			const secondBody = (await secondResponse.json()) as {
-				snapshot: ImportanceTestSnapshot;
-				report: string;
-			};
-			expect(secondBody.snapshot.files[0]?.spans[0]).toEqual(secondAfter);
-			expect(secondBody.report).toContain("- Before contest:");
-			const ledger = await readImportanceLedger(
-				join(importanceDir, "ledger.ndjson"),
-			);
-			const contests = ledger.filter((entry) => entry.kind === "contest");
-			expect(contests).toHaveLength(2);
-			expect(contests[1]).toMatchObject({
-				before: firstAfter,
-				after: secondAfter,
-				report: secondBody.report,
-			});
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("rejects invalid, multi-line, and unchanged contests", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-contest-"),
-		);
-		try {
-			const { routes } = await readyImportance(dir);
-			const expected = {
-				side: "new",
-				startLine: 1,
-				endLine: 1,
-				score: 4,
-				reason: "This changes request validation behavior.",
-			};
-			const invalidBody = await routes(
-				importanceRequest("/api/importance/contest", "POST", "{ invalid"),
-			);
-			expect(invalidBody.status).toBe(400);
-
-			const multiLine = await routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected,
-						score: 3,
-						reason: "This changes request\nvalidation behavior.",
-					}),
-				),
-			);
-			expect(multiLine.status).toBe(400);
-
-			const noOp = await routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected,
-						score: expected.score,
-						reason: expected.reason,
-					}),
-				),
-			);
-			expect(noOp.status).toBe(400);
-			expect(await noOp.json()).toEqual({
-				error: "Contest must change the score or reason",
-			});
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("rejects stale revision, expected span, and span index", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-contest-"),
-		);
-		try {
-			const { routes } = await readyImportance(dir);
-			const expected = {
-				side: "new",
-				startLine: 1,
-				endLine: 1,
-				score: 4,
-				reason: "This changes request validation behavior.",
-			};
-			const contest = async (overrides: Record<string, unknown>) =>
-				routes(
+				const retried = await routes(
+					importanceRequest(
+						"/api/importance/retry?revisionKey=head%3Abase",
+						"POST",
+					),
+				);
+				expect(retried.status).toBe(200);
+				expect(await retried.text()).toContain('"status":"ready"');
+				expect(agent.runs).toBe(1);
+				const contestedSpan = {
+					...readySpan,
+					score: 5,
+					reason: "This changes behavior without feature configuration.",
+				};
+				const contested = await routes(
 					importanceRequest(
 						"/api/importance/contest",
 						"POST",
@@ -7578,748 +7453,383 @@ describe("importance API", () => {
 							path: "src/app.ts",
 							fileIndex: 0,
 							spanIndex: 0,
-							expected,
-							score: 3,
-							reason: "This changes output validation behavior.",
-							...overrides,
+							expected: readySpan,
+							score: contestedSpan.score,
+							reason: contestedSpan.reason,
 						}),
 					),
 				);
-			for (const overrides of [
-				{ revisionKey: "stale:base" },
-				{ expected: { ...expected, reason: "A different reason." } },
-				{ spanIndex: 5 },
-			]) {
-				const response = await contest(overrides);
-				expect(response.status).toBe(409);
-				expect(await response.json()).toEqual({
-					error: "Importance results changed. Reload the review.",
-				});
+				expect(contested.status).toBe(200);
+				expect(
+					((await contested.json()) as { snapshot: ImportanceTestSnapshot })
+						.snapshot.files[0]?.spans[0],
+				).toEqual(contestedSpan);
+				expect(agent.runs).toBe(1);
+				expect(
+					await Bun.file(join(importanceDir, "importance.json")).exists(),
+				).toBe(true);
 			}
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	test("contests legacy importance results without a run id", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-contest-"),
-		);
+	test("reuses cached snapshot and ledger bytes without rerunning", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-cache-"));
 		try {
-			const { importanceDir, routes } = await readyImportance(dir);
-			const resultPath = join(importanceDir, "importance.json");
-			const legacy = JSON.parse(await readFile(resultPath, "utf8")) as Record<
-				string,
-				unknown
-			>;
-			delete legacy.runId;
-			await writeFile(resultPath, JSON.stringify(legacy), "utf8");
-			const response = await routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected: {
-							side: "new",
-							startLine: 1,
-							endLine: 1,
-							score: 4,
-							reason: "This changes request validation behavior.",
-						},
-						score: 3,
-						reason: "This changes response parsing behavior.",
-					}),
-				),
+			const { agent, importanceDir, routes } = await fixture(dir);
+			await mkdir(importanceDir, { recursive: true });
+			const cached = {
+				version: 1,
+				revision: { headSha: "head", mergeBaseSha: "base" },
+				status: "ready",
+				error: null,
+				files: [{ path: "src/app.ts", spans: [readySpan] }],
+				generatedAt: "2026-01-01T00:00:00.000Z",
+				runId: "cached-run",
+			};
+			await writeFile(
+				join(importanceDir, "importance.json"),
+				JSON.stringify(cached),
 			);
-			expect(response.status).toBe(200);
-			expect(await response.text()).toContain(
-				"unavailable (scored before the importance ledger)",
-			);
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("returns write errors without changing the served importance span", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-contest-"),
-		);
-		let importanceDir: string | undefined;
-		let originalMode: number | undefined;
-		try {
-			const ready = await readyImportance(dir);
-			importanceDir = ready.importanceDir;
-			originalMode = (await stat(importanceDir)).mode & 0o777;
-			await chmod(importanceDir, 0o500);
-			const response = await ready.routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected: {
-							side: "new",
-							startLine: 1,
-							endLine: 1,
-							score: 4,
-							reason: "This changes request validation behavior.",
-						},
-						score: 3,
-						reason: "This changes response parsing behavior.",
-					}),
-				),
-			);
-			expect(response.status).toBe(500);
-			expect(await response.json()).toMatchObject({
-				error: expect.stringMatching(/^Unable to save importance:/),
-			});
-			const unchanged = await ready.routes(
-				importanceRequest("/api/importance"),
-			);
-			const unchangedSnapshot =
-				(await unchanged.json()) as ImportanceTestSnapshot;
-			expect(unchangedSnapshot.files[0]?.spans[0]).toEqual(
-				ready.snapshot.files[0]?.spans[0],
-			);
-		} finally {
-			if (importanceDir && originalMode !== undefined)
-				await chmod(importanceDir, originalMode);
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("persists contest when ledger path is a directory", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-contest-"),
-		);
-		try {
-			const { importanceDir, routes } = await readyImportance(dir);
 			const ledgerPath = join(importanceDir, "ledger.ndjson");
-			await rm(ledgerPath);
-			await mkdir(ledgerPath);
-			const response = await routes(
-				importanceRequest(
-					"/api/importance/contest",
-					"POST",
-					JSON.stringify({
-						revisionKey: "head:base",
-						path: "src/app.ts",
-						fileIndex: 0,
-						spanIndex: 0,
-						expected: {
-							side: "new",
-							startLine: 1,
-							endLine: 1,
-							score: 4,
-							reason: "This changes request validation behavior.",
-						},
-						score: 3,
-						reason: "This changes response parsing behavior.",
-					}),
-				),
-			);
-			expect(response.status).toBe(200);
-			expect(await response.text()).toContain("### System prompt");
-			const persisted = await routes(importanceRequest("/api/importance"));
-			const persistedSnapshot =
-				(await persisted.json()) as ImportanceTestSnapshot;
-			expect(persistedSnapshot.files[0]?.spans[0]).toEqual({
-				side: "new",
-				startLine: 1,
-				endLine: 1,
-				score: 3,
-				reason: "This changes response parsing behavior.",
+			const existingLedger = `${JSON.stringify({
+				version: 1,
+				kind: "run",
+				runId: "cached-run",
+				recordedAt: "2026-01-01T00:00:00.000Z",
+				revision: { headSha: "head", mergeBaseSha: "base" },
+				status: "ready",
+				error: null,
+				attempts: 1,
+				prompt: { slot: "review-importance", preset: "default", version: 1 },
+				agent: null,
+				systemPrompt: "cached",
+				input: "cached input",
+				messages: ["cached"],
+				files: cached.files,
+			})}\n`;
+			await writeFile(ledgerPath, existingLedger);
+
+			const snapshot = await routes(importanceRequest("/api/importance"));
+			expect(await snapshot.json()).toMatchObject({
+				revisionKey: "head:base",
+				status: "ready",
+				files: cached.files,
 			});
+			const observed = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await observed.text()).toContain('"status":"ready"');
+			expect(agent.runs).toBe(0);
+			expect(
+				await readFile(join(importanceDir, "importance.json"), "utf8"),
+			).toBe(JSON.stringify(cached));
+			expect(await readFile(ledgerPath, "utf8")).toBe(existingLedger);
+			expect(await readImportanceLedger(ledgerPath)).toHaveLength(1);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	test("reads absent, invalid, schema-invalid, and stale results as pending", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-read-"));
+	test("observes generated results and contests only the current ready span", async () => {
+		const dir = await mkdtemp(
+			join(tmpdir(), "mole-review-importance-contest-"),
+		);
 		try {
 			const { importanceDir, routes } = await fixture(dir);
-			const resultPath = join(importanceDir, "importance.json");
-			const readSnapshot = async () => {
-				const response = await routes(importanceRequest("/api/importance"));
-				expect(response.status).toBe(200);
-				return response.json();
+			const pending = await routes(importanceRequest("/api/importance"));
+			expect(await pending.json()).toEqual({
+				revisionKey: "head:base",
+				status: "pending",
+				error: null,
+				files: [],
+			});
+			const notReady = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: readySpan,
+						score: 5,
+						reason: "This span is not ready to contest.",
+					}),
+				),
+			);
+			expect(notReady.status).toBe(409);
+			const observed = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await observed.text()).toContain('"status":"ready"');
+			const cached = await routes(importanceRequest("/api/importance"));
+			const snapshot = (await cached.json()) as ImportanceTestSnapshot;
+			expect(snapshot.status).toBe("ready");
+			expect(snapshot.files[0]?.spans[0]).toEqual(readySpan);
+
+			const invalid = await routes(
+				importanceRequest("/api/importance/contest", "POST", "{ invalid"),
+			);
+			expect(invalid.status).toBe(400);
+			const contestedSpan = {
+				...readySpan,
+				score: 5,
+				reason: "This is a critical authorization change.",
 			};
-			expect(await readSnapshot()).toEqual({
-				revisionKey: "head:base",
-				status: "pending",
-				error: null,
-				files: [],
-			});
-
-			await mkdir(importanceDir, { recursive: true });
-			for (const contents of [
-				"{ invalid json",
-				JSON.stringify({ version: 1, status: "pending" }),
-				JSON.stringify({
-					version: 1,
-					revision: { headSha: "old-head", mergeBaseSha: "base" },
-					status: "ready",
-					error: null,
-					files: [],
-					generatedAt: "2026-01-01T00:00:00.000Z",
-				}),
-				JSON.stringify({
-					version: 1,
-					revision: { headSha: "head", mergeBaseSha: "base" },
-					status: "ready",
-					error: null,
-					files: [
-						{
-							path: "src/app.ts",
-							spans: [{ side: "new", startLine: 1, endLine: 1, score: 5 }],
-						},
-					],
-					generatedAt: "2026-01-01T00:00:00.000Z",
-				}),
-				JSON.stringify({
-					version: 1,
-					revision: { headSha: "new-head", mergeBaseSha: "base" },
-					status: "ready",
-					error: null,
-					files: [
-						{
-							path: "src/app.ts",
-							spans: [
-								{
-									side: "new",
-									startLine: 1,
-									endLine: 1,
-									score: 5,
-									reason: "This changes request validation behavior.",
-								},
-							],
-						},
-					],
-					generatedAt: "2026-01-01T00:00:00.000Z",
-				}),
-			]) {
-				await writeFile(resultPath, contents, "utf8");
-				expect(await readSnapshot()).toEqual({
-					revisionKey: "head:base",
-					status: "pending",
-					error: null,
-					files: [],
-				});
-			}
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("joins concurrent observes and returns the stored result without rerunning", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-join-"));
-		try {
-			const agent = new ImportanceRouteAgent({ blockFirst: true });
-			const { importanceDir, routes } = await fixture(dir, { agent });
-			const before = await routes(importanceRequest("/api/importance"));
-			expect(await before.json()).toEqual({
-				revisionKey: "head:base",
-				status: "pending",
-				error: null,
-				files: [],
-			});
-
-			const firstResponse = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
+			const response = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: readySpan,
+						score: contestedSpan.score,
+						reason: contestedSpan.reason,
+					}),
+				),
 			);
-			const firstBody = firstResponse.text();
-			await agent.waitForRun(1);
-			const active = await routes(importanceRequest("/api/importance"));
-			expect(await active.json()).toEqual({
-				revisionKey: "head:base",
-				status: "running",
-				error: null,
-				files: [],
-			});
-			const secondResponse = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			const secondBody = secondResponse.text();
-			agent.releaseFirst.resolve();
-			const [first, second] = await Promise.all([firstBody, secondBody]);
-
-			for (const body of [first, second]) {
-				const running = body.indexOf(
-					'event: status\ndata: {"status":"running","revisionKey":"head:base"}',
-				);
-				const ready = body.indexOf(
-					'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
-				);
-				const done = body.indexOf(
-					'event: done\ndata: {"status":"ready","revisionKey":"head:base"}',
-				);
-				expect(running).toBeGreaterThanOrEqual(0);
-				expect(ready).toBeGreaterThan(running);
-				expect(done).toBeGreaterThan(ready);
-			}
-			expect(agent.runs).toBe(1);
-
-			const result = JSON.parse(
+			expect(response.status).toBe(200);
+			const result = (await response.json()) as {
+				snapshot: ImportanceTestSnapshot;
+				report: string;
+			};
+			expect(result.snapshot.files[0]?.spans[0]).toEqual(contestedSpan);
+			expect(result.report).toContain("### System prompt");
+			const persisted = JSON.parse(
 				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as {
-				runId: string;
-				status: string;
-				revision: { headSha: string; mergeBaseSha: string };
-				files: Array<{ path: string }>;
-			};
-			expect(result).toMatchObject({
-				runId: expect.any(String),
-				status: "ready",
-				revision: { headSha: "head", mergeBaseSha: "base" },
-				files: [{ path: "src/app.ts" }],
-			});
+			) as { files: ImportanceTestSnapshot["files"] };
+			expect(persisted.files[0]?.spans[0]).toEqual(contestedSpan);
 			const ledger = await readImportanceLedger(
 				join(importanceDir, "ledger.ndjson"),
 			);
-			expect(ledger).toHaveLength(1);
-			expect(ledger[0]).toMatchObject({
-				kind: "run",
-				runId: result.runId,
-				status: "ready",
-				prompt: {
-					slot: "review-importance",
-					preset: "default",
-					version: 1,
-				},
-				systemPrompt: expect.stringContaining(
-					"Score how much reviewer attention",
+			expect(ledger.map((entry) => entry.kind)).toEqual(["run", "contest"]);
+
+			const stale = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "old:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: contestedSpan,
+						score: 3,
+						reason: "This stale contest must not be saved.",
+					}),
 				),
-				agent: null,
-				files: result.files,
-			});
-			expect(await readdir(importanceDir)).toEqual([
-				"importance.json",
-				"ledger.ndjson",
-			]);
-
-			const cachedResponse = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
 			);
-			expect(await cachedResponse.text()).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
-			);
-			expect(agent.runs).toBe(1);
-			expect(
-				await readImportanceLedger(join(importanceDir, "ledger.ndjson")),
-			).toHaveLength(1);
-			const readySnapshot = await routes(importanceRequest("/api/importance"));
-			expect(await readySnapshot.json()).toMatchObject({
-				status: "ready",
-				files: [{ path: "src/app.ts" }],
-			});
+			expect(stale.status).toBe(409);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
-	test("keeps ready importance when ledger append fails", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-ledger-failure-"),
-		);
-		const sink = new MemoryLogSink();
-		try {
-			const agent = new ImportanceRouteAgent();
-			const { importanceDir, routes } = await fixture(dir, { agent });
-			await mkdir(join(importanceDir, "ledger.ndjson"), { recursive: true });
-			await initializeLogger({ sink });
-			const response = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			expect(await response.text()).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
-			);
-			const persisted = JSON.parse(
-				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as { status: string; files: unknown[] };
-			const snapshot = await routes(importanceRequest("/api/importance"));
-			expect(await snapshot.json()).toMatchObject({
-				status: "ready",
-				files: persisted.files,
-			});
-			expect(persisted.status).toBe("ready");
-			await flushLogger();
-			expect(sink.events).toContainEqual(
-				expect.objectContaining({
-					level: "warn",
-					event: "review.importance.ledger-failed",
-				}),
-			);
-		} finally {
-			resetLogger();
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
 
-	test("persists agent failures and forced retry reruns the agent", async () => {
+	test("preserves authorization, invalid contest, and retry error behavior", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-retry-"));
 		try {
 			const agent = new ImportanceRouteAgent({ failRuns: new Set([1]) });
 			const { importanceDir, routes } = await fixture(dir, { agent });
-			const failedResponse = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			const failedStream = await failedResponse.text();
-			expect(failedStream).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"failed","error":"Importance agent failed","files":[]}',
-			);
-			expect(failedStream).toContain(
-				'event: error\ndata: {"message":"Importance agent failed","revisionKey":"head:base"}',
-			);
-			expect(failedStream).toContain(
-				'event: done\ndata: {"status":"failed","revisionKey":"head:base"}',
-			);
-
-			const storedFailure = JSON.parse(
-				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as { runId: string; status: string; error: string };
-			expect(storedFailure).toMatchObject({
-				runId: expect.any(String),
-				status: "failed",
-				error: "Importance agent failed",
-			});
-			const observedFailure = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			expect(await observedFailure.text()).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"failed","error":"Importance agent failed","files":[]}',
-			);
-			expect(agent.runs).toBe(1);
-
-			const retry = await routes(
-				importanceRequest(
-					"/api/importance/retry?revisionKey=head%3Abase",
-					"POST",
-				),
-			);
-			expect(await retry.text()).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
-			);
-			expect(agent.runs).toBe(2);
-			const ready = await routes(importanceRequest("/api/importance"));
-			expect(await ready.json()).toMatchObject({
-				status: "ready",
-				files: [{ path: "src/app.ts" }],
-			});
-			const storedReady = JSON.parse(
-				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as { runId: string };
-			const entries = await readImportanceLedger(
-				join(importanceDir, "ledger.ndjson"),
-			);
-			expect(entries).toHaveLength(2);
-			expect(
-				entries.map((entry) => entry.kind === "run" && entry.status),
-			).toEqual(["failed", "ready"]);
-			expect(entries[0]?.kind).toBe("run");
-			expect(entries[1]?.kind).toBe("run");
-			if (entries[0]?.kind !== "run" || entries[1]?.kind !== "run") {
-				throw new Error("Expected run entries");
+			for (const [path, method] of [
+				["/api/importance", "GET"],
+				["/api/importance/observe", "POST"],
+				["/api/importance/retry", "POST"],
+				["/api/importance/contest", "POST"],
+			] as const) {
+				expect((await routes(request(path, { method }))).status).toBe(401);
 			}
-			expect(entries[0].runId).not.toBe(entries[1].runId);
-			expect(storedReady.runId).toBe(entries[1].runId);
 
-			const duplicateRetry = await routes(
+			const invalidContest = await routes(
+				importanceRequest(
+					"/api/importance/contest",
+					"POST",
+					JSON.stringify({
+						revisionKey: "head:base",
+						path: "src/app.ts",
+						fileIndex: 0,
+						spanIndex: 0,
+						expected: readySpan,
+						score: 4,
+						reason: readySpan.reason,
+						extra: true,
+					}),
+				),
+			);
+			expect(invalidContest.status).toBe(400);
+			const failed = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await failed.text()).toContain("Importance agent failed");
+			const missingRevision = await routes(
+				importanceRequest("/api/importance/retry", "POST"),
+			);
+			expect(missingRevision.status).toBe(400);
+			expect(await missingRevision.json()).toEqual({
+				error: "Missing revisionKey",
+			});
+			const retried = await routes(
 				importanceRequest(
 					"/api/importance/retry?revisionKey=head%3Abase",
 					"POST",
 				),
 			);
-			expect(await duplicateRetry.text()).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"ready"',
-			);
-			expect(agent.runs).toBe(2);
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("stale revision retry does not rerun or overwrite current ready results", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-stale-retry-"));
-		try {
-			const agent = new ImportanceRouteAgent();
-			const { importanceDir, routes, store } = await fixture(dir, { agent });
-			await (
-				await routes(importanceRequest("/api/importance/observe", "POST"))
-			).text();
-			expect(agent.runs).toBe(1);
-
-			const previous = await store.read();
-			if (!previous) throw new Error("Review state was not written");
-			await store.write(
-				ReviewStateSchema.parse({
-					...previous,
-					revision: {
-						...previous.revision,
-						headSha: "head-2",
-						diffRefs: {
-							...previous.revision.diffRefs,
-							headSha: "head-2",
-						},
-					},
-				}),
-			);
-			await (
-				await routes(importanceRequest("/api/importance/observe", "POST"))
-			).text();
-			expect(agent.runs).toBe(2);
-			const persisted = await readFile(
-				join(importanceDir, "importance.json"),
-				"utf8",
-			);
-
-			const staleRetry = await routes(
-				importanceRequest(
-					"/api/importance/retry?revisionKey=head%3Abase",
-					"POST",
-				),
-			);
-			const stream = await staleRetry.text();
-			expect(stream).toContain(
-				'event: status\ndata: {"revisionKey":"head-2:base","status":"ready"',
-			);
-			expect(agent.runs).toBe(2);
-			expect(
-				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			).toBe(persisted);
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("discards output when revision changes before another observer starts", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-stale-completion-"),
-		);
-		try {
-			const agent = new ImportanceRouteAgent({ blockFirst: true });
-			const { importanceDir, routes, store } = await fixture(dir, { agent });
-			const response = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			const body = response.text();
-			await agent.waitForRun(1);
-
-			const previous = await store.read();
-			if (!previous) throw new Error("Review state was not written");
-			await store.write(
-				ReviewStateSchema.parse({
-					...previous,
-					revision: {
-						...previous.revision,
-						headSha: "head-2",
-						diffRefs: {
-							...previous.revision.diffRefs,
-							headSha: "head-2",
-						},
-					},
-				}),
-			);
-			agent.releaseFirst.resolve();
-
-			const stream = await body;
-			expect(stream).toContain(
-				'event: status\ndata: {"revisionKey":"head-2:base","status":"pending","error":null,"files":[]}',
-			);
-			expect(stream).toContain(
-				'event: done\ndata: {"status":"pending","revisionKey":"head-2:base"}',
-			);
-			expect(stream).not.toContain("outdated revision");
-			expect(agent.runs).toBe(1);
-			expect(
-				await Bun.file(join(importanceDir, "importance.json")).exists(),
-			).toBe(false);
-
-			const current = await routes(importanceRequest("/api/importance"));
-			expect(await current.json()).toEqual({
-				revisionKey: "head-2:base",
-				status: "pending",
-				error: null,
-				files: [],
-			});
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("aborts a run from an old revision and starts one for the new revision", async () => {
-		const dir = await mkdtemp(
-			join(tmpdir(), "mole-review-importance-revision-"),
-		);
-		try {
-			const agent = new ImportanceRouteAgent({ blockFirst: true });
-			const { importanceDir, routes, store } = await fixture(dir, { agent });
-			const oldResponse = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			const oldBody = oldResponse.text();
-			await agent.waitForRun(1);
-
-			const previous = await store.read();
-			if (!previous) throw new Error("Review state was not written");
-			await store.write(
-				ReviewStateSchema.parse({
-					...previous,
-					revision: {
-						...previous.revision,
-						headSha: "head-2",
-						diffRefs: {
-							...previous.revision.diffRefs,
-							headSha: "head-2",
-						},
-					},
-				}),
-			);
-			const pending = await routes(importanceRequest("/api/importance"));
-			expect(await pending.json()).toEqual({
-				revisionKey: "head-2:base",
-				status: "pending",
-				error: null,
-				files: [],
-			});
-
-			const secondStarted = agent.waitForRun(2);
-			const newResponse = await routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			const newBody = newResponse.text();
-			await secondStarted;
-			expect(agent.signals[0]?.aborted).toBe(true);
-			agent.releaseFirst.resolve();
-
-			const [oldStream, newStream] = await Promise.all([oldBody, newBody]);
-			expect(oldStream).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"pending","error":null,"files":[]}',
-			);
-			expect(newStream).toContain(
-				'event: status\ndata: {"revisionKey":"head-2:base","status":"ready","error":null,"files":',
-			);
+			expect(await retried.text()).toContain('"status":"ready"');
 			expect(agent.runs).toBe(2);
 			const result = JSON.parse(
 				await readFile(join(importanceDir, "importance.json"), "utf8"),
-			) as { revision: { headSha: string; mergeBaseSha: string } };
-			expect(result.revision).toEqual({
-				headSha: "head-2",
-				mergeBaseSha: "base",
-			});
+			) as { status: string; files: ImportanceTestSnapshot["files"] };
+			expect(result.status).toBe("ready");
+			expect(result.files[0]?.spans[0]).toEqual(readySpan);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 
-	test("lets an active run persist after the flag turns off", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-toggle-"));
+	test("joins concurrent observation and aborts a run after the revision changes", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-race-"));
 		try {
 			const agent = new ImportanceRouteAgent({ blockFirst: true });
-			const { featureFlagStore, routes } = await fixture(dir, { agent });
-			const response = await routes(
+			const { routes } = await fixture(dir, { agent });
+			const first = await routes(
 				importanceRequest("/api/importance/observe", "POST"),
 			);
-			const body = response.text();
+			const firstBody = first.text();
 			await agent.waitForRun(1);
-
-			await featureFlagStore.set("layer-importance", false);
-			const disabled = await routes(importanceRequest("/api/importance"));
-			expect(disabled.status).toBe(404);
-			agent.releaseFirst.resolve();
-			expect(await body).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"ready","error":null,"files":',
+			const second = await routes(
+				importanceRequest("/api/importance/observe", "POST"),
 			);
-			expect(agent.signals[0]?.aborted).toBe(false);
+			const secondBody = second.text();
+			agent.releaseFirst.resolve();
+			expect(await firstBody).toContain('"status":"ready"');
+			expect(await secondBody).toContain('"status":"ready"');
+			expect(agent.runs).toBe(1);
 
-			await featureFlagStore.set("layer-importance", true);
-			const ready = await routes(importanceRequest("/api/importance"));
-			expect(await ready.json()).toMatchObject({
+			const cancelDir = join(dir, "cancel");
+			const changingAgent = new ImportanceRouteAgent({ blockFirst: true });
+			const secondFixture = await fixture(cancelDir, { agent: changingAgent });
+			const old = await secondFixture.routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			const oldBody = old.text();
+			await changingAgent.waitForRun(1);
+			const oldState = await secondFixture.store.read();
+			if (!oldState) throw new Error("review state missing");
+			await secondFixture.store.write({
+				...oldState,
+				revision: {
+					...oldState.revision,
+					headSha: "head-2",
+					diffRefs: { ...oldState.revision.diffRefs, headSha: "head-2" },
+				},
+			});
+			const current = await secondFixture.routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await current.text()).toContain('"status":"ready"');
+			await oldBody;
+			expect(changingAgent.signals[0]?.aborted).toBe(true);
+			const persisted = JSON.parse(
+				await readFile(
+					join(secondFixture.importanceDir, "importance.json"),
+					"utf8",
+				),
+			) as { revision: { headSha: string } };
+			expect(persisted.revision.headSha).toBe("head-2");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("surfaces snapshot write failures and keeps ready results when ledger append fails", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-write-"));
+		try {
+			const blocked = await fixture(join(dir, "blocked"));
+			await mkdir(join(blocked.importanceDir, "importance.json"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(blocked.importanceDir, "importance.json", "blocker"),
+				"keep",
+			);
+			const failed = await blocked.routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await failed.text()).toContain("Unable to save importance:");
+			expect(
+				await readFile(
+					join(blocked.importanceDir, "importance.json", "blocker"),
+					"utf8",
+				),
+			).toBe("keep");
+
+			const ledgerFailure = await fixture(join(dir, "ledger-failure"));
+			await mkdir(join(ledgerFailure.importanceDir, "ledger.ndjson"), {
+				recursive: true,
+			});
+			const observed = await ledgerFailure.routes(
+				importanceRequest("/api/importance/observe", "POST"),
+			);
+			expect(await observed.text()).toContain('"status":"ready"');
+			const snapshot = await ledgerFailure.routes(
+				importanceRequest("/api/importance"),
+			);
+			expect(await snapshot.json()).toMatchObject({
 				status: "ready",
 				files: [{ path: "src/app.ts" }],
 			});
-			expect(agent.runs).toBe(1);
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("reports unavailable agents and write failures through the stream", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-errors-"));
-		try {
-			const noAgent = await fixture(dir);
-			const unavailable = await noAgent.routes(
-				importanceRequest("/api/importance/observe", "POST"),
+			const contestFailure = await fixture(join(dir, "contest-failure"));
+			await (
+				await contestFailure.routes(
+					importanceRequest("/api/importance/observe", "POST"),
+				)
+			).text();
+			const before = await contestFailure.routes(
+				importanceRequest("/api/importance"),
 			);
-			expect(await unavailable.text()).toBe(
-				'event: status\ndata: {"status":"unavailable","revisionKey":"head:base"}\n\n' +
-					'event: error\ndata: {"message":"Importance agent is unavailable","revisionKey":"head:base"}\n\n' +
-					'event: done\ndata: {"status":"failed","revisionKey":"head:base"}\n\n',
-			);
-
-			const writeDir = join(dir, "write-failure");
-			const agent = new ImportanceRouteAgent();
-			const writable = await fixture(writeDir, { agent });
-			const resultPath = join(writable.importanceDir, "importance.json");
-			await mkdir(resultPath, { recursive: true });
-			await writeFile(join(resultPath, "blocker"), "keep");
-
-			const failed = await writable.routes(
-				importanceRequest("/api/importance/observe", "POST"),
-			);
-			const body = await failed.text();
-			expect(body).toContain(
-				'event: status\ndata: {"revisionKey":"head:base","status":"failed","error":"Unable to save importance:',
-			);
-			const message = body.match(
-				/"error":"(Unable to save importance:[^"]*)"/,
-			)?.[1];
-			expect(message).toMatch(/^Unable to save importance: /);
-			expect(body).toContain(
-				`event: error\ndata: {"message":"${message}","revisionKey":"head:base"}`,
-			);
-			expect(body).toContain(
-				'event: done\ndata: {"status":"failed","revisionKey":"head:base"}',
-			);
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("layer regeneration and retry do not start importance runs", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "mole-review-importance-layer-"));
-		try {
-			const agent = new RecordingLayerAgent();
-			const { importanceDir, routes } = await fixture(dir, { agent });
-			for (const path of ["/api/layers/regenerate", "/api/layers/retry"]) {
-				const response = await routes(importanceRequest(path, "POST"));
-				expect(response.status).toBe(200);
-				await response.text();
+			const beforeSnapshot = (await before.json()) as ImportanceTestSnapshot;
+			const originalMode =
+				(await stat(contestFailure.importanceDir)).mode & 0o777;
+			await chmod(contestFailure.importanceDir, 0o500);
+			try {
+				const failedContest = await contestFailure.routes(
+					importanceRequest(
+						"/api/importance/contest",
+						"POST",
+						JSON.stringify({
+							revisionKey: "head:base",
+							path: "src/app.ts",
+							fileIndex: 0,
+							spanIndex: 0,
+							expected: readySpan,
+							score: 5,
+							reason: "This contested change must be persisted.",
+						}),
+					),
+				);
+				expect(failedContest.status).toBe(500);
+				expect(await failedContest.json()).toMatchObject({
+					error: expect.stringMatching(/^Unable to save importance:/),
+				});
+			} finally {
+				await chmod(contestFailure.importanceDir, originalMode);
 			}
-
-			expect(agent.prompts).toHaveLength(2);
+			const unchanged = await contestFailure.routes(
+				importanceRequest("/api/importance"),
+			);
 			expect(
-				await Bun.file(join(importanceDir, "importance.json")).exists(),
-			).toBe(false);
-			const snapshot = await routes(importanceRequest("/api/importance"));
-			expect(await snapshot.json()).toEqual({
-				revisionKey: "head:base",
-				status: "pending",
-				error: null,
-				files: [],
-			});
+				((await unchanged.json()) as ImportanceTestSnapshot).files,
+			).toEqual(beforeSnapshot.files);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
 });
-
 describe("one pager routes", () => {
 	class OnePagerRouteAgent implements ReviewAgent {
 		runs = 0;
