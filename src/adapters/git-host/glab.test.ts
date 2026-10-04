@@ -999,6 +999,39 @@ describe("GlabAdapter", () => {
 				{ position: null },
 			]);
 		});
+		test("accepts GitLab-returned ranges without line codes (issue #190)", async () => {
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(
+						discussion({
+							base_sha: "87fe0f08eb6f68cccb89d05af7be294d77526e83",
+							start_sha: "87fe0f08eb6f68cccb89d05af7be294d77526e83",
+							head_sha: "aa48e9dd8394f0cf1b4db98e7d1bfcd98b1ec90e",
+							old_path: "src/infrastructure/a2a/a2a-events.ts",
+							new_path: "src/infrastructure/a2a/a2a-events.ts",
+							position_type: "text",
+							old_line: null,
+							new_line: 129,
+							line_range: {
+								start: { old_line: null, new_line: 126, type: "new" },
+								end: { old_line: null, new_line: 129, type: "new" },
+							},
+						}),
+					),
+			});
+
+			const discussions = await glab.listDiscussions(ref);
+			expect(discussions).toMatchObject([
+				{
+					position: {
+						newPath: "src/infrastructure/a2a/a2a-events.ts",
+						oldPath: "src/infrastructure/a2a/a2a-events.ts",
+						newLine: 129,
+						oldLine: null,
+					},
+				},
+			]);
+		});
 
 		test("rejects malformed present ranges rather than using scalar lines", async () => {
 			const malformed = [

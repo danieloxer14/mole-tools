@@ -105,7 +105,6 @@ const PositiveLine = z.number().int().positive().nullable();
 
 const GitLabDiscussionLineRangeEntrySchema = z
 	.object({
-		line_code: NonEmptyString,
 		type: z.enum(["new", "old"]),
 		old_line: PositiveLine,
 		new_line: PositiveLine,
