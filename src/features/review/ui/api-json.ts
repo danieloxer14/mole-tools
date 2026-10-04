@@ -10,6 +10,18 @@ export function responseError(value: unknown): string | null {
 	return typeof error === "string" && error.length > 0 ? error : null;
 }
 
+export async function responseErrorMessage(
+	response: Response,
+	fallback: string,
+): Promise<string> {
+	try {
+		const detail = responseError(await response.json());
+		return detail ? `${fallback}: ${detail}` : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
 export function controlValue(event: unknown): string {
 	if (
 		typeof event !== "object" ||

@@ -147,19 +147,24 @@ function parseJsonDocuments(text: string, operation: string): unknown[] {
 
 function parsePayload<T>(
 	schema: {
-		safeParse(
-			value: unknown,
-		):
+		safeParse(value: unknown):
 			| { success: true; data: T }
-			| { success: false; error: { issues: { message: string }[] } };
+			| {
+					success: false;
+					error: { issues: { message: string; path?: readonly unknown[] }[] };
+			  };
 	},
 	value: unknown,
 	operation: string,
 ): T {
 	const parsed = schema.safeParse(value);
 	if (parsed.success) return parsed.data;
-	const issue = parsed.error.issues[0]?.message ?? "schema validation failed";
-	throw invalidPayload(operation, issue);
+	const issue = parsed.error.issues[0];
+	const path = issue?.path?.map(String).join(".");
+	throw invalidPayload(
+		operation,
+		`${path ? `${path}: ` : ""}${issue?.message ?? "schema validation failed"}`,
+	);
 }
 
 function mapApprovalIdentity(value: unknown, operation: string): string {
