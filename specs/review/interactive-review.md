@@ -320,6 +320,8 @@ For a ranged GitLab discussion, that row is the selected-side range end even
 when GitLab's top-level scalar coordinate differs; unpositioned discussions
 appear in Overview's `General discussion` section, each with its own Explain
 button. Local drafts have no Explain.
+GitLab omits `line_code` from returned range endpoints; incoming discussions
+are parsed without it, and only outgoing positions carry line codes.
 
 Existing GitLab discussions are read-only. Positioned discussions appear below
 their matching diff lines with resolved/unresolved styling and all notes;
