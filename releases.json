@@ -1,5 +1,23 @@
 [
 	{
+		"version": "0.13.0",
+		"description": "Adds one-pager generation and chat, with improvements to review navigation and GitLab discussion handling.",
+		"features": [
+			"Generate and chat about reviewer-facing one-page merge-request summaries."
+		],
+		"improvements": [
+			"Open reviews on Overview by default and improve navigation between review sections and search matches.",
+			"Scope Claude and Codex one-pager writes to dedicated output directories.",
+			"Keep importance indicators visible and redistribute importance progress weights across all five levels."
+		],
+		"fixes": [
+			"Handle ranged GitLab discussion positions when line codes are absent, including explicit-null single-line ranges.",
+			"Preserve importance results and review drafts across concurrent updates.",
+			"Keep merged status visible on merged reviews."
+		]
+	},
+
+	{
 		"version": "0.12.0",
 		"description": "Adds layer-importance scoring to code reviews and improves review navigation and GitLab discussion handling.",
 		"features": [
