@@ -61,10 +61,26 @@ describe("prompt store", () => {
 		}
 	});
 
-	test("preserves an existing layer prompt version when the shipped default changes", async () => {
+	test("refreshes the shipped default while v1 is the only version", async () => {
 		const root = await promptsDir();
+		const oldDefault = "Old shipped layer prompt.\n";
+		await writeVersion(root, "review-layers-code", "default", "001.md", oldDefault);
+
+		expect(await loadPrompt("review-layers-code", { dir: root })).toBe(
+			DEFAULT_PROMPTS["review-layers-code"].trim(),
+		);
+		expect(
+			await Bun.file(
+				join(root, "review-layers-code", "default", "001.md"),
+			).text(),
+		).toBe(DEFAULT_PROMPTS["review-layers-code"]);
+	});
+	test("preserves saved versions when the shipped default changes", async () => {
+		const root = await promptsDir();
+		const original = "Original default prompt.\n";
 		const custom = "Custom layer prompt with local verification rules.\n";
-		await writeVersion(root, "review-layers-code", "default", "001.md", custom);
+		await writeVersion(root, "review-layers-code", "default", "001.md", original);
+		await writeVersion(root, "review-layers-code", "default", "002.md", custom);
 
 		expect(await loadPrompt("review-layers-code", { dir: root })).toBe(
 			custom.trim(),
@@ -73,7 +89,7 @@ describe("prompt store", () => {
 			await Bun.file(
 				join(root, "review-layers-code", "default", "001.md"),
 			).text(),
-		).toBe(custom);
+		).toBe(original);
 	});
 	test("preserves flat legacy layer prompts without a migration bump", async () => {
 		const root = await promptsDir();
@@ -90,14 +106,13 @@ describe("prompt store", () => {
 		}
 	});
 
-	test("returns an existing version unchanged", async () => {
+	test("refreshes an existing default version when it is the only version", async () => {
 		const root = await promptsDir();
-		const text = "Custom prompt with trailing newline.\n";
-		await writeVersion(root, "commit-system", "default", "001.md", text);
+		await writeVersion(root, "commit-system", "default", "001.md", "Old default");
 
 		const prompt = await readPrompt("commit-system", { dir: root });
 
-		expect(prompt.text).toBe(text);
+		expect(prompt.text).toBe(DEFAULT_PROMPTS["commit-system"]);
 		expect(prompt.version).toBe(1);
 		expect(prompt.agent).toBeNull();
 		expect(prompt.model).toBeNull();

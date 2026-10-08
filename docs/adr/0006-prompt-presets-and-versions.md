@@ -19,10 +19,10 @@ or worktree access.
 
 ## Decision
 
-### D1 — Named presets with append-only versions
+### D1 — Named presets with append-only user revisions
 
-A preset is a named variant of one prompt slot. A version is an append-only
-revision of one preset. Prompt files use this layout:
+A preset is a named variant of one prompt slot. User-authored versions are
+append-only revisions of that preset. Prompt files use this layout:
 
 ```text
 ~/.config/mole-tools/prompts/
@@ -32,10 +32,12 @@ revision of one preset. Prompt files use this layout:
         └── 002.md
 ```
 
-The active text is the highest version of the active preset. Saving creates a
-new version. Rollback copies an older version forward as a new latest version,
-and reset writes the shipped default as a new version. Mole-tools never
-deletes prompt versions.
+The active text is the highest version of the active preset. A shipped
+text-only v1 refreshes in place while it remains the preset's only version,
+except when it came from a legacy flat prompt file. Metadata-bearing v1 files
+are preserved. Hand-edited plain-text v1 cannot be distinguished from an old
+shipped default and is refreshed. Saving, rollback, and reset create new
+versions; mole-tools never deletes user-authored prompt versions.
 
 ### D2 — Active preset is recorded in config
 
