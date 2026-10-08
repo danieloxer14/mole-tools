@@ -135,57 +135,39 @@ Also in a test file try to consider each test individually, putting a reason/exp
 Do not force a distribution: several files may contain important parts.
 Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.
 For every scored span, provide exactly one concise sentence explaining its score and the hunk, no more than 144 characters and with no line breaks.`,
-	"review-one-pager": `Write a one-page Markdown summary that helps a reviewer understand this merge request as quickly as possible. Return the complete Markdown in your response; do not create or modify files.
+	"review-one-pager": `Write a one-page Markdown summary that helps a reviewer understand this merge request as quickly as possible. Assume that the reader has no understanding of the changes, the context, or the decisions.
+
+Skip all preambles and keep prose brief. Use the repository's own domain language when present.
+
+Use only Markdown headings, paragraphs, bold and italic text, lists, tables, inline code, and fenced code blocks (\`\`\`text, \`\`\`diff, \`\`\`mermaid, or a language name). Never use raw HTML or images. The diff is the source of truth; the description and commit messages are context only.
 
 Use this template:
 
-## Summary
+## TLDR
 
-<one or two sentences on what changes and why, then the smallest visual that makes the key point clear>
-
-## Evidence
-
-- **Before:** <behaviour, output, or failing test before the change>
-  **After:** <behaviour, output, or passing test after the change>
+One or two sentences on what changes and why.
 
 ## Merge Danger
 
 **Door:** <one-way or two-way>
 
-<optional: description>
+State whether this is a one-way door (destructive or hard to reverse) or a two-way door (cheap to roll back). The blast radius is the potential scope of impact: consider consumers, data, configuration, layout, and performance.
 
 **Blast Radius:** <one-word description>
 
-<optional: potential ramifications of merge>
+Detail the potential ramifications of the merge. What areas it affects, whether it is a new feature (how substantial), a bug fix (how substantial), non-user affecting change.
 
-## Sections
+## Summary
 
-Skip all preambles and keep prose brief. Use the repository's own domain language, for example terms defined in CONTEXT.md or GLOSSARY.md when present.
+Explain progressively: begin plainly, then add context and technical detail. Cite evidence near claims.
+The goal here is to explain the PR gradually, building topic upon topic as the user reads through the document.
+Keep it concise and cover the key topics, with brief (few words) mention of how a change has been validated.
 
-### Summary
+Control flow or sequence of the change as a \`\`\`mermaid diagram such as a sequenceDiagram or flowchart is key to understanding flow at a glance.
+UI structure as a component tree, including state and module boundaries that matter.
+Component interaction, control flow, or data flow as a \`\`\`mermaid diagram such as a sequenceDiagram or flowchart.
 
-Pick the smallest view that makes the key point clear:
-
-- Logic or an algorithm as pseudocode in a \`\`\`text block.
-- Runtime control flow as a call tree in a \`\`\`text block.
-- UI structure as a component tree, including state and module boundaries that matter.
-- File responsibility or a broad refactor as a shallow file tree.
-- Component interaction, control flow, or data flow as a \`\`\`mermaid diagram such as a sequenceDiagram or flowchart. Use valid Mermaid syntax: declare diagram type first; use simple quoted labels for punctuation or line breaks; use --> for flowchart edges; use participant identifiers and ->> for sequence messages. Keep node IDs simple and never put Markdown fences inside the diagram.
-- A whole code block in the relevant language when most of it is new or the reviewer needs a copyable target shape.
-
-Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to understand the change. Use one or several views, rarely all of them; do not overwhelm the reader.
-
-### Evidence
-
-Concrete evidence that the change works, shown as a before and after. You cannot take screenshots: use execution-based evidence visible in the diff, such as the exact test that now passes, described in pseudocode. If the diff contains no evidence, say so plainly; never invent test results.
-
-### Merge Danger
-
-State whether this is a one-way door (destructive or hard to reverse) or a two-way door (cheap to roll back). The blast radius is the potential scope of impact: consider consumers, data, configuration, layout, and performance.
-
-## Output rules
-
-Use only Markdown headings, paragraphs, bold and italic text, lists, tables, inline code, and fenced code blocks (\`\`\`text, \`\`\`diff, \`\`\`mermaid, or a language name). Never use raw HTML or images.`,
+Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to understand the change.`,
 	"review-one-pager-chat": `You are the one pager chat agent for a merge request review. The reviewer is reading a one-page Markdown summary of this merge request and asks follow-up questions about it and about the change.
 
 Answer concisely and ground every claim in the worktree or the one pager. When the reviewer asks for more explanation, a breakdown, a correction, or a different visual, and the answer belongs in the document, edit the one pager in place only when runtime permissions allow editing: change the smallest section that answers the request and keep the rest intact. Runtime read-only policy overrides any editing request in this prompt; when editing is unavailable, explain that and suggest Markdown text the reviewer can apply. Keep the document to Markdown headings, paragraphs, lists, tables, inline code, and fenced \`\`\`text, \`\`\`diff, \`\`\`mermaid, or language code blocks; never add raw HTML or images. After editing, reply in one or two sentences saying what changed and where. When no edit is needed, just answer.`,

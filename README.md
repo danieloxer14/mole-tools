@@ -241,8 +241,11 @@ The prompt slots are `commit-system`, `mr-code`, `mr-plan`,
 **Settings > Prompts** only when **Settings > Features > One pager** is on.
 Each slot can have multiple presets. The active text is the highest-numbered
 version of the active preset. The shipped default seeds `default/001.md` on
-first access, and `config.prompts` records the active preset per slot (a
-missing entry means `default`).
+first access and refreshes text-only v1 files while they remain the only
+version. Saving through the UI creates a new version, so saved edits remain
+intact. Metadata-bearing prompts and migrated legacy flat prompt files are
+preserved. `config.prompts` records the active preset per slot (a missing entry
+means `default`).
 
 The six standard review prompt slots are managed from **Settings > Prompts**;
 the one-pager prompt slots appear there only when **One pager** is on.
@@ -253,11 +256,14 @@ append-only: mole-tools never deletes prompt versions. The `commit-system`,
 `mr-code`, and `mr-plan` presets are selected in `config.json`'s `prompts` map;
 their text edits still live under `~/.config/mole-tools/prompts/`.
 
-Shipped review-prompt guidance does not automatically replace existing prompt
-versions. To adopt updated layer guidance, open **Settings > Prompts** and
-**Reset** `review-layers-code` and `review-layers-plan`; each Reset saves the
-shipped guidance as a new version while preserving existing history. Use
-**Regenerate** to apply updated layer prompts to cached layers.
+Updated shipped defaults replace eligible `default/001.md` files when v1 is
+the preset's only version. Hand-edited plain-text v1 files cannot be
+distinguished from old shipped defaults and will be replaced; save edits in
+**Settings > Prompts** to preserve them as a new version. To adopt updated
+layer guidance after customizing a prompt, use **Reset** for
+`review-layers-code` and `review-layers-plan`; Reset saves the shipped guidance
+as a new version while preserving existing history. Use **Regenerate** to
+apply updated layer prompts to cached layers.
 
 
 Existing flat prompt files migrate lazily, once on first access of their slot:

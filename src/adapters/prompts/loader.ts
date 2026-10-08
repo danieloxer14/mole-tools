@@ -29,25 +29,38 @@ export function activePreset(
 	return config?.prompts?.[name] ?? DEFAULT_PRESET;
 }
 
+async function legacyPromptPath(
+	name: PromptName,
+	dir: string,
+): Promise<string | null> {
+	const flatPath = join(dir, `${name}.md`);
+	if (await Bun.file(flatPath).exists()) {
+		return flatPath;
+	}
+
+	if (
+		name === "mr-code" &&
+		!(await Bun.file(join(dir, "mr-code.md")).exists())
+	) {
+		const legacyPath = join(dir, "mr-system.md");
+		if (await Bun.file(legacyPath).exists()) {
+			return legacyPath;
+		}
+	}
+
+	return null;
+}
+
 async function ensureSlotDir(name: PromptName, dir: string): Promise<string> {
 	const slotDir = join(dir, name);
 	await mkdir(slotDir, { recursive: true });
 
 	const defaultVersionPath = join(slotDir, DEFAULT_PRESET, "001.md");
 	if (!(await Bun.file(defaultVersionPath).exists())) {
-		const flatPath = join(dir, `${name}.md`);
-		if (await Bun.file(flatPath).exists()) {
+		const legacyPath = await legacyPromptPath(name, dir);
+		if (legacyPath !== null) {
 			await mkdir(dirname(defaultVersionPath), { recursive: true });
-			await Bun.write(defaultVersionPath, await Bun.file(flatPath).text());
-		} else if (
-			name === "mr-code" &&
-			!(await Bun.file(join(dir, "mr-code.md")).exists())
-		) {
-			const legacyPath = join(dir, "mr-system.md");
-			if (await Bun.file(legacyPath).exists()) {
-				await mkdir(dirname(defaultVersionPath), { recursive: true });
-				await Bun.write(defaultVersionPath, await Bun.file(legacyPath).text());
-			}
+			await Bun.write(defaultVersionPath, await Bun.file(legacyPath).text());
 		}
 	}
 
@@ -130,6 +143,30 @@ export async function readPrompt(
 	const preset = options.preset ?? DEFAULT_PRESET;
 	PresetNameSchema.parse(preset);
 	let versions = await versionsInPreset(slotDir, preset);
+
+	if (
+		preset === DEFAULT_PRESET &&
+		options.version === undefined &&
+		versions.length === 1 &&
+		versions[0] === 1
+	) {
+		const hasLegacyPrompt = (await legacyPromptPath(name, dir)) !== null;
+		const defaultVersionPath = versionPath(slotDir, DEFAULT_PRESET, 1);
+		const raw = await Bun.file(defaultVersionPath).text();
+		const current = parsePromptFile(
+			raw,
+			`${name}/${DEFAULT_PRESET}/001.md`,
+		);
+		if (
+			!hasLegacyPrompt &&
+			current.agent === null &&
+			current.model === null &&
+			current.effort === null &&
+			raw !== DEFAULT_PROMPTS[name]
+		) {
+			await Bun.write(defaultVersionPath, DEFAULT_PROMPTS[name]);
+		}
+	}
 
 	if (preset === DEFAULT_PRESET && versions.length === 0) {
 		await mkdir(join(slotDir, DEFAULT_PRESET), { recursive: true });
