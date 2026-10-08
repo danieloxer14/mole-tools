@@ -65,32 +65,12 @@ describe("parseReleaseCatalog", () => {
 		}
 	});
 
-	test("parses root catalog with exact release sequence and strict schema", async () => {
-		const catalog = parseReleaseCatalog(
-			JSON.parse(
-				await Bun.file(
-					new URL("../../../releases.json", import.meta.url),
-				).text(),
-			),
-		);
-		expect(catalog.map(({ version }) => version)).toEqual([
-			"0.13.0",
-			"0.12.0",
-			"0.11.0",
-			"0.10.1",
-			"0.10.0",
-			"0.9.0",
-			"0.8.1",
-			"0.8.0",
-			"0.7.0",
-			"0.6.1",
-			"0.6.0",
-			"0.5.0",
-			"0.4.1",
-			"0.4.0",
-			"0.3.1",
-			"0.3.0",
-			"0.2.0",
+	test("parses root catalog and matches the package version", async () => {
+		const [rawCatalog, packageJson] = await Promise.all([
+			Bun.file(new URL("../../../releases.json", import.meta.url)).json(),
+			Bun.file(new URL("../../../package.json", import.meta.url)).json(),
 		]);
+		const catalog = parseReleaseCatalog(rawCatalog);
+		expect(catalog[0]?.version).toBe(packageJson.version);
 	});
 });

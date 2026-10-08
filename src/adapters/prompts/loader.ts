@@ -153,10 +153,7 @@ export async function readPrompt(
 		const hasLegacyPrompt = (await legacyPromptPath(name, dir)) !== null;
 		const defaultVersionPath = versionPath(slotDir, DEFAULT_PRESET, 1);
 		const raw = await Bun.file(defaultVersionPath).text();
-		const current = parsePromptFile(
-			raw,
-			`${name}/${DEFAULT_PRESET}/001.md`,
-		);
+		const current = parsePromptFile(raw, `${name}/${DEFAULT_PRESET}/001.md`);
 		if (
 			!hasLegacyPrompt &&
 			current.agent === null &&

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeVcs } from "../../../test/fakes/FakeVcs";
+import { savePrompt } from "../../adapters/prompts/loader";
 import type { IssueTracker } from "../../ports/issue-tracker";
 import type {
 	AgentEvent,
@@ -349,36 +350,27 @@ describe("review layer generation", () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-layers-prompts-"));
 		try {
 			const promptDir = join(dir, "prompts");
-			await mkdir(promptDir, { recursive: true });
-			await mkdir(join(promptDir, "review-layers-code", "default"), {
-				recursive: true,
-			});
-			await Bun.write(
-				join(promptDir, "review-layers-code", "default", "001.md"),
-				"DEFAULT CODE LAYERS PROMPT",
-			);
-			await mkdir(join(promptDir, "review-layers-plan", "default"), {
-				recursive: true,
-			});
-			await Bun.write(
-				join(promptDir, "review-layers-plan", "default", "001.md"),
-				"DEFAULT PLAN LAYERS PROMPT",
-			);
-			await mkdir(join(promptDir, "review-layers-code", "terse"), {
-				recursive: true,
-			});
-			await Bun.write(
-				join(promptDir, "review-layers-code", "terse", "001.md"),
-				"TERSE CODE LAYERS PROMPT",
-			);
-			await mkdir(join(promptDir, "review-layers-plan", "terse"), {
-				recursive: true,
-			});
-			await Bun.write(
-				join(promptDir, "review-layers-plan", "terse", "001.md"),
-				"TERSE PLAN LAYERS PROMPT",
-			);
 
+			await savePrompt("review-layers-code", {
+				preset: "default",
+				text: "DEFAULT CODE LAYERS PROMPT",
+				dir: promptDir,
+			});
+			await savePrompt("review-layers-plan", {
+				preset: "default",
+				text: "DEFAULT PLAN LAYERS PROMPT",
+				dir: promptDir,
+			});
+			await savePrompt("review-layers-code", {
+				preset: "terse",
+				text: "TERSE CODE LAYERS PROMPT",
+				dir: promptDir,
+			});
+			await savePrompt("review-layers-plan", {
+				preset: "terse",
+				text: "TERSE PLAN LAYERS PROMPT",
+				dir: promptDir,
+			});
 			const planAgent = new WritingAgent([layerDoc]);
 			const planOptions = await generationOptions(
 				dir,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeLlm } from "../../../test/fakes/FakeLlm";
@@ -7,6 +7,7 @@ import { fakeContext } from "../../../test/fakes/fakeContext";
 import { CONFIG_TEMPLATE } from "../../adapters/config/loader";
 import { ConfigSchema } from "../../adapters/config/schema";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
+import { savePrompt } from "../../adapters/prompts/loader";
 import { AbortError } from "../../core/errors";
 import { generateMergeRequest, loadMergeRequestPrompt } from "./generate";
 
@@ -18,13 +19,15 @@ async function tempPromptDir(): Promise<string> {
 }
 
 async function writePrompt(
-	slot: string,
+	slot: keyof typeof DEFAULT_PROMPTS,
 	text: string,
 	preset = "default",
 ): Promise<void> {
-	const slotDir = join(promptDir, slot, preset);
-	await mkdir(slotDir, { recursive: true });
-	await Bun.write(join(slotDir, "001.md"), text);
+	await savePrompt(slot, {
+		preset,
+		text,
+		dir: promptDir,
+	});
 }
 
 afterEach(async () => {
