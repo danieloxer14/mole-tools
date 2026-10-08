@@ -1,5 +1,20 @@
 [
 	{
+		"version": "0.14.0",
+		"description": "Improves one-pager evidence handling and refreshes untouched shipped prompt defaults.",
+		"features": [
+			"Inspect omitted diff and file details from a complete parsed-diff sidecar when generating one-pager summaries."
+		],
+		"improvements": [
+			"Persist one-pager Markdown responses in the host app and limit agent access to separate evidence and output directories.",
+			"Refresh text-only default prompt v1 files when they remain the only version, while preserving saved versions and migrated legacy prompts."
+		],
+		"fixes": [
+			"Accept GitLab discussion line-range entries when the side's type field is omitted."
+		]
+	},
+
+	{
 		"version": "0.13.0",
 		"description": "Adds one-pager generation and chat, with improvements to review navigation and GitLab discussion handling.",
 		"features": [

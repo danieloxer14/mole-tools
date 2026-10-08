@@ -64,7 +64,13 @@ describe("prompt store", () => {
 	test("refreshes the shipped default while v1 is the only version", async () => {
 		const root = await promptsDir();
 		const oldDefault = "Old shipped layer prompt.\n";
-		await writeVersion(root, "review-layers-code", "default", "001.md", oldDefault);
+		await writeVersion(
+			root,
+			"review-layers-code",
+			"default",
+			"001.md",
+			oldDefault,
+		);
 
 		expect(await loadPrompt("review-layers-code", { dir: root })).toBe(
 			DEFAULT_PROMPTS["review-layers-code"].trim(),
@@ -75,11 +81,18 @@ describe("prompt store", () => {
 			).text(),
 		).toBe(DEFAULT_PROMPTS["review-layers-code"]);
 	});
+
 	test("preserves saved versions when the shipped default changes", async () => {
 		const root = await promptsDir();
 		const original = "Original default prompt.\n";
 		const custom = "Custom layer prompt with local verification rules.\n";
-		await writeVersion(root, "review-layers-code", "default", "001.md", original);
+		await writeVersion(
+			root,
+			"review-layers-code",
+			"default",
+			"001.md",
+			original,
+		);
 		await writeVersion(root, "review-layers-code", "default", "002.md", custom);
 
 		expect(await loadPrompt("review-layers-code", { dir: root })).toBe(
@@ -91,6 +104,7 @@ describe("prompt store", () => {
 			).text(),
 		).toBe(original);
 	});
+
 	test("preserves flat legacy layer prompts without a migration bump", async () => {
 		const root = await promptsDir();
 		for (const slot of ["review-layers-code", "review-layers-plan"] as const) {
@@ -108,7 +122,13 @@ describe("prompt store", () => {
 
 	test("refreshes an existing default version when it is the only version", async () => {
 		const root = await promptsDir();
-		await writeVersion(root, "commit-system", "default", "001.md", "Old default");
+		await writeVersion(
+			root,
+			"commit-system",
+			"default",
+			"001.md",
+			"Old default",
+		);
 
 		const prompt = await readPrompt("commit-system", { dir: root });
 
@@ -324,7 +344,6 @@ describe("prompt store", () => {
 			await Bun.file(join(root, "mr-code", "default", "001.md")).text(),
 		).toBe(text);
 	});
-
 	test("prefers mr-code.md when both legacy flat files exist", async () => {
 		const root = await promptsDir();
 		await Bun.write(join(root, "mr-code.md"), "Current code prompt\n");

@@ -24,6 +24,7 @@ import { OmpAgentAdapter } from "../../adapters/agent/omp";
 import type { Config } from "../../adapters/config/schema";
 import { FeatureFlagStore } from "../../adapters/feature-flags/store";
 import { DEFAULT_PROMPTS } from "../../adapters/prompts/defaults";
+import { savePrompt } from "../../adapters/prompts/loader";
 import { SkillStore } from "../../adapters/skills/store";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
@@ -3887,9 +3888,11 @@ describe("comment from chat routes", () => {
 	}
 
 	async function writeCommentPrompt(dir: string, text: string): Promise<void> {
-		const promptDir = join(dir, "review-comment-from-chat", "default");
-		await mkdir(promptDir, { recursive: true });
-		await writeFile(join(promptDir, "001.md"), text, "utf8");
+		await savePrompt("review-comment-from-chat", {
+			preset: "default",
+			text,
+			dir,
+		});
 	}
 
 	async function setupCommentFixture(

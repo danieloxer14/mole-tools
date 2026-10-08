@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { savePrompt } from "../../adapters/prompts/loader";
 import type { HostDiscussion } from "../../ports/git-host";
 import type {
 	AgentEvent,
@@ -525,20 +526,16 @@ describe("persistent chat turns", () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-chat-prompts-"));
 		try {
 			const promptSourceDir = join(dir, "prompts");
-			await mkdir(join(promptSourceDir, "review-chat", "default"), {
-				recursive: true,
+			await savePrompt("review-chat", {
+				preset: "default",
+				text: "DEFAULT CHAT PROMPT",
+				dir: promptSourceDir,
 			});
-			await Bun.write(
-				join(promptSourceDir, "review-chat", "default", "001.md"),
-				"DEFAULT CHAT PROMPT",
-			);
-			await mkdir(join(promptSourceDir, "review-chat", "terse"), {
-				recursive: true,
+			await savePrompt("review-chat", {
+				preset: "terse",
+				text: "TERSE CHAT PROMPT",
+				dir: promptSourceDir,
 			});
-			await Bun.write(
-				join(promptSourceDir, "review-chat", "terse", "001.md"),
-				"TERSE CHAT PROMPT",
-			);
 
 			const terseAgent = new RecordingAgent();
 			await runChatTurn(
@@ -580,13 +577,11 @@ describe("persistent chat turns", () => {
 		try {
 			const promptSourceDir = join(dir, "prompts");
 			const promptMarker = "ONE PAGER CHAT PROMPT";
-			await mkdir(join(promptSourceDir, "review-one-pager-chat", "default"), {
-				recursive: true,
+			await savePrompt("review-one-pager-chat", {
+				preset: "default",
+				text: promptMarker,
+				dir: promptSourceDir,
 			});
-			await Bun.write(
-				join(promptSourceDir, "review-one-pager-chat", "default", "001.md"),
-				promptMarker,
-			);
 
 			const documentDir = join(dir, "one-pager", "document");
 			const documentPath = join(documentDir, "one-pager.md");
