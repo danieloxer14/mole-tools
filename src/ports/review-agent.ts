@@ -21,6 +21,8 @@ export interface AgentTurn {
 	/** Absolute path to a file whose contents are appended to the system prompt. */
 	systemPromptFile: string;
 	message: string;
+	/** Absolute read-only directory grant; must stay outside cwd and any writeDir. */
+	readDir?: string;
 	/** Requested write directory; writeScope controls strict scope enforcement. */
 	writeDir?: string;
 	/**

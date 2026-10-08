@@ -135,7 +135,7 @@ Also in a test file try to consider each test individually, putting a reason/exp
 Do not force a distribution: several files may contain important parts.
 Give different parts of the same file or hunk different scores when they differ in importance, for example an import line versus new logic.
 For every scored span, provide exactly one concise sentence explaining its score and the hunk, no more than 144 characters and with no line breaks.`,
-	"review-one-pager": `Write a one-page Markdown summary that helps a reviewer understand this merge request as quickly as possible.
+	"review-one-pager": `Write a one-page Markdown summary that helps a reviewer understand this merge request as quickly as possible. Return the complete Markdown in your response; do not create or modify files.
 
 Use this template:
 
@@ -170,8 +170,7 @@ Pick the smallest view that makes the key point clear:
 - Runtime control flow as a call tree in a \`\`\`text block.
 - UI structure as a component tree, including state and module boundaries that matter.
 - File responsibility or a broad refactor as a shallow file tree.
-- Component interaction, control flow, or data flow as a \`\`\`mermaid diagram such as a sequenceDiagram or flowchart.
-- A \`\`\`diff block when the point is what changes and the surrounding shape already exists; match the diff shape to the topic (component tree, file layout, call tree, or state and control flow).
+- Component interaction, control flow, or data flow as a \`\`\`mermaid diagram such as a sequenceDiagram or flowchart. Use valid Mermaid syntax: declare diagram type first; use simple quoted labels for punctuation or line breaks; use --> for flowchart edges; use participant identifiers and ->> for sequence messages. Keep node IDs simple and never put Markdown fences inside the diagram.
 - A whole code block in the relevant language when most of it is new or the reviewer needs a copyable target shape.
 
 Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to understand the change. Use one or several views, rarely all of them; do not overwhelm the reader.

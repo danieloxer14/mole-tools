@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvent } from "../../ports/review-agent";
 import type { AgentEffort } from "./effort";
@@ -37,6 +38,62 @@ export function resolveScopedWritePaths(
 	}
 
 	return { cwd: resolvedCwd, writeDir: resolvedWriteDir };
+}
+
+export const SCOPED_READ_PATH_ERROR =
+	"Read-only directory grants require an absolute readDir outside the worktree and separate from writeDir";
+
+/** A read-only grant must stay outside both worktree and any write directory. */
+export function resolveScopedReadDir(
+	cwd: string,
+	readDir: string | undefined,
+	writeDir?: string,
+): { cwd: string; readDir: string } | null {
+	if (
+		!readDir ||
+		!isAbsolute(cwd) ||
+		!isAbsolute(readDir) ||
+		cwd.includes("\0") ||
+		readDir.includes("\0") ||
+		cwd.trim() !== cwd ||
+		readDir.trim() !== readDir ||
+		(writeDir !== undefined &&
+			(!isAbsolute(writeDir) ||
+				writeDir.includes("\0") ||
+				writeDir.trim() !== writeDir))
+	) {
+		return null;
+	}
+
+	let resolvedCwd: string;
+	let resolvedReadDir: string;
+	let resolvedWriteDir: string | undefined;
+	try {
+		resolvedCwd = realpathSync(cwd);
+		resolvedReadDir = realpathSync(readDir);
+		resolvedWriteDir =
+			writeDir === undefined ? undefined : realpathSync(writeDir);
+	} catch {
+		return null;
+	}
+	const isWithin = (parent: string, child: string): boolean => {
+		const fromParent = relative(parent, child);
+		return (
+			!isAbsolute(fromParent) &&
+			(fromParent === "" ||
+				(fromParent !== ".." && !fromParent.startsWith(`..${sep}`)))
+		);
+	};
+	if (
+		isWithin(resolvedCwd, resolvedReadDir) ||
+		isWithin(resolvedReadDir, resolvedCwd) ||
+		(resolvedWriteDir !== undefined &&
+			(isWithin(resolvedWriteDir, resolvedReadDir) ||
+				isWithin(resolvedReadDir, resolvedWriteDir)))
+	) {
+		return null;
+	}
+	return { cwd: resolvedCwd, readDir: resolvedReadDir };
 }
 
 export type JsonRecord = Record<string, unknown>;

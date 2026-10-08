@@ -14,6 +14,8 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedReadDir,
+	SCOPED_READ_PATH_ERROR,
 } from "./shared";
 
 export interface OmpAgentOptions {
@@ -133,6 +135,18 @@ export class OmpAgentAdapter implements ReviewAgent {
 	async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
 		if (turn.signal?.aborted) return;
 
+		const readPaths =
+			turn.readDir === undefined
+				? null
+				: resolveScopedReadDir(turn.cwd, turn.readDir, turn.writeDir);
+		if (turn.readDir !== undefined && !readPaths) {
+			yield {
+				kind: "error",
+				message: SCOPED_READ_PATH_ERROR,
+			};
+			yield { kind: "turn_end" };
+			return;
+		}
 		const directoryWrite = turn.writeScope === "directory";
 		const tools = directoryWrite
 			? DIRECTORY_READ_ONLY_TOOLS.join(",")
@@ -155,6 +169,7 @@ export class OmpAgentAdapter implements ReviewAgent {
 		if (this.effort) args.push("--thinking", this.effort);
 		if (turn.sessionId) args.push("-r", turn.sessionId);
 		if (turn.writeDir && !directoryWrite) args.push("--add-dir", turn.writeDir);
+		if (readPaths) args.push("--add-dir", readPaths.readDir);
 		args.push("--", turn.message);
 
 		let sessionEmitted = false;

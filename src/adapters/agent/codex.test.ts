@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PortError } from "../../core/errors";
@@ -66,6 +66,28 @@ function replay(lines: string[], calls: Call[]): AgentExec {
 
 function jsonLine(value: unknown): string {
 	return JSON.stringify(value);
+}
+async function withScopedDirectories<T>(
+	run: (paths: {
+		readDir: string;
+		resolvedReadDir: string;
+		writeDir: string;
+	}) => Promise<T>,
+): Promise<T> {
+	const root = await mkdtemp(join(tmpdir(), "codex-scoped-paths-"));
+	const readDir = join(root, "evidence");
+	const writeDir = join(root, "output");
+	try {
+		await mkdir(readDir);
+		await mkdir(writeDir);
+		return await run({
+			readDir,
+			resolvedReadDir: await realpath(readDir),
+			writeDir,
+		});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 }
 
 describe("CodexAgentAdapter", () => {
@@ -148,49 +170,54 @@ describe("CodexAgentAdapter", () => {
 		});
 	});
 
-	test("enforces directory-scoped writes with a read-only-inheriting profile", async () => {
-		const calls: Call[] = [];
-		await withPrompt("System prompt", async (systemPromptFile) => {
-			const writeDir = `${baseTurn.cwd}/../codex-scoped-write-dir`;
-			const resolvedWriteDir = resolve(writeDir);
-			const adapter = new CodexAgentAdapter(replay([], calls));
-			await collect(
-				adapter.run(
-					makeTurn(systemPromptFile, {
-						writeDir,
-						writeScope: "directory",
-					}),
-				),
-			);
+	test("enforces separate read-only evidence and directory-scoped write grants", async () => {
+		await withScopedDirectories(
+			async ({ readDir, resolvedReadDir, writeDir }) => {
+				const calls: Call[] = [];
+				await withPrompt("System prompt", async (systemPromptFile) => {
+					const resolvedWriteDir = resolve(writeDir);
+					const adapter = new CodexAgentAdapter(replay([], calls));
+					await collect(
+						adapter.run(
+							makeTurn(systemPromptFile, {
+								readDir,
+								writeDir,
+								writeScope: "directory",
+							}),
+						),
+					);
 
-			expect(adapter.supportsScopedWrites).toBe(true);
-			const filesystemPermission =
-				`permissions.one_pager_write.filesystem={${JSON.stringify(resolve(baseTurn.cwd))}="read",` +
-				`${JSON.stringify(resolvedWriteDir)}="write"}`;
-			expect(calls[0]).toEqual({
-				binary: "codex",
-				args: [
-					"exec",
-					"--json",
-					"--skip-git-repo-check",
-					"--ignore-user-config",
-					"--strict-config",
-					"-C",
-					resolvedWriteDir,
-					"-c",
-					'default_permissions="one_pager_write"',
-					"-c",
-					'permissions.one_pager_write.extends=":read-only"',
-					"-c",
-					filesystemPermission,
-					"-c",
-					'developer_instructions="System prompt"',
-					"--",
-					baseTurn.message,
-				],
-				cwd: resolvedWriteDir,
-			});
-		});
+					expect(adapter.supportsScopedWrites).toBe(true);
+					const filesystemPermission =
+						`permissions.one_pager_write.filesystem={${JSON.stringify(resolve(baseTurn.cwd))}="read",` +
+						`${JSON.stringify(resolvedReadDir)}="read",` +
+						`${JSON.stringify(resolvedWriteDir)}="write"}`;
+					expect(calls[0]).toEqual({
+						binary: "codex",
+						args: [
+							"exec",
+							"--json",
+							"--skip-git-repo-check",
+							"--ignore-user-config",
+							"--strict-config",
+							"-C",
+							resolvedWriteDir,
+							"-c",
+							'default_permissions="one_pager_write"',
+							"-c",
+							'permissions.one_pager_write.extends=":read-only"',
+							"-c",
+							filesystemPermission,
+							"-c",
+							'developer_instructions="System prompt"',
+							"--",
+							baseTurn.message,
+						],
+						cwd: resolvedWriteDir,
+					});
+				});
+			},
+		);
 	});
 
 	test("fails closed for invalid directory-scoped paths in both dimensions", async () => {
@@ -243,6 +270,35 @@ describe("CodexAgentAdapter", () => {
 					{ kind: "turn_end" },
 				]);
 			}
+			await withScopedDirectories(async ({ writeDir }) => {
+				for (const readDir of [
+					"",
+					"relative-evidence",
+					baseTurn.cwd,
+					join(baseTurn.cwd, "review-evidence"),
+					join(baseTurn.cwd, ".."),
+					writeDir,
+				]) {
+					expect(
+						await collect(
+							adapter.run(
+								makeTurn(systemPromptFile, {
+									readDir,
+									writeDir,
+									writeScope: "directory",
+								}),
+							),
+						),
+					).toEqual([
+						{
+							kind: "error",
+							message:
+								"Read-only directory grants require an absolute readDir outside the worktree and separate from writeDir",
+						},
+						{ kind: "turn_end" },
+					]);
+				}
+			});
 			expect(calls).toEqual([]);
 		});
 	});

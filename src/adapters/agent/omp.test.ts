@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentEvent, AgentTurn } from "../../ports/review-agent";
 import type { AgentExec } from "./exec";
 import { OmpAgentAdapter } from "./omp";
@@ -38,6 +41,28 @@ function replay(lines: string[], calls: Call[]): AgentExec {
 			yield line;
 		}
 	};
+}
+async function withScopedDirectories<T>(
+	run: (paths: {
+		readDir: string;
+		resolvedReadDir: string;
+		writeDir: string;
+	}) => Promise<T>,
+): Promise<T> {
+	const root = await mkdtemp(join(tmpdir(), "omp-scoped-paths-"));
+	const readDir = join(root, "evidence");
+	const writeDir = join(root, "output");
+	try {
+		await mkdir(readDir);
+		await mkdir(writeDir);
+		return await run({
+			readDir,
+			resolvedReadDir: await realpath(readDir),
+			writeDir,
+		});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 }
 
 describe("OmpAgentAdapter", () => {
@@ -231,44 +256,76 @@ describe("OmpAgentAdapter", () => {
 			cwd: turn.cwd,
 		});
 	});
-	test("keeps scoped-write requests read-only without shell or file writes", async () => {
-		const calls: Call[] = [];
-		const adapter = new OmpAgentAdapter(
-			replay([`{"type":"session","id":"other"}`], calls),
-		);
-		const writeDir = "/tmp/review-output";
-		const scopedTurn: AgentTurn = {
-			...turn,
-			sessionId: "resume-session",
-			writeDir,
-			writeScope: "directory",
-		};
+	test("keeps scoped-write requests read-only while exposing evidence separately", async () => {
+		await withScopedDirectories(
+			async ({ readDir, resolvedReadDir, writeDir }) => {
+				const calls: Call[] = [];
+				const adapter = new OmpAgentAdapter(
+					replay([`{"type":"session","id":"other"}`], calls),
+				);
+				const scopedTurn: AgentTurn = {
+					...turn,
+					sessionId: "resume-session",
+					readDir,
+					writeDir,
+					writeScope: "directory",
+				};
 
-		expect(await collect(adapter.run(scopedTurn))).toEqual([
-			{ kind: "session", sessionId: "resume-session" },
-			{ kind: "turn_end" },
-		]);
-		expect(adapter.supportsScopedWrites).toBe(false);
-		expect(calls[0]).toEqual({
-			binary: "omp",
-			args: [
-				"-p",
-				"--no-extensions",
-				"--mode",
-				"json",
-				"--cwd",
+				expect(await collect(adapter.run(scopedTurn))).toEqual([
+					{ kind: "session", sessionId: "resume-session" },
+					{ kind: "turn_end" },
+				]);
+				expect(adapter.supportsScopedWrites).toBe(false);
+				expect(calls[0]).toEqual({
+					binary: "omp",
+					args: [
+						"-p",
+						"--no-extensions",
+						"--mode",
+						"json",
+						"--cwd",
+						turn.cwd,
+						"--append-system-prompt",
+						turn.systemPromptFile,
+						"--tools",
+						"read,grep,glob",
+						"-r",
+						"resume-session",
+						"--add-dir",
+						resolvedReadDir,
+						"--",
+						turn.message,
+					],
+					cwd: turn.cwd,
+				});
+			},
+		);
+	});
+	test("rejects evidence grants that overlap the worktree or write scope", async () => {
+		const calls: Call[] = [];
+		const adapter = new OmpAgentAdapter(replay([], calls));
+		await withScopedDirectories(async ({ writeDir }) => {
+			for (const readDir of [
+				"",
+				"relative-evidence",
 				turn.cwd,
-				"--append-system-prompt",
-				turn.systemPromptFile,
-				"--tools",
-				"read,grep,glob",
-				"-r",
-				"resume-session",
-				"--",
-				turn.message,
-			],
-			cwd: turn.cwd,
+				`${turn.cwd}/evidence`,
+				join(writeDir, ".."),
+				writeDir,
+			]) {
+				expect(
+					await collect(adapter.run({ ...turn, readDir, writeDir })),
+				).toEqual([
+					{
+						kind: "error",
+						message:
+							"Read-only directory grants require an absolute readDir outside the worktree and separate from writeDir",
+					},
+					{ kind: "turn_end" },
+				]);
+			}
 		});
+		expect(calls).toEqual([]);
 	});
 
 	test("turns executor failures into one error followed by turn_end", async () => {

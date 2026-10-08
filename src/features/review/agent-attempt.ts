@@ -68,6 +68,7 @@ type AgentFileAttemptOptions<T> = {
 	cwd: string;
 	systemPromptFile: string;
 	message: string;
+	readDir?: string;
 	writeScope?: "directory";
 	timeoutSeconds: number;
 	signal?: AbortSignal;
@@ -81,7 +82,7 @@ type AgentFileAttemptOptions<T> = {
 	  }
 	| {
 			outputPath?: never;
-			writeDir?: never;
+			writeDir?: string;
 			format: "text";
 	  }
 );
@@ -111,6 +112,7 @@ export async function runAgentFileAttempt<T>(
 				cwd: options.cwd,
 				systemPromptFile: options.systemPromptFile,
 				message: options.message,
+				...(options.readDir !== undefined ? { readDir: options.readDir } : {}),
 				...(options.writeDir ? { writeDir: options.writeDir } : {}),
 				...(options.writeScope ? { writeScope: options.writeScope } : {}),
 				signal: controller.signal,

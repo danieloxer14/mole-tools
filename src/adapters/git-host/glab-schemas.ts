@@ -105,14 +105,23 @@ const PositiveLine = z.number().int().positive().nullable();
 
 const GitLabDiscussionLineRangeEntrySchema = z
 	.object({
-		type: z.enum(["new", "old"]),
+		type: z.enum(["new", "old"]).nullable().optional(),
 		old_line: PositiveLine,
 		new_line: PositiveLine,
 	})
 	.passthrough()
 	.refine(
-		(entry) =>
-			entry.type === "new" ? entry.new_line !== null : entry.old_line !== null,
+		(entry) => {
+			if (entry.type === "new") {
+				return entry.new_line !== null;
+			}
+
+			if (entry.type === "old") {
+				return entry.old_line !== null;
+			}
+
+			return entry.old_line !== null || entry.new_line !== null;
+		},
 		{
 			message: "GitLab line range entry must include its selected side line",
 		},
