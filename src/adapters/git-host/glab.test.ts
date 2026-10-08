@@ -1059,6 +1059,35 @@ describe("GlabAdapter", () => {
 			]);
 		});
 
+		test("accepts returned ranges with an omitted start type", async () => {
+			const glab = makeGlab({
+				"api --hostname gitlab.example.com --paginate projects/group%2Fsub%2Fproject/merge_requests/42/discussions":
+					ok(
+						discussion({
+							old_path: "src/old.ts",
+							new_path: "src/new.ts",
+							old_line: null,
+							new_line: 129,
+							line_range: {
+								start: { old_line: null, new_line: 126 },
+								end: { old_line: null, new_line: 129, type: "new" },
+							},
+						}),
+					),
+			});
+
+			await expect(glab.listDiscussions(ref)).resolves.toMatchObject([
+				{
+					position: {
+						newPath: "src/new.ts",
+						oldPath: "src/old.ts",
+						newLine: 129,
+						oldLine: null,
+					},
+				},
+			]);
+		});
+
 		test("rejects malformed present ranges rather than using scalar lines", async () => {
 			const malformed = [
 				{ start: {}, end: {} },

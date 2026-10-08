@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import type { AgentEvent, AgentTurn } from "../../ports/review-agent";
 import { ClaudeAgentAdapter } from "./claude";
 import type { AgentExec } from "./exec";
@@ -39,6 +41,29 @@ function replay(lines: string[], calls: Call[]): AgentExec {
 			yield line;
 		}
 	};
+}
+
+async function withScopedDirectories<T>(
+	run: (paths: {
+		readDir: string;
+		resolvedReadDir: string;
+		writeDir: string;
+	}) => Promise<T>,
+): Promise<T> {
+	const root = await mkdtemp(join(tmpdir(), "claude-scoped-paths-"));
+	const readDir = join(root, "evidence");
+	const writeDir = join(root, "output");
+	try {
+		await mkdir(readDir);
+		await mkdir(writeDir);
+		return await run({
+			readDir,
+			resolvedReadDir: await realpath(readDir),
+			writeDir,
+		});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 }
 
 describe("ClaudeAgentAdapter", () => {
@@ -152,70 +177,77 @@ describe("ClaudeAgentAdapter", () => {
 		]);
 	});
 
-	test("scopes one-pager writes to the allowed directory and denies other tools", async () => {
-		const calls: Call[] = [];
-		const adapter = new ClaudeAgentAdapter(
-			replay(
-				[
-					'{"type":"system","subtype":"init","session_id":"other"}',
-					'{"type":"result","subtype":"success"}',
-				],
-				calls,
-			),
-		);
-		const writeDir = resolve(turn.cwd, "..", "review-output");
-		const resumedTurn: AgentTurn = {
-			...turn,
-			sessionId: "resume-session",
-			writeDir,
-			writeScope: "directory",
-		};
+	test("scopes one-pager writes and read-only evidence access separately", async () => {
+		await withScopedDirectories(
+			async ({ readDir, resolvedReadDir, writeDir }) => {
+				const calls: Call[] = [];
+				const adapter = new ClaudeAgentAdapter(
+					replay(
+						[
+							'{"type":"system","subtype":"init","session_id":"other"}',
+							'{"type":"result","subtype":"success"}',
+						],
+						calls,
+					),
+				);
+				const resolvedWriteDir = resolve(writeDir);
+				const resumedTurn: AgentTurn = {
+					...turn,
+					sessionId: "resume-session",
+					readDir,
+					writeDir,
+					writeScope: "directory",
+				};
 
-		expect(await collect(adapter.run(resumedTurn))).toEqual([
-			{ kind: "session", sessionId: "resume-session" },
-			{ kind: "turn_end" },
-		]);
-		expect(adapter.supportsScopedWrites).toBe(true);
-		expect(calls[0]?.args).toEqual([
-			"-p",
-			"--output-format",
-			"stream-json",
-			"--include-partial-messages",
-			"--verbose",
-			"--resume",
-			"resume-session",
-			"--model",
-			"opus",
-			"--append-system-prompt",
-			await Bun.file(turn.systemPromptFile).text(),
-			"--safe-mode",
-			"--restricted",
-			"--tools",
-			"Read",
-			"Grep",
-			"Glob",
-			"Write",
-			"Edit",
-			"--allowedTools",
-			"Read",
-			"Grep",
-			"Glob",
-			`Write(${writeDir}/**)`,
-			`Edit(${writeDir}/**)`,
-			"--permission-mode",
-			"default",
-			"--permission-prompts",
-			"none",
-			"--add-dir",
-			writeDir,
-			"--add-dir",
-			turn.cwd,
-			"--",
-			turn.message,
-		]);
-		expect(calls[0]?.args).not.toContain("Bash");
-		expect(calls[0]?.args).not.toContain("acceptEdits");
-		expect(calls[0]?.args).not.toContain("--dangerously-skip-permissions");
+				expect(await collect(adapter.run(resumedTurn))).toEqual([
+					{ kind: "session", sessionId: "resume-session" },
+					{ kind: "turn_end" },
+				]);
+				expect(adapter.supportsScopedWrites).toBe(true);
+				expect(calls[0]?.args).toEqual([
+					"-p",
+					"--output-format",
+					"stream-json",
+					"--include-partial-messages",
+					"--verbose",
+					"--resume",
+					"resume-session",
+					"--model",
+					"opus",
+					"--append-system-prompt",
+					await Bun.file(turn.systemPromptFile).text(),
+					"--safe-mode",
+					"--restricted",
+					"--tools",
+					"Read",
+					"Grep",
+					"Glob",
+					"Write",
+					"Edit",
+					"--allowedTools",
+					"Read",
+					"Grep",
+					"Glob",
+					`Write(${resolvedWriteDir}/**)`,
+					`Edit(${resolvedWriteDir}/**)`,
+					"--permission-mode",
+					"default",
+					"--permission-prompts",
+					"none",
+					"--add-dir",
+					resolvedWriteDir,
+					"--add-dir",
+					resolvedReadDir,
+					"--add-dir",
+					turn.cwd,
+					"--",
+					turn.message,
+				]);
+				expect(calls[0]?.args).not.toContain("Bash");
+				expect(calls[0]?.args).not.toContain("acceptEdits");
+				expect(calls[0]?.args).not.toContain("--dangerously-skip-permissions");
+			},
+		);
 	});
 
 	test("fails closed for invalid directory-scoped paths in both dimensions", async () => {
@@ -252,6 +284,34 @@ describe("ClaudeAgentAdapter", () => {
 				{ kind: "turn_end" },
 			]);
 		}
+		await withScopedDirectories(async ({ writeDir }) => {
+			for (const invalidReadDir of [
+				"",
+				"relative-evidence",
+				turn.cwd,
+				resolve(turn.cwd, "review-evidence"),
+				resolve(turn.cwd, ".."),
+				writeDir,
+			]) {
+				expect(
+					await collect(
+						adapter.run({
+							...turn,
+							readDir: invalidReadDir,
+							writeDir,
+							writeScope: "directory",
+						}),
+					),
+				).toEqual([
+					{
+						kind: "error",
+						message:
+							"Read-only directory grants require an absolute readDir outside the worktree and separate from writeDir",
+					},
+					{ kind: "turn_end" },
+				]);
+			}
+		});
 		expect(calls).toEqual([]);
 	});
 

@@ -140,7 +140,7 @@ Each prompt field overrides its corresponding General default independently when
 Review chat turns use read-only inspection tools (`read`, `grep`, `glob`, `bash`) for OMP and Claude; Bash is limited by prompt policy to read-only commands. Codex review chats run in its `read-only` sandbox, with the review working directory marked `untrusted` to prevent project-local Codex configuration from granting reviewed code access to local MCP commands or broader workspace/network permissions. Codex layer and comment-from-chat turns run in `workspace-write` with the review output directory added via `--add-dir`; the review worktree is writable to Codex in those turns, so prompt policy is the guard, as for OMP's `bash` tool. This write access is an intentional exception to the read-only review boundary, limited to those turns.
 One-pager generation persists Markdown returned by the agent through the host app: Claude and Codex write only within the temporary run directory, while OMP returns Markdown without file-write tools. For one-pager chat, Claude receives Read/Grep/Glob and Write/Edit scoped to the document directory; Codex uses a read-only profile with writes scoped to the document directory; OMP receives read/grep/glob without write tools and stays read-only. Codex one-pager generation and chat scoped-write turns deliberately use `--ignore-user-config --strict-config`: user `config.toml` settings, including provider and default model, are not loaded. The one-pager prompt version can select Codex agent/model/effort, but cannot configure provider. If you rely on a non-default Codex provider or other user-config settings, ensure scoped turns can run without user config.
 
-Generation sends bounded MR metadata and parsed diff hunks (64 KiB input, 64 KiB message, 96 KiB combined prompt). Explicit truncation markers identify omitted descriptions, file metadata, or diff content; the agent must not infer omitted changes.
+Generation sends bounded MR metadata and parsed diff hunks (64 KiB input, 64 KiB message, 96 KiB combined prompt). If diff/file content is omitted, the host writes a complete parsed-diff JSON Lines sidecar under the disposable run directory without injecting its contents into the initial message. The agent receives a separate read-only evidence-directory grant and reads the sidecar in chunks; truncated MR-description text remains unavailable and must not be inferred.
 
 Prompt versions can select an agent and model independently. A version whose agent is **Default** inherits the global Review agent/model above; a version with an explicit agent uses that agent and its version model, or Claude's latest Opus CLI alias (`--model opus`) when Claude's model is blank. Explicit Claude models are forwarded unchanged. Chats keep the agent/model they were bound to when created, even after the global setting or prompt version changes. For a non-default agent kind, mole-tools uses the `omp`, `claude`, or `codex` binary from `PATH`; `review.binary` applies only when the selected agent is the configured default.
 
@@ -500,6 +500,16 @@ Overview. **Create** generates an agent-written, reviewer-facing Markdown
 summary of the merge request; **Regenerate** replaces it with a newly generated
 summary. The summary is saved at
 `~/.config/mole-tools/reviews/<host>/<project>/mr-<iid>/one-pager/document/one-pager.md`.
+Generation persists the Markdown response through the host app; it does not
+depend on the agent creating the output file. Claude and Codex writes stay
+within the disposable run directory; when evidence exists, their write scope is
+limited to a sibling output subdirectory. If bounded input omits diff/file
+content, the host writes complete parsed-diff JSON Lines to
+`runs/<run-id>/evidence/complete-diff.ndjson`; the agent receives read-only
+access to that evidence directory and must inspect it in chunks. The prompt
+carries only the sidecar path and instructions, not its contents; the sidecar
+is removed with the run directory.
+
 The separate **One pager chat** uses its own prompt and model to answer
 follow-up questions. Claude and Codex can edit the summary in place; OMP remains
 read-only because its tools do not enforce directory-scoped writes. After

@@ -20,7 +20,9 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedReadDir,
 	resolveScopedWritePaths,
+	SCOPED_READ_PATH_ERROR,
 	SCOPED_WRITE_PATH_ERROR,
 } from "./shared";
 
@@ -258,6 +260,18 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 			yield { kind: "turn_end" };
 			return;
 		}
+		const readPaths =
+			turn.readDir === undefined
+				? null
+				: resolveScopedReadDir(turn.cwd, turn.readDir, turn.writeDir);
+		if (turn.readDir !== undefined && !readPaths) {
+			yield {
+				kind: "error",
+				message: SCOPED_READ_PATH_ERROR,
+			};
+			yield { kind: "turn_end" };
+			return;
+		}
 		const scopedWriteDir = scopedPaths?.writeDir;
 		const allowedTools = scopedWrite
 			? [
@@ -294,6 +308,7 @@ export class ClaudeAgentAdapter implements ReviewAgent {
 		} else if (turn.writeDir) {
 			args.push("--permission-mode", "acceptEdits", "--add-dir", turn.writeDir);
 		}
+		if (readPaths) args.push("--add-dir", readPaths.readDir);
 		args.push("--add-dir", turn.cwd, "--", turn.message);
 
 		let sessionEmitted = false;

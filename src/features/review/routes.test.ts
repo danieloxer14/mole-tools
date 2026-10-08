@@ -7864,11 +7864,14 @@ describe("one pager routes", () => {
 				return;
 			}
 
-			const outputPath = turn.message.match(
-				/^Write the one pager Markdown document to this absolute path: ([^\n]+)$/m,
-			)?.[1];
-			if (!outputPath) throw new Error("missing one pager output path");
-			await Bun.write(outputPath, "# Generated one pager\n");
+			if (
+				!turn.message.includes(
+					"Return only the complete one-pager Markdown in your response",
+				)
+			) {
+				throw new Error("missing response Markdown instruction");
+			}
+			yield { kind: "text", delta: "# Generated one pager\n" };
 			yield { kind: "turn_end" };
 		}
 	}
@@ -7883,7 +7886,10 @@ describe("one pager routes", () => {
 			chatsDir: join(dir, "chats"),
 		};
 		const store = new ReviewStore(paths);
-		await store.write(state());
+		const reviewState = state();
+		reviewState.worktreePath = join(dir, "worktree");
+		await mkdir(reviewState.worktreePath, { recursive: true });
+		await store.write(reviewState);
 		const featureFlagStore = new FeatureFlagStore(join(dir, "features.json"));
 		await featureFlagStore.set("one-pager", options.enabled ?? true);
 		const onePagerDir = join(dir, "one-pager");
@@ -8100,7 +8106,12 @@ describe("one pager chat", () => {
 			chatPath: join(dir, "chat.ndjson"),
 			chatsDir: join(dir, "chats"),
 		});
-		await store.write(options.initialState ?? state());
+		const reviewState = {
+			...(options.initialState ?? state()),
+			worktreePath: join(dir, "worktree"),
+		};
+		await mkdir(reviewState.worktreePath, { recursive: true });
+		await store.write(reviewState);
 		const featureFlagStore = new FeatureFlagStore(join(dir, "features.json"));
 		await featureFlagStore.set("one-pager", options.enabled ?? true);
 		const onePagerDir = join(dir, "one-pager");
@@ -8493,15 +8504,10 @@ describe("one pager chat", () => {
 
 			async preflight(): Promise<void> {}
 
-			async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
-				this.runs += 1;
-				const outputPath = turn.message.match(
-					/^Write the one pager Markdown document to this absolute path: ([^\n]+)$/m,
-				)?.[1];
-				if (!outputPath) throw new Error("missing one pager output path");
+			async *run(): AsyncIterable<AgentEvent> {
 				this.started.resolve();
 				await this.release.promise;
-				await Bun.write(outputPath, "# Regenerated one pager\n");
+				yield { kind: "text", delta: "# Regenerated one pager\n" };
 				yield { kind: "turn_end" };
 			}
 		}
@@ -8562,13 +8568,9 @@ describe("one pager chat", () => {
 
 			async preflight(): Promise<void> {}
 
-			async *run(turn: AgentTurn): AsyncIterable<AgentEvent> {
+			async *run(): AsyncIterable<AgentEvent> {
 				this.runs += 1;
-				const outputPath = turn.message.match(
-					/^Write the one pager Markdown document to this absolute path: ([^\n]+)$/m,
-				)?.[1];
-				if (!outputPath) throw new Error("missing one pager output path");
-				await Bun.write(outputPath, "# Generated one pager\n");
+				yield { kind: "text", delta: "# Generated one pager\n" };
 				yield { kind: "turn_end" };
 			}
 		}

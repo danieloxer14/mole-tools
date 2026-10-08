@@ -89,10 +89,15 @@ class ScriptedOnePagerAgent implements ReviewAgent {
 		}
 
 		this.secondRunStarted = true;
-		const outputPath = turn.message.match(/absolute path: (\S+)/)?.[1];
-		if (!outputPath) throw new Error("one pager output path is missing");
+		if (
+			!turn.message.includes(
+				"Return only the complete one-pager Markdown in your response",
+			)
+		) {
+			throw new Error("one pager response instruction is missing");
+		}
 		await this.releaseSuccess.promise;
-		await Bun.write(outputPath, "# Initial summary\n");
+		yield { kind: "text", delta: "# Initial summary\n" };
 		yield { kind: "turn_end" };
 	}
 }

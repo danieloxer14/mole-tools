@@ -15,7 +15,9 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedReadDir,
 	resolveScopedWritePaths,
+	SCOPED_READ_PATH_ERROR,
 	SCOPED_WRITE_PATH_ERROR,
 } from "./shared";
 
@@ -214,16 +216,29 @@ export class CodexAgentAdapter implements ReviewAgent {
 			yield { kind: "turn_end" };
 			return;
 		}
+		const readPaths =
+			turn.readDir === undefined
+				? null
+				: resolveScopedReadDir(turn.cwd, turn.readDir, turn.writeDir);
+		if (turn.readDir !== undefined && !readPaths) {
+			yield {
+				kind: "error",
+				message: SCOPED_READ_PATH_ERROR,
+			};
+			yield { kind: "turn_end" };
+			return;
+		}
 		const resolvedCwd = scopedPaths?.cwd ?? turn.cwd;
 		const resolvedWriteDir = scopedPaths?.writeDir ?? turn.cwd;
-
 		const sandbox =
 			turn.writeDir && !directoryWrite ? "workspace-write" : "read-only";
 		const args = ["exec", "--json", "--skip-git-repo-check"];
 		if (directoryWrite) {
-			const filesystemPermissions =
-				`${tomlBasicString(resolvedCwd)}="read",` +
-				`${tomlBasicString(resolvedWriteDir)}="write"`;
+			const filesystemPermissions = [
+				`${tomlBasicString(resolvedCwd)}="read"`,
+				...(readPaths ? [`${tomlBasicString(readPaths.readDir)}="read"`] : []),
+				`${tomlBasicString(resolvedWriteDir)}="write"`,
+			].join(",");
 			args.push(
 				"--ignore-user-config",
 				"--strict-config",
@@ -251,6 +266,9 @@ export class CodexAgentAdapter implements ReviewAgent {
 		}
 		args.push("-c", `developer_instructions=${tomlBasicString(systemPrompt)}`);
 		if (turn.writeDir && !directoryWrite) args.push("--add-dir", turn.writeDir);
+		if (readPaths && !directoryWrite) {
+			args.push("--add-dir", readPaths.readDir);
+		}
 		if (turn.sessionId) {
 			args.push("resume", turn.sessionId, "--", turn.message);
 		} else {

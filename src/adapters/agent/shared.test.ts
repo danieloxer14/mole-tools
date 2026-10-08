@@ -1,4 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentExec } from "./exec";
@@ -10,6 +17,7 @@ import {
 	parseJson,
 	preflight,
 	resolveAgentConfig,
+	resolveScopedReadDir,
 	resolveScopedWritePaths,
 } from "./shared";
 
@@ -31,6 +39,49 @@ describe("shared agent adapter plumbing", () => {
 		expect(resolveScopedWritePaths(cwd, join(cwd, ".git"))).toBeNull();
 		expect(resolveScopedWritePaths(cwd, cwd)).toBeNull();
 		expect(resolveScopedWritePaths(cwd, join(cwd, ".."))).toBeNull();
+	});
+	test("keeps scoped read grants outside worktree and write scope", () => {
+		const cwd = process.cwd();
+		const root = mkdtempSync(join(tmpdir(), "review-scoped-path-"));
+		try {
+			const readDir = join(root, "evidence");
+			const writeDir = join(root, "output");
+			const separateReadDir = join(root, "separate-evidence");
+			mkdirSync(readDir);
+			mkdirSync(writeDir);
+			mkdirSync(separateReadDir);
+
+			expect(resolveScopedReadDir(cwd, readDir, writeDir)).toEqual({
+				cwd: realpathSync(cwd),
+				readDir: realpathSync(readDir),
+			});
+			expect(
+				resolveScopedReadDir(cwd, separateReadDir, writeDir),
+			).not.toBeNull();
+			for (const invalid of [
+				undefined,
+				"",
+				"relative-evidence",
+				cwd,
+				join(cwd, "evidence"),
+				join(cwd, ".."),
+				writeDir,
+			]) {
+				expect(resolveScopedReadDir(cwd, invalid, writeDir)).toBeNull();
+			}
+			expect(resolveScopedReadDir(cwd, readDir, "relative-output")).toBeNull();
+			expect(resolveScopedReadDir(cwd, `${readDir} `, writeDir)).toBeNull();
+			expect(resolveScopedReadDir(cwd, `${readDir}\0`, writeDir)).toBeNull();
+
+			const worktreeLink = join(root, "worktree-link");
+			const outputLink = join(root, "output-link");
+			symlinkSync(cwd, worktreeLink, "dir");
+			symlinkSync(writeDir, outputLink, "dir");
+			expect(resolveScopedReadDir(cwd, worktreeLink, writeDir)).toBeNull();
+			expect(resolveScopedReadDir(cwd, outputLink, writeDir)).toBeNull();
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 	test("preserves provider labels and diagnostic/error formatting", () => {
 		expect(errorMessage(new Error("failed"))).toBe("failed");
