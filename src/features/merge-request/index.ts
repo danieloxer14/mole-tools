@@ -5,6 +5,7 @@ import { AbortError, UserRejectedError } from "../../core/errors";
 import type { Feature } from "../../core/feature";
 import type { Issue } from "../../ports/issue-tracker";
 import { filterDiff } from "../../shared/diff";
+import { gitHostTargetForRemote } from "../../shared/git-host-target";
 import { runCommitFlow } from "../commit";
 import { generateMergeRequest, type MergeRequestMode } from "./generate";
 import { selectReviewers } from "./reviewers";
@@ -65,16 +66,20 @@ export async function runMergeRequestFlow(
 	options: MergeRequestFlowOptions = {},
 ): Promise<MergeRequestResult> {
 	// Host preflight is deliberately first: do not spend git/Jira/Ollama work
-	// before discovering that glab cannot perform the final operation.
-	if (!ctx.gitHost) throw new AbortError("GitLab host is not configured");
-	await ctx.gitHost.preflight();
+	// before discovering that the host CLI cannot perform the final operation.
+	const remote = await ctx.vcs
+		.repoRoot()
+		.then((root) => ctx.vcs.remoteUrl(root, "origin"))
+		.catch(() => null);
+	const host = ctx.gitHostFor(gitHostTargetForRemote(remote));
+	await host.preflight();
 
 	const branch = await ctx.vcs.currentBranch();
 	const defaultBranch = await ctx.vcs.defaultBranch();
 	if (branch === defaultBranch)
 		throw new AbortError(`Cannot open MR from ${defaultBranch}`);
 
-	const existing = await ctx.gitHost.findOpenMr(branch);
+	const existing = await host.findOpenMr(branch);
 	if (existing) {
 		await ctx.ui.info(`Open merge request already exists: ${existing.url}`);
 		return { title: "", body: "", commits: [], issue: null, reviewers: [] };
@@ -112,18 +117,18 @@ export async function runMergeRequestFlow(
 	});
 	await ctx.ui.info(`Title: ${candidate.title}\n\n${candidate.body}`);
 
-	const reviewers = await selectReviewers(ctx, defaultBranch);
+	const reviewers = await selectReviewers(ctx, host, defaultBranch);
 	const configuredAutoReviewer = ctx.config.autoReviewer?.username;
 	if (
 		configuredAutoReviewer &&
 		(await ctx.ui.confirm(`Add ${configuredAutoReviewer} as an auto-reviewer?`))
 	) {
-		const member = await ctx.gitHost.resolveHandle(configuredAutoReviewer);
+		const member = await host.resolveHandle(configuredAutoReviewer);
 		if (member && !reviewers.includes(member.handle))
 			reviewers.push(member.handle);
 	}
 
-	const currentUser = await ctx.gitHost.currentUser();
+	const currentUser = await host.currentUser();
 	const assignee = currentUser?.handle;
 	const draft = await ctx.ui.confirm("Create as draft?");
 	await ctx.ui.info(
@@ -133,7 +138,7 @@ export async function runMergeRequestFlow(
 	if (!(await ctx.ui.confirm("Create merge request?")))
 		throw new UserRejectedError();
 
-	const created = await ctx.gitHost.createMr({
+	const created = await host.createMr({
 		sourceBranch: branch,
 		title: candidate.title,
 		description: candidate.body,
@@ -179,7 +184,8 @@ export async function runMergeRequestFlow(
 
 export const mergeRequest: Feature<typeof args, MergeRequestResult> = {
 	name: "merge-request",
-	description: "Generate and review a GitLab merge request",
+	description:
+		"Generate and review a GitLab merge request or GitHub pull request",
 	args,
 	help: {
 		usage: "mole-tools merge-request [--mode <code|plan>] [--context <text>]",

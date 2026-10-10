@@ -110,6 +110,7 @@ export const ReviewStateSchema = z.object({
 		host: z.string(),
 		projectPath: z.string(),
 		iid: z.number().int().positive(),
+		provider: z.enum(["gitlab", "github"]).default("gitlab"),
 		state: z.string().nullable().default(null),
 		webUrl: z.string(),
 		title: z.string(),

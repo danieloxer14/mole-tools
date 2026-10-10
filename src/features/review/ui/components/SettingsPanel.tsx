@@ -69,7 +69,7 @@ export const SLOT_DESCRIPTIONS: Record<PromptName, string> = {
 	"review-chat":
 		"Base system prompt for the review chat agent's replies to questions about the MR.",
 	"review-explain-comment":
-		"Prompt used by the review UI to explain a GitLab discussion in a new chat.",
+		"Prompt used by the review UI to explain a review discussion in a new chat.",
 	"review-comment-from-chat":
 		"Turns the selected agent chat into a review comment when you click From chat in a comment draft.",
 	"review-importance":

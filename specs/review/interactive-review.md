@@ -1,22 +1,26 @@
 # Interactive review specification
 
 **Status:** Implemented
-**Command:** `mole-tools review <gitlab-mr-url>`
+**Command:** `mole-tools review <mr-or-pr-url>`
 
-Interactive review puts a GitLab merge request's local diff, a generated review
-guide, and a session-persistent agent in one loopback-only web UI. The CLI owns
-repository/worktree setup and the server lifetime. GitLab supplies merge-request
-metadata, diff refs, and discussions; local git supplies the diff shown in the
-centre column.
+Interactive review puts a GitLab merge request or GitHub pull request's local
+diff, a generated review guide, and a session-persistent agent in one
+loopback-only web UI. The CLI owns repository/worktree setup and the server
+lifetime. The host supplies request metadata and discussions; local git supplies
+the diff shown in the centre column.
 
 ## 1. Invocation and configuration
 
-The command accepts a full GitLab URL containing
-`/-/merge_requests/<iid>`:
+The command accepts either a GitLab URL containing
+`/-/merge_requests/<iid>` or a GitHub URL containing
+`/<owner>/<repo>/pull/<n>`:
 
 ```text
 mole-tools review <mr-url> [--mode code|plan] [--no-open] [--refresh]
 ```
+
+GitLab URLs use `glab`; GitHub URLs use `gh` authenticated for the URL host.
+GitHub Enterprise hosts are supported for review.
 
 | Flag                | Contract                                                                                                                                                             |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -24,9 +28,9 @@ mole-tools review <mr-url> [--mode code|plan] [--no-open] [--refresh]
 | `--no-open`         | Prints the local URL but does not ask the operating system to open a browser.                                                                                        |
 | `--refresh`         | Re-fetches the MR head and rebuilds the detached worktree/diff before opening the server. Without it, an existing review remains anchored to its persisted revision. |
 
-The feature requires an authenticated `glab` and the configured review agent
-binary on `PATH`. The optional top-level `review` config is independent of
-`models`/`RoutingPurpose`:
+The feature requires authenticated `glab` (GitLab) or `gh` (GitHub) and the
+configured review agent binary on `PATH`. The optional top-level `review`
+config is independent of `models`/`RoutingPurpose`:
 
 ```jsonc
 {
@@ -105,9 +109,9 @@ model-specific reasoning levels and receives
 
 ## 2. Repository and worktree lifecycle
 
-1. Parse the URL into GitLab host, project path, and numeric MR IID.
+1. Parse the URL into provider, host, project path, and numeric request number.
 2. Fetch MR metadata and its `diff_refs` through the existing `GitHost` port and
-   `GlabAdapter`, always passing the URL host to `glab api`.
+   host adapter, always passing the URL host to its host CLI.
 3. Prefer the current working directory when its `origin` matches the MR
    project. Otherwise reuse the cache clone at
    `~/.config/mole-tools/repos/<host>/<projectPath>/`; if absent, clone the MR
@@ -164,8 +168,8 @@ Implemented HTTP surface:
 | `GET /`                                              | Serve embedded React HTML.                                                                                                                                                                                                                                                                                                              |
 | `GET /api/state`                                     | Return persisted state, including `mr.description` (empty for legacy state), plus parsed filtered diff, discussions, live approval status, and large-file threshold. A pending layer guide starts its first run here. |
 | `GET /api/version`                                   | Return `{ current, latest, updateAvailable }` from the launch-time GitHub release check. |
-| `GET /api/approval`                                  | Return live GitLab approval status for the current user and merge request.                                                                                                                                                                                                                                                              |
-| `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's GitLab approval. |
+| `GET /api/approval`                                  | Return live approval status for the current user and merge request from its host provider.                                                                                                                                                                                                                                                |
+| `POST /api/approval`                                 | Accept `{ action: "approve"                                                                                                                                                                                                                                                                                                             | "unapprove" }` and mutate the current user's approval through its host provider. |
 | `GET /api/refresh`                                   | Re-fetch the MR head and report `{ stale, headSha, newCommitCount }`; this read-only freshness check does not mutate review state or the worktree.                                                                                                                                                                                          |
 | `POST /api/sync`                                     | Fetch current MR metadata and preflight the complete discussion list. When head SHA and all available diff refs match persisted state, update metadata only; otherwise perform full code sync, recomputing merge base/worktree/diff refs and marking layers stale. Return synced state and discussions. |
 | `POST /api/progress`                                 | Persist a layer `done` toggle and/or a viewed-file change, returning only updated `layers` and `viewedFiles`; viewed-file changes support one path or a batch `{ viewedFiles: { paths: string[], viewed: boolean } }` applied in one mutation. |
@@ -183,12 +187,12 @@ Implemented HTTP surface:
 | `POST /api/comments/:id/from-chat`                    | Accept `{ chatId }`; run the active chat transcript through the `review-comment-from-chat` prompt and stream generated comment status. |
 | `PUT /api/comments/:id`                              | Edit a local draft body. Posted comments return a conflict and cannot be edited.                                                                                                                                                                                                                                                        |
 | `DELETE /api/comments/:id`                           | Cancel/remove a local draft.                                                                                                                                                                                                                                                                                                            |
-| `POST /api/comments/:id/send`                        | Validate the anchor, post one GitLab discussion, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread.                                                                                                                       |
+| `POST /api/comments/:id/send`                        | Validate the anchor, post one GitLab discussion or GitHub review comment, refetch discussions, retain the local draft as `status: "posted"` with `postedDiscussionId`, and render the refreshed discussion in the read-only posted thread.                                                                                                                       |
 
 ## 4. Code/Overview UI and diff contract
 
 The MR header presents lifecycle and approval status alongside diff statistics.
-An MR whose persisted GitLab lifecycle state is exactly `merged` shows a
+An MR whose persisted lifecycle state is exactly `merged` shows a
 **Merged** badge instead of an approval badge, regardless of approval state or
 loading status. Its header omits the Approve/Unapprove control and its tooltip
 and accessible description. Other lifecycle values—including `opened`,
@@ -202,7 +206,7 @@ In `Code` view, the left sidebar holds review layers and the changed-file tree,
 the centre column shows the selected file's diff, and the right column is the
 agent chat.
 
-- **Left — Review layers and changed files.** Open in GitLab, layer status,
+- **Left — Review layers and changed files.** Open in GitLab/GitHub, layer status,
   Regenerate/Retry,
   hover tooltip, per-layer file coverage, and a global Viewed-files progress
   bar. The complete changed-file tree remains available even when a layer does
@@ -721,7 +725,7 @@ The read-only freshness check is not itself a sync:
 
 ## 10. Failure and non-goals
 
-Once the server is up, agent, GitLab discussion, file, sync, and layer failures
+Once the server is up, agent, host discussion, file, sync, and layer failures
 are returned as UI-visible errors with retry where applicable. A failed layer
 does not hide the diff or chat; a failed discussion post preserves its draft;
 a stale anchor is rejected before posting. API responses are `no-store`.
@@ -732,4 +736,4 @@ not produce a CLI or UI error.
 
 This feature does not provide remote access, a background daemon, automatic
 worktree cleanup, batch review submission, discussion editing/resolution after
-posting, merges, or hosts other than GitLab.
+posting, merges, or hosts other than GitLab and GitHub.

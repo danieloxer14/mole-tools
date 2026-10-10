@@ -1,7 +1,11 @@
 import { CONFIG_TEMPLATE } from "../../src/adapters/config/loader";
 import type { Config, RoutingPurpose } from "../../src/adapters/config/schema";
 import type { Context } from "../../src/core/context";
-import type { GitHost } from "../../src/ports/git-host";
+import type {
+	GitHost,
+	GitHostTarget,
+	GitLabAutomationHost,
+} from "../../src/ports/git-host";
 import type { IssueTracker } from "../../src/ports/issue-tracker";
 import type { Llm } from "../../src/ports/llm";
 import type { Notifier } from "../../src/ports/notifier";
@@ -25,10 +29,12 @@ export function fakeContext(
 		createReviewBabysitterAgent?: (model: string) => ReviewAgent;
 		createNotifier?: (webhookUrlEnv: string) => Notifier;
 		issues?: IssueTracker | null;
-		gitHost?: GitHost | null;
+		gitHost?: GitLabAutomationHost;
+		gitHostFor?: (target: GitHostTarget) => GitHost;
 	} = {},
 ): Context {
 	const llm = overrides.llm ?? new FakeLlm();
+	const gitHost = overrides.gitHost ?? new FakeGitHost();
 	const reviewAgent = overrides.reviewAgent ?? new FakeReviewAgent();
 	const createReviewBabysitterAgent =
 		overrides.createReviewBabysitterAgent ??
@@ -46,7 +52,7 @@ export function fakeContext(
 		createNotifier,
 		getLlmFor: (_purpose: RoutingPurpose): Llm => llm,
 		issues: overrides.issues !== undefined ? overrides.issues : null,
-		gitHost:
-			overrides.gitHost !== undefined ? overrides.gitHost : new FakeGitHost(),
+		gitHostFor: overrides.gitHostFor ?? (() => gitHost),
+		gitLabAutomation: gitHost,
 	};
 }

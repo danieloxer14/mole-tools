@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { PortError } from "../core/errors";
-import { parseFileDiff } from "./diff-parse";
-import {
-	buildPosition,
-	type GitLabPositionPayload,
-	validatePosition,
-} from "./gitlab-position";
+import { PortError } from "../../core/errors";
+import { parseFileDiff } from "../../shared/diff-parse";
+import { buildPosition } from "./gitlab-position";
 
 const refs = {
 	baseSha: "base-sha",
@@ -213,57 +209,5 @@ describe("buildPosition", () => {
 				refs,
 			),
 		).toThrow(PortError);
-	});
-});
-
-describe("validatePosition", () => {
-	test("rejects cross-side ranges and stale line codes before a write", () => {
-		const valid = buildPosition(
-			{ path: "src/app.ts", side: "new", startLine: 2, endLine: 3 },
-			modified,
-			refs,
-		);
-		const crossSide = {
-			...valid,
-			line_range: {
-				start: {
-					line_code: expectedHash("src/app.ts", 2, 2),
-					type: "old" as const,
-					old_line: 2,
-					new_line: null,
-				},
-				end: {
-					line_code: expectedHash("src/app.ts", 3, 3),
-					type: "old" as const,
-					old_line: 3,
-					new_line: null,
-				},
-			},
-		};
-		expect(() => validatePosition(crossSide, modified)).toThrow(
-			"span new and old",
-		);
-
-		const stale = structuredClone(valid) as GitLabPositionPayload;
-		if (stale.line_range) {
-			stale.line_range.start.line_code = "stale-line-code";
-		}
-		expect(() => validatePosition(stale, modified, refs)).toThrow(
-			"parsed diff lines",
-		);
-	});
-
-	test("rejects refs from a stale MR head", () => {
-		const position = buildPosition(
-			{ path: "src/app.ts", side: "new", startLine: 2, endLine: 2 },
-			modified,
-			refs,
-		);
-		expect(() =>
-			validatePosition(position, modified, {
-				...refs,
-				headSha: "new-head-sha",
-			}),
-		).toThrow("current diff refs");
 	});
 });

@@ -24,6 +24,15 @@ class CountingReviewStore extends ReviewStore {
 		this.writeCount += 1;
 		await super.write(state);
 	}
+
+	override async mutate(
+		mutator: (
+			current: ReviewState | null,
+		) => ReviewState | Promise<ReviewState>,
+	): Promise<ReviewState> {
+		this.writeCount += 1;
+		return super.mutate(mutator);
+	}
 }
 
 const ref = {
@@ -420,6 +429,7 @@ describe("setupReview chat state", () => {
 					host: validatedRef.host,
 					projectPath: validatedRef.projectPath,
 					iid: ref.iid,
+					provider: "gitlab",
 					webUrl: mr.webUrl,
 					title: mr.title,
 					description: "",
@@ -466,6 +476,79 @@ describe("setupReview chat state", () => {
 			expect(store.writeCount).toBe(1);
 
 			await setupReview(input);
+			expect(store.writeCount).toBe(1);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists provider for fresh GitHub and GitLab reviews", async () => {
+		for (const [provider, expected] of [
+			["github", "github"],
+			[undefined, "gitlab"],
+		] as const) {
+			const dir = await mkdtemp(join(tmpdir(), "mole-review-provider-fresh-"));
+			try {
+				const paths = pathsFor(dir);
+				const store = new ReviewStore(paths);
+				const result = await runSetup(paths, {
+					mr: { ...mergeRequest(), provider },
+					store,
+				});
+
+				expect(result.state.mr.provider).toBe(expected);
+				expect((await store.read())?.mr).toEqual(result.state.mr);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}
+	});
+
+	test("keeps GitLab default when resuming legacy state with provider-less MR", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-provider-legacy-"));
+		try {
+			const paths = pathsFor(dir);
+			const legacy = stateFor(paths);
+			const legacyMr = { ...legacy.mr } as Record<string, unknown>;
+			delete legacyMr.provider;
+			await mkdir(paths.reviewDir, { recursive: true });
+			await Bun.write(
+				paths.statePath,
+				`${JSON.stringify({ ...legacy, mr: legacyMr })}\n`,
+			);
+
+			const store = new ReviewStore(paths);
+			expect((await store.read())?.mr.provider).toBe("gitlab");
+			const result = await runSetup(paths, { store });
+			expect(result.state.mr.provider).toBe("gitlab");
+			expect((await store.read())?.mr).toEqual(result.state.mr);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("syncs provider changes and skips writes when metadata matches", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-provider-sync-"));
+		try {
+			const paths = pathsFor(dir);
+			const store = new CountingReviewStore(paths);
+			const existing = stateFor(paths);
+			await store.write(existing);
+			store.writeCount = 0;
+			const input = {
+				ref,
+				mr: { ...mergeRequest(), provider: "github" as const },
+				state: existing,
+				store,
+			};
+
+			const updated = await syncReviewMetadata(input);
+			expect(updated.mr.provider).toBe("github");
+			expect(store.writeCount).toBe(1);
+			expect((await store.read())?.mr).toEqual(updated.mr);
+
+			const unchanged = await syncReviewMetadata({ ...input, state: updated });
+			expect(unchanged.mr).toEqual(updated.mr);
 			expect(store.writeCount).toBe(1);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -744,6 +827,7 @@ describe("syncReviewMetadata", () => {
 				host: "gitlab-new.example.com",
 				projectPath: "group/new-api",
 				iid: ref.iid,
+				provider: "gitlab",
 				webUrl:
 					"https://gitlab-new.example.com/group/new-api/-/merge_requests/42",
 				title: "New title",

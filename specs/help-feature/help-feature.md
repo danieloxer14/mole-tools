@@ -60,9 +60,9 @@ mole-tools
 Available tools:
   commit          Generate a commit message for staged changes
   init            Write a default config.json template
-  merge-request   Generate and review a GitLab merge request
+  merge-request   Generate and review a GitLab merge request or GitHub pull request
   worktree-prune  Scan a base directory for extra Git worktrees and remove them
-  review          Interactive review of a GitLab merge request in a local web UI
+  review          Interactive review of a GitLab merge request or GitHub pull request in a local web UI
 
 Run "mole-tools help <command>" for details.
 ```

@@ -7,6 +7,7 @@ import {
 	type RoutingPurpose,
 	validateModelProviders,
 } from "../adapters/config/schema";
+import { GhAdapter } from "../adapters/git-host/gh";
 import { GlabAdapter } from "../adapters/git-host/glab";
 import { JiraAdapter } from "../adapters/issue-tracker/jira";
 import { OllamaAdapter } from "../adapters/llm/ollama";
@@ -14,7 +15,11 @@ import { PiAdapter } from "../adapters/llm/pi";
 import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
 import type { PromptAgentName } from "../adapters/prompts/frontmatter";
 import { GitAdapter } from "../adapters/vcs/git";
-import type { GitHost } from "../ports/git-host";
+import type {
+	GitHost,
+	GitHostTarget,
+	GitLabAutomationHost,
+} from "../ports/git-host";
 import type { IssueTracker } from "../ports/issue-tracker";
 import type { GenerateRequest, Llm } from "../ports/llm";
 import type { Notifier } from "../ports/notifier";
@@ -38,7 +43,8 @@ export interface Context {
 	createReviewBabysitterAgent(model: string): ReviewAgent;
 	createNotifier(webhookUrlEnv: string): Notifier;
 	issues: IssueTracker | null;
-	gitHost: GitHost | null;
+	gitHostFor(target: GitHostTarget): GitHost;
+	gitLabAutomation: GitLabAutomationHost;
 }
 
 /**
@@ -198,6 +204,8 @@ export function buildContext(input: {
 	const adapterMap = buildAdapterMap(config);
 
 	const llmProxy = new RoutingLlmProxy(adapterMap, config);
+	const glab = new GlabAdapter();
+	const github = new Map<string, GhAdapter>();
 
 	return {
 		config,
@@ -222,6 +230,16 @@ export function buildContext(input: {
 						email: config.jira.email,
 					})
 				: null,
-		gitHost: new GlabAdapter(),
+		gitHostFor: (target) => {
+			if (target.provider === "gitlab") return glab;
+			const key = target.host.toLowerCase();
+			let adapter = github.get(key);
+			if (!adapter) {
+				adapter = new GhAdapter({ host: key });
+				github.set(key, adapter);
+			}
+			return adapter;
+		},
+		gitLabAutomation: glab,
 	};
 }

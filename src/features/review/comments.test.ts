@@ -146,7 +146,7 @@ describe("comment drafts", () => {
 		}
 	});
 
-	test("validates current position, posts, refreshes, and retains failed drafts", async () => {
+	test("validates current selection, posts, refreshes, and retains failed drafts", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mole-review-comments-send-"));
 		try {
 			const baseDraft = {
@@ -166,10 +166,12 @@ describe("comment drafts", () => {
 			});
 			await store.write(state([baseDraft]));
 			let created = 0;
+			let capturedInput: unknown;
 			let refreshed = 0;
 			const host = {
 				createDiscussion: async (input: unknown) => {
 					created++;
+					capturedInput = input;
 					expect(input).toMatchObject({ body: "Please fix this." });
 					return discussion();
 				},
@@ -195,6 +197,10 @@ describe("comment drafts", () => {
 			expect((await store.read())?.drafts[0]).toMatchObject({
 				status: "posted",
 				postedDiscussionId: "discussion-1",
+			});
+			expect(capturedInput).toMatchObject({
+				selection,
+				parsedDiff: diff[0],
 			});
 
 			const failingStore = new ReviewStore({
@@ -223,6 +229,55 @@ describe("comment drafts", () => {
 				body: "Please fix this.",
 				status: "failed",
 				error: "glab unauthenticated",
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("marks invalid positioned selection as failed with HTTP 400", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mole-review-invalid-selection-"));
+		try {
+			const store = new ReviewStore({
+				statePath: join(dir, "review.json"),
+				chatPath: join(dir, "chat.ndjson"),
+				chatsDir: join(dir, "chats"),
+			});
+			const invalidDraft = {
+				id: "draft-invalid-selection",
+				body: "Please fix this.",
+				selection: { ...selection, startLine: 3, endLine: 3 },
+				filePath: selection.path,
+				status: "draft" as const,
+				error: null,
+				postedDiscussionId: null,
+				staleSince: null,
+			};
+			await store.write(state([invalidDraft]));
+			let createCount = 0;
+			const routes = createReviewRoutes({
+				token,
+				store,
+				diff,
+				gitHost: {
+					createDiscussion: async () => {
+						createCount++;
+						return discussion();
+					},
+				},
+			});
+
+			const response = await routes(
+				request(`/api/comments/${invalidDraft.id}/send?t=${token}`, {
+					method: "POST",
+				}),
+			);
+
+			expect(response.status).toBe(400);
+			expect(createCount).toBe(0);
+			expect((await store.read())?.drafts[0]).toMatchObject({
+				status: "failed",
+				error: expect.stringContaining("Invalid diff line selection:"),
 			});
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -284,7 +339,7 @@ describe("comment drafts", () => {
 			);
 			expect(sent.status).toBe(200);
 			expect(sendCount).toBe(1);
-			expect(capturedInput).not.toHaveProperty("position");
+			expect(capturedInput).not.toHaveProperty("selection");
 			if (
 				!capturedInput ||
 				typeof capturedInput !== "object" ||

@@ -317,7 +317,7 @@ effort uses OMP `--thinking`, Claude `--effort`, or Codex `-c model_reasoning_ef
 | `review-layers-code` | `review` default `--mode code` | Ordered end-to-end runtime boundaries and test coverage for code review. |
 | `review-layers-plan` | `review` default `--mode plan` | Architecture decisions, deliverable completeness, and acceptance-criteria testability for plan review. |
 | `review-chat` | Review UI chat | Chat-review behavior and response format. |
-| `review-explain-comment` | Review UI **Explain** on a GitLab discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
+| `review-explain-comment` | Review UI **Explain** on a review discussion | A 1–2 sentence non-technical manager TL;DR for a review comment. |
 | `review-comment-from-chat` | "Comment from chat" | One concise reviewer-voice comment distilled from chat. |
 | `review-one-pager` | One pager generation (Features > One pager) | Writes a reviewer-facing one-page Markdown summary of the MR. |
 | `review-one-pager-chat` | One pager chat (Features > One pager) | Answers questions about the summary; Claude and Codex can edit it in place, while OMP remains read-only. |
@@ -373,9 +373,11 @@ Features > One pager** is on; it does not change commit prompt configuration.
 
 ---
 
-### `merge-request` — Generate GitLab Merge Requests
+### `merge-request` — Generate Merge Requests (GitLab) and Pull Requests (GitHub)
 
-Creates a merge-request candidate from the current branch, commits any staged changes first (reusing `commit` under the hood), then pushes and opens the MR in GitLab.
+Creates a merge-request or pull-request candidate from the current branch, commits any staged changes first (reusing `commit` under the hood), then pushes and opens it on the detected host.
+
+The host is detected from the `origin` remote: `github.com` uses `gh`; any other or unreadable origin uses `glab`. GitHub Enterprise origins are treated as GitLab for `merge-request`.
 
 ```bash
 mole-tools merge-request                              # code-description flow (default)
@@ -388,13 +390,13 @@ mole-tools merge-request --context "migration risk"   # extra inline guidance
 | `--mode <code|plan>` | Description prompt mode. Defaults to `code`; `plan` frames an implementation plan by purpose, scope, and decisions. |
 | `--context <text>` | Extra guidance for both the commit-phase and MR-description generation. |
 
-**How it works.** Preflight GitLab connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
-**Configuration.** Uses the `mergeRequest` model route. The active `mr-code` or `mr-plan` prompt preset supplies the description prompt; set it in `config.json`'s `prompts` map, since the overlay manages the five review slots. Requires `glab` to be installed and authenticated for the GitLab host in the MR URL.
+**How it works.** Detects the host from `origin` → preflight host connection → if staged changes exist, commits them first → pushes branch → collects diff against default branch → fetches Jira issue if present → generates title + description → interactive reviewer selection (with optional auto-reviewer from config) → draft toggle → confirm and create. For repos listed in `dynamicEnvRepos`, an optional dynamic-environment handoff script is offered after creation.
+**Configuration.** Uses the `mergeRequest` model route. The active `mr-code` or `mr-plan` prompt preset supplies the description prompt; set it in `config.json`'s `prompts` map, since the overlay manages the five review slots. Requires authenticated `gh` for GitHub origins or `glab` for GitLab origins.
 
 
 ---
 
-### `review` — Interactive GitLab Merge-Request Review
+### `review` — Interactive GitLab Merge-Request and GitHub Pull-Request Review
 
 Opens a local review surface with a full-width merge-request header above its
 three review columns. The left sidebar offers **Layers** and **Files** tabs:
@@ -404,17 +406,17 @@ it does not contain a second files browser. The right column provides persistent
 read-only agent chat. Overview opens first with the merge-request description;
 use the header to switch to Code for layers, files, and diffs, or back to
 Overview. Comments stay local drafts until you explicitly send each one as a
-positioned GitLab discussion. Each published
-discussion has an **Explain** button that opens a new chat pre-loaded with the
-surrounding diff: the chat is titled `Explain: …` after the comment, and its
-first turn uses the active `review-explain-comment` prompt preset, the comment's notes,
+positioned GitLab discussion or GitHub review comment. Each published
+discussion or review comment has an **Explain** button that opens a new chat
+pre-loaded with the surrounding diff: the chat is titled `Explain: …` after
+the comment, and its first turn uses the active `review-explain-comment` prompt preset, the comment's notes,
 and a diff excerpt around the anchored line (marked `>`) — or
 `No diff excerpt available for this comment.` for a general discussion — so
 the agent replies with a plain-language explanation you can follow up on.
 
 Positioned comments support both single-line and multiline selections. If a
-failed draft follows sending, GitLab may already have created the discussion
-before its response could be processed. Check GitLab for an existing discussion
+failed draft follows sending, the host may already have created the comment
+before its response could be processed. Check the host for an existing comment
 before using **Retry** to avoid posting a duplicate.
 
 Review layers have one completion circle on the right of the title, sized like
@@ -557,18 +559,31 @@ mole-tools review https://gitlab.com/acme/api/-/merge_requests/42 --refresh
 
 #### Review-agent setup
 
-All review agents need GitLab access, a local Git checkout (or permission to
-clone the MR project), and one agent binary. Authenticate GitLab first:
+All review agents need access to the GitLab merge request or GitHub pull request,
+a local Git checkout (or permission to clone the project), and one agent binary.
+Authenticate GitLab with `glab` or GitHub with `gh` before starting a review:
 
 ```bash
 brew install glab
 glab auth login
 glab auth status
+brew install gh
+gh auth login
+gh auth status
 ```
 
-`glab` must be authenticated for the GitLab host in the MR URL. It fetches MR
-metadata and discussions, and sends any comments or approval changes you make
-in the UI.
+Example GitHub pull request URL:
+
+```bash
+mole-tools review https://github.com/<owner>/<repo>/pull/<n>
+```
+
+Trailing paths such as `/files` are accepted. GitHub Enterprise hosts are
+supported for review when authenticated with `gh` for that host.
+
+`glab` or `gh` must be authenticated for the review URL's host. The host CLI
+fetches request metadata and discussions, and sends comments or approval changes
+made in the UI.
 
 **OMP**
 
@@ -632,7 +647,19 @@ policy is the guard against editing code under review. The worktree persists
 for restart and is not auto-removed when the CLI exits; clean deliberately with
 `mole-tools worktree-prune` after checking path and any local work.
 
-**Configuration.** `review.agent` selects `claude` (default), `omp`, or `codex`; `review.binary` selects a non-default executable, `review.model` selects the model, and optional `review.effort` selects agent-specific effort. General and per-prompt controls, catalog sources, and Claude entitlement limits are described in [the interactive review spec](specs/review/interactive-review.md) and [ADR 0005](docs/adr/0005-review-agent-port.md). Layer output and chat state persist per MR below `~/.config/mole-tools/reviews/`. Requires authenticated `glab` and selected agent binary on `PATH`.
+**Configuration.** `review.agent` selects `claude` (default), `omp`, or `codex`; `review.binary` selects a non-default executable, `review.model` selects the model, and optional `review.effort` selects agent-specific effort. General and per-prompt controls, catalog sources, and Claude entitlement limits are described in [the interactive review spec](specs/review/interactive-review.md) and [ADR 0005](docs/adr/0005-review-agent-port.md). Layer output and chat state persist per MR below `~/.config/mole-tools/reviews/`. Requires authenticated `glab` (GitLab) or `gh` (GitHub) for the review URL's host, plus the selected agent binary on `PATH`.
+
+#### GitHub limitations
+
+- `review-babysitter` remains GitLab-only.
+- GitHub Enterprise origins are not detected as GitHub for `merge-request`;
+  they use `glab` as GitLab.
+- GitHub description images are not proxied; private images may not render.
+- Threads show at most 100 comments each.
+- Unapprove dismisses your approving review and may require repository
+  permission. Errors are shown.
+- LEFT-side comments on renamed files may be rejected by GitHub; the draft is
+  marked failed.
 
 ### `review-babysitter` — Periodic Safe Merge-Request Approval
 

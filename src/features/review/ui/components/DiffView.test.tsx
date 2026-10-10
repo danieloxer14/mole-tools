@@ -2841,6 +2841,7 @@ test("from-chat draft targeting preserves mounted drafts through failure, Stop, 
 		mode: "code",
 		mr: {
 			host: "gitlab.example.com",
+			provider: "gitlab",
 			projectPath: "group/project",
 			iid: 42,
 			webUrl: "https://gitlab.example.com/group/project/-/merge_requests/42",

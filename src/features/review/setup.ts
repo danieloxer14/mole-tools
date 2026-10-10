@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Config } from "../../adapters/config/schema";
 import { PortError } from "../../core/errors";
+import type { GitHostProvider } from "../../ports/git-host";
 import type { FileDiff, Vcs } from "../../ports/vcs";
 import { filterDiff } from "../../shared/diff";
 import {
@@ -9,7 +10,7 @@ import {
 	type ParsedFileDiff,
 	parseFileDiffs,
 } from "../../shared/diff-parse";
-import { buildPosition } from "../../shared/gitlab-position";
+import { selectDiffLines } from "../../shared/diff-selection";
 import type { MrRef } from "../../shared/mr-url";
 import { getReviewPaths, type ReviewPaths } from "./paths";
 import {
@@ -27,6 +28,7 @@ export interface ReviewDiffRefs {
 }
 
 export interface ReviewMergeRequest {
+	provider?: GitHostProvider;
 	iid: number;
 	projectPath: string;
 	title: string;
@@ -233,19 +235,29 @@ export async function compareReviewHead(
 function draftAnchorResolves(
 	draft: ReviewState["drafts"][number],
 	diff: ParsedFileDiff[],
-	diffRefs: ReviewDiffRefs,
 ): boolean {
 	const selection = draft.selection;
-	if (draft.filePath !== selection.path) return false;
-	if (!("side" in selection)) return false;
+
+	if (draft.filePath !== selection.path) {
+		return false;
+	}
+
+	if (!("side" in selection)) {
+		return false;
+	}
+
 	const file = diff.find((candidate) => {
 		const path =
 			selection.side === "new" ? candidate.newPath : candidate.oldPath;
 		return path === draft.filePath;
 	});
-	if (!file) return false;
+
+	if (!file) {
+		return false;
+	}
+
 	try {
-		buildPosition(selection, file, diffRefs);
+		selectDiffLines(selection, file);
 		return true;
 	} catch {
 		return false;
@@ -303,7 +315,7 @@ function syncedState(
 		layers: base.layers.map((layer) => ({ ...layer, stale: true })),
 		viewedFiles,
 		drafts: base.drafts.map((draft) =>
-			draftAnchorResolves(draft, parsedDiff, diffRefs)
+			draftAnchorResolves(draft, parsedDiff)
 				? { ...draft }
 				: { ...draft, staleSince: draft.staleSince ?? syncedAt },
 		),
@@ -329,6 +341,7 @@ function withMergeRequestMetadata(
 			host: ref.host,
 			projectPath: ref.projectPath,
 			iid: mr.iid,
+			provider: mr.provider ?? base.mr.provider,
 			webUrl: mr.webUrl,
 			title: mr.title,
 			description: mr.description ?? base.mr.description ?? "",
@@ -346,6 +359,7 @@ function sameMergeRequestMetadata(
 		left.host === right.host &&
 		left.projectPath === right.projectPath &&
 		left.iid === right.iid &&
+		left.provider === right.provider &&
 		left.webUrl === right.webUrl &&
 		left.title === right.title &&
 		left.description === right.description &&
@@ -365,9 +379,17 @@ export async function syncReviewMetadata(
 	}
 	const apply = (base: ReviewState): ReviewState =>
 		withMergeRequestMetadata(base, input.ref, input.mr);
-	return input.store
-		? input.store.mutate((current) => apply(current ?? input.state))
-		: apply(input.state);
+	if (!input.store) {
+		return apply(input.state);
+	}
+
+	const current = await input.store.read();
+	const base = current ?? input.state;
+	const updated = apply(base);
+	if (current && sameMergeRequestMetadata(current.mr, updated.mr)) {
+		return current;
+	}
+	return input.store.mutate((latest) => apply(latest ?? input.state));
 }
 
 export async function syncReview(
@@ -547,6 +569,7 @@ export async function setupReview(
 			host: input.ref.host,
 			projectPath: input.ref.projectPath,
 			iid: input.mr.iid,
+			provider: input.mr.provider ?? "gitlab",
 			webUrl: input.mr.webUrl,
 			title: input.mr.title,
 			description: input.mr.description ?? "",

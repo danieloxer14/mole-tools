@@ -28,15 +28,21 @@ Optional command-level documentation colocated on a feature. It may include invo
 ### Zod argument metadata
 Descriptions and examples attached to individual zod argument schemas with `.describe(...)` and `.meta({ examples: [...] })`. This is the canonical place for option-level help text.
 
+### Git host provider
+The provider for remote merge-request and review operations: GitLab via `glab`
+or GitHub via `gh`. Review selects it from the review URL; `merge-request`
+selects it from the `origin` remote.
+
 ### Interactive review (`mole-tools review`)
-The feature that reviews one GitLab merge request in a local web UI with
-`Code` and `Overview` review views. Invoke it as
-`mole-tools review <mr-url> [--mode code|plan] [--no-open] [--refresh]`.
+The feature that reviews one GitLab merge request or GitHub pull request in a
+local web UI with `Code` and `Overview` review views. Invoke it as
+`mole-tools review <mr-or-pr-url> [--mode code|plan] [--no-open] [--refresh]`.
 `--mode` defaults to `code` and selects only the layer prompt; `plan` frames
 the same diff/chat/comment flow around requirements and acceptance criteria.
-`--no-open` suppresses browser launch. `--refresh` re-fetches the MR head and
-rebuilds the detached worktree before serving.
+`--no-open` suppresses browser launch. `--refresh` re-fetches the request head
+and rebuilds the detached worktree before serving.
 Review UI is styled with Tailwind v4 + vendored shadcn base-luma components (`src/features/review/ui/components/ui`) and Lucide icons.
+A positioned discussion is sent as a GitLab discussion or GitHub review comment.
 
 ### Review URL and run token
 The URL printed by `mole-tools review` points to
@@ -96,10 +102,12 @@ ready, and can be Regenerated or Retried. A layer curates files from the full
 changed-file tree; global and per-layer viewed-file coverage are separate.
 
 ### Positioned discussion
+
 A local comment draft anchored to one diff side and inclusive line range.
 New-side anchors use `new_line`; deleted-side anchors use `old_line`. Ranges
 cannot cross sides and must resolve against current diff refs before explicit
-Send posts one GitLab discussion. Existing discussions remain read-only.
+Send. A positioned discussion is sent as a GitLab discussion or GitHub review
+comment. Existing discussions remain read-only.
 
 ### General discussion
 An unpositioned merge-request discussion shown at the bottom of the Overview

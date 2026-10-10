@@ -65,6 +65,7 @@ function state(
 	return {
 		mr: {
 			iid: ref.iid,
+			provider: "gitlab",
 			projectPath: ref.projectPath,
 			title: metadata.title,
 			description: "",

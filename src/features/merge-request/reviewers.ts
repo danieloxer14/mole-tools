@@ -1,6 +1,6 @@
 import type { Context } from "../../core/context";
 import { logger } from "../../core/logger";
-import type { HostMember } from "../../ports/git-host";
+import type { GitHost, HostMember } from "../../ports/git-host";
 import type { Choice } from "../../ports/ui";
 
 export interface ReviewerSuggestion {
@@ -180,13 +180,12 @@ export function rankReviewerSuggestions(
 
 export async function selectReviewers(
 	ctx: Context,
+	host: GitHost,
 	base: string,
 ): Promise<string[]> {
-	if (!ctx.gitHost) return [];
-
 	const [files, currentUser] = await Promise.all([
 		ctx.vcs.changedFiles(base),
-		ctx.gitHost.currentUser(),
+		host.currentUser(),
 	]);
 
 	const repoRoot = await ctx.vcs.repoRoot();
@@ -199,12 +198,7 @@ export async function selectReviewers(
 		const handles = parseCodeowners(await Bun.file(path).text());
 
 		members = (
-			await Promise.all(
-				handles.map(
-					(handle) =>
-						ctx.gitHost?.resolveHandle(handle) ?? Promise.resolve(null),
-				),
-			)
+			await Promise.all(handles.map((handle) => host.resolveHandle(handle)))
 		).filter((member): member is HostMember => member !== null);
 	}
 
@@ -226,15 +220,13 @@ export async function selectReviewers(
 			currentUser,
 		);
 
-		// Git history contains display names, not necessarily GitLab usernames.
-		// Resolve every fallback candidate before passing it to `glab mr create`;
+		// Git history contains display names, not necessarily host usernames.
+		// Resolve each fallback candidate before creating the merge request;
 		// otherwise "Cara Fisher" becomes the invalid handle "carafisher".
 		suggestions = (
 			await Promise.all(
 				suggestions.map(async (suggestion) => {
-					const member = await ctx.gitHost?.resolveHandle(
-						suggestion.displayName,
-					);
+					const member = await host.resolveHandle(suggestion.displayName);
 					if (member?.kind !== "user") return null;
 					return {
 						...suggestion,
