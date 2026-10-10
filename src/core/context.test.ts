@@ -6,6 +6,8 @@ import { ClaudeAgentAdapter } from "../adapters/agent/claude";
 import { CodexAgentAdapter } from "../adapters/agent/codex";
 import { OmpAgentAdapter } from "../adapters/agent/omp";
 import { ConfigSchema } from "../adapters/config/schema";
+import { GhAdapter } from "../adapters/git-host/gh";
+import { GlabAdapter } from "../adapters/git-host/glab";
 import { SlackWebhookNotifier } from "../adapters/notifier/slack-webhook";
 import type { GenerateRequest, Llm } from "../ports/llm";
 import {
@@ -273,4 +275,32 @@ test("allows babysitter service factories to be overridden", () => {
 	expect(context.createNotifier("ENV_FROM_TEST")).toBe(notifier);
 	expect(requestedModel).toBe("model-from-test");
 	expect(requestedEnvironment).toBe("ENV_FROM_TEST");
+});
+
+test("composes shared GitLab automation and cached GitHub hosts", () => {
+	const context = buildContext({
+		config,
+		ui: new FakeUiPort(),
+	});
+	const gitLabHost = context.gitHostFor({ provider: "gitlab" });
+	const githubHost = context.gitHostFor({
+		provider: "github",
+		host: "GitHub.com",
+	});
+
+	expect(gitLabHost).toBeInstanceOf(GlabAdapter);
+	expect(context.gitLabAutomation === gitLabHost).toBe(true);
+	expect(githubHost).toBeInstanceOf(GhAdapter);
+	expect((githubHost as GhAdapter).host).toBe("github.com");
+	expect(context.gitHostFor({ provider: "github", host: "github.com" })).toBe(
+		githubHost,
+	);
+
+	const gheHost = context.gitHostFor({
+		provider: "github",
+		host: "GHE.Example.com",
+	});
+	expect(gheHost).toBeInstanceOf(GhAdapter);
+	expect(gheHost).not.toBe(githubHost);
+	expect((gheHost as GhAdapter).host).toBe("ghe.example.com");
 });

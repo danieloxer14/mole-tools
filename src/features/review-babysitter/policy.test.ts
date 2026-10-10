@@ -18,6 +18,7 @@ const config = ReviewBabysitterConfigSchema.parse({
 });
 
 const mr: MrAutoApprovalState["mr"] = {
+	provider: "gitlab",
 	iid: 42,
 	projectPath: "group/project",
 	title: "Improve API",

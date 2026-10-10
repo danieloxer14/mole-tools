@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { PortError } from "../../core/errors";
 import type { CreateDiscussionInput } from "../../ports/git-host";
 import { parseFileDiff } from "../../shared/diff-parse";
-import { buildPosition } from "../../shared/gitlab-position";
 import type { MrRef } from "../../shared/mr-url";
+import { buildPosition } from "./gitlab-position";
 import { GlabAdapter, type GlabExec, type GlabExecResult } from "./glab";
 
 function ok(stdout: string): GlabExecResult {
@@ -333,6 +333,19 @@ describe("GlabAdapter", () => {
 			).rejects.toBeInstanceOf(PortError);
 		});
 
+		test("stamps fetched merge requests with GitLab provider", async () => {
+			const glab = makeGlab({
+				[`api --hostname ${ref.host} ${mrPath}`]: ok(
+					JSON.stringify(autoStatePayload()),
+				),
+			});
+
+			await expect(glab.fetchMr(ref)).resolves.toMatchObject({
+				provider: "gitlab",
+				iid: 42,
+			});
+		});
+
 		test("maps MR state and exact-head pipeline status", async () => {
 			const glab = makeGlab({
 				[`api --hostname ${ref.host} ${mrPath}?with_merge_status_recheck=true`]:
@@ -354,6 +367,7 @@ describe("GlabAdapter", () => {
 
 			await expect(glab.fetchAutoApprovalState(ref)).resolves.toMatchObject({
 				mr: {
+					provider: "gitlab",
 					iid: 42,
 					projectPath: "group/api",
 					title: "Improve API",
@@ -1203,7 +1217,7 @@ describe("GlabAdapter", () => {
 				const discussion = await new GlabAdapter(exec).createDiscussion({
 					ref,
 					body: "Review this",
-					position,
+					selection,
 					parsedDiff,
 					diffRefs: refs,
 				});
@@ -1222,15 +1236,20 @@ describe("GlabAdapter", () => {
 				expect(request.body).toBe("Review this");
 				expect(request.position).toEqual(position);
 				expect(request.position).not.toHaveProperty("line_range");
+				expect(calls[0]?.input).toBe(
+					JSON.stringify({ body: "Review this", position }),
+				);
 			}
 		});
 
 		test("posts body and validated position as JSON stdin", async () => {
-			const position = buildPosition(
-				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 2 },
-				parsedDiff,
-				refs,
-			);
+			const selection = {
+				path: "src/app.ts",
+				side: "new" as const,
+				startLine: 1,
+				endLine: 2,
+			};
+			const position = buildPosition(selection, parsedDiff, refs);
 			const responsePosition = {
 				...position,
 				new_line: 150,
@@ -1272,7 +1291,7 @@ describe("GlabAdapter", () => {
 			const discussion = await new GlabAdapter(exec).createDiscussion({
 				ref,
 				body: "Review this",
-				position,
+				selection,
 				parsedDiff,
 				diffRefs: refs,
 			});
@@ -1297,11 +1316,11 @@ describe("GlabAdapter", () => {
 				"-",
 				"projects/group%2Fsub%2Fproject/merge_requests/42/discussions",
 			]);
-			expect(JSON.parse(calls[0]?.input ?? "")).toEqual({
-				body: "Review this",
-				position,
-			});
+			expect(calls[0]?.input).toBe(
+				JSON.stringify({ body: "Review this", position }),
+			);
 		});
+
 		test("posts unpositioned discussion body as JSON stdin", async () => {
 			const calls: { args: string[]; input?: string }[] = [];
 			const exec: GlabExec = async (args, input) => {
@@ -1326,27 +1345,23 @@ describe("GlabAdapter", () => {
 			});
 		});
 
-		test("rejects stale line codes before host write", async () => {
-			const position = buildPosition(
-				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 2 },
-				parsedDiff,
-				refs,
-			);
+		test("rejects invalid selections before host write", async () => {
 			const calls: { args: string[]; input?: string }[] = [];
 			const exec: GlabExec = async (args, input) => {
 				calls.push({ args, input });
 				return ok("unreachable");
 			};
-			const stale = structuredClone(position);
-			if (stale.line_range) {
-				stale.line_range.start.line_code = "stale-line-code";
-			}
 
 			await expect(
 				new GlabAdapter(exec).createDiscussion({
 					ref,
 					body: "Review this",
-					position: stale,
+					selection: {
+						path: "src/app.ts",
+						side: "new",
+						startLine: 3,
+						endLine: 3,
+					},
 					parsedDiff,
 					diffRefs: refs,
 				}),
@@ -1354,35 +1369,7 @@ describe("GlabAdapter", () => {
 			expect(calls).toEqual([]);
 		});
 
-		test("rejects positions from a stale MR head before host write", async () => {
-			const position = buildPosition(
-				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 1 },
-				parsedDiff,
-				refs,
-			);
-			const calls: { args: string[]; input?: string }[] = [];
-			const exec: GlabExec = async (args, input) => {
-				calls.push({ args, input });
-				return ok("unreachable");
-			};
-
-			await expect(
-				new GlabAdapter(exec).createDiscussion({
-					ref,
-					body: "Review this",
-					position,
-					parsedDiff,
-					diffRefs: { ...refs, headSha: "new-head-sha" },
-				}),
-			).rejects.toThrow("current diff refs");
-			expect(calls).toEqual([]);
-		});
-		test("rejects positioned payload without parsed diff before host write", async () => {
-			const position = buildPosition(
-				{ path: "src/app.ts", side: "new", startLine: 1, endLine: 1 },
-				parsedDiff,
-				refs,
-			);
+		test("rejects positioned selection without parsed diff before host write", async () => {
 			const calls: { args: string[]; input?: string }[] = [];
 			const exec: GlabExec = async (args, input) => {
 				calls.push({ args, input });
@@ -1391,7 +1378,12 @@ describe("GlabAdapter", () => {
 			const invalid = {
 				ref,
 				body: "Review this",
-				position,
+				selection: {
+					path: "src/app.ts",
+					side: "new" as const,
+					startLine: 1,
+					endLine: 1,
+				},
 				diffRefs: refs,
 			} as unknown as CreateDiscussionInput;
 
@@ -1401,6 +1393,7 @@ describe("GlabAdapter", () => {
 			expect(calls).toEqual([]);
 		});
 	});
+
 	describe("approval", () => {
 		const ref: MrRef = {
 			host: "gitlab.example.com",

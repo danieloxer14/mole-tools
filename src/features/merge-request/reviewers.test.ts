@@ -107,7 +107,7 @@ describe("merge-request reviewers", () => {
 
 		try {
 			await expect(
-				selectReviewers(fakeContext({ gitHost: host, ui, vcs }), "main"),
+				selectReviewers(fakeContext({ ui, vcs }), host, "main"),
 			).resolves.toEqual(["alice", "bob"]);
 			expect(vcs.touchAuthorCalls).toEqual([{ files: [], maxCount: 200 }]);
 			expect(vcs.recentAuthorCalls).toEqual([100]);

@@ -55,6 +55,7 @@ function reviewState(overrides: Partial<ReviewState> = {}): ReviewState {
 			host: "gitlab.example.com",
 			projectPath: "group/project",
 			iid: 42,
+			provider: "gitlab",
 			webUrl: "https://gitlab.example.com/group/project/-/merge_requests/42",
 			title: "Add feature",
 			description: "",

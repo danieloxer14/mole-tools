@@ -5,7 +5,7 @@ import type {
 	CreateMrInput,
 	DiffRefs,
 	DiscussionPosition,
-	GitHost,
+	GitLabAutomationHost,
 	HostDiscussion,
 	HostMember,
 	HostNote,
@@ -15,8 +15,8 @@ import type {
 	MrDetail,
 	WatchedMrRef,
 } from "../../ports/git-host";
-import { validatePosition } from "../../shared/gitlab-position";
 import { encodeProjectPath, type MrRef, parseMrUrl } from "../../shared/mr-url";
+import { buildPosition, type GitLabPositionPayload } from "./gitlab-position";
 import type {
 	GitLabDiscussion,
 	GitLabLabel,
@@ -30,7 +30,6 @@ import {
 	GitLabMergeRequestSchema,
 	GitLabOpenedMergeRequestSchema,
 	GitLabPipelinePageSchema,
-	GitLabPositionPayloadSchema,
 } from "./glab-schemas";
 
 export interface GlabExecResult {
@@ -269,6 +268,7 @@ function mapMergeRequest(
 		headSha: payload.diff_refs.head_sha,
 	};
 	return {
+		provider: "gitlab",
 		iid: payload.iid,
 		projectPath: ref.projectPath,
 		title: payload.title,
@@ -283,7 +283,7 @@ function mapMergeRequest(
 	};
 }
 
-export class GlabAdapter implements GitHost {
+export class GlabAdapter implements GitLabAutomationHost {
 	constructor(private readonly execFn: GlabExec = defaultGlabExec) {}
 
 	async getGitLabAuthToken(hostname: string): Promise<string | null> {
@@ -655,20 +655,16 @@ export class GlabAdapter implements GitHost {
 		if (!input.body.trim()) {
 			throw new PortError("Cannot create an empty GitLab discussion");
 		}
-		let position: CreateDiscussionInput["position"];
-		if (input.position !== undefined) {
+
+		let position: GitLabPositionPayload | undefined;
+		if (input.selection !== undefined) {
 			if (!input.parsedDiff || !input.diffRefs) {
 				throw new PortError(
 					"Positioned GitLab discussions require parsedDiff and diffRefs",
 				);
 			}
-			const parsedPosition = parsePayload(
-				GitLabPositionPayloadSchema,
-				input.position,
-				"discussion position",
-			);
-			position = validatePosition(
-				parsedPosition,
+			position = buildPosition(
+				input.selection,
 				input.parsedDiff,
 				input.diffRefs,
 			);
@@ -681,7 +677,10 @@ export class GlabAdapter implements GitHost {
 		const requestBody: { body: string; position?: typeof position } = {
 			body: input.body,
 		};
-		if (position) requestBody.position = position;
+		if (position) {
+			requestBody.position = position;
+		}
+
 		const result = await this._exec(
 			[
 				"api",
@@ -697,8 +696,11 @@ export class GlabAdapter implements GitHost {
 			],
 			JSON.stringify(requestBody),
 		);
+
 		const executionError = glabApiError(result, "discussion create");
-		if (executionError) throw executionError;
+		if (executionError) {
+			throw executionError;
+		}
 
 		const documents = parseJsonDocuments(result.stdout, "discussion");
 		if (documents.length !== 1) {

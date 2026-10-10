@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { FakeGitHost } from "../../test/fakes/FakeGitHost";
+import { buildPosition } from "../adapters/git-host/gitlab-position";
 import {
 	GlabAdapter,
 	type GlabExec,
@@ -9,7 +10,6 @@ import {
 import { PortError } from "../core/errors";
 import type { CreateDiscussionInput } from "../ports/git-host";
 import { parseFileDiff } from "../shared/diff-parse";
-import { buildPosition } from "../shared/gitlab-position";
 import type { MrRef } from "../shared/mr-url";
 
 const ref: MrRef = {
@@ -39,6 +39,7 @@ describe("GitHost review contract", () => {
 		const glab = new GlabAdapter(exec);
 
 		expect(await glab.fetchMr(ref)).toEqual({
+			provider: "gitlab",
 			iid: 42,
 			projectPath: "group/sub/project",
 			title: "Improve parser",
@@ -185,7 +186,7 @@ describe("GitHost review contract", () => {
 		expect(calls[0]?.input).toBeUndefined();
 	});
 
-	test("rejects invalid diff positions before comment writes", async () => {
+	test("rejects invalid diff selections before comment writes", async () => {
 		const calls: { args: string[]; input?: string }[] = [];
 		const exec: GlabExec = async (args, input) => {
 			calls.push({ args, input });
@@ -199,79 +200,21 @@ describe("GitHost review contract", () => {
 			insertions: 0,
 			deletions: 0,
 		});
-		const diffRefs = { baseSha: "base", startSha: "start", headSha: "head" };
 		const invalid: CreateDiscussionInput = {
 			ref,
 			body: "Comment",
-			position: {
-				position_type: "text",
-				base_sha: "base",
-				start_sha: "start",
-				head_sha: "head",
-				old_path: "src/app.ts",
-				new_path: "src/app.ts",
-				old_line: null,
-				new_line: null,
+			selection: {
+				path: "src/app.ts",
+				side: "new",
+				startLine: 1,
+				endLine: 1,
 			},
 			parsedDiff,
-			diffRefs,
+			diffRefs: { baseSha: "base", startSha: "start", headSha: "head" },
 		};
 		await expect(glab.createDiscussion(invalid)).rejects.toBeInstanceOf(
 			PortError,
 		);
-		expect(calls).toEqual([]);
-	});
-	test("rejects stale line codes and refs before comment writes", async () => {
-		const calls: { args: string[]; input?: string }[] = [];
-		const exec: GlabExec = async (args, input) => {
-			calls.push({ args, input });
-			return ok("never reached");
-		};
-		const glab = new GlabAdapter(exec);
-		const parsedDiff = parseFileDiff({
-			path: "src/app.ts",
-			statOnly: false,
-			patch: [
-				"diff --git a/src/app.ts b/src/app.ts",
-				"--- a/src/app.ts",
-				"+++ b/src/app.ts",
-				"@@ -1,1 +1,2 @@",
-				"-old",
-				"+new",
-				"+added",
-			].join("\n"),
-			insertions: 2,
-			deletions: 1,
-		});
-		const refs = { baseSha: "base", startSha: "start", headSha: "head" };
-		const position = buildPosition(
-			{ path: "src/app.ts", side: "new", startLine: 1, endLine: 2 },
-			parsedDiff,
-			refs,
-		);
-		const staleLineCode = structuredClone(position);
-		if (staleLineCode.line_range) {
-			staleLineCode.line_range.end.line_code = "stale-line-code";
-		}
-
-		await expect(
-			glab.createDiscussion({
-				ref,
-				body: "Comment",
-				position: staleLineCode,
-				parsedDiff,
-				diffRefs: refs,
-			}),
-		).rejects.toThrow("parsed diff lines");
-		await expect(
-			glab.createDiscussion({
-				ref,
-				body: "Comment",
-				position,
-				parsedDiff,
-				diffRefs: { ...refs, headSha: "new-head" },
-			}),
-		).rejects.toThrow("current diff refs");
 		expect(calls).toEqual([]);
 	});
 
@@ -326,111 +269,10 @@ describe("GitHost review contract", () => {
 		).toThrow(PortError);
 	});
 
-	test("rejects zero, reversed, and cross-side positions before comment writes", async () => {
-		const calls: { args: string[]; input?: string }[] = [];
-		const exec: GlabExec = async (args, input) => {
-			calls.push({ args, input });
-			return ok("never reached");
-		};
-		const glab = new GlabAdapter(exec);
-		const validationDiff = parseFileDiff({
-			path: "src/app.ts",
-			statOnly: false,
-			patch: null,
-			insertions: 0,
-			deletions: 0,
-		});
-		const diffRefs = { baseSha: "base", startSha: "start", headSha: "head" };
-		const base = {
-			position_type: "text" as const,
-			base_sha: "base",
-			start_sha: "start",
-			head_sha: "head",
-			old_path: "src/app.ts",
-			new_path: "src/app.ts",
-		};
-		const invalidPositions: CreateDiscussionInput["position"][] = [
-			{ ...base, old_line: null, new_line: 0 },
-			{
-				...base,
-				old_line: null,
-				new_line: 3,
-				line_range: {
-					start: {
-						line_code: "start",
-						type: "new",
-						old_line: null,
-						new_line: 3,
-					},
-					end: {
-						line_code: "end",
-						type: "new",
-						old_line: null,
-						new_line: 2,
-					},
-				},
-			},
-			{
-				...base,
-				old_line: null,
-				new_line: 3,
-				line_range: {
-					start: {
-						line_code: "start",
-						type: "old",
-						old_line: 2,
-						new_line: null,
-					},
-					end: {
-						line_code: "end",
-						type: "old",
-						old_line: 3,
-						new_line: null,
-					},
-				},
-			},
-		];
-
-		for (const position of invalidPositions) {
-			await expect(
-				glab.createDiscussion({
-					ref,
-					body: "Comment",
-					position,
-					parsedDiff: validationDiff,
-					diffRefs,
-				}),
-			).rejects.toBeInstanceOf(PortError);
-		}
-		const parsedDiff = parseFileDiff({
-			path: "src/app.ts",
-			statOnly: false,
-			patch: [
-				"diff --git a/src/app.ts b/src/app.ts",
-				"--- a/src/app.ts",
-				"+++ b/src/app.ts",
-				"@@ -1,1 +1,1 @@",
-				"-old",
-				"+new",
-			].join("\n"),
-			insertions: 1,
-			deletions: 1,
-		});
-		await expect(
-			glab.createDiscussion({
-				ref,
-				body: "Comment",
-				position: { ...base, old_line: null, new_line: 2 },
-				parsedDiff,
-				diffRefs,
-			}),
-		).rejects.toBeInstanceOf(PortError);
-		expect(calls).toEqual([]);
-	});
-
 	test("FakeGitHost exposes review methods", async () => {
 		const fake = new FakeGitHost({
 			fetchMr: async () => ({
+				provider: "gitlab",
 				iid: 42,
 				projectPath: ref.projectPath,
 				title: "Title",
@@ -448,6 +290,7 @@ describe("GitHost review contract", () => {
 		expect((await fake.fetchMr(ref)).headSha).toBe("head");
 		expect(await fake.listDiscussions(ref)).toEqual([]);
 	});
+
 	test("FakeGitHost forwards createDiscussion payloads", async () => {
 		let received: CreateDiscussionInput | undefined;
 		const discussion = {
@@ -476,15 +319,16 @@ describe("GitHost review contract", () => {
 			deletions: 0,
 		});
 		const diffRefs = { baseSha: "base", startSha: "start", headSha: "head" };
-		const position = buildPosition(
-			{ path: "src/app.ts", side: "new", startLine: 12, endLine: 12 },
-			parsedDiff,
-			diffRefs,
-		);
+		const selection = {
+			path: "src/app.ts",
+			side: "new" as const,
+			startLine: 12,
+			endLine: 12,
+		};
 		const input: CreateDiscussionInput = {
 			ref,
 			body: "Review this line",
-			position,
+			selection,
 			parsedDiff,
 			diffRefs,
 		};

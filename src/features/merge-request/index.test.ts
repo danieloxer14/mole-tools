@@ -61,6 +61,118 @@ describe("merge-request flow", () => {
 		expect(calls).toEqual(["preflight"]);
 	});
 
+	test("targets the GitHub host for a GitHub origin and uses it throughout creation", async () => {
+		const targets: unknown[] = [];
+		const calls: string[] = [];
+		const host = new FakeGitHost({
+			preflight: async () => {
+				calls.push("preflight");
+			},
+			findOpenMr: async () => {
+				calls.push("findOpenMr");
+				return null;
+			},
+			currentUser: async () => {
+				calls.push("currentUser");
+				return null;
+			},
+			resolveHandle: async (handle) => {
+				calls.push("resolveHandle");
+				return { id: handle, handle, displayName: handle, kind: "user" };
+			},
+			createMr: async () => {
+				calls.push("createMr");
+				return { url: "https://github.com/o/r/pull/1" };
+			},
+		});
+		const ctx = fakeContext({
+			gitHostFor: (target) => {
+				targets.push(target);
+				return host;
+			},
+			config: {
+				...CONFIG_TEMPLATE,
+				autoReviewer: { username: "reviewer" },
+			},
+			llm: new FakeLlm([["Title: feat: add feature\n\nDescription"]]),
+			vcs: new FakeVcs({
+				remoteUrl: "git@github.com:o/r.git",
+				staged: false,
+				commitsAhead: [commit],
+				mergeBaseDiff: [],
+			}),
+			ui: new FakeUiPort([
+				{ confirm: true }, // auto-reviewer
+				{ confirm: false }, // draft
+				{ confirm: true }, // create
+			]),
+		});
+
+		await runMergeRequestFlow(ctx);
+
+		expect(targets).toEqual([{ provider: "github", host: "github.com" }]);
+		expect(calls).toEqual([
+			"preflight",
+			"findOpenMr",
+			"currentUser",
+			"resolveHandle",
+			"currentUser",
+			"createMr",
+		]);
+	});
+
+	test.each([
+		{
+			scenario: "missing origin",
+			vcs: () => new FakeVcs({ branch: "main", defaultBranch: "main" }),
+		},
+		{
+			scenario: "GitLab origin",
+			vcs: () =>
+				new FakeVcs({
+					remoteUrl: "git@gitlab.com:g/p.git",
+					branch: "main",
+					defaultBranch: "main",
+				}),
+		},
+		{
+			scenario: "failing repoRoot",
+			vcs: () => {
+				const vcs = new FakeVcs({ branch: "main", defaultBranch: "main" });
+				vcs.repoRoot = async () => {
+					throw new Error("root unavailable");
+				};
+
+				return vcs;
+			},
+		},
+		{
+			scenario: "failing remoteUrl",
+			vcs: () => {
+				const vcs = new FakeVcs({ branch: "main", defaultBranch: "main" });
+				vcs.remoteUrl = async () => {
+					throw new Error("remote unavailable");
+				};
+
+				return vcs;
+			},
+		},
+	])("falls back to GitLab for $scenario", async ({ vcs }) => {
+		const targets: unknown[] = [];
+		const ctx = fakeContext({
+			gitHostFor: (target) => {
+				targets.push(target);
+				return new FakeGitHost();
+			},
+			vcs: vcs(),
+		});
+
+		await expect(runMergeRequestFlow(ctx)).rejects.toThrow(
+			"Cannot open MR from main",
+		);
+		expect(targets).toEqual([{ provider: "gitlab" }]);
+	});
+
 	test("collects filtered diff and returns accepted candidate", async () => {
 		const llm = new FakeLlm([["Title: feat: add feature\n\nDescription"]]);
 		// staged=false → no commit flow runs, so first UI interaction is the draft confirm, not a select
@@ -192,8 +304,8 @@ describe("merge-request flow", () => {
 			await expect(runMergeRequestFlow(ctx)).resolves.toMatchObject({
 				url: "https://example.com/mr/1",
 			});
-			// First call belongs to reviewer discovery; second is dynamic-env lookup.
-			expect(vcs.repoRootCalls).toEqual([root, root]);
+			// Host selection, reviewer discovery, and dynamic-env handoff each read the root.
+			expect(vcs.repoRootCalls).toEqual([root, root, root]);
 			expect(await Bun.file(marker).text()).toBe("executed");
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -221,8 +333,8 @@ describe("merge-request flow", () => {
 		await expect(runMergeRequestFlow(ctx)).resolves.toMatchObject({
 			url: "https://example.com/mr/1",
 		});
-		// Reviewer discovery still performs its independent root lookup.
-		expect(vcs.repoRootCalls).toEqual([root]);
+		// Host selection and reviewer discovery each read the root.
+		expect(vcs.repoRootCalls).toEqual([root, root]);
 		expect(
 			ui.transcript.some(
 				(entry) =>

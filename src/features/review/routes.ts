@@ -51,7 +51,6 @@ import { logger } from "../../core/logger";
 import type {
 	CreateDiscussionInput,
 	GitHost,
-	GitLabPositionPayload,
 	HostDiscussion,
 	MrApprovalState,
 } from "../../ports/git-host";
@@ -61,13 +60,13 @@ import type { FileDiff, Vcs } from "../../ports/vcs";
 import { APP_VERSION } from "../../shared/app-version";
 import { filterDiff } from "../../shared/diff";
 import { type ParsedFileDiff, parseFileDiffs } from "../../shared/diff-parse";
+import { selectDiffLines } from "../../shared/diff-selection";
 import {
 	defaultFeatureFlagValues,
 	FeatureFlagIdSchema,
 	type FeatureFlagValues,
 	featureFlagViews,
 } from "../../shared/feature-flags";
-import { buildPosition } from "../../shared/gitlab-position";
 import { importanceRevisionKey } from "../../shared/importance-revision-key";
 import { encodeProjectPath, type MrRef } from "../../shared/mr-url";
 import {
@@ -2312,11 +2311,10 @@ export function createReviewRoutes(
 		const ref = reviewRef(state);
 		if (request.method === "GET") {
 			const fetcher = approvalFetcher();
-			if (!fetcher)
-				return jsonResponse(
-					{ error: "GitLab approval host is unavailable" },
-					503,
-				);
+			if (!fetcher) {
+				return jsonResponse({ error: "Approval host is unavailable" }, 503);
+			}
+
 			try {
 				return jsonResponse(await fetcher(ref));
 			} catch (error) {
@@ -2337,11 +2335,10 @@ export function createReviewRoutes(
 			action === "approve"
 				? options.gitHost?.approveMr
 				: options.gitHost?.unapproveMr;
-		if (!mutate)
-			return jsonResponse(
-				{ error: "GitLab approval host is unavailable" },
-				503,
-			);
+		if (!mutate) {
+			return jsonResponse({ error: "Approval host is unavailable" }, 503);
+		}
+
 		try {
 			return jsonResponse(await mutate.call(options.gitHost, ref));
 		} catch (error) {
@@ -3240,29 +3237,31 @@ export function createReviewRoutes(
 					await markFailed(message);
 					return fail(message, 400);
 				}
-				let position: GitLabPositionPayload;
+
 				try {
-					position = buildPosition(
-						draft.selection,
-						file,
-						state.revision.diffRefs,
-					);
+					selectDiffLines(draft.selection, file);
 				} catch (error) {
 					const message = errorMessage(error);
 					await markFailed(message);
 					return fail(message, 400);
 				}
+
 				discussionInput = {
 					ref: reviewRef(state),
 					body: draft.body,
-					position,
+					selection: {
+						path: draft.selection.path,
+						side: draft.selection.side,
+						startLine: draft.selection.startLine,
+						endLine: draft.selection.endLine,
+					},
 					parsedDiff: file,
 					diffRefs: state.revision.diffRefs,
 				};
 			}
 
 			if (!options.gitHost?.createDiscussion) {
-				const message = "GitLab discussion host is unavailable";
+				const message = "Discussion host is unavailable";
 				await markFailed(message);
 				return fail(message, 503);
 			}

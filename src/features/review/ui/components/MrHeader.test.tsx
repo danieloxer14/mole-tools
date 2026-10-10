@@ -49,6 +49,7 @@ const base: MrHeaderProps = {
 		title: "Add review header",
 		webUrl: "https://gitlab.example.test/group/project/-/merge_requests/42",
 		state: "opened",
+		provider: "gitlab",
 	},
 	view: "code",
 	onViewChange: () => {},
@@ -268,7 +269,16 @@ test("renders title, sha identity, approved pill, and GitLab link", () => {
 	);
 	expect(link?.getAttribute("href")).toBe(base.mr.webUrl);
 	expect(link?.getAttribute("target")).toBe("_blank");
+	expect(link?.getAttribute("aria-label")).toBe("Open in GitLab");
 	expect(link?.getAttribute("title")).toBeNull();
+});
+
+test("renders GitHub link for GitHub pull requests", () => {
+	const link = render({
+		mr: { ...base.mr, provider: "github" },
+	}).querySelector<HTMLAnchorElement>('a[aria-label="Open in GitHub"]');
+
+	expect(link?.getAttribute("href")).toBe(base.mr.webUrl);
 });
 
 test("hides the update button when no update is available", () => {
@@ -611,11 +621,14 @@ test("covers approval helper matrix", () => {
 });
 
 test("covers pure display helpers", () => {
-	expect(headerTitle("  Title  ", 42)).toBe("  Title  ");
-	expect(headerTitle("", 42)).toBe("!42");
-	expect(tabTitle("group/project", 42)).toBe("project!42");
-	expect(tabTitle("group/sub/project", 7)).toBe("project!7");
-	expect(tabTitle("project", 1)).toBe("project!1");
+	expect(headerTitle("  Title  ", 42, "gitlab")).toBe("  Title  ");
+	expect(headerTitle("", 42, "gitlab")).toBe("!42");
+	expect(headerTitle("", 42, "github")).toBe("#42");
+	expect(tabTitle("group/project", 42, "gitlab")).toBe("project!42");
+	expect(tabTitle("group/r", 42, "github")).toBe("r#42");
+	expect(tabTitle("group/project", 42, "github")).toBe("project#42");
+	expect(tabTitle("group/sub/project", 7, "gitlab")).toBe("project!7");
+	expect(tabTitle("project", 1, "gitlab")).toBe("project!1");
 	expect(shortSha(base.headSha)).toBe("12345678");
 	expect(shaButtonLabel(base.headSha, false)).toBe("12345678");
 	expect(shaButtonLabel(base.headSha, true)).toBe("Copied");

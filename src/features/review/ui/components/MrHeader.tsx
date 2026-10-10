@@ -1,6 +1,9 @@
 import { Check, Copy, ExternalLink, RefreshCw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { MrApprovalState } from "../../../../ports/git-host";
+import type {
+	GitHostProvider,
+	MrApprovalState,
+} from "../../../../ports/git-host";
 import type { ReleaseNotes } from "../../release-notes";
 import { IconButton } from "./IconButton";
 import { UpdateAvailable } from "./UpdateAvailable";
@@ -15,7 +18,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 export type ApprovalAction = "approve" | "unapprove";
 export type ReviewView = "code" | "overview";
 export interface MrHeaderProps {
-	mr: { iid: number; title: string; webUrl: string; state: string | null };
+	mr: {
+		iid: number;
+		title: string;
+		webUrl: string;
+		state: string | null;
+		provider: GitHostProvider;
+	};
 	view: ReviewView;
 	onViewChange: (view: ReviewView) => void;
 	headSha: string;
@@ -39,12 +48,32 @@ export interface MrHeaderProps {
 	onOpenSettings: () => void;
 }
 
-export function headerTitle(title: string, iid: number): string {
-	return title.trim() ? title : `!${iid}`;
+const PROVIDER_PRESENTATION: Record<
+	GitHostProvider,
+	{ iidSeparator: string; externalLinkLabel: string }
+> = {
+	github: { iidSeparator: "#", externalLinkLabel: "Open in GitHub" },
+	gitlab: { iidSeparator: "!", externalLinkLabel: "Open in GitLab" },
+};
+
+export function headerTitle(
+	title: string,
+	iid: number,
+	provider: GitHostProvider,
+): string {
+	return title.trim()
+		? title
+		: `${PROVIDER_PRESENTATION[provider].iidSeparator}${iid}`;
 }
 
-export function tabTitle(projectPath: string, iid: number): string {
-	return `${projectPath.slice(projectPath.lastIndexOf("/") + 1)}!${iid}`;
+export function tabTitle(
+	projectPath: string,
+	iid: number,
+	provider: GitHostProvider,
+): string {
+	return `${projectPath.slice(projectPath.lastIndexOf("/") + 1)}${
+		PROVIDER_PRESENTATION[provider].iidSeparator
+	}${iid}`;
 }
 
 export function shortSha(sha: string): string {
@@ -194,7 +223,7 @@ export function MrHeader({
 				className="min-w-0 basis-full break-words text-lg font-semibold tracking-tight lg:flex-1 lg:basis-auto lg:truncate"
 				title={mr.title}
 			>
-				{headerTitle(mr.title, mr.iid)}
+				{headerTitle(mr.title, mr.iid, mr.provider)}
 			</h1>
 			<div className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap leading-none">
 				<Button
@@ -281,7 +310,10 @@ export function MrHeader({
 				>
 					<RefreshCw aria-hidden />
 				</IconButton>
-				<IconButton href={mr.webUrl} label="Open in GitLab">
+				<IconButton
+					href={mr.webUrl}
+					label={PROVIDER_PRESENTATION[mr.provider].externalLinkLabel}
+				>
 					<ExternalLink aria-hidden />
 				</IconButton>
 				{merged ? null : (

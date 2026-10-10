@@ -114,6 +114,25 @@ test("defaults missing MR description to empty string", () => {
 
 	expect(ReviewStateSchema.parse(legacy).mr.description).toBe("");
 });
+test("defaults a missing MR provider to GitLab for legacy state", () => {
+	const current = state();
+	const legacy = { ...current, mr: { ...current.mr } };
+	delete (legacy.mr as Partial<ReviewState["mr"]>).provider;
+
+	expect(ReviewStateSchema.parse(legacy).mr.provider).toBe("gitlab");
+});
+
+test("rejects an unknown MR provider", () => {
+	const current = state();
+
+	expect(
+		ReviewStateSchema.safeParse({
+			...current,
+			mr: { ...current.mr, provider: "bitbucket" },
+		}).success,
+	).toBe(false);
+});
+
 test("defaults missing MR lifecycle state to null", () => {
 	const current = state();
 	const legacy = { ...current, mr: { ...current.mr } };

@@ -5,7 +5,7 @@ import type { Context } from "../../core/context";
 import type { Feature } from "../../core/feature";
 import { logger } from "../../core/logger";
 import type {
-	GitHost,
+	GitLabAutomationHost,
 	HostDiscussion,
 	MrApprovalState,
 	MrAutoApprovalState,
@@ -51,7 +51,7 @@ export interface BabysitterLoopResult {
 
 export interface RunOneLoopOptions {
 	config?: ReviewBabysitterConfig;
-	gitHost?: GitHost;
+	gitHost?: GitLabAutomationHost;
 	notifier?: Notifier;
 	agent?: ReviewAgent;
 	assessRisk?: (input: AssessRiskInput) => Promise<AssessmentResult>;
@@ -195,9 +195,7 @@ export async function runOneLoop(
 	options: RunOneLoopOptions = {},
 ): Promise<BabysitterLoopResult> {
 	const config = parseConfig(options.config ?? ctx.config.reviewBabysitter);
-	const gitHost = options.gitHost ?? ctx.gitHost;
-	if (!gitHost)
-		throw new Error("review-babysitter requires authenticated GitLab");
+	const gitHost = options.gitHost ?? ctx.gitLabAutomation;
 	const notifier = options.notifier ?? ctx.createNotifier(config.webhookUrlEnv);
 	await ctx.ui.info("Review babysitter — Discovering matching open MRs.", {
 		spinner: true,
@@ -570,9 +568,7 @@ export async function runScheduler(input: SchedulerInput): Promise<void> {
 
 export async function runReviewBabysitter(ctx: Context): Promise<void> {
 	const config = parseConfig(ctx.config.reviewBabysitter);
-	const gitHost = ctx.gitHost;
-	if (!gitHost)
-		throw new Error("review-babysitter requires authenticated GitLab");
+	const gitHost = ctx.gitLabAutomation;
 	await ctx.ui.info("Review babysitter — Checking GitLab access.", {
 		spinner: true,
 		terminal: true,

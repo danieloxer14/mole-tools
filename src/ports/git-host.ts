@@ -1,11 +1,12 @@
 import type { ParsedFileDiff } from "../shared/diff-parse";
-import type { GitLabPositionPayload } from "../shared/gitlab-position";
+import type { DiffLineSelection } from "../shared/diff-selection";
 import type { MrRef } from "../shared/mr-url";
 
-export type {
-	GitLabLineRangeEntry,
-	GitLabPositionPayload,
-} from "../shared/gitlab-position";
+export type GitHostProvider = "gitlab" | "github";
+export type GitHostTarget =
+	| { provider: "gitlab" }
+	| { provider: "github"; host: string };
+
 export interface HostUser {
 	id: string;
 	handle: string;
@@ -35,6 +36,7 @@ export interface DiffRefs {
 }
 
 export interface MrDetail {
+	provider: GitHostProvider;
 	iid: number;
 	projectPath: string;
 	title: string;
@@ -95,10 +97,7 @@ export interface DiscussionPosition {
 export interface HostDiscussion {
 	id: string;
 	resolved: boolean;
-	/**
-	 * GitLab marks standalone MR notes as individual_note. They are not
-	 * unresolved discussion threads and must not block approval.
-	 */
+	/** Standalone conversation note (GitLab individual_note, GitHub issue comment or review summary); not a resolvable thread and must not block approval. */
 	individualNote?: boolean;
 	notes: HostNote[];
 	position: DiscussionPosition | null;
@@ -107,7 +106,7 @@ export interface HostDiscussion {
 export interface UnpositionedCreateDiscussionInput {
 	ref: MrRef;
 	body: string;
-	position?: never;
+	selection?: never;
 	parsedDiff?: never;
 	diffRefs?: never;
 }
@@ -115,7 +114,7 @@ export interface UnpositionedCreateDiscussionInput {
 export interface PositionedCreateDiscussionInput {
 	ref: MrRef;
 	body: string;
-	position: GitLabPositionPayload;
+	selection: DiffLineSelection;
 	parsedDiff: ParsedFileDiff;
 	diffRefs: DiffRefs;
 }
@@ -126,21 +125,25 @@ export type CreateDiscussionInput =
 
 export interface GitHost {
 	preflight(): Promise<void>;
-	/** Returns auth token for authenticated, binary GitLab upload requests. */
+	/** GitLab-only: token for authenticated GitLab description-media fetches. */
 	getGitLabAuthToken?(hostname: string): Promise<string | null>;
 	currentUser(): Promise<HostUser | null>;
 	findOpenMr(sourceBranch: string): Promise<{ url: string } | null>;
 	resolveHandle(handle: string): Promise<HostMember | null>;
 	createMr(input: CreateMrInput): Promise<{ url: string }>;
 	fetchMr(ref: MrRef): Promise<MrDetail>;
-	listOpenedMrsForAssignees(
-		assignees: readonly string[],
-	): Promise<WatchedMrRef[]>;
-	fetchAutoApprovalState(ref: MrRef): Promise<MrAutoApprovalState>;
-	addMrLabel(ref: MrRef, label: string): Promise<void>;
 	listDiscussions(ref: MrRef): Promise<HostDiscussion[]>;
 	createDiscussion(input: CreateDiscussionInput): Promise<HostDiscussion>;
 	fetchApprovalState(ref: MrRef): Promise<MrApprovalState>;
 	approveMr(ref: MrRef): Promise<MrApprovalState>;
 	unapproveMr(ref: MrRef): Promise<MrApprovalState>;
+}
+
+/** GitLab-only operations used by review-babysitter. */
+export interface GitLabAutomationHost extends GitHost {
+	listOpenedMrsForAssignees(
+		assignees: readonly string[],
+	): Promise<WatchedMrRef[]>;
+	fetchAutoApprovalState(ref: MrRef): Promise<MrAutoApprovalState>;
+	addMrLabel(ref: MrRef, label: string): Promise<void>;
 }

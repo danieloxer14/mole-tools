@@ -1,7 +1,7 @@
 import type {
 	CreateDiscussionInput,
 	CreateMrInput,
-	GitHost,
+	GitLabAutomationHost,
 	HostDiscussion,
 	HostMember,
 	HostUser,
@@ -31,7 +31,7 @@ export interface FakeGitHostOptions {
 	unapproveMr?: (ref: MrRef) => Promise<MrApprovalState>;
 }
 
-export class FakeGitHost implements GitHost {
+export class FakeGitHost implements GitLabAutomationHost {
 	constructor(private readonly options: FakeGitHostOptions = {}) {}
 
 	async preflight(): Promise<void> {
@@ -83,6 +83,7 @@ export class FakeGitHost implements GitHost {
 	async fetchMr(ref: MrRef): Promise<MrDetail> {
 		return (
 			(await this.options.fetchMr?.(ref)) ?? {
+				provider: "gitlab",
 				iid: ref.iid,
 				projectPath: ref.projectPath,
 				title: "",

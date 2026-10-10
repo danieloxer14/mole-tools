@@ -494,6 +494,9 @@ describe("review feature", () => {
 		expect(result.text).toContain(
 			"mole-tools review https://gitlab.com/acme/api/-/merge_requests/42 --mode plan",
 		);
+		expect(result.text).toContain(
+			"mole-tools review https://github.com/acme/api/pull/42",
+		);
 		expect(result.text).not.toContain("mole-tools review mole-tools review");
 	});
 });

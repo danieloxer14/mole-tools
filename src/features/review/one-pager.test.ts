@@ -59,6 +59,7 @@ function makeState(worktreePath: string): ReviewState {
 			host: "gitlab.example.com",
 			projectPath: "group/project",
 			iid: 42,
+			provider: "gitlab",
 			state: "opened",
 			webUrl: "https://gitlab.example.com/group/project/-/merge_requests/42",
 			title: "Add one pager generation",

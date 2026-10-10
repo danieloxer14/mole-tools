@@ -860,10 +860,18 @@ function ReviewApp() {
 	}, [token, reviewLoaded, pushToast]);
 	const mrProjectPath = data?.mr.projectPath;
 	const mrIid = data?.mr.iid;
+	const mrProvider = data?.mr.provider;
 	useEffect(() => {
-		if (mrProjectPath === undefined || mrIid === undefined) return;
-		document.title = tabTitle(mrProjectPath, mrIid);
-	}, [mrProjectPath, mrIid]);
+		if (
+			mrProjectPath === undefined ||
+			mrIid === undefined ||
+			mrProvider === undefined
+		) {
+			return;
+		}
+
+		document.title = tabTitle(mrProjectPath, mrIid, mrProvider);
+	}, [mrProjectPath, mrIid, mrProvider]);
 	const selectedScopeChatId =
 		chatScope === "one-pager"
 			? (selectedOnePagerChatId ?? data?.activeOnePagerChatId ?? null)

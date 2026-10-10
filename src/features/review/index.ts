@@ -8,11 +8,11 @@ import {
 import { promptsDir } from "../../adapters/prompts/loader";
 import { SkillStore, skillsDir } from "../../adapters/skills/store";
 import type { Context } from "../../core/context";
-import { PortError } from "../../core/errors";
 import type { Feature } from "../../core/feature";
-import type { HostDiscussion } from "../../ports/git-host";
+import type { GitHost, HostDiscussion } from "../../ports/git-host";
 import { parseFileDiffs } from "../../shared/diff-parse";
-import { type MrRef, parseMrUrl } from "../../shared/mr-url";
+import { gitHostTargetForReview } from "../../shared/git-host-target";
+import { type MrRef, parseReviewUrl } from "../../shared/mr-url";
 import { openBrowser } from "./open-browser";
 import type { ReviewFileRequest } from "./routes";
 import { createReviewServer } from "./server";
@@ -27,22 +27,17 @@ import { checkForUpdate } from "./version-check";
 
 export interface ReviewFlowResult extends ReviewSetupResult {
 	discussions: HostDiscussion[];
-	getDiscussions?: () => Promise<HostDiscussion[]>;
+	getDiscussions: () => Promise<HostDiscussion[]>;
 	mr: ReviewMergeRequest;
 	ref: MrRef;
+	host: GitHost;
 }
 
-interface ReviewGitHost {
-	fetchMr?: NonNullable<Context["gitHost"]>["fetchMr"];
-	listDiscussions?(ref: MrRef): Promise<HostDiscussion[]>;
-	createDiscussion?: NonNullable<Context["gitHost"]>["createDiscussion"];
-	fetchApprovalState?: NonNullable<Context["gitHost"]>["fetchApprovalState"];
-	approveMr?: NonNullable<Context["gitHost"]>["approveMr"];
-	unapproveMr?: NonNullable<Context["gitHost"]>["unapproveMr"];
-	getGitLabAuthToken?: NonNullable<Context["gitHost"]>["getGitLabAuthToken"];
-}
 export const reviewArgs = z.object({
-	url: z.string().min(1).describe("Full GitLab merge request URL"),
+	url: z
+		.string()
+		.min(1)
+		.describe("Full GitLab merge request or GitHub pull request URL"),
 	mode: z
 		.enum(["code", "plan"])
 		.optional()
@@ -60,19 +55,14 @@ export async function runReviewFlow(
 	ctx: Context,
 	args: ReviewArgs,
 ): Promise<ReviewFlowResult> {
-	const ref = parseMrUrl(args.url);
-	const host = ctx.gitHost as unknown as ReviewGitHost | null;
-	if (!host?.fetchMr) {
-		throw new PortError("Git host does not support fetching merge requests");
-	}
+	const { provider, ref } = parseReviewUrl(args.url);
+	const host = ctx.gitHostFor(gitHostTargetForReview(provider, ref));
 	const mr = await host.fetchMr(ref);
 	let discussions: HostDiscussion[] = [];
-	if (host.listDiscussions) {
-		try {
-			discussions = await host.listDiscussions(ref);
-		} catch {
-			// Discussions are supplementary; keep review startup available offline.
-		}
+	try {
+		discussions = await host.listDiscussions(ref);
+	} catch {
+		// Discussions are supplementary; keep review startup available offline.
 	}
 	const result = await setupReview({
 		vcs: ctx.vcs,
@@ -82,13 +72,12 @@ export async function runReviewFlow(
 		refresh: args.refresh,
 		config: ctx.config,
 	});
-	const getDiscussions = host.listDiscussions
-		? () => host.listDiscussions?.(ref) ?? Promise.resolve([])
-		: undefined;
+	const getDiscussions = () => host.listDiscussions(ref);
 	return {
 		...result,
 		discussions,
 		getDiscussions,
+		host,
 		mr,
 		ref,
 	};
@@ -96,7 +85,8 @@ export async function runReviewFlow(
 
 export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 	name: "review",
-	description: "Interactive review of a GitLab merge request in a local web UI",
+	description:
+		"Interactive review of a GitLab merge request or GitHub pull request in a local web UI",
 	positionals: ["url"],
 	args: reviewArgs,
 	help: {
@@ -105,9 +95,10 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 		examples: [
 			"https://gitlab.com/acme/api/-/merge_requests/42",
 			"https://gitlab.com/acme/api/-/merge_requests/42 --mode plan",
+			"https://github.com/acme/api/pull/42",
 		],
 		notes: [
-			"Requires an authenticated `glab` and the configured review agent binary on PATH.",
+			"Requires an authenticated `glab` (GitLab) or `gh` (GitHub) for the URL's host, and the configured review agent binary on PATH.",
 			"Review state persists under ~/.config/mole-tools/reviews.",
 			"Prompts and the review agent/model are managed from the review UI's Settings panel.",
 		],
@@ -119,7 +110,7 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			noOpen: args.noOpen ?? false,
 			refresh: args.refresh ?? false,
 		});
-		const host = ctx.gitHost as unknown as ReviewGitHost | null;
+		const host = result.host;
 		const getFileContents = ctx.vcs.readFileAtRevision
 			? async ({ path, revision }: ReviewFileRequest): Promise<string | null> =>
 					(await ctx.vcs.readFileAtRevision?.(
@@ -135,24 +126,17 @@ export const reviewFeature: Feature<typeof reviewArgs, ReviewState> = {
 			layerDiff: result.diff,
 			expandedDiff: parseFileDiffs(result.fullDiff),
 			discussions: result.discussions,
-			gitHost:
-				host?.fetchMr ||
-				host?.createDiscussion ||
-				host?.listDiscussions ||
-				host?.fetchApprovalState ||
-				host?.approveMr ||
-				host?.unapproveMr ||
-				host?.getGitLabAuthToken
-					? {
-							fetchMr: host.fetchMr?.bind(host),
-							createDiscussion: host.createDiscussion?.bind(host),
-							listDiscussions: host.listDiscussions?.bind(host),
-							fetchApprovalState: host.fetchApprovalState?.bind(host),
-							approveMr: host.approveMr?.bind(host),
-							unapproveMr: host.unapproveMr?.bind(host),
-							getGitLabAuthToken: host?.getGitLabAuthToken?.bind(host),
-						}
-					: undefined,
+			gitHost: {
+				fetchMr: host.fetchMr.bind(host),
+				createDiscussion: host.createDiscussion.bind(host),
+				listDiscussions: host.listDiscussions.bind(host),
+				fetchApprovalState: host.fetchApprovalState.bind(host),
+				approveMr: host.approveMr.bind(host),
+				unapproveMr: host.unapproveMr.bind(host),
+				...(host.getGitLabAuthToken
+					? { getGitLabAuthToken: host.getGitLabAuthToken.bind(host) }
+					: {}),
+			},
 			ref: result.ref,
 			getFileContents,
 			worktreePath: result.state.worktreePath,
